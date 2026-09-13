@@ -1,0 +1,68 @@
+[build-system]
+requires = ["setuptools==82.0.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vres-os"
+version = "0.2.0a1"
+description = "Persistent executive operating system for Claude Code, with institutional memory, procedural learning, and engineering execution."
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+license = {text = "MIT"}
+authors = [{name = "Vres-OS"}]
+dependencies = [
+  "typer>=0.12,<1",
+  "rich>=13.7,<15",
+  "pydantic>=2.8,<3",
+  "platformdirs>=4.2,<5",
+  "psycopg[binary]>=3.2,<4",
+  "keyring>=25.3,<26",
+  "mcp>=1.12,<2",
+]
+
+[project.optional-dependencies]
+ingest = [
+  "openpyxl>=3.1,<4",
+  "python-docx>=1.1,<2",
+  "python-pptx>=1.0,<2",
+  "pypdf>=5.9,<7",
+  "pyyaml>=6.0,<7",
+]
+embeddings = [
+  "sentence-transformers>=3.0,<6",
+  "pgvector>=0.3,<1",
+]
+full = [
+  "openpyxl>=3.1,<4",
+  "python-docx>=1.1,<2",
+  "python-pptx>=1.0,<2",
+  "pypdf>=5.9,<7",
+  "pyyaml>=6.0,<7",
+]
+dev = [
+  "pytest>=9.0,<10",
+  "pytest-cov>=7,<8",
+  "ruff>=0.6,<1",
+]
+
+[project.scripts]
+vres = "vres_os.cli:app"
+vres-mcp = "vres_os.mcp_server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+vres_os = ["migrations/*.sql"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

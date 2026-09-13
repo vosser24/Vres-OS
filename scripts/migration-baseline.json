@@ -1,0 +1,12 @@
+{
+  "source_commit": "e332df7",
+  "description": "Recovered source migration bytes; immutable audit baseline, not PostgreSQL runtime proof.",
+  "sha256": {
+    "001_initial.sql": "0bfac431940459f7cef45735fd89e88093e2db99065225ec7cfedc7cfb9d2af1",
+    "002_operational_memory.sql": "3e2457a1d410711ad8420eae98592e73c99db790dfa83f5f53b6b62870375f15",
+    "003_capability_seed.sql": "3cc8af2d1afdf2a67524a7791a7d0611f69ef2a48afe28bc1ac432962bf232d8",
+    "004_source_locations.sql": "24256171f76daeda78c9d12c0732afa324200666b4f1bca66107640aecac01e2",
+    "005_procedure_decisions_and_model_bootstrap.sql": "becceb28b746feb4c8c9da4bac595f96b465b9ef46b189d696d211c1b4281c35",
+    "006_governance_hardening.sql": "bef54f0dd0495e086e225a1f73dd02297c46218b481c0fb1b52d5b5c6c42d02f"
+  }
+}

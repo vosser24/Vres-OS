@@ -1,0 +1,7 @@
+include README.md LICENSE pyproject.toml install.ps1 update.ps1 uninstall.ps1
+recursive-include src *.py *.sql
+recursive-include docs *.md *.json *.csv
+recursive-include scripts *.py *.ps1 *.json
+recursive-include plugins *.md *.json *.ps1
+recursive-include constitution *.md
+recursive-include tests *.py *.md *.json *.xlsx

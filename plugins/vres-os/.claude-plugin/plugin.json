@@ -1,0 +1,17 @@
+{
+  "name": "vres-os",
+  "version": "0.2.0-alpha.1",
+  "description": "Persistent Chairman, institutional memory, procedural learning, and AIGO-derived engineering execution for Claude Code.",
+  "author": {
+    "name": "Vres-OS"
+  },
+  "repository": "https://github.com/vosser24/Vres-OS",
+  "license": "MIT",
+  "keywords": [
+    "agents",
+    "memory",
+    "postgresql",
+    "engineering",
+    "executive-os"
+  ]
+}

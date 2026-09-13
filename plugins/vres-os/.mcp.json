@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "vres": {
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${CLAUDE_PLUGIN_ROOT}/bin/vres-mcp.ps1"
+      ]
+    }
+  }
+}

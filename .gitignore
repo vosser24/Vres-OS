@@ -1,0 +1,21 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+.env
+.env.*
+.vres-local/
+*.log
+.DS_Store
+Thumbs.db
+coverage.xml
+validation-output/
+
+# Disposable live-verification environment
+.live-test-venv/

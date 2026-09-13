@@ -1,0 +1,17 @@
+{
+  "name": "vres-os",
+  "owner": {
+    "name": "Vres-OS"
+  },
+  "metadata": {
+    "description": "Vres-OS local marketplace"
+  },
+  "plugins": [
+    {
+      "name": "vres-os",
+      "source": "./plugins/vres-os",
+      "description": "Persistent Chairman and operating system for Claude Code",
+      "version": "0.2.0-alpha.1"
+    }
+  ]
+}
