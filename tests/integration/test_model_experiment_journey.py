@@ -16,7 +16,16 @@ def _digest(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _provider_evidence(model: str, response_id: str, input_tokens: int, output_tokens: int) -> dict:
+def _provider_evidence(
+    model: str,
+    response_id: str,
+    *,
+    effort: str,
+    success: bool,
+    runtime_ms: int,
+    input_tokens: int,
+    output_tokens: int,
+) -> dict:
     # Synthetic integration producer: validates Vres provenance/state semantics only.
     # This is deliberately not evidence that a live vendor CLI/API was invoked in CI.
     return {
@@ -30,6 +39,11 @@ def _provider_evidence(model: str, response_id: str, input_tokens: int, output_t
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
         },
+        "effort_source": "adapter_request",
+        "requested_effort": effort,
+        "runtime_source": "adapter_monotonic",
+        "runtime_ms": runtime_ms,
+        "completion_success": success,
     }
 
 
@@ -61,7 +75,15 @@ def test_host_model_pair_can_be_attested_without_mutating_policy(pg_project, tmp
         output_tokens=40,
         input_digest=input_digest,
         output_digest=_digest("baseline output"),
-        execution_evidence=_provider_evidence("baseline-model", f"base-{marker}", 100, 40),
+        execution_evidence=_provider_evidence(
+            "baseline-model",
+            f"base-{marker}",
+            effort="high",
+            success=True,
+            runtime_ms=120,
+            input_tokens=100,
+            output_tokens=40,
+        ),
     )
     candidate_run_id = service.record_host_run(
         task_key=task_key,
@@ -75,7 +97,15 @@ def test_host_model_pair_can_be_attested_without_mutating_policy(pg_project, tmp
         output_tokens=35,
         input_digest=input_digest,
         output_digest=_digest("candidate output"),
-        execution_evidence=_provider_evidence("candidate-model", f"candidate-{marker}", 90, 35),
+        execution_evidence=_provider_evidence(
+            "candidate-model",
+            f"candidate-{marker}",
+            effort="high",
+            success=True,
+            runtime_ms=90,
+            input_tokens=90,
+            output_tokens=35,
+        ),
     )
 
     artifact = tmp_path / "model-experiment-review.json"
@@ -169,6 +199,8 @@ def test_host_model_pair_can_be_attested_without_mutating_policy(pg_project, tmp
     assert all(row["quality_score"] is None for row in runs)
     assert all(row["input_digest"] == input_digest for row in runs)
     assert all(row["execution_evidence"]["usage_source"] == "provider" for row in runs)
+    assert all(row["execution_evidence"]["runtime_source"] == "adapter_monotonic" for row in runs)
+    assert all(row["execution_evidence"]["effort_source"] == "adapter_request" for row in runs)
     assert stored["id"] == attestation["id"]
     assert stored["validation_request_id"] is not None
     assert stored["candidate_quality_not_worse"] is True
