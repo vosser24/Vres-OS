@@ -64,3 +64,15 @@ def test_static_windows_release_path_cannot_be_parent_traversal():
 def test_static_python_discovery_checks_supported_side_by_side_versions():
     text = (Path(__file__).parents[1] / "install.ps1").read_text()
     assert "@('-3.13','-3.12')" in text
+
+
+def test_static_python_probe_treats_missing_selector_as_dependency_absence():
+    text = (ROOT / "install.ps1").read_text()
+    assert "function Probe-Python" in text
+    probe = text.split("function Probe-Python", 1)[1].split("function Find-Python", 1)[0]
+    assert "$savedErrorActionPreference = $ErrorActionPreference" in probe
+    assert "$ErrorActionPreference = 'SilentlyContinue'" in probe
+    assert "$ErrorActionPreference = $savedErrorActionPreference" in probe
+    find = text.split("function Find-Python", 1)[1].split("function Write-JsonAtomic", 1)[0]
+    assert "Probe-Python 'py'" in find
+    assert "Probe-Python 'python'" in find
