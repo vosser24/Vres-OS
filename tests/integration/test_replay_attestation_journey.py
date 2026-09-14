@@ -207,6 +207,11 @@ def test_runtime_replay_requires_host_observed_validation_before_promotion(pg_pr
 
     with connect() as conn, conn.transaction():
         conn.execute(
+            "DELETE FROM vres.optimization_candidates "
+            "WHERE procedure_id=(SELECT id FROM vres.procedures WHERE procedure_key=%s)",
+            (procedure_key,),
+        )
+        conn.execute(
             "DELETE FROM vres.procedure_replay_attestations "
             "WHERE procedure_id=(SELECT id FROM vres.procedures WHERE procedure_key=%s)",
             (procedure_key,),
