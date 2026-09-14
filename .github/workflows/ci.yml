@@ -63,6 +63,7 @@ jobs:
           src/vres_os/processes.py
           src/vres_os/model_policy.py
           tests/test_company_authority.py
+          tests/test_company_optimization_mcp.py
           tests/test_replay_attestation.py
           tests/test_executor.py
           tests/test_procedure_recipe.py
