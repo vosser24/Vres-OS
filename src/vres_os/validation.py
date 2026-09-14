@@ -160,11 +160,17 @@ class ValidationService:
             "Return one JSON report with request_key, outcome, checks[{status,evidence}]."
         )
         if context_type is not None:
-            instruction += (
-                " Preserve context_key exactly and return it as context_key. "
-                "For procedure_replay also return optimization_replay with "
-                "replay_key, output_equivalent, and protected_regression."
-            )
+            instruction += " Preserve context_key exactly and return it as context_key."
+            if context_type == "procedure_replay":
+                instruction += (
+                    " Return optimization_replay with replay_key, output_equivalent, "
+                    "and protected_regression."
+                )
+            elif context_type == "model_experiment":
+                instruction += (
+                    " Return model_experiment with experiment_key, candidate_quality_not_worse, "
+                    "and protected_regression."
+                )
         return {
             "request_key": key,
             "task_key": task_key,
@@ -221,6 +227,21 @@ class ValidationService:
                         raise ValueError("Replay report must state output_equivalent as a boolean")
                     if type(replay.get("protected_regression")) is not bool:
                         raise ValueError("Replay report must state protected_regression as a boolean")
+                elif request["context_type"] == "model_experiment":
+                    experiment = report.get("model_experiment")
+                    if (
+                        not isinstance(experiment, dict)
+                        or experiment.get("experiment_key") != request["context_key"]
+                    ):
+                        raise ValueError("Model experiment report does not identify the frozen experiment")
+                    if type(experiment.get("candidate_quality_not_worse")) is not bool:
+                        raise ValueError(
+                            "Model experiment report must state candidate_quality_not_worse as a boolean"
+                        )
+                    if type(experiment.get("protected_regression")) is not bool:
+                        raise ValueError(
+                            "Model experiment report must state protected_regression as a boolean"
+                        )
             session = conn.execute(
                 "SELECT task_id FROM vres.sessions WHERE provider='claude' "
                 "AND provider_session_id=%s AND project_id=%s AND ended_at IS NULL "
@@ -241,7 +262,7 @@ class ValidationService:
             if artifact_manifest(root, list(request["artifact_manifest"])) != request[
                 "artifact_manifest"
             ]:
-                raise ValueError("Reviewed artifacts changed; fresh review required")
+                raise ValueError("Reviewed files changed; fresh review required")
             conn.execute(
                 "UPDATE vres.validation_requests SET status=%s,observed_model=%s,"
                 "agent_id=%s,session_id=%s,report=%s::jsonb,completed_at=now() WHERE id=%s",
