@@ -49,7 +49,7 @@ jobs:
       - name: Repository-wide critical Python lint
         run: python -m ruff check src tests scripts --select E9,F63,F7,F82
 
-      - name: Strict lint for authority replay executor and model provenance surfaces
+      - name: Strict lint for authority replay executor and model evidence surfaces
         run: >-
           python -m ruff check
           src/vres_os/authority.py
@@ -62,16 +62,19 @@ jobs:
           src/vres_os/procedure_worker.py
           src/vres_os/processes.py
           src/vres_os/model_policy.py
+          src/vres_os/model_experiments.py
           tests/test_company_authority.py
           tests/test_company_optimization_mcp.py
           tests/test_replay_attestation.py
           tests/test_executor.py
           tests/test_procedure_recipe.py
           tests/test_model_policy_provenance.py
+          tests/test_model_experiment_evidence.py
           tests/integration/test_company_authority_journey.py
           tests/integration/test_company_optimization_journey.py
           tests/integration/test_replay_attestation_journey.py
           tests/integration/test_bounded_executor_journey.py
+          tests/integration/test_model_experiment_journey.py
           --ignore E501,I001
 
       - name: Full test suite with PostgreSQL integration
@@ -80,10 +83,11 @@ jobs:
       - name: Installed runtime import smoke
         run: >-
           python -c "import importlib.resources, vres_os.company_mcp as c, vres_os.replay as r,
-          vres_os.executor as e, vres_os.procedure_worker as w, vres_os.model_policy as mp;
+          vres_os.executor as e, vres_os.procedure_worker as w, vres_os.model_policy as mp,
+          vres_os.model_experiments as me;
           assert callable(c.main) and hasattr(r, 'ReplayService') and hasattr(e, 'ProcedureExecutorService') and callable(w.main);
-          assert hasattr(mp, 'ModelPolicyService');
-          assert len(list(importlib.resources.files('vres_os').joinpath('migrations').iterdir())) >= 13"
+          assert hasattr(mp, 'ModelPolicyService') and hasattr(me, 'ModelExperimentService');
+          assert len(list(importlib.resources.files('vres_os').joinpath('migrations').iterdir())) >= 14"
 
       - name: Local release gate
         run: |
