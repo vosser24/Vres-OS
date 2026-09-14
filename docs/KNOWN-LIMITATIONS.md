@@ -10,7 +10,6 @@ A green local release gate does not change the boundaries below.
 |---|---|---|
 | Automatic procedural optimization | Records candidate experiments and applies a conservative mathematical gate, but will not auto-promote from agent-supplied measurements. Explicit, subject-bound user decisions remain possible. | Host-measured, comparable paired replay; accepted-output equivalence; full runtime/token accounting; reliability/security constraints; rollback. |
 | Learned automatic model replacement | Recommendations use registered policies. Recorded telemetry is advisory. | Independently measured comparable runs and a policy-promotion authority. |
-| Company-wide procedure publication | Dedicated company-authority tools can publish sources, durable knowledge, registry objects and shared capability definitions after preview → exact persisted approval → write. Ordinary project tools remain project-local. Company-wide procedures are still rejected. | Bind the complete reusable procedure contract and any baseline measurements to the exact company approval event, persist global-scope provenance, and execute regression/PostgreSQL journeys for retries and changed content. |
 | Arbitrary transparent session replacement | Hooks checkpoint and restore material state around native sessions/compaction. There is no custom terminal host that replaces every Claude context invisibly. | Actual host lifecycle implementation and end-to-end tests. |
 | Infinite nested executive hierarchy | Chairman coordinates ordinary subagents; directors return staffing requests rather than recursively spawning unsupported workers. | Supported nested runtime or a separately tested external coordinator. |
 | Chaotic company-disk project reconstruction | Mechanical folder ingestion assigns a nominated project. It does not autonomously infer an entire trustworthy company taxonomy. | Project-discovery evaluation and review of ambiguous assignments. |
@@ -22,9 +21,11 @@ A green local release gate does not change the boundaries below.
 ## Executed and unexecuted target dependencies
 
 Repository CI now starts PostgreSQL 16, applies the packaged migrations through the guarded integration fixture,
-and runs the full test suite including the company-authority journey. That is real PostgreSQL execution on the
-recorded Linux runner; it is not Windows acceptance, production-load testing, lock-contention proof, or evidence
-against a user's existing business database.
+and runs the full test suite including the company-authority journey. That journey covers exact-approved global
+sources, durable knowledge, registry objects, capability definitions and accepted procedure baselines, including
+scope provenance and changed-content rejection. That is real PostgreSQL execution on the recorded Linux runner;
+it is not Windows acceptance, production-load testing, lock-contention proof, or evidence against a user's
+existing business database.
 
 This audit environment still has not executed the Windows/PowerShell installer, Windows Credential Manager,
 live Claude Code plugin/hooks/models, the real MCP SDK transport, live Codex, or a downloaded
@@ -48,8 +49,10 @@ exercised or that the same OS user could not forge inputs. High effort is config
 
 Project-local approvals point to a real persisted user turn and a specific action/subject. Company-authority
 writes add an exact redacted subject fingerprint and dedicated `company_<action>` approval type. Changing the
-approved company content changes that fingerprint and fails closed. This is still application-level provenance,
-not a cryptographic signature or independent identity system. Conditional/ambiguous assent must not be broadened.
+approved company content changes that fingerprint and fails closed. Accepted company-wide procedure approval
+binds the reusable procedure contract, implementation reference and any initial baseline metrics to the same
+scope provenance stored on the procedure. This is still application-level provenance, not a cryptographic
+signature or independent identity system. Conditional/ambiguous assent must not be broadened.
 
 Redaction covers common credential patterns, not all possible secrets. Never place real credentials in
 chat, source documents, transcripts, test fixtures or Git. PostgreSQL administrators and local users with
