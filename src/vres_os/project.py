@@ -3,10 +3,11 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
+
+from .processes import run_bounded
 
 
 @dataclass(slots=True)
@@ -19,13 +20,24 @@ class ProjectIdentity:
 
 
 def _run_git(root: Path, *args: str) -> str | None:
-    try:
-        out = subprocess.check_output(
-            ["git", "-C", str(root), *args], stderr=subprocess.DEVNULL, text=True, timeout=5
-        ).strip()
-        return out or None
-    except (OSError, subprocess.SubprocessError):
+    """Run Git without ever inheriting the MCP transport stdin.
+
+    Git for Windows may spawn a launcher/grandchild pair. Use the shared bounded
+    runner so timeout handling terminates the process tree instead of killing only
+    the launcher while a grandchild keeps transport/output handles alive.
+    """
+    result = run_bounded(
+        ["git", "-C", str(root), *args],
+        timeout=5,
+        max_output_bytes=64 * 1024,
+        max_result_chars=64 * 1024,
+        redact_output=False,
+        stdin_devnull=True,
+    )
+    if not result.ok:
         return None
+    out = result.output.strip()
+    return out or None
 
 
 def normalize_remote(remote: str) -> str:

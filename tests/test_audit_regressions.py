@@ -38,6 +38,13 @@ class ScriptedConnection:
         assert expected in str(sql), f"Expected {expected!r}, got {sql!r}"
         if isinstance(reply, Exception):
             raise reply
+        # Some older boundary tests used a boolean as an existence sentinel. When
+        # production code asks PostgreSQL for diagnostic columns, model the real
+        # dict-row shape instead of weakening the existence/no-mutation assertion.
+        if reply is True and expected == "FROM pg_roles":
+            reply = {"rolsuper": False, "rolcanlogin": True}
+        elif reply is True and expected == "FROM pg_database":
+            reply = {"owner": "existing-owner"}
         return SimpleNamespace(fetchone=lambda: reply, fetchall=lambda: reply)
 
     def transaction(self):
