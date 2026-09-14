@@ -25,6 +25,7 @@ def test_runtime_replay_requires_host_observed_validation_before_promotion(pg_pr
         "chairman",
     )
     session_id = f"replay-session-{marker}"
+    repo.open_session(pg_project, session_id)
     repo.bind_session(pg_project, session_id, task_key)
     artifact = tmp_path / "replay-result.json"
     artifact.write_text(json.dumps({"fixture": marker, "result": 42}), encoding="utf-8")
