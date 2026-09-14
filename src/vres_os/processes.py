@@ -54,8 +54,14 @@ def run_bounded(
     max_output_bytes: int = MAX_OUTPUT_BYTES,
     max_result_chars: int = MAX_RESULT_CHARS,
     redact_output: bool = True,
+    stdin_devnull: bool = False,
 ) -> ProcessResult:
-    """No shell, no prompt in argv, finite retained output, and bounded process lifetime."""
+    """No shell, explicit stdin, finite retained output, and bounded process lifetime.
+
+    ``stdin_devnull`` is for tools that must never observe or inherit the caller's
+    transport/console input. Prompt-driven workers instead receive a finite private
+    temporary file. Both modes are independent of parent stdin.
+    """
     if not 0 < timeout <= 3600:
         raise ValueError("Subprocess timeout must be in (0, 3600] seconds")
     if (
@@ -67,6 +73,8 @@ def run_bounded(
         raise ValueError("Worker output limits must be positive bounded integers")
     if len(prompt.encode("utf-8")) > MAX_PROMPT_BYTES:
         raise ValueError("Worker input exceeds the prompt budget")
+    if stdin_devnull and prompt:
+        raise ValueError("stdin_devnull cannot be combined with a worker prompt")
     with tempfile.TemporaryFile() as source, tempfile.TemporaryFile() as output:
         source.write(prompt.encode("utf-8"))
         source.seek(0)
@@ -78,7 +86,7 @@ def run_bounded(
         proc = subprocess.Popen(
             args,
             cwd=cwd,
-            stdin=source,
+            stdin=subprocess.DEVNULL if stdin_devnull else source,
             stdout=output,
             stderr=subprocess.STDOUT,
             **options,
