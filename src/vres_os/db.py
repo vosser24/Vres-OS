@@ -48,12 +48,25 @@ def build_dsn() -> str:
 
 @contextmanager
 def connect(*, autocommit: bool = False) -> Iterator[Connection]:
-    """Open a database connection without masking SQL/application defects as outages."""
+    """Open a database connection without masking SQL/application defects as outages.
+
+    Vres intentionally uses psycopg's ClientCursor compatibility binding. Several
+    scoped retrieval queries contain nullable filter guards such as ``%s IS NULL``.
+    With psycopg 3 server-side binding, Python strings and None may be sent with OID
+    0 and PostgreSQL cannot infer the standalone guard parameter type. ClientCursor
+    keeps psycopg's value adaptation/escaping while sending a non-parametric query,
+    matching the value-binding semantics expected by this SQL corpus.
+    """
     psycopg = _driver()
     from psycopg.rows import dict_row
 
     try:
-        conn = psycopg.connect(build_dsn(), row_factory=dict_row, autocommit=autocommit)
+        conn = psycopg.connect(
+            build_dsn(),
+            row_factory=dict_row,
+            cursor_factory=psycopg.ClientCursor,
+            autocommit=autocommit,
+        )
     except DatabaseUnavailable:
         raise
     except (psycopg.OperationalError, psycopg.InterfaceError) as exc:
