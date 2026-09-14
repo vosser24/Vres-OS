@@ -13,6 +13,22 @@ def _connect():
     return connect()
 
 
+def capability_register_subject(
+    key: str,
+    name: str,
+    description: str,
+    domain: str | None,
+    owner_role: str | None,
+) -> dict[str, Any]:
+    return {
+        "capability_key": key.strip(),
+        "name": redact_text(name),
+        "description": redact_text(description),
+        "domain": domain,
+        "owner_role": owner_role,
+    }
+
+
 class CapabilityService:
     def resolve(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
         query = query.strip()
@@ -45,17 +61,12 @@ class CapabilityService:
         *,
         approval_key: str | None = None,
     ) -> str:
-        key = key.strip()
+        subject = capability_register_subject(key, name, description, domain, owner_role)
+        key = subject["capability_key"]
+        name = subject["name"]
+        description = subject["description"]
         if not key or not name.strip() or not description.strip():
             raise ValueError("capability key, name and description are required")
-        name, description = redact_text(name), redact_text(description)
-        subject = {
-            "capability_key": key,
-            "name": name,
-            "description": description,
-            "domain": domain,
-            "owner_role": owner_role,
-        }
         with _connect() as conn, conn.transaction():
             scope_approval_id = require_company_approval(
                 conn, approval_key, "capability_register", subject
@@ -81,7 +92,9 @@ class CapabilityService:
                 ) VALUES (%s,%s,%s,%s,%s,'active',%s)
                 ON CONFLICT(capability_key) DO UPDATE SET name=excluded.name,description=excluded.description,
                   domain=excluded.domain,owner_role=excluded.owner_role,status='active',
-                  scope_approval_event_id=COALESCE(vres.capabilities.scope_approval_event_id,excluded.scope_approval_event_id)
+                  scope_approval_event_id=COALESCE(
+                    vres.capabilities.scope_approval_event_id,excluded.scope_approval_event_id
+                  )
                 """,
                 (key, name, description, domain, owner_role, scope_approval_id),
             )
