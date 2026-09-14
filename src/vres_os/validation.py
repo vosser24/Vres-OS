@@ -15,15 +15,25 @@ from .redaction import redact
 from .transcript import transcript_tail
 
 STATE_FIELDS = (
-    "objective", "current_phase", "current_step", "state_summary", "next_action",
-    "latest_user_instruction", "open_questions", "assumptions", "constraints",
-    "completed_work", "pending_work", "relevant_objects",
+    "objective",
+    "current_phase",
+    "current_step",
+    "state_summary",
+    "next_action",
+    "latest_user_instruction",
+    "open_questions",
+    "assumptions",
+    "constraints",
+    "completed_work",
+    "pending_work",
+    "relevant_objects",
 )
 MAX_REVIEW_BYTES = 128 * 1024 * 1024
 
 
 def _connect():
     from .db import connect
+
     return connect()
 
 
@@ -57,7 +67,11 @@ def artifact_manifest(root: Path, paths: list[str]) -> dict[str, str]:
                     raise ValueError("Reviewed file changed during hashing")
                 digest.update(block)
         after = p.stat()
-        if (before.st_mtime_ns, before.st_size, before.st_ino) != (after.st_mtime_ns, after.st_size, after.st_ino):
+        if (before.st_mtime_ns, before.st_size, before.st_ino) != (
+            after.st_mtime_ns,
+            after.st_size,
+            after.st_ino,
+        ):
             raise ValueError("Reviewed file changed during hashing")
         result[p.relative_to(root).as_posix()] = digest.hexdigest()
     return result
@@ -77,7 +91,12 @@ def parse_validator_report(text: str) -> dict:
     checks = report.get("checks")
     if not isinstance(checks, list) or not checks:
         raise ValueError("Validator report requires executable/documented checks")
-    if any(not isinstance(c, dict) or not c.get("evidence") or c.get("status") not in {"passed", "failed", "not_run"} for c in checks):
+    if any(
+        not isinstance(c, dict)
+        or not c.get("evidence")
+        or c.get("status") not in {"passed", "failed", "not_run"}
+        for c in checks
+    ):
         raise ValueError("Every check needs a status and concrete evidence")
     if report["outcome"] == "passed" and any(c["status"] != "passed" for c in checks):
         raise ValueError("A skipped or failed check cannot establish PASS")
@@ -85,88 +104,203 @@ def parse_validator_report(text: str) -> dict:
 
 
 class ValidationService:
-    def prepare(self, task_key: str, project_id: int, root: Path, paths: list[str]) -> dict:
+    def prepare(
+        self,
+        task_key: str,
+        project_id: int,
+        root: Path,
+        paths: list[str],
+        *,
+        context_type: str | None = None,
+        context_key: str | None = None,
+        context_payload: dict[str, Any] | None = None,
+    ) -> dict:
+        if (context_type is None) != (context_key is None):
+            raise ValueError("Validation context_type and context_key must be supplied together")
+        if context_type is not None and (not context_type.strip() or not context_key.strip()):
+            raise ValueError("Validation context must be non-empty")
         manifest = artifact_manifest(root, paths)
         key = f"VAL-{uuid.uuid4().hex[:16]}"
+        safe_context = redact(context_payload or {}) if context_type is not None else None
         with _connect() as conn, conn.transaction():
             row = conn.execute(
                 "SELECT t.objective,t.project_id,t.status,s.* FROM vres.tasks t "
-                "JOIN vres.task_state s ON s.task_id=t.id WHERE t.task_key=%s FOR UPDATE OF s",
+                "JOIN vres.task_state s ON s.task_id=t.id "
+                "WHERE t.task_key=%s FOR UPDATE OF s",
                 (task_key,),
             ).fetchone()
-            if not row or row["project_id"] != project_id or row["status"] not in {"active", "blocked", "waiting_user"}:
+            if (
+                not row
+                or row["project_id"] != project_id
+                or row["status"] not in {"active", "blocked", "waiting_user"}
+            ):
                 raise ValueError("Validation must target an unfinished task in this project")
-            conn.execute("UPDATE vres.task_state SET validation_status='pending' WHERE task_id=%s", (row["task_id"],))
             conn.execute(
-                "INSERT INTO vres.validation_requests(request_key,task_id,state_digest,artifact_manifest) "
-                "VALUES (%s,%s,%s,%s::jsonb)", (key, row["task_id"], state_digest(dict(row)), json.dumps(manifest)),
+                "UPDATE vres.task_state SET validation_status='pending' WHERE task_id=%s",
+                (row["task_id"],),
             )
-        return {"request_key": key, "task_key": task_key, "artifacts": manifest,
-                "validator": "vres-os:validator", "model": "fable", "effort": "high",
-                "instruction": "Return one JSON report with request_key, outcome, checks[{status,evidence}]."}
+            conn.execute(
+                """
+                INSERT INTO vres.validation_requests(
+                  request_key,task_id,state_digest,artifact_manifest,
+                  context_type,context_key,context_payload
+                ) VALUES (%s,%s,%s,%s::jsonb,%s,%s,%s::jsonb)
+                """,
+                (
+                    key,
+                    row["task_id"],
+                    state_digest(dict(row)),
+                    json.dumps(manifest),
+                    context_type,
+                    context_key,
+                    json.dumps(safe_context) if safe_context is not None else None,
+                ),
+            )
+        instruction = (
+            "Return one JSON report with request_key, outcome, checks[{status,evidence}]."
+        )
+        if context_type is not None:
+            instruction += (
+                " Preserve context_key exactly and return it as context_key. "
+                "For procedure_replay also return optimization_replay with "
+                "replay_key, output_equivalent, and protected_regression."
+            )
+        return {
+            "request_key": key,
+            "task_key": task_key,
+            "artifacts": manifest,
+            "validator": "vres-os:validator",
+            "model": "fable",
+            "effort": "high",
+            "context_type": context_type,
+            "context_key": context_key,
+            "context": safe_context,
+            "instruction": instruction,
+        }
 
     def record_from_hook(self, payload: dict, project_id: int, root: Path) -> dict:
-        if payload.get("agent_type") != "vres-os:validator" or not payload.get("agent_id") or not payload.get("session_id"):
+        if (
+            payload.get("agent_type") != "vres-os:validator"
+            or not payload.get("agent_id")
+            or not payload.get("session_id")
+        ):
             raise ValueError("Only an observed namespaced validator completion is accepted")
         report = parse_validator_report(payload.get("last_assistant_message", ""))
         transcript = payload.get("agent_transcript_path")
         if not transcript:
             raise ValueError("Missing validator transcript; model identity cannot be verified")
         records = transcript_tail(Path(transcript).expanduser())
-        models = [x["message"].get("model") for x in records if isinstance(x.get("message"), dict)
-                  and x.get("type") == "assistant" and x["message"].get("model")]
-        if not models or not all(m == "fable" or m.startswith("claude-fable-") for m in models):
+        models = [
+            x["message"].get("model")
+            for x in records
+            if isinstance(x.get("message"), dict)
+            and x.get("type") == "assistant"
+            and x["message"].get("model")
+        ]
+        if not models or not all(
+            m == "fable" or m.startswith("claude-fable-") for m in models
+        ):
             raise ValueError("Observed validator model is missing or below the protected Fable family")
         with _connect() as conn, conn.transaction():
             request = conn.execute(
                 "SELECT r.*,t.project_id,t.task_key,t.objective FROM vres.validation_requests r "
-                "JOIN vres.tasks t ON t.id=r.task_id WHERE request_key=%s FOR UPDATE OF r",
+                "JOIN vres.tasks t ON t.id=r.task_id "
+                "WHERE request_key=%s FOR UPDATE OF r",
                 (report["request_key"],),
             ).fetchone()
             if not request or request["project_id"] != project_id:
                 raise ValueError("Validator request is unknown or belongs to another project")
+            if request.get("context_type"):
+                if report.get("context_key") != request["context_key"]:
+                    raise ValueError("Validator report does not match the frozen validation context")
+                if request["context_type"] == "procedure_replay":
+                    replay = report.get("optimization_replay")
+                    if not isinstance(replay, dict) or replay.get("replay_key") != request["context_key"]:
+                        raise ValueError("Replay validator report does not identify the frozen replay")
+                    if type(replay.get("output_equivalent")) is not bool:
+                        raise ValueError("Replay report must state output_equivalent as a boolean")
+                    if type(replay.get("protected_regression")) is not bool:
+                        raise ValueError("Replay report must state protected_regression as a boolean")
             session = conn.execute(
-                "SELECT task_id FROM vres.sessions WHERE provider='claude' AND provider_session_id=%s "
-                "AND project_id=%s AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1",
+                "SELECT task_id FROM vres.sessions WHERE provider='claude' "
+                "AND provider_session_id=%s AND project_id=%s AND ended_at IS NULL "
+                "ORDER BY started_at DESC LIMIT 1",
                 (payload["session_id"], project_id),
             ).fetchone()
             if not session or session["task_id"] != request["task_id"]:
                 raise ValueError("Validator session is not bound to this task")
             if request["status"] != "pending":
                 return {"recorded": False, "reason": "request already consumed"}
-            row = conn.execute("SELECT * FROM vres.task_state WHERE task_id=%s FOR UPDATE", (request["task_id"],)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM vres.task_state WHERE task_id=%s FOR UPDATE",
+                (request["task_id"],),
+            ).fetchone()
             state = dict(row) | {"objective": request["objective"]}
             if state_digest(state) != request["state_digest"]:
                 raise ValueError("Task changed during validation; fresh review required")
-            if artifact_manifest(root, list(request["artifact_manifest"])) != request["artifact_manifest"]:
+            if artifact_manifest(root, list(request["artifact_manifest"])) != request[
+                "artifact_manifest"
+            ]:
                 raise ValueError("Reviewed artifacts changed; fresh review required")
             conn.execute(
-                "UPDATE vres.validation_requests SET status=%s,observed_model=%s,agent_id=%s,session_id=%s,"
-                "report=%s::jsonb,completed_at=now() WHERE id=%s",
-                (report["outcome"], models[-1], payload["agent_id"], payload["session_id"],
-                 json.dumps(redact(report)), request["id"]),
+                "UPDATE vres.validation_requests SET status=%s,observed_model=%s,"
+                "agent_id=%s,session_id=%s,report=%s::jsonb,completed_at=now() WHERE id=%s",
+                (
+                    report["outcome"],
+                    models[-1],
+                    payload["agent_id"],
+                    payload["session_id"],
+                    json.dumps(redact(report)),
+                    request["id"],
+                ),
             )
-            conn.execute("UPDATE vres.task_state SET validation_status=%s WHERE task_id=%s",
-                         (report["outcome"], request["task_id"]))
-        return {"recorded": True, "request_key": report["request_key"], "outcome": report["outcome"]}
+            conn.execute(
+                "UPDATE vres.task_state SET validation_status=%s WHERE task_id=%s",
+                (report["outcome"], request["task_id"]),
+            )
+        return {
+            "recorded": True,
+            "request_key": report["request_key"],
+            "outcome": report["outcome"],
+        }
 
-
-    def assert_current(self, task_key: str, project_id: int, root: Path,
-                       request_key: str | None = None) -> dict:
+    def assert_current(
+        self,
+        task_key: str,
+        project_id: int,
+        root: Path,
+        request_key: str | None = None,
+    ) -> dict:
         with _connect() as conn:
-            request = conn.execute(
-                "SELECT r.*,t.objective,t.project_id FROM vres.validation_requests r JOIN vres.tasks t ON t.id=r.task_id "
-                "WHERE t.task_key=%s AND t.project_id=%s AND (%s IS NULL OR r.request_key=%s) "
-                "ORDER BY r.id DESC LIMIT 1",
-                (task_key, project_id, request_key, request_key),
-            ).fetchone()
+            if request_key is None:
+                request = conn.execute(
+                    "SELECT r.*,t.objective,t.project_id FROM vres.validation_requests r "
+                    "JOIN vres.tasks t ON t.id=r.task_id "
+                    "WHERE t.task_key=%s AND t.project_id=%s "
+                    "ORDER BY r.id DESC LIMIT 1",
+                    (task_key, project_id),
+                ).fetchone()
+            else:
+                request = conn.execute(
+                    "SELECT r.*,t.objective,t.project_id FROM vres.validation_requests r "
+                    "JOIN vres.tasks t ON t.id=r.task_id "
+                    "WHERE t.task_key=%s AND t.project_id=%s AND r.request_key=%s "
+                    "ORDER BY r.id DESC LIMIT 1",
+                    (task_key, project_id, request_key),
+                ).fetchone()
             if not request or request["status"] != "passed":
                 raise ValueError("No current host-observed passing review exists for this task")
-            state = conn.execute("SELECT * FROM vres.task_state WHERE task_id=%s", (request["task_id"],)).fetchone()
+            state = conn.execute(
+                "SELECT * FROM vres.task_state WHERE task_id=%s", (request["task_id"],)
+            ).fetchone()
             if not state or state["validation_status"] != "passed":
                 raise ValueError("Task is not currently validated")
-            if state_digest(dict(state) | {"objective": request["objective"]}) != request["state_digest"]:
+            if state_digest(dict(state) | {"objective": request["objective"]}) != request[
+                "state_digest"
+            ]:
                 raise ValueError("Task changed after review; revalidation required")
-            if artifact_manifest(root, list(request["artifact_manifest"])) != request["artifact_manifest"]:
+            if artifact_manifest(root, list(request["artifact_manifest"])) != request[
+                "artifact_manifest"
+            ]:
                 raise ValueError("Reviewed files changed after PASS; revalidation required")
         return dict(request)

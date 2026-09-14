@@ -18,7 +18,9 @@ environment; CI provisions the exact `setuptools==82.0.1` backend before invokin
 This gate executes local tests and Python compilation; parses JSON/frontmatter; checks package and migration
 manifests; builds an actual wheel without dependency resolution or build isolation; compares packaged
 Python/SQL bytes to source; smoke-imports selected installed modules in a separate directory; checks local
-documentation links; and runs `git diff --check` when a Git checkout is available.
+documentation links; and runs `git diff --check` when a Git checkout is available. The installed-wheel smoke
+requires the company MCP entry point, replay module and all packaged migrations currently present through
+`011_optimization_attestation.sql`.
 
 The local gate deliberately removes ambient Vres database credentials, so PostgreSQL integration tests are
 reported as skipped there. It does NOT execute PowerShell, PostgreSQL or a live model. Structural migration
@@ -37,9 +39,23 @@ contract.
 
 For the company-authority tranche, the green CI boundary includes migration `010_company_authority.sql`,
 exact-subject approval provenance, company-wide source/knowledge/registry publication, shared capability
-catalog registration, and the installed `vres_os.company_mcp` entry-point smoke. A green Linux/PostgreSQL CI
-run is still not Windows acceptance, a production database authorization, concurrency/load proof, or a live
-Claude/Codex transport test.
+catalog registration, exact-approved company-wide procedure baselines, and the installed
+`vres_os.company_mcp` entry-point smoke.
+
+For the optimization-evidence tranche, the green CI boundary additionally includes
+`011_optimization_attestation.sql`, runtime-vs-reported measurement provenance, exact input/output digests,
+frozen validation contexts, replay attestations, PostgreSQL `numeric`/Python `Decimal` metric handling, and a
+real replay journey that proves a candidate cannot attest before protected validation and can be promoted only
+after a current Fable-observed PASS, unchanged evidence, exact contract fingerprints and the Pareto gate. The
+trusted runtime-run and promotion sinks are intentionally absent from both MCP surfaces.
+
+The replay integration proves the evidence/promotion state machine. It does **not** prove a general production
+procedure executor because the integration test supplies runtime-classified runs directly through the internal
+service boundary. General automatic optimization therefore remains held until a bounded registered executor is
+the production owner of that sink.
+
+A green Linux/PostgreSQL CI run is still not Windows acceptance, a production database authorization,
+concurrency/load proof, a live Claude/Codex transport test, or proof against a hostile local administrator.
 
 ## Release artifact protocol
 
@@ -63,6 +79,9 @@ artifacts belong beside the source export; record their hashes in a separate rel
 - **Local gate passed:** the exact local commands in the evidence log passed in the recorded environment.
 - **PostgreSQL CI passed:** the exact repository head passed the full suite against the workflow's disposable
   PostgreSQL service; this is scoped runtime evidence, not target-Windows acceptance.
+- **Replay evidence path passed:** the exact head proved the tested runtime-run → frozen protected validation →
+  replay attestation → Pareto assessment → promotion state machine. This label does not imply that a general
+  production executor exists.
 - **Controlled-live-test preview:** a packaged checkpoint with known held capabilities, ready to be evaluated
   on a disposable target; it is not yet proved usable by a novice.
 - **Windows acceptance passed:** the exact live matrix was executed and reviewed against the exact artifact.
@@ -79,7 +98,8 @@ as if it were a fresh test result.
 ## Validator independence
 
 The repository CI and deterministic gates are execution evidence, not a substitute for an independent live
-model review. A separate live Claude/Codex validator has not been invoked by this document. Product-side
-validator hooks are code under test, not proof that an independent model reviewed this build. The strongest
-protected validation role must be observed in LIVE-VERIFICATION.md before trusting its application-level
-completion decisions.
+model review. The replay integration exercises the protected-validator ingestion path using an observed Fable
+transcript fixture and exact frozen context; that proves the application checks, not that an independent live
+model externally reviewed this build. Product-side validator hooks are code under test, not a cryptographic
+identity proof. The strongest protected validation role must still be observed in LIVE-VERIFICATION.md before
+trusting its application-level completion decisions on the target host.

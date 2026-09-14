@@ -8,24 +8,32 @@ A green local release gate does not change the boundaries below.
 
 | Capability | Actual preview behavior | What is required before enabling the larger promise |
 |---|---|---|
-| Automatic procedural optimization | Records candidate experiments and applies a conservative mathematical gate, but will not auto-promote from agent-supplied measurements. Explicit, subject-bound user decisions remain possible. | Host-measured, comparable paired replay; accepted-output equivalence; full runtime/token accounting; reliability/security constraints; rollback. |
-| Learned automatic model replacement | Recommendations use registered policies. Recorded telemetry is advisory. | Independently measured comparable runs and a policy-promotion authority. |
+| General automatic procedural optimization | Candidate experiments remain non-promoting when they rely on caller-reported telemetry. A separate replay layer now accepts only runtime-classified paired runs, binds exact input/output digests and contract fingerprints to a frozen protected-validator request, rejects stale/mismatched evidence, and can promote only a current Pareto-superior attested candidate. The runtime-run and promotion sinks are not exposed through MCP. | A bounded runtime-owned production executor that generates the paired measurements from registered procedures; reliable provider/token accounting where token comparison is used; additional fault/concurrency/rollback acceptance. |
+| Learned automatic model replacement | Recommendations use registered policies. Recorded telemetry is advisory. | Independently measured comparable runs and a policy-promotion authority, with the same evidence discipline as procedure replay. |
 | Arbitrary transparent session replacement | Hooks checkpoint and restore material state around native sessions/compaction. There is no custom terminal host that replaces every Claude context invisibly. | Actual host lifecycle implementation and end-to-end tests. |
 | Infinite nested executive hierarchy | Chairman coordinates ordinary subagents; directors return staffing requests rather than recursively spawning unsupported workers. | Supported nested runtime or a separately tested external coordinator. |
 | Chaotic company-disk project reconstruction | Mechanical folder ingestion assigns a nominated project. It does not autonomously infer an entire trustworthy company taxonomy. | Project-discovery evaluation and review of ambiguous assignments. |
 | Annual unattended market research | Domain due dates and explicit refresh records exist. No annual background scheduler is installed. | A separately authorized scheduler and actual research/validation execution. |
 | Automatic best-expert hiring | Roles/skills/capability records aid routing; shared catalog definitions require exact company approval. No benchmark establishes that a generated persona is the world's best expert. | Domain-specific competence evaluations and documented evidence retrieval. |
 | Automatic company DB reporting | Vres manages its own memory database. It does not automatically discover or authorize arbitrary reporting databases. | Explicit read-only data-source integration and query validation. |
-| Generic recipe execution | Accepted contracts and implementation references can be retrieved. A universal safe executable-recipe sandbox is not present. | Registered deterministic executors with verified input/output and permissions contracts. |
+| Generic recipe execution | Accepted contracts and implementation references can be retrieved. There is no general arbitrary-code procedure runner. The replay evidence sink exists but is intentionally not an MCP capability. | Registered deterministic executors with verified input/output and permissions contracts, bounded process execution, and runtime-owned measurement provenance. |
 
 ## Executed and unexecuted target dependencies
 
-Repository CI now starts PostgreSQL 16, applies the packaged migrations through the guarded integration fixture,
-and runs the full test suite including the company-authority journey. That journey covers exact-approved global
-sources, durable knowledge, registry objects, capability definitions and accepted procedure baselines, including
-scope provenance and changed-content rejection. That is real PostgreSQL execution on the recorded Linux runner;
-it is not Windows acceptance, production-load testing, lock-contention proof, or evidence against a user's
-existing business database.
+Repository CI starts PostgreSQL 16, applies the packaged migrations through the guarded integration fixture,
+and runs the full test suite including company-authority and optimization-replay journeys. The authority journey
+covers exact-approved global sources, durable knowledge, registry objects, capability definitions and accepted
+procedure baselines, including scope provenance and changed-content rejection. The replay journey covers a
+reported candidate that cannot self-promote, runtime-classified baseline/candidate runs on the same input,
+frozen replay context, an observed Fable validator completion, replay attestation, Pareto assessment and
+promotion with retained evidence provenance. That is real PostgreSQL execution on the recorded Linux runner;
+it is not Windows acceptance, production-load testing, lock-contention proof, or proof that arbitrary procedure
+implementations can yet be executed safely.
+
+The replay integration uses an integration-only runtime-run producer to prove the evidence and promotion state
+machine. It is not a production generic executor. Until a bounded registered executor owns that sink, an MCP
+caller cannot turn its own metrics into runtime measurements and ordinary candidate evaluation remains
+non-promoting.
 
 This audit environment still has not executed the Windows/PowerShell installer, Windows Credential Manager,
 live Claude Code plugin/hooks/models, the real MCP SDK transport, live Codex, or a downloaded
@@ -44,8 +52,10 @@ that user's security context. The design is not a multi-tenant server, a cryptog
 system, or protection against a local agent/operator allowed arbitrary shell access to the same files/database.
 
 The validation hook checks a native subagent event, model-family evidence, registered session, frozen
-state, reviewed artifact hashes and a structured report. It does not prove every criterion was actually
-exercised or that the same OS user could not forge inputs. High effort is configured rather than attested.
+state, reviewed artifact hashes and a structured report. Replay-scoped validation additionally freezes a replay
+key and exact baseline/candidate run/contract context. It does not prove every criterion was actually exercised,
+that the same OS user could not forge inputs, or that a future executor is safe merely because the evidence
+schema exists. High effort is configured rather than cryptographically attested.
 
 Project-local approvals point to a real persisted user turn and a specific action/subject. Company-authority
 writes add an exact redacted subject fingerprint and dedicated `company_<action>` approval type. Changing the
@@ -53,6 +63,11 @@ approved company content changes that fingerprint and fails closed. Accepted com
 binds the reusable procedure contract, implementation reference and any initial baseline metrics to the same
 scope provenance stored on the procedure. This is still application-level provenance, not a cryptographic
 signature or independent identity system. Conditional/ambiguous assent must not be broadened.
+
+Replay evidence uses `RESTRICT` references from attestations/optimization decisions to the runs and validation
+request that justified promotion. This is intended to preserve the evidence chain. Administrators with direct
+DB privileges can still modify or delete data by operating outside the cooperative application workflow; Vres
+is not a tamper-proof ledger.
 
 Redaction covers common credential patterns, not all possible secrets. Never place real credentials in
 chat, source documents, transcripts, test fixtures or Git. PostgreSQL administrators and local users with
@@ -88,9 +103,10 @@ Only persisted material state survives. Unsaved reasoning, a user instruction lo
 write, or files never included in a review cannot be reconstructed reliably. Session-end hooks are best
 effort; do not rely on their short native timeout to save a whole conversation.
 
-Migration/application semantics and the normal integration journeys now execute against PostgreSQL 16 in CI.
-Real concurrent lock contention, serialization behavior under load and interrupted transactions still require
-separate stress/fault testing. No database-wide backup/restore operation is automated by this preview.
+Migration/application semantics and the normal integration journeys execute against PostgreSQL 16 in CI.
+Real concurrent lock contention, serialization behavior under load, duplicate concurrent promotion attempts and
+interrupted transactions still require separate stress/fault testing. No database-wide backup/restore operation
+is automated by this preview.
 
 Source paths often reference the original files; ingestion is not an archival backup. Moved/deleted raw
 sources can make evidence unavailable. Back up source/artifact storage with the DB. Hashes detect changes;

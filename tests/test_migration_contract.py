@@ -55,6 +55,18 @@ def test_company_authority_migration_preserves_scope_approval_provenance():
     assert "idx_approval_events_type_subject" in sql
 
 
+def test_optimization_attestation_migration_separates_reported_and_runtime_evidence():
+    sql = _migration("011_optimization_attestation.sql")
+    assert "measurement_source" in sql
+    assert "'reported','runtime'" in sql
+    assert "input_digest" in sql and "output_digest" in sql
+    assert "context_type" in sql and "context_key" in sql and "context_payload" in sql
+    assert "vres.procedure_replay_attestations" in sql
+    assert "validation_request_id" in sql
+    assert "replay_attestation_id" in sql
+    assert "ON DELETE RESTRICT" in sql
+
+
 def test_initial_migration_does_not_make_pg_trgm_a_hard_requirement():
     sql = _migration("001_initial.sql")
     assert "pg_available_extensions" in sql
