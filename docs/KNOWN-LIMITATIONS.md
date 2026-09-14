@@ -10,26 +10,31 @@ A green local release gate does not change the boundaries below.
 |---|---|---|
 | Automatic procedural optimization | Records candidate experiments and applies a conservative mathematical gate, but will not auto-promote from agent-supplied measurements. Explicit, subject-bound user decisions remain possible. | Host-measured, comparable paired replay; accepted-output equivalence; full runtime/token accounting; reliability/security constraints; rollback. |
 | Learned automatic model replacement | Recommendations use registered policies. Recorded telemetry is advisory. | Independently measured comparable runs and a policy-promotion authority. |
-| Company-wide publication | MCP rejects `company_wide=True`; new content is project-local. | A dedicated authorization event covering the exact content and global scope. |
+| Company-wide procedure publication | Dedicated company-authority tools can publish sources, durable knowledge, registry objects and shared capability definitions after preview → exact persisted approval → write. Ordinary project tools remain project-local. Company-wide procedures are still rejected. | Bind the complete reusable procedure contract and any baseline measurements to the exact company approval event, persist global-scope provenance, and execute regression/PostgreSQL journeys for retries and changed content. |
 | Arbitrary transparent session replacement | Hooks checkpoint and restore material state around native sessions/compaction. There is no custom terminal host that replaces every Claude context invisibly. | Actual host lifecycle implementation and end-to-end tests. |
 | Infinite nested executive hierarchy | Chairman coordinates ordinary subagents; directors return staffing requests rather than recursively spawning unsupported workers. | Supported nested runtime or a separately tested external coordinator. |
 | Chaotic company-disk project reconstruction | Mechanical folder ingestion assigns a nominated project. It does not autonomously infer an entire trustworthy company taxonomy. | Project-discovery evaluation and review of ambiguous assignments. |
 | Annual unattended market research | Domain due dates and explicit refresh records exist. No annual background scheduler is installed. | A separately authorized scheduler and actual research/validation execution. |
-| Shared capability catalog writes | Public MCP registration is held; installed seed definitions and task-backed proof/read operations remain. | Explicit reviewed catalog authority; no global persona publication merely because an agent names itself an expert. |
-| Automatic best-expert hiring | Roles/skills/capability records aid routing; no benchmark establishes that a generated persona is the world's best expert. | Domain-specific competence evaluations and documented evidence retrieval. |
+| Automatic best-expert hiring | Roles/skills/capability records aid routing; shared catalog definitions require exact company approval. No benchmark establishes that a generated persona is the world's best expert. | Domain-specific competence evaluations and documented evidence retrieval. |
 | Automatic company DB reporting | Vres manages its own memory database. It does not automatically discover or authorize arbitrary reporting databases. | Explicit read-only data-source integration and query validation. |
 | Generic recipe execution | Accepted contracts and implementation references can be retrieved. A universal safe executable-recipe sandbox is not present. | Registered deterministic executors with verified input/output and permissions contracts. |
 
-## Unexecuted target dependencies
+## Executed and unexecuted target dependencies
 
-This audit environment did not run Windows/PowerShell, PostgreSQL/psycopg, Windows Credential Manager,
-Claude Code, the real MCP SDK transport, Codex, or a downloaded SentenceTransformer. Mock/scripted
-boundary tests are not substitutes for those runtimes. See LIVE-VERIFICATION.md for the required tests.
+Repository CI now starts PostgreSQL 16, applies the packaged migrations through the guarded integration fixture,
+and runs the full test suite including the company-authority journey. That is real PostgreSQL execution on the
+recorded Linux runner; it is not Windows acceptance, production-load testing, lock-contention proof, or evidence
+against a user's existing business database.
 
-The wheel was built with the recorded local build backend and its package contents checked. Runtime
-dependencies remain bounded version ranges, not a tested Windows lockfile. The installer records
-`resolved-dependencies.txt` and runs `pip check`, but a resolved environment is not a reproducibility guarantee.
-Optional embedding dependencies are large and are deliberately not installed by default.
+This audit environment still has not executed the Windows/PowerShell installer, Windows Credential Manager,
+live Claude Code plugin/hooks/models, the real MCP SDK transport, live Codex, or a downloaded
+SentenceTransformer. Installed-module smoke tests and mocked/scripted boundaries are not substitutes for those
+runtimes. See LIVE-VERIFICATION.md for the required target tests.
+
+The wheel is built with the declared build backend prepared in the CI environment and its package contents
+checked. Runtime dependencies remain bounded version ranges, not a tested Windows lockfile. The installer
+records `resolved-dependencies.txt` and runs `pip check`, but a resolved environment is not a reproducibility
+guarantee. Optional embedding dependencies are large and are deliberately not installed by default.
 
 ## Security and authority
 
@@ -41,9 +46,10 @@ The validation hook checks a native subagent event, model-family evidence, regis
 state, reviewed artifact hashes and a structured report. It does not prove every criterion was actually
 exercised or that the same OS user could not forge inputs. High effort is configured rather than attested.
 
-Approval recording points to a real persisted user turn and a specific action/subject. Recognizing natural
-acceptance is intentionally conservative. This does not provide a cryptographic binding between arbitrary
-chat language and every field of a business contract. Conditional/ambiguous assent must not be broadened.
+Project-local approvals point to a real persisted user turn and a specific action/subject. Company-authority
+writes add an exact redacted subject fingerprint and dedicated `company_<action>` approval type. Changing the
+approved company content changes that fingerprint and fails closed. This is still application-level provenance,
+not a cryptographic signature or independent identity system. Conditional/ambiguous assent must not be broadened.
 
 Redaction covers common credential patterns, not all possible secrets. Never place real credentials in
 chat, source documents, transcripts, test fixtures or Git. PostgreSQL administrators and local users with
@@ -79,9 +85,9 @@ Only persisted material state survives. Unsaved reasoning, a user instruction lo
 write, or files never included in a review cannot be reconstructed reliably. Session-end hooks are best
 effort; do not rely on their short native timeout to save a whole conversation.
 
-SQL locks, checksums, uniqueness and leases have scripted boundary tests, but real lock contention,
-serialization behavior and interrupted transactions still require PostgreSQL tests. No database-wide
-backup/restore operation is automated by this preview.
+Migration/application semantics and the normal integration journeys now execute against PostgreSQL 16 in CI.
+Real concurrent lock contention, serialization behavior under load and interrupted transactions still require
+separate stress/fault testing. No database-wide backup/restore operation is automated by this preview.
 
 Source paths often reference the original files; ingestion is not an archival backup. Moved/deleted raw
 sources can make evidence unavailable. Back up source/artifact storage with the DB. Hashes detect changes;
