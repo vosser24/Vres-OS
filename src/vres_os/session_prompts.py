@@ -7,6 +7,7 @@ from .db import connect
 from .redaction import redact
 
 _PENDING_KEY = "pending_user_instruction"
+_ACTIVE = {"active", "waiting_user", "blocked"}
 
 
 def is_system_prompt_event(prompt: str) -> bool:
@@ -15,6 +16,63 @@ def is_system_prompt_event(prompt: str) -> bool:
         return False
     stripped = prompt.lstrip()
     return stripped.startswith("<task-notification>") or stripped.startswith("<task-notification ")
+
+
+def bind_session_to_project_focus(project_id: int, provider_session_id: str | None) -> str | None:
+    """Bind an unbound Claude session to the project's explicit unfinished focus, if any.
+
+    This is intentionally conservative: an already-bound session is never rebound here, and a
+    stale/missing/completed focus is ignored so callers can surface ambiguity rather than guess.
+    """
+    if not provider_session_id:
+        return None
+    with connect() as conn, conn.transaction():
+        session = conn.execute(
+            """
+            SELECT id,task_id
+              FROM vres.sessions
+             WHERE provider='claude' AND provider_session_id=%s AND project_id=%s AND ended_at IS NULL
+             ORDER BY started_at DESC LIMIT 1
+             FOR UPDATE
+            """,
+            (provider_session_id, project_id),
+        ).fetchone()
+        if not session:
+            return None
+        if session.get("task_id"):
+            row = conn.execute(
+                "SELECT task_key,status FROM vres.tasks WHERE id=%s AND project_id=%s",
+                (session["task_id"], project_id),
+            ).fetchone()
+            return str(row["task_key"]) if row and row["status"] in _ACTIVE else None
+
+        focus = conn.execute(
+            """
+            SELECT t.id,t.task_key,t.status
+              FROM vres.project_focus pf
+              JOIN vres.tasks t ON t.id=pf.task_id
+             WHERE pf.project_id=%s AND t.project_id=%s
+            """,
+            (project_id, project_id),
+        ).fetchone()
+        if not focus or focus["status"] not in _ACTIVE:
+            return None
+
+        conn.execute(
+            "UPDATE vres.sessions SET task_id=%s WHERE id=%s",
+            (focus["id"], session["id"]),
+        )
+        conn.execute(
+            "INSERT INTO vres.task_events(task_id,event_type,actor,payload,session_id) "
+            "VALUES (%s,'SESSION_BOUND','vres-lifecycle',%s::jsonb,%s)",
+            (
+                focus["id"],
+                json.dumps({"source": "project_focus", "previous_task_id": None}),
+                provider_session_id,
+            ),
+        )
+        conn.execute("UPDATE vres.tasks SET updated_at=now() WHERE id=%s", (focus["id"],))
+        return str(focus["task_key"])
 
 
 def stage_user_instruction(project_id: int, provider_session_id: str | None, prompt: str) -> bool:
@@ -78,7 +136,7 @@ def commit_staged_user_instruction(
                 not target
                 or int(target["id"]) != int(task_id)
                 or int(target["project_id"]) != int(project_id)
-                or target["status"] not in {"active", "waiting_user", "blocked"}
+                or target["status"] not in _ACTIVE
             ):
                 raise ValueError("Staged user instruction target does not match the bound unfinished task")
         text = pending["text"]

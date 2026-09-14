@@ -32,6 +32,7 @@ def pg_project(monkeypatch, tmp_path):
     finally:
         # Delete only records created inside this unique test project. Never DROP schema/database.
         with connect() as conn, conn.transaction():
+            conn.execute("DELETE FROM vres.validation_ingestion_attempts WHERE project_id=%s", (pid,))
             conn.execute("DELETE FROM vres.knowledge_items WHERE project_id=%s", (pid,))
             conn.execute("DELETE FROM vres.procedures WHERE project_id=%s", (pid,))
             conn.execute("DELETE FROM vres.approval_events WHERE project_id=%s", (pid,))

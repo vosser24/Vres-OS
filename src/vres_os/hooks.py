@@ -13,6 +13,7 @@ from .project import discover_project
 from .redaction import redact_text
 from .repository import Repository
 from .session_prompts import (
+    bind_session_to_project_focus,
     commit_staged_user_instruction,
     is_system_prompt_event,
     stage_user_instruction,
@@ -82,6 +83,7 @@ def session_start() -> None:
             sid = _session_id(payload)
             if sid:
                 repo.open_session(project_id, sid)
+                bind_session_to_project_focus(project_id, sid)
             state = repo.resume_context(project_id, provider_session_id=sid)
             if state:
                 context = _resume_message(state, label="VRES CONTINUITY STATE")
@@ -124,6 +126,7 @@ def user_prompt() -> None:
         sid = _session_id(payload)
         if sid:
             repo.open_session(project_id, sid)
+            bind_session_to_project_focus(project_id, sid)
             # Do not attribute the prompt to the currently focused task yet. The model may
             # create/switch tasks during this turn; Stop commits it to the final binding.
             stage_user_instruction(project_id, sid, prompt)
@@ -255,14 +258,36 @@ def stop() -> None:
 
 def validator_stop() -> None:
     payload = _input()
+    pid: int | None = None
     try:
         from .validation import ValidationService
+        from .validation_audit import record_validation_ingestion_attempt
+
         repo = Repository()
         pid = _project_id(repo, payload)
         root = discover_project(payload.get("cwd") or ".").root
-        ValidationService().record_from_hook(payload, pid, root)
+        result = ValidationService().record_from_hook(payload, pid, root)
+        record_validation_ingestion_attempt(
+            payload,
+            pid,
+            accepted=True,
+            reason=str(result.get("outcome") or result.get("reason") or "accepted"),
+            request_key=result.get("request_key"),
+        )
     except Exception as exc:
         # Never convert a broken reviewer hook into a passing task.
+        if pid is not None:
+            try:
+                from .validation_audit import record_validation_ingestion_attempt
+
+                record_validation_ingestion_attempt(
+                    payload,
+                    pid,
+                    accepted=False,
+                    reason=str(exc),
+                )
+            except Exception as audit_exc:
+                _log_hook_error("SubagentStopAudit", audit_exc)
         _log_hook_error("SubagentStop", exc)
         detail = redact_text(str(exc))[:800]
         sys.stderr.write(
