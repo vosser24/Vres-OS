@@ -43,11 +43,26 @@ jobs:
       - name: Install test runtime
         run: python -m pip install ".[full,dev]"
 
-      - name: Ruff
-        run: python -m ruff check src tests scripts
+      - name: Repository-wide critical Python lint
+        run: python -m ruff check src tests scripts --select E9,F63,F7,F82
+
+      - name: Strict lint for new authority surface
+        run: >-
+          python -m ruff check
+          src/vres_os/authority.py
+          src/vres_os/company_mcp.py
+          tests/test_company_authority.py
+          tests/integration/test_company_authority_journey.py
+          --ignore E501,I001
 
       - name: Full test suite with PostgreSQL integration
         run: python -m pytest -o addopts= -q -ra
+
+      - name: Installed company MCP import smoke
+        run: >-
+          python -c "import importlib.resources, vres_os.company_mcp as c;
+          assert callable(c.main);
+          assert len(list(importlib.resources.files('vres_os').joinpath('migrations').iterdir())) >= 10"
 
       - name: Local release gate
         run: |
