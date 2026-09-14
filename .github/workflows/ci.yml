@@ -2,7 +2,7 @@ name: Vres-OS CI
 
 on:
   push:
-    branches: [main, "work/**"]
+    branches: [main]
   pull_request:
 
 permissions:
@@ -39,6 +39,9 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+
+      - name: Provision exact offline build backend
+        run: python -m pip install "setuptools==82.0.1" wheel
 
       - name: Install test runtime
         run: python -m pip install ".[full,dev]"
