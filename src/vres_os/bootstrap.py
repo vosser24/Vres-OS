@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import getpass
 import importlib.util
+import json
 import os
 import secrets
 import shutil
 import subprocess
 import sys
 import time
+import uuid
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 
 from .db import _driver
 
@@ -40,6 +43,60 @@ def prerequisite_status() -> dict[str, bool]:
         "codex": command_exists("codex"),
         "psql": command_exists("psql"),
     }
+
+
+def _setup_result_path():
+    from .paths import logs_dir
+
+    return logs_dir() / "setup-last.json"
+
+
+def _write_setup_result(
+    status: str,
+    *,
+    error: Exception | None = None,
+    cleanup: str | None = None,
+) -> None:
+    """Persist a small redacted setup result; never persist credentials or a traceback."""
+    if status not in {"in_progress", "success", "failed"}:
+        raise ValueError("Unsupported setup result status")
+    from .redaction import redact_text
+
+    payload: dict[str, object] = {
+        "status": status,
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if error is not None:
+        payload["error_type"] = type(error).__name__
+        payload["message"] = redact_text(str(error))[:4000]
+    if cleanup is not None:
+        payload["cleanup"] = cleanup
+    path = _setup_result_path()
+    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def last_setup_result() -> dict | None:
+    """Return only the bounded, non-secret setup status fields intended for UI/MCP."""
+    path = _setup_result_path()
+    if not path.exists() or path.stat().st_size > 64 * 1024:
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(raw, dict) or raw.get("status") not in {"in_progress", "success", "failed"}:
+        return None
+    result = {"status": raw["status"]}
+    for key in ("recorded_at", "error_type", "message", "cleanup"):
+        value = raw.get(key)
+        if isinstance(value, str):
+            result[key] = value[:4000]
+    return result
 
 
 def _ask(prompt: str, default: str) -> str:
@@ -99,12 +156,27 @@ def _provision_local_database(
     runtime_password = secrets.token_urlsafe(32)
     with _driver().connect(admin_dsn, autocommit=True) as conn:
         # Preflight BOTH names before creating anything. Existing accounts may belong to other software.
-        role = conn.execute("SELECT 1 FROM pg_roles WHERE rolname=%s", (runtime_user,)).fetchone()
-        database_exists = conn.execute("SELECT 1 FROM pg_database WHERE datname=%s", (database,)).fetchone()
+        role = conn.execute(
+            "SELECT rolsuper,rolcanlogin FROM pg_roles WHERE rolname=%s", (runtime_user,)
+        ).fetchone()
+        database_exists = conn.execute(
+            "SELECT pg_get_userbyid(datdba) AS owner FROM pg_database WHERE datname=%s", (database,)
+        ).fetchone()
         if role or database_exists:
+            conflicts = []
+            if database_exists:
+                conflicts.append(
+                    f"database {database!r} exists (owner={database_exists['owner']})"
+                )
+            if role:
+                conflicts.append(
+                    f"role {runtime_user!r} exists (superuser={bool(role['rolsuper'])}, "
+                    f"login={bool(role['rolcanlogin'])})"
+                )
             raise RuntimeError(
-                "Database or role already exists. Choose existing-account setup with its current password, "
-                "or choose unused names. Vres will not reset passwords, grant privileges or change ownership."
+                "Cannot auto-provision because " + "; ".join(conflicts) + ". "
+                "Choose unused names, or use an existing account only if you know its current credentials. "
+                "Vres will not reset passwords, grant privileges, change ownership, or delete pre-existing objects."
             )
         conn.execute(sql.SQL("CREATE ROLE {} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD {}")
                      .format(sql.Identifier(runtime_user), sql.Literal(runtime_password)))
@@ -147,6 +219,7 @@ def _interactive_setup() -> None:
     previous_secret = secret_store.get(cfg.database.password_key)
     secret_changed = False
     provisioned: _ProvisionedLocalDatabase | None = None
+    _write_setup_result("in_progress")
     print("\nVres-OS secure first-run setup")
     print("================================")
     print("Passwords entered in this window are not sent through Claude, Codex, or MCP.")
@@ -207,6 +280,7 @@ def _interactive_setup() -> None:
             raise RuntimeError(f"Self-test failed: {selftest}")
         cfg.configured = True
         store.save(cfg)
+        _write_setup_result("success")
         print("Core self-test passed. Vres-OS setup is active.")
     except Exception as exc:
         cleanup_failed = False
@@ -222,6 +296,14 @@ def _interactive_setup() -> None:
                 _cleanup_provisioned_local_database(provisioned)
             except Exception:
                 cleanup_failed = True
+        cleanup = (
+            "created_resources_cleanup_failed"
+            if provisioned is not None and cleanup_failed
+            else "created_resources_removed"
+            if provisioned is not None
+            else "no_resources_created"
+        )
+        _write_setup_result("failed", error=exc, cleanup=cleanup)
         from .redaction import redact_text
         print(f"\nVres setup failed: {redact_text(str(exc))}")
         print("Previous configuration restored.")
@@ -235,44 +317,79 @@ def _interactive_setup() -> None:
     print("Close this window and return to Claude Code.")
 
 
+def _pause_setup_console() -> None:
+    if os.name == "nt" and os.environ.get("VRES_SETUP_CONSOLE") == "1":
+        try:
+            input("\nPress Enter to close this secure setup window...")
+        except (EOFError, KeyboardInterrupt):
+            pass
+
 
 def interactive_setup() -> None:
     from .locking import local_lock
     with local_lock("secure-setup") as acquired:
         if not acquired:
             print("Another secure Vres setup is already open. Use that window.")
+            _pause_setup_console()
             return
-        _interactive_setup()
+        try:
+            _interactive_setup()
+        finally:
+            _pause_setup_console()
 
 
 def launch_secure_setup_and_wait(timeout_seconds: int = 2) -> dict:
     cfg = ConfigStore().load()
     if cfg.configured:
-        return {"ready": True, "launched": False}
+        return {"ready": True, "launched": False, "last_setup": last_setup_result()}
     if os.name != "nt":
-        return {"ready": False, "launched": False, "action": "Run `vres setup` in a secure local terminal."}
+        return {
+            "ready": False,
+            "launched": False,
+            "action": "Run `vres setup` in a secure local terminal.",
+            "last_setup": last_setup_result(),
+        }
     from .locking import lock_is_held
     if lock_is_held("secure-setup"):
-        return {"ready": False, "launched": False, "in_progress": True}
+        return {
+            "ready": False,
+            "launched": False,
+            "in_progress": True,
+            "last_setup": last_setup_result(),
+        }
     flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
     from .processes import worker_command
     # A setup console must not inherit the MCP stdio transport handles. With a new
     # console and no standard-handle redirection Windows supplies interactive console
     # input/output to the child while close_fds isolates unrelated parent handles.
+    env = os.environ.copy()
+    env["VRES_SETUP_CONSOLE"] = "1"
     proc = subprocess.Popen(
         worker_command("vres_os.cli", "setup"),
         creationflags=flags,
         close_fds=True,
+        env=env,
     )
     started = time.monotonic()
     while time.monotonic() - started < timeout_seconds:
         time.sleep(min(0.1, timeout_seconds))
         if ConfigStore().load().configured:
-            return {"ready": True, "launched": True}
+            return {"ready": True, "launched": True, "last_setup": last_setup_result()}
         code = proc.poll()
         if code is not None:
-            return {"ready": False, "launched": True, "exit_code": code, "action": "Inspect the secure setup window and run `vres doctor`."}
-    return {"ready": False, "launched": True, "in_progress": True}
+            return {
+                "ready": False,
+                "launched": True,
+                "exit_code": code,
+                "last_setup": last_setup_result(),
+                "action": "Inspect the secure setup result and run `vres doctor`.",
+            }
+    return {
+        "ready": False,
+        "launched": True,
+        "in_progress": True,
+        "last_setup": last_setup_result(),
+    }
 
 
 def start_for_project(project_root: str = ".") -> dict:
