@@ -15,6 +15,7 @@ def test_mcp_does_not_expose_runtime_replay_sink_or_auto_promotion():
     combined = TEXT + "\n" + COMPANY_TEXT
     assert "def record_runtime_run(" not in combined
     assert "def promote_attested(" not in combined
+    assert "def promote_company_attested(" not in combined
     assert "def replay_attest(" not in combined
     assert "def replay_promote(" not in combined
 
@@ -26,6 +27,17 @@ def test_mcp_exposes_authoritative_approval_and_lifecycle_tools():
         "task_open_list",
     ]:
         assert f"def {function}(" in TEXT
+
+
+def test_company_mcp_exposes_only_exact_approved_optimization_workflow():
+    for function in [
+        "company_procedure_candidate_register",
+        "company_procedure_replay_promote",
+    ]:
+        assert f"def {function}(" in COMPANY_TEXT
+    assert '"procedure_optimize"' in COMPANY_TEXT
+    assert "preview_company_candidate" in COMPANY_TEXT
+    assert "preview_company_promotion" in COMPANY_TEXT
 
 
 def test_onboarding_is_project_scoped_by_default():
