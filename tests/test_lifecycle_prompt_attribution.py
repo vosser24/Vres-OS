@@ -19,6 +19,7 @@ def test_user_prompt_is_staged_before_task_attribution(monkeypatch, capsys):
 
     staged = []
     focused = []
+    observed = []
 
     class Repo:
         def open_session(self, project_id, sid):
@@ -39,6 +40,11 @@ def test_user_prompt_is_staged_before_task_attribution(monkeypatch, capsys):
     monkeypatch.setattr(hooks, "Repository", Repo)
     monkeypatch.setattr(
         hooks,
+        "_observe_session",
+        lambda project_id, sid, reconcile=False: observed.append((project_id, sid, reconcile)),
+    )
+    monkeypatch.setattr(
+        hooks,
         "bind_session_to_project_focus",
         lambda project_id, sid: focused.append((project_id, sid)),
     )
@@ -50,6 +56,7 @@ def test_user_prompt_is_staged_before_task_attribution(monkeypatch, capsys):
 
     hooks.user_prompt()
 
+    assert observed == [(7, "S-NEW", True)]
     assert focused == [(7, "S-NEW")]
     assert staged == [(7, "S-NEW", "Start LV-09")]
     assert "VRES_CURRENT_SESSION_ID=S-NEW" in capsys.readouterr().out
@@ -60,6 +67,7 @@ def test_stop_commits_prompt_to_final_bound_task(monkeypatch):
     monkeypatch.setattr(hooks, "ConfigStore", lambda: SimpleNamespace(load=lambda: VresConfig(configured=True)))
     monkeypatch.setattr(hooks, "_project_id", lambda _repo, _payload: 9)
     monkeypatch.setattr(hooks, "last_assistant_snapshot", lambda _payload: None)
+    monkeypatch.setattr(hooks, "_observe_session", lambda *_args, **_kwargs: None)
 
     committed = []
     events = []
