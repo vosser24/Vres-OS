@@ -7,6 +7,7 @@ from typing import Any
 
 from .metrics import validate_metrics
 from .optimization import pareto_gate
+from .procedures import fingerprint
 from .redaction import redact
 from .validation import ValidationService
 
@@ -28,13 +29,34 @@ def _metrics(row: dict[str, Any]) -> dict[str, Any]:
     return metrics
 
 
+def _contract_fingerprint(row: dict[str, Any]) -> str:
+    stored = row.get("contract_fingerprint")
+    if stored:
+        return str(stored)
+    return fingerprint(
+        {
+            "name": row["name"],
+            "description": row["description"],
+            "family": row["task_family"],
+            "input": row["input_contract"],
+            "method": row["method"],
+            "invariants": row["invariants"],
+            "validation": row["validation_contract"],
+            "output": row["output_contract"],
+            "implementation": row["implementation_ref"],
+        }
+    )
+
+
 def _runtime_run(conn, run_id: int) -> dict[str, Any]:
     row = conn.execute(
         """
         SELECT r.id,r.task_id,r.quality_score,r.runtime_ms,r.input_tokens,r.output_tokens,
                r.measurement_source,r.input_digest,r.output_digest,r.execution_evidence,
                v.version_no,v.status AS version_status,v.contract_fingerprint,
-               p.id AS procedure_id,p.procedure_key,p.project_id,p.preferred_version
+               v.input_contract,v.method,v.invariants,v.validation_contract,v.output_contract,
+               v.implementation_ref,p.id AS procedure_id,p.procedure_key,p.project_id,
+               p.preferred_version,p.name,p.description,p.task_family
           FROM vres.procedure_runs r
           JOIN vres.procedure_versions v ON v.id=r.procedure_version_id
           JOIN vres.procedures p ON p.id=v.procedure_id
@@ -49,9 +71,8 @@ def _runtime_run(conn, run_id: int) -> dict[str, Any]:
         raise ValueError("Optimization replay requires runtime-measured runs")
     if not data["input_digest"] or not data["output_digest"]:
         raise ValueError("Runtime replay run is missing input/output digests")
-    if not data["contract_fingerprint"]:
-        raise ValueError("Runtime replay run is missing a frozen contract fingerprint")
     _metrics(data)
+    data["effective_contract_fingerprint"] = _contract_fingerprint(data)
     return data
 
 
@@ -64,6 +85,21 @@ def _assert_pair(baseline: dict[str, Any], candidate: dict[str, Any]) -> None:
         raise ValueError("Paired replay runs must belong to the same replay task")
     if baseline["input_digest"] != candidate["input_digest"]:
         raise ValueError("Paired replay runs must use the exact same input digest")
+
+
+def _context(baseline: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "procedure_key": baseline["procedure_key"],
+        "baseline_version": int(baseline["version_no"]),
+        "candidate_version": int(candidate["version_no"]),
+        "baseline_run_id": int(baseline["id"]),
+        "candidate_run_id": int(candidate["id"]),
+        "input_digest": baseline["input_digest"],
+        "baseline_output_digest": baseline["output_digest"],
+        "candidate_output_digest": candidate["output_digest"],
+        "baseline_contract_fingerprint": baseline["effective_contract_fingerprint"],
+        "candidate_contract_fingerprint": candidate["effective_contract_fingerprint"],
+    }
 
 
 class ReplayService:
@@ -90,7 +126,7 @@ class ReplayService:
         validate_metrics(metrics)
         with _connect() as conn, conn.transaction():
             proc = conn.execute(
-                "SELECT id FROM vres.procedures WHERE procedure_key=%s",
+                "SELECT id,project_id FROM vres.procedures WHERE procedure_key=%s",
                 (procedure_key,),
             ).fetchone()
             if not proc:
@@ -102,11 +138,13 @@ class ReplayService:
             if not version:
                 raise KeyError(f"Unknown version {procedure_key} v{version_no}")
             task = conn.execute(
-                "SELECT id FROM vres.tasks WHERE task_key=%s",
+                "SELECT id,project_id FROM vres.tasks WHERE task_key=%s",
                 (task_key,),
             ).fetchone()
             if not task:
                 raise KeyError(task_key)
+            if proc["project_id"] is not None and task["project_id"] != proc["project_id"]:
+                raise ValueError("Runtime replay task belongs to a different project")
             row = conn.execute(
                 """
                 INSERT INTO vres.procedure_runs(
@@ -165,18 +203,7 @@ class ReplayService:
             if candidate["version_status"] != "candidate":
                 raise ValueError("Replay candidate version is not awaiting evaluation")
             replay_key = f"REPLAY-{uuid.uuid4().hex[:16]}"
-            context = {
-                "procedure_key": baseline["procedure_key"],
-                "baseline_version": int(baseline["version_no"]),
-                "candidate_version": int(candidate["version_no"]),
-                "baseline_run_id": int(baseline["id"]),
-                "candidate_run_id": int(candidate["id"]),
-                "input_digest": baseline["input_digest"],
-                "baseline_output_digest": baseline["output_digest"],
-                "candidate_output_digest": candidate["output_digest"],
-                "baseline_contract_fingerprint": baseline["contract_fingerprint"],
-                "candidate_contract_fingerprint": candidate["contract_fingerprint"],
-            }
+            context = _context(baseline, candidate)
         request = ValidationService().prepare(
             task_key,
             project_id,
@@ -220,19 +247,7 @@ class ReplayService:
             baseline = _runtime_run(conn, int(context["baseline_run_id"]))
             candidate = _runtime_run(conn, int(context["candidate_run_id"]))
             _assert_pair(baseline, candidate)
-            expected = {
-                "procedure_key": baseline["procedure_key"],
-                "baseline_version": int(baseline["version_no"]),
-                "candidate_version": int(candidate["version_no"]),
-                "baseline_run_id": int(baseline["id"]),
-                "candidate_run_id": int(candidate["id"]),
-                "input_digest": baseline["input_digest"],
-                "baseline_output_digest": baseline["output_digest"],
-                "candidate_output_digest": candidate["output_digest"],
-                "baseline_contract_fingerprint": baseline["contract_fingerprint"],
-                "candidate_contract_fingerprint": candidate["contract_fingerprint"],
-            }
-            if context != expected:
+            if context != _context(baseline, candidate):
                 raise ValueError("Replay evidence changed after validation was prepared")
             if int(baseline["preferred_version"]) != int(baseline["version_no"]):
                 raise ValueError("Preferred baseline changed after replay validation")
@@ -263,8 +278,8 @@ class ReplayService:
                     candidate["id"],
                     request["id"],
                     baseline["input_digest"],
-                    baseline["contract_fingerprint"],
-                    candidate["contract_fingerprint"],
+                    baseline["effective_contract_fingerprint"],
+                    candidate["effective_contract_fingerprint"],
                 ),
             ).fetchone()
             conn.execute(
@@ -279,81 +294,77 @@ class ReplayService:
 
     def assess(self, replay_key: str) -> dict[str, Any]:
         with _connect() as conn:
-            row = conn.execute(
-                """
-                SELECT a.*,p.preferred_version,
-                       bv.status AS baseline_status,bv.contract_fingerprint AS live_baseline_fingerprint,
-                       cv.status AS candidate_status,cv.contract_fingerprint AS live_candidate_fingerprint,
-                       br.quality_score AS baseline_quality,br.runtime_ms AS baseline_runtime,
-                       br.input_tokens AS baseline_input_tokens,br.output_tokens AS baseline_output_tokens,
-                       cr.quality_score AS candidate_quality,cr.runtime_ms AS candidate_runtime,
-                       cr.input_tokens AS candidate_input_tokens,cr.output_tokens AS candidate_output_tokens
-                  FROM vres.procedure_replay_attestations a
-                  JOIN vres.procedures p ON p.id=a.procedure_id
-                  JOIN vres.procedure_versions bv
-                    ON bv.procedure_id=p.id AND bv.version_no=a.baseline_version
-                  JOIN vres.procedure_versions cv
-                    ON cv.procedure_id=p.id AND cv.version_no=a.candidate_version
-                  JOIN vres.procedure_runs br ON br.id=a.baseline_run_id
-                  JOIN vres.procedure_runs cr ON cr.id=a.candidate_run_id
-                 WHERE a.replay_key=%s
-                """,
-                (replay_key,),
-            ).fetchone()
-        if not row:
-            raise KeyError(replay_key)
-        data = dict(row)
-        stale = (
-            int(data["preferred_version"]) != int(data["baseline_version"])
-            or data["candidate_status"] != "candidate"
-            or data["baseline_contract_fingerprint"] != data["live_baseline_fingerprint"]
-            or data["candidate_contract_fingerprint"] != data["live_candidate_fingerprint"]
-        )
-        if stale:
-            return {"auto_promote": False, "reason": "replay attestation is stale"}
-        gate = pareto_gate(
-            baseline_quality=float(data["baseline_quality"]),
-            candidate_quality=float(data["candidate_quality"]),
-            baseline_runtime_ms=int(data["baseline_runtime"]),
-            candidate_runtime_ms=int(data["candidate_runtime"]),
-            baseline_tokens=int(data["baseline_input_tokens"])
-            + int(data["baseline_output_tokens"]),
-            candidate_tokens=int(data["candidate_input_tokens"])
-            + int(data["candidate_output_tokens"]),
-            protected_regression=bool(data["protected_regression"])
-            or not bool(data["output_equivalent"]),
-            validation_passed=True,
-        )
-        return {"auto_promote": gate.auto_promote, "reason": gate.reason, "replay_key": replay_key}
-
-    def promote_attested(self, replay_key: str) -> dict[str, Any]:
-        assessment = self.assess(replay_key)
-        if not assessment["auto_promote"]:
-            raise ValueError(f"Replay is not eligible for automatic promotion: {assessment['reason']}")
-        with _connect() as conn, conn.transaction():
             attestation = conn.execute(
-                "SELECT * FROM vres.procedure_replay_attestations WHERE replay_key=%s FOR UPDATE",
+                "SELECT * FROM vres.procedure_replay_attestations WHERE replay_key=%s",
                 (replay_key,),
             ).fetchone()
             if not attestation:
                 raise KeyError(replay_key)
+            baseline = _runtime_run(conn, int(attestation["baseline_run_id"]))
+            candidate = _runtime_run(conn, int(attestation["candidate_run_id"]))
+        stale = (
+            int(baseline["preferred_version"]) != int(attestation["baseline_version"])
+            or candidate["version_status"] != "candidate"
+            or baseline["effective_contract_fingerprint"]
+            != attestation["baseline_contract_fingerprint"]
+            or candidate["effective_contract_fingerprint"]
+            != attestation["candidate_contract_fingerprint"]
+        )
+        if stale:
+            return {"auto_promote": False, "reason": "replay attestation is stale"}
+        gate = pareto_gate(
+            baseline_quality=float(baseline["quality_score"]),
+            candidate_quality=float(candidate["quality_score"]),
+            baseline_runtime_ms=int(baseline["runtime_ms"]),
+            candidate_runtime_ms=int(candidate["runtime_ms"]),
+            baseline_tokens=int(baseline["input_tokens"]) + int(baseline["output_tokens"]),
+            candidate_tokens=int(candidate["input_tokens"])
+            + int(candidate["output_tokens"]),
+            protected_regression=bool(attestation["protected_regression"])
+            or not bool(attestation["output_equivalent"]),
+            validation_passed=True,
+        )
+        return {
+            "auto_promote": gate.auto_promote,
+            "reason": gate.reason,
+            "replay_key": replay_key,
+        }
+
+    def promote_attested(self, replay_key: str) -> dict[str, Any]:
+        assessment = self.assess(replay_key)
+        if not assessment["auto_promote"]:
+            raise ValueError(
+                f"Replay is not eligible for automatic promotion: {assessment['reason']}"
+            )
+        with _connect() as conn, conn.transaction():
+            attestation = conn.execute(
+                "SELECT * FROM vres.procedure_replay_attestations "
+                "WHERE replay_key=%s FOR UPDATE",
+                (replay_key,),
+            ).fetchone()
+            if not attestation:
+                raise KeyError(replay_key)
+            baseline = _runtime_run(conn, int(attestation["baseline_run_id"]))
+            candidate_run = _runtime_run(conn, int(attestation["candidate_run_id"]))
             proc = conn.execute(
                 "SELECT preferred_version FROM vres.procedures WHERE id=%s FOR UPDATE",
                 (attestation["procedure_id"],),
             ).fetchone()
             if int(proc["preferred_version"]) != int(attestation["baseline_version"]):
                 raise ValueError("Preferred baseline changed before promotion")
+            if (
+                baseline["effective_contract_fingerprint"]
+                != attestation["baseline_contract_fingerprint"]
+                or candidate_run["effective_contract_fingerprint"]
+                != attestation["candidate_contract_fingerprint"]
+            ):
+                raise ValueError("Procedure contract changed before promotion")
             candidate = conn.execute(
-                "SELECT id,status,contract_fingerprint FROM vres.procedure_versions "
+                "SELECT id,status FROM vres.procedure_versions "
                 "WHERE procedure_id=%s AND version_no=%s FOR UPDATE",
                 (attestation["procedure_id"], attestation["candidate_version"]),
             ).fetchone()
-            if (
-                not candidate
-                or candidate["status"] != "candidate"
-                or candidate["contract_fingerprint"]
-                != attestation["candidate_contract_fingerprint"]
-            ):
+            if not candidate or candidate["status"] != "candidate":
                 raise ValueError("Candidate changed before promotion")
             conn.execute(
                 "UPDATE vres.procedure_versions SET status='superseded' "
