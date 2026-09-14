@@ -19,10 +19,11 @@ This gate executes local tests and Python compilation; parses JSON/frontmatter; 
 manifests; builds an actual wheel without dependency resolution or build isolation; compares packaged
 Python/SQL bytes to source; smoke-imports selected installed modules in a separate directory; checks local
 documentation links; and runs `git diff --check` when a Git checkout is available. The installed-wheel smoke
-requires the company MCP entry point, replay service, bounded executor, deterministic recipe module,
-procedure worker, model-policy module and all packaged migrations currently present through
-`012_model_run_provenance.sql`. The structure gate also requires the controlled executor MCP workflow while
-separately testing that raw runtime measurement and promotion sinks are not exposed as MCP tools.
+requires the company MCP entry point, replay service, bounded executor, deterministic recipe module, procedure
+worker, model-policy module and all packaged migrations currently present through
+`013_company_optimization_authority.sql`. The structure gate also requires the controlled project executor
+workflow plus the exact-approved company candidate/promotion tools while separately testing that raw runtime
+measurement and raw promotion sinks are not exposed as MCP tools.
 
 The local gate deliberately removes ambient Vres database credentials, so PostgreSQL integration tests are
 reported as skipped there. It does NOT execute PowerShell, PostgreSQL or a live model. Structural migration
@@ -49,7 +50,7 @@ For the optimization-evidence tranche, the green CI boundary additionally includ
 frozen validation contexts, replay attestations, PostgreSQL `numeric`/Python `Decimal` metric handling, and a
 replay journey that proves a candidate cannot attest before protected validation and can be promoted only after
 a current Fable-observed PASS, unchanged evidence, exact contract fingerprints and the Pareto gate. The trusted
-runtime-run and promotion sinks remain intentionally absent from both MCP surfaces.
+runtime-run and raw promotion sinks remain intentionally absent from both MCP surfaces.
 
 For the bounded-executor tranche, CI executes the registered `vres:builtin:json-recipe:v1` worker rather than
 inserting runtime measurements directly. The integration journey accepts a project-scoped baseline recipe,
@@ -68,17 +69,27 @@ explicitly writes `reported` so the ordinary MCP telemetry path cannot become ho
 default. This tranche intentionally does **not** provide a host model-experiment writer, does not compare live
 models, and does not mutate `model_policies`.
 
-The validated model-provenance head reported **256 passed** in the full PostgreSQL 16 workflow. Its local
-credential-stripped release gate reported **251 passed and 5 intentionally skipped PostgreSQL integration
-modules**. Installed-wheel smoke required migration 012 and `vres_os.model_policy`, and the release-gate evidence
-artifact was uploaded. These counts apply only to that recorded head; future release evidence must use its own
-exact final SHA rather than copying them forward.
+For the company-optimization-authority tranche, migration `013_company_optimization_authority.sql` preserves
+separate candidate and promotion approval provenance. The PostgreSQL journey begins with an exact-approved
+company-wide bounded baseline, requires a fresh exact `company_procedure_optimize` approval to create the
+protected-contract-identical candidate, executes baseline/candidate through the registered bounded worker,
+freezes and validates the paired replay, and then requires another fresh exact approval before the attested
+candidate can become globally preferred. The promotion subject binds the expected preferred/candidate versions,
+replay attestation, run IDs, validation request, input/output digests and contract fingerprints. The candidate
+approval cannot authorize promotion, and a baseline approval cannot authorize either optimization phase.
 
-The bounded executor evidence is deliberately narrow. It proves the registered JSON recipe implementation on
-the recorded Linux/Python runner, not arbitrary Python or shell execution, not a universal procedure compiler,
-and not the target Windows installation. Its recipe language has no shell, filesystem, network, import or
-arbitrary-code operation. Company-wide automatic candidate registration and replay promotion also remain
-blocked pending dedicated company optimization authority.
+The retry-hardened company-optimization code head reported **268 passed** in the full PostgreSQL 16 workflow.
+Its credential-stripped local release gate reported **262 passed and 6 intentionally skipped PostgreSQL
+integration modules**. Both lint layers, installed-wheel smoke through migration 013, the offline release gate
+and evidence upload passed. The approved MCP promotion path was additionally hardened so a safe idempotent retry
+routes directly to the service transaction instead of failing first on a now-stale preview; repeated candidate
+previews also reuse the already allocated exact candidate version for the same experiment.
+
+The bounded executor and company optimization evidence remain deliberately narrow. They prove the registered
+JSON recipe implementation and exact-approved global authority workflow on the recorded Linux/Python runner,
+not arbitrary Python or shell execution, not a universal procedure compiler, not unattended company-wide
+replacement, and not the target Windows installation. Its recipe language has no shell, filesystem, network,
+import or arbitrary-code operation. Technical Pareto superiority alone never grants company promotion authority.
 
 The model-provenance evidence is narrower still: PostgreSQL accepts the provenance schema and ordinary telemetry
 is explicitly classified as reported. It is **not** evidence that live Claude/Codex model identity, runtime,
@@ -100,8 +111,9 @@ artifact on the target Windows live-test host before those target capabilities c
 5. Export source with `git archive`, and full history with `git bundle create ... --all`.
 6. Restore the bundle into a separate checkout, run `git fsck`, and run the tests there.
 7. Compare every source ZIP member byte-for-byte with the committed Git blob.
-8. Inspect the wheel, including every migration and the registered executor/worker/model-policy modules. A wheel
-   alone is not the Windows distribution: it excludes the top-level installer/plugin/docs by design.
+8. Inspect the wheel, including every migration through 013 and the registered executor/worker/model-policy
+   modules. A wheel alone is not the Windows distribution: it excludes the top-level installer/plugin/docs by
+   design.
 9. Produce a manifest with artifact SHA-256 hashes, commit/tree IDs, environment inventory and exact results.
 10. Include gate logs and a per-file evidence ledger. Preserve unavailable dependencies as NOT RUN.
 
@@ -117,7 +129,11 @@ artifacts belong beside the source export; record their hashes in a separate rel
   replay attestation → Pareto assessment → promotion state machine. This label alone does not imply an executor.
 - **Bounded registered executor passed:** the exact head additionally produced the tested paired runtime evidence
   through the code-owned deterministic JSON worker and completed the protected project-scoped promotion journey.
-  This label does not authorize arbitrary code or company-wide automatic promotion.
+  This label does not authorize arbitrary code.
+- **Exact-approved company optimization passed:** the exact head additionally proved candidate authorization,
+  bounded runtime replay, protected attestation, Pareto eligibility and a separately authorized company-wide
+  promotion with retained candidate/promotion provenance. This label does not mean company optimization is
+  unattended or automatically authorized.
 - **Model telemetry provenance passed:** the exact head proved migration 012 and the explicit reported-vs-host
   storage boundary. It does not mean host model experiments or automatic model-policy replacement passed.
 - **Controlled-live-test preview:** a packaged checkpoint with known held capabilities, ready to be evaluated
@@ -136,9 +152,9 @@ as if it were a fresh test result.
 ## Validator independence
 
 The repository CI and deterministic gates are execution evidence, not a substitute for an independent live
-model review. The replay/executor integrations exercise the protected-validator ingestion path using an observed
-Fable transcript fixture and exact frozen context; that proves the application checks, not that an independent
-live model externally reviewed this build. The model-provenance tranche does not execute or benchmark a live
-model at all. Product-side validator hooks are code under test, not a cryptographic identity proof. The strongest
-protected validation role must still be observed in LIVE-VERIFICATION.md before trusting its application-level
-completion decisions on the target host.
+model review. The replay/executor/company-optimization integrations exercise the protected-validator ingestion
+path using an observed Fable transcript fixture and exact frozen context; that proves the application checks,
+not that an independent live model externally reviewed this build. The model-provenance tranche does not execute
+or benchmark a live model at all. Product-side validator hooks are code under test, not a cryptographic identity
+proof. The strongest protected validation role must still be observed in LIVE-VERIFICATION.md before trusting
+its application-level completion decisions on the target host.
