@@ -18,6 +18,7 @@ def test_user_prompt_is_staged_before_task_attribution(monkeypatch, capsys):
     monkeypatch.setattr(hooks, "_project_id", lambda _repo, _payload: 7)
 
     staged = []
+    focused = []
 
     class Repo:
         def open_session(self, project_id, sid):
@@ -38,12 +39,18 @@ def test_user_prompt_is_staged_before_task_attribution(monkeypatch, capsys):
     monkeypatch.setattr(hooks, "Repository", Repo)
     monkeypatch.setattr(
         hooks,
+        "bind_session_to_project_focus",
+        lambda project_id, sid: focused.append((project_id, sid)),
+    )
+    monkeypatch.setattr(
+        hooks,
         "stage_user_instruction",
         lambda project_id, sid, prompt: staged.append((project_id, sid, prompt)),
     )
 
     hooks.user_prompt()
 
+    assert focused == [(7, "S-NEW")]
     assert staged == [(7, "S-NEW", "Start LV-09")]
     assert "VRES_CURRENT_SESSION_ID=S-NEW" in capsys.readouterr().out
 
