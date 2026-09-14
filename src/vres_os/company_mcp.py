@@ -9,6 +9,8 @@ from .authority import company_subject
 from .capabilities import CapabilityService, capability_register_subject
 from .knowledge import KnowledgeService
 from .mcp_server import _require_node, mcp
+from .metrics import validate_metrics
+from .procedures import ProcedureService, procedure_accept_subject
 from .redaction import redact, redact_text
 from .registry import RegistryService, registry_publish_subject
 from .sources import SourceService, source_publish_subject
@@ -52,6 +54,35 @@ def _knowledge_subject(
         "review_after": review_after.isoformat() if review_after else None,
         "metadata": {},
     }
+
+
+def _baseline_metrics(
+    *,
+    quality_score: float | None,
+    runtime_ms: int | None,
+    input_tokens: int | None,
+    output_tokens: int | None,
+    model_calls: int | None,
+) -> dict[str, Any] | None:
+    values = (quality_score, runtime_ms, input_tokens, output_tokens, model_calls)
+    if not any(value is not None for value in values):
+        return None
+    if not all(
+        value is not None for value in (quality_score, runtime_ms, input_tokens, output_tokens)
+    ):
+        raise ValueError(
+            "Baseline benchmark requires quality, runtime, input_tokens and output_tokens together"
+        )
+    metrics = {
+        "quality_score": quality_score,
+        "runtime_ms": runtime_ms,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "model_calls": model_calls,
+        "validation": {"accepted_by_user": True, "source": "user-accepted baseline"},
+    }
+    validate_metrics(metrics)
+    return metrics
 
 
 @mcp.tool()
@@ -229,6 +260,71 @@ def company_capability_register(
         approval_key=approval_key,
     )
     return {"capability_key": key, "company_wide": True}
+
+
+@mcp.tool()
+def company_procedure_accept(
+    procedure_key: str,
+    name: str,
+    description: str,
+    input_contract: dict[str, Any],
+    method: list[Any],
+    invariants: list[Any],
+    validation_contract: list[Any],
+    output_contract: dict[str, Any],
+    task_family: str | None = None,
+    implementation_ref: str | None = None,
+    quality_score: float | None = None,
+    runtime_ms: int | None = None,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    model_calls: int | None = None,
+    approval_key: str | None = None,
+) -> dict:
+    """Preview or publish an exact company-wide accepted procedure baseline."""
+    metrics = _baseline_metrics(
+        quality_score=quality_score,
+        runtime_ms=runtime_ms,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        model_calls=model_calls,
+    )
+    subject = procedure_accept_subject(
+        procedure_key=procedure_key,
+        name=name,
+        description=description,
+        task_family=task_family,
+        input_contract=input_contract,
+        method=method,
+        invariants=invariants,
+        validation_contract=validation_contract,
+        output_contract=output_contract,
+        implementation_ref=implementation_ref,
+        initial_metrics=metrics,
+    )
+    if not approval_key:
+        return _preview("procedure_accept", subject)
+    key, version = ProcedureService().accept_baseline(
+        procedure_key=procedure_key,
+        name=name,
+        description=description,
+        task_family=task_family,
+        project_id=None,
+        input_contract=input_contract,
+        method=method,
+        invariants=invariants,
+        validation_contract=validation_contract,
+        output_contract=output_contract,
+        approval_key=approval_key,
+        implementation_ref=implementation_ref,
+        initial_metrics=metrics,
+    )
+    return {
+        "procedure_key": key,
+        "preferred_version": version,
+        "baseline_metrics_recorded": bool(metrics),
+        "company_wide": True,
+    }
 
 
 def main() -> None:
