@@ -92,6 +92,7 @@ def structure():
     migrations = sorted((ROOT / 'src/vres_os/migrations').glob('*.sql'))
     numbers = [int(p.name[:3]) for p in migrations]
     assert numbers == list(range(1, len(migrations)+1)), numbers
+    assert len(migrations) >= 11
     for p in migrations:
         if p.name in baseline:
             assert digest(p.read_bytes()) == baseline[p.name], f'Recovered migration changed: {p.name}'
@@ -120,8 +121,10 @@ def structure():
         'company_knowledge_propose',
         'company_registry_register',
         'company_capability_register',
+        'company_procedure_accept',
     } <= set(company_names)
     assert len(company_names) == len(set(company_names))
+    assert (ROOT / 'src/vres_os/replay.py').is_file()
     return {'package_version': config['project']['version'], 'plugin_version': manifest['version'],
             'agents': sorted(agents), 'skills': sorted(skills), 'mcp_tools': names,
             'company_mcp_tools': company_names,
@@ -154,12 +157,13 @@ def package(output: Path, env: dict):
                 output, 'wheel-install', cwd=Path(d), env=env)
         smoke = """import sys, pathlib, importlib.resources
 sys.path.insert(0, sys.argv[1])
-import vres_os, vres_os.cli, vres_os.metrics, vres_os.optimization, vres_os.company_mcp
+import vres_os, vres_os.cli, vres_os.metrics, vres_os.optimization, vres_os.company_mcp, vres_os.replay
 assert pathlib.Path(vres_os.__file__).resolve().is_relative_to(pathlib.Path(sys.argv[1]).resolve())
 assert callable(vres_os.company_mcp.main)
-assert len(list(importlib.resources.files('vres_os').joinpath('migrations').iterdir())) >= 10
+assert hasattr(vres_os.replay, 'ReplayService')
+assert len(list(importlib.resources.files('vres_os').joinpath('migrations').iterdir())) >= 11
 print('installed runtime source:', vres_os.__file__)
-print('selected imports, company MCP and migration resources: passed')
+print('selected imports, authority/replay surfaces and migration resources: passed')
 """
         command([sys.executable, '-I', '-X', 'utf8', '-c', smoke, str(target)], output, 'wheel-import-smoke', cwd=Path(d), env=env)
     return {'filename': path.name, 'sha256': digest(path.read_bytes()), 'bytes': path.stat().st_size,
