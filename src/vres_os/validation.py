@@ -272,13 +272,22 @@ class ValidationService:
         request_key: str | None = None,
     ) -> dict:
         with _connect() as conn:
-            request = conn.execute(
-                "SELECT r.*,t.objective,t.project_id FROM vres.validation_requests r "
-                "JOIN vres.tasks t ON t.id=r.task_id "
-                "WHERE t.task_key=%s AND t.project_id=%s "
-                "AND (%s IS NULL OR r.request_key=%s) ORDER BY r.id DESC LIMIT 1",
-                (task_key, project_id, request_key, request_key),
-            ).fetchone()
+            if request_key is None:
+                request = conn.execute(
+                    "SELECT r.*,t.objective,t.project_id FROM vres.validation_requests r "
+                    "JOIN vres.tasks t ON t.id=r.task_id "
+                    "WHERE t.task_key=%s AND t.project_id=%s "
+                    "ORDER BY r.id DESC LIMIT 1",
+                    (task_key, project_id),
+                ).fetchone()
+            else:
+                request = conn.execute(
+                    "SELECT r.*,t.objective,t.project_id FROM vres.validation_requests r "
+                    "JOIN vres.tasks t ON t.id=r.task_id "
+                    "WHERE t.task_key=%s AND t.project_id=%s AND r.request_key=%s "
+                    "ORDER BY r.id DESC LIMIT 1",
+                    (task_key, project_id, request_key),
+                ).fetchone()
             if not request or request["status"] != "passed":
                 raise ValueError("No current host-observed passing review exists for this task")
             state = conn.execute(
