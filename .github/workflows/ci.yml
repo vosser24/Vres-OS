@@ -54,6 +54,7 @@ jobs:
           python -m ruff check
           src/vres_os/authority.py
           src/vres_os/company_mcp.py
+          src/vres_os/procedures.py
           tests/test_company_authority.py
           tests/integration/test_company_authority_journey.py
           --ignore E501,I001

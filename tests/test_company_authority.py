@@ -5,10 +5,11 @@ from pathlib import Path
 import pytest
 
 from test_audit_regressions import ScriptedConnection
-from vres_os import approvals, capabilities, registry
+from vres_os import approvals, capabilities, procedures, registry
 from vres_os.approvals import ApprovalService, require_company_approval
 from vres_os.authority import company_subject
 from vres_os.capabilities import CapabilityService, capability_register_subject
+from vres_os.procedures import ProcedureService, procedure_accept_subject
 from vres_os.registry import RegistryService, registry_publish_subject
 from vres_os.sources import SourceService, source_publish_subject
 
@@ -98,6 +99,43 @@ def test_company_approval_cannot_authorize_changed_content():
         require_company_approval(conn, "APP-1", "capability_register", changed)
 
 
+def test_procedure_subject_binds_full_contract_and_baseline_metrics():
+    subject = procedure_accept_subject(
+        procedure_key="PROC-pricing",
+        name="Pricing review",
+        description="Review monthly pricing",
+        task_family="commercial",
+        input_contract={"required": ["price-list"]},
+        method=["load", "compare", "review"],
+        invariants=["never publish automatically"],
+        validation_contract=["chairman approval"],
+        output_contract={"artifact": "review.json"},
+        implementation_ref="scripts/pricing.py?token=secret",
+        initial_metrics={
+            "quality_score": 1.0,
+            "runtime_ms": 120,
+            "input_tokens": 50,
+            "output_tokens": 20,
+            "validation": {"accepted_by_user": True},
+        },
+    )
+    original_key, safe = company_subject("procedure_accept", subject)
+    changed_method_key, _ = company_subject(
+        "procedure_accept",
+        dict(subject, method=["load", "compare", "publish"]),
+    )
+    changed_metrics_key, _ = company_subject(
+        "procedure_accept",
+        dict(
+            subject,
+            initial_metrics=dict(subject["initial_metrics"], runtime_ms=80),
+        ),
+    )
+    assert changed_method_key != original_key
+    assert changed_metrics_key != original_key
+    assert "secret" not in safe["implementation_ref"]
+
+
 def test_company_services_fail_closed_without_approval(monkeypatch):
     with pytest.raises(ValueError, match="explicit exact-scope approval"):
         SourceService().register_in_conn(
@@ -122,6 +160,23 @@ def test_company_services_fail_closed_without_approval(monkeypatch):
             object_type="process",
             name="Monthly close",
             project_id=None,
+        )
+
+    procedure_conn = ScriptedConnection([("pg_advisory_xact_lock", None)])
+    monkeypatch.setattr(procedures, "_connect", lambda: procedure_conn)
+    with pytest.raises(ValueError, match="explicit exact-scope approval"):
+        ProcedureService().accept_baseline(
+            procedure_key="PROC-1",
+            name="Monthly close",
+            description="Close the books",
+            task_family="finance",
+            project_id=None,
+            input_contract={},
+            method=["close"],
+            invariants=["reconcile"],
+            validation_contract=["controller approval"],
+            output_contract={"artifact": "close.json"},
+            approval_key=None,
         )
 
 
@@ -151,5 +206,6 @@ def test_company_mcp_extension_is_the_installed_entrypoint():
         "company_knowledge_propose",
         "company_registry_register",
         "company_capability_register",
+        "company_procedure_accept",
     ]:
         assert f"def {function}(" in tools
