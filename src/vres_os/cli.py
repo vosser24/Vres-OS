@@ -17,7 +17,7 @@ from .hooks import compact, post_compact, session_end, session_start, stop, user
 from .onboarding import OnboardingService
 from .project import discover_project
 from .repository import Repository
-from .redaction import redact_text
+from .redaction import redact, redact_text
 
 app = typer.Typer(pretty_exceptions_show_locals=False, help="Vres-OS control CLI. Normal users primarily interact through the Claude Code Chairman.")
 hook_app = typer.Typer(hidden=True)
@@ -122,7 +122,9 @@ def status() -> None:
         setup_last = last_setup_result()
         if setup_last:
             data["setup_last"] = setup_last
-    console.print_json(data=data)
+    # Repository rows may contain native date/datetime values. Normalize and redact
+    # at the CLI JSON boundary before Rich hands the object to json.dumps().
+    console.print_json(data=redact(data))
 
 
 @hook_app.command("session-start")
