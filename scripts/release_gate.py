@@ -92,7 +92,7 @@ def structure():
     migrations = sorted((ROOT / 'src/vres_os/migrations').glob('*.sql'))
     numbers = [int(p.name[:3]) for p in migrations]
     assert numbers == list(range(1, len(migrations)+1)), numbers
-    assert len(migrations) >= 12
+    assert len(migrations) >= 13
     for p in migrations:
         if p.name in baseline:
             assert digest(p.read_bytes()) == baseline[p.name], f'Recovered migration changed: {p.name}'
@@ -136,6 +136,7 @@ def structure():
         ROOT / 'src/vres_os/executor.py',
         ROOT / 'src/vres_os/procedure_recipe.py',
         ROOT / 'src/vres_os/procedure_worker.py',
+        ROOT / 'src/vres_os/model_policy.py',
     ]:
         assert path.is_file(), path
     return {'package_version': config['project']['version'], 'plugin_version': manifest['version'],
@@ -171,15 +172,16 @@ def package(output: Path, env: dict):
         smoke = """import sys, pathlib, importlib.resources
 sys.path.insert(0, sys.argv[1])
 import vres_os, vres_os.cli, vres_os.metrics, vres_os.optimization, vres_os.company_mcp, vres_os.replay
-import vres_os.executor, vres_os.procedure_recipe, vres_os.procedure_worker
+import vres_os.executor, vres_os.procedure_recipe, vres_os.procedure_worker, vres_os.model_policy
 assert pathlib.Path(vres_os.__file__).resolve().is_relative_to(pathlib.Path(sys.argv[1]).resolve())
 assert callable(vres_os.company_mcp.main)
 assert hasattr(vres_os.replay, 'ReplayService')
 assert hasattr(vres_os.executor, 'ProcedureExecutorService')
 assert callable(vres_os.procedure_worker.main)
-assert len(list(importlib.resources.files('vres_os').joinpath('migrations').iterdir())) >= 12
+assert hasattr(vres_os.model_policy, 'ModelPolicyService')
+assert len(list(importlib.resources.files('vres_os').joinpath('migrations').iterdir())) >= 13
 print('installed runtime source:', vres_os.__file__)
-print('selected imports, authority/replay/executor/company-optimization surfaces and migration resources: passed')
+print('selected imports, authority/replay/executor/model-provenance/company-optimization surfaces and migration resources: passed')
 """
         command([sys.executable, '-I', '-X', 'utf8', '-c', smoke, str(target)], output, 'wheel-import-smoke', cwd=Path(d), env=env)
     return {'filename': path.name, 'sha256': digest(path.read_bytes()), 'bytes': path.stat().st_size,
