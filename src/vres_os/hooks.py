@@ -12,6 +12,7 @@ from .paths import logs_dir
 from .project import discover_project
 from .redaction import redact_text
 from .repository import Repository
+from .session_lifecycle import host_pid_from_env, reconcile_open_sessions, touch_session_host
 from .session_prompts import (
     bind_session_to_project_focus,
     commit_staged_user_instruction,
@@ -51,6 +52,16 @@ def _project_id(repo: Repository, payload: dict | None = None) -> int:
     return repo.ensure_project(project)
 
 
+def _observe_session(project_id: int, sid: str | None, *, reconcile: bool = False) -> None:
+    """Refresh bounded host evidence and optionally reconcile provably stale sessions."""
+    if not sid:
+        return
+    host_pid = host_pid_from_env()
+    touch_session_host(project_id, sid, host_pid)
+    if reconcile:
+        reconcile_open_sessions(project_id, sid, host_pid)
+
+
 def _resume_message(state: dict[str, Any], *, label: str) -> str:
     if state.get("ambiguous"):
         return (
@@ -83,6 +94,7 @@ def session_start() -> None:
             sid = _session_id(payload)
             if sid:
                 repo.open_session(project_id, sid)
+                _observe_session(project_id, sid, reconcile=True)
                 bind_session_to_project_focus(project_id, sid)
             state = repo.resume_context(project_id, provider_session_id=sid)
             if state:
@@ -126,6 +138,9 @@ def user_prompt() -> None:
         sid = _session_id(payload)
         if sid:
             repo.open_session(project_id, sid)
+            # UserPromptSubmit is also a safe recovery point if the host skipped SessionStart
+            # for a provider-session replacement.
+            _observe_session(project_id, sid, reconcile=True)
             bind_session_to_project_focus(project_id, sid)
             # Do not attribute the prompt to the currently focused task yet. The model may
             # create/switch tasks during this turn; Stop commits it to the final binding.
@@ -161,6 +176,7 @@ def compact(reason: str, payload: dict[str, Any] | None = None) -> None:
         repo = Repository()
         project_id = _project_id(repo, payload)
         sid = _session_id(payload)
+        _observe_session(project_id, sid)
         task = repo.active_task(project_id, sid)
         if task:
             snap = last_assistant_snapshot(payload)
@@ -195,6 +211,7 @@ def post_compact() -> None:
         repo = Repository()
         project_id = _project_id(repo, payload)
         sid = _session_id(payload)
+        _observe_session(project_id, sid)
         task = repo.active_task(project_id, sid)
         if task:
             repo.record_event(
@@ -239,6 +256,7 @@ def stop() -> None:
         repo = Repository()
         project_id = _project_id(repo, payload)
         sid = _session_id(payload)
+        _observe_session(project_id, sid)
         task = repo.active_task(project_id, sid)
         if task:
             commit_staged_user_instruction(project_id, sid, task.task_key)
