@@ -91,6 +91,13 @@ def _assert_pair(baseline: dict[str, Any], candidate: dict[str, Any]) -> None:
         )
 
 
+def _assert_project_auto_promotion_scope(row: dict[str, Any]) -> None:
+    if row.get("project_id") is None:
+        raise ValueError(
+            "Automatic promotion of company-wide procedures requires dedicated company optimization authority"
+        )
+
+
 def _context(baseline: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
     return {
         "procedure_key": baseline["procedure_key"],
@@ -112,8 +119,6 @@ def _attested_quality_pair(
     baseline_quality = baseline.get("quality_score")
     candidate_quality = candidate.get("quality_score")
     if baseline_quality is None and candidate_quality is None and output_equivalent:
-        # Exact protected-contract replay plus host-observed output equivalence proves
-        # no quality regression without inventing an executor-supplied quality score.
         return 1.0, 1.0
     if baseline_quality is None or candidate_quality is None:
         return None, None
@@ -121,11 +126,7 @@ def _attested_quality_pair(
 
 
 class ReplayService:
-    """Bind runtime measurements to host-observed independent replay validation.
-
-    This service does not execute arbitrary procedures. It only accepts runs marked
-    by a runtime-owned executor path and never upgrades caller-reported telemetry.
-    """
+    """Bind runtime measurements to host-observed independent replay validation."""
 
     def record_runtime_run(
         self,
@@ -321,6 +322,15 @@ class ReplayService:
             baseline = _runtime_run(conn, int(attestation["baseline_run_id"]))
             candidate = _runtime_run(conn, int(attestation["candidate_run_id"]))
             _assert_pair(baseline, candidate)
+        if baseline.get("project_id") is None:
+            return {
+                "auto_promote": False,
+                "reason": (
+                    "Automatic promotion of company-wide procedures requires dedicated company "
+                    "optimization authority"
+                ),
+                "replay_key": replay_key,
+            }
         stale = (
             int(baseline["preferred_version"]) != int(attestation["baseline_version"])
             or candidate["version_status"] != "candidate"
@@ -385,6 +395,7 @@ class ReplayService:
             baseline = _runtime_run(conn, int(attestation["baseline_run_id"]))
             candidate_run = _runtime_run(conn, int(attestation["candidate_run_id"]))
             _assert_pair(baseline, candidate_run)
+            _assert_project_auto_promotion_scope(baseline)
             proc = conn.execute(
                 "SELECT preferred_version FROM vres.procedures WHERE id=%s FOR UPDATE",
                 (attestation["procedure_id"],),
