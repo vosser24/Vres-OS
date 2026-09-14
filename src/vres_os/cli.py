@@ -10,7 +10,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from .bootstrap import interactive_setup, prerequisite_status, start_for_project
+from .bootstrap import interactive_setup, last_setup_result, prerequisite_status, start_for_project
 from .config import ConfigStore
 from .db import DatabaseUnavailable, migrate
 from .hooks import compact, post_compact, session_end, session_start, stop, user_prompt, validator_stop
@@ -66,8 +66,13 @@ def doctor(allow_unconfigured: bool = False) -> None:
         except Exception as exc:
             missing.append("PostgreSQL")
             table.add_row("PostgreSQL", "ERROR: " + redact_text(str(exc)))
-    elif not allow_unconfigured:
-        missing.append("setup")
+    else:
+        setup_last = last_setup_result()
+        if setup_last and setup_last.get("status") == "failed":
+            summary = f"FAILED {setup_last.get('error_type', 'Error')}: {setup_last.get('message', '')}"
+            table.add_row("last setup", summary[:800])
+        if not allow_unconfigured:
+            missing.append("setup")
     console.print(table)
     if missing:
         raise typer.Exit(2)
@@ -113,6 +118,10 @@ def status() -> None:
             data["task"] = repo.resume_context(pid)
         except Exception as exc:
             data["error"] = redact_text(str(exc))
+    else:
+        setup_last = last_setup_result()
+        if setup_last:
+            data["setup_last"] = setup_last
     console.print_json(data=data)
 
 
