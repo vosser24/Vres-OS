@@ -3,6 +3,18 @@ ALTER TABLE vres.procedure_runs
     ADD COLUMN IF NOT EXISTS measurement_source text NOT NULL DEFAULT 'reported'
     CHECK (measurement_source IN ('reported','runtime'));
 
+-- Host-observed validation may carry a durable, exact context. Existing ordinary
+-- validation requests remain context-free.
+ALTER TABLE vres.validation_requests
+    ADD COLUMN IF NOT EXISTS context_type text;
+ALTER TABLE vres.validation_requests
+    ADD COLUMN IF NOT EXISTS context_key text;
+ALTER TABLE vres.validation_requests
+    ADD COLUMN IF NOT EXISTS context_payload jsonb;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_validation_context
+    ON vres.validation_requests(context_type,context_key)
+    WHERE context_type IS NOT NULL AND context_key IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS vres.procedure_replay_attestations (
     id bigserial PRIMARY KEY,
     replay_key text NOT NULL UNIQUE,
