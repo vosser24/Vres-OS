@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 import uuid
 from typing import Any
 
@@ -46,6 +45,18 @@ def require_approval(conn, approval_key: str, project_id: int | None, approval_t
     if project_id is not None and row["project_id"] != project_id:
         raise ValueError("Approval belongs to a different project")
     return int(row["id"])
+
+
+def require_company_approval(
+    conn,
+    approval_key: str | None,
+    action: str,
+    subject: dict[str, Any],
+) -> int:
+    if not approval_key:
+        raise ValueError("Company-wide write requires an explicit exact-scope approval")
+    subject_key, _ = company_subject(action, subject)
+    return require_approval(conn, approval_key, None, action, subject_key)
 
 
 class ApprovalService:
