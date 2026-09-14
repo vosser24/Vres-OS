@@ -32,10 +32,35 @@ def _safe_uri(value: str | None) -> str | None:
             for key, val in parse_qsl(parts.query, keep_blank_values=True):
                 safe = redact({key: val})[key]
                 pairs.append((key, safe))
-            return urlunsplit((parts.scheme, host, redact_text(parts.path), urlencode(pairs), redact_text(parts.fragment)))
+            return urlunsplit(
+                (parts.scheme, host, redact_text(parts.path), urlencode(pairs), redact_text(parts.fragment))
+            )
     except ValueError:
         return "[REDACTED_INVALID_URI]"
     return redact_text(value)
+
+
+def source_publish_subject(
+    *,
+    source_type: str,
+    title: str,
+    origin: str | None = None,
+    path_or_uri: str | None = None,
+    content_hash: str | None = None,
+    version: str | None = None,
+    authority_level: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "source_type": source_type.strip(),
+        "title": redact_text(title),
+        "origin": redact_text(origin) if origin else origin,
+        "path_or_uri": _safe_uri(path_or_uri),
+        "content_hash": content_hash,
+        "version": version,
+        "authority_level": authority_level,
+        "metadata": redact(metadata or {}),
+    }
 
 
 class SourceService:
@@ -46,34 +71,35 @@ class SourceService:
         created_at: datetime | None = None, metadata: dict[str, Any] | None = None,
         approval_key: str | None = None,
     ) -> tuple[str, int]:
-        source_type = source_type.strip()
-        if not source_type or not title.strip():
+        subject = source_publish_subject(
+            source_type=source_type,
+            title=title,
+            origin=origin,
+            path_or_uri=path_or_uri,
+            content_hash=content_hash,
+            version=version,
+            authority_level=authority_level,
+            metadata=metadata,
+        )
+        source_type = subject["source_type"]
+        safe_title = subject["title"]
+        safe_origin = subject["origin"]
+        safe_uri = subject["path_or_uri"]
+        safe_meta = subject["metadata"]
+        if not source_type or not safe_title.strip():
             raise ValueError("source_type and title are required")
-        safe_title = redact_text(title)
-        safe_meta = redact(metadata or {})
-        safe_uri = _safe_uri(path_or_uri)
-        safe_origin = redact_text(origin) if origin else origin
         scope_approval_id = None
         if project_id is None:
             scope_approval_id = require_company_approval(
-                conn,
-                approval_key,
-                "source_publish",
-                {
-                    "source_type": source_type,
-                    "title": safe_title,
-                    "origin": safe_origin,
-                    "path_or_uri": safe_uri,
-                    "content_hash": content_hash,
-                    "version": version,
-                    "authority_level": authority_level,
-                    "metadata": safe_meta,
-                },
+                conn, approval_key, "source_publish", subject
             )
         source_key = f"SRC-{uuid.uuid4().hex[:12]}"
         existing = None
         if content_hash:
-            conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", (f"source:{project_id}:{content_hash}",))
+            conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
+                (f"source:{project_id}:{content_hash}",),
+            )
             existing = conn.execute(
                 "SELECT id,source_key FROM vres.sources WHERE content_hash=%s AND status='active' "
                 "AND project_id IS NOT DISTINCT FROM %s AND source_type=%s "
@@ -169,7 +195,9 @@ class SourceService:
                 raise KeyError(f"Unknown knowledge item {knowledge_key}")
             source_id = None
             if source_key:
-                source = conn.execute("SELECT id,project_id FROM vres.sources WHERE source_key=%s", (source_key,)).fetchone()
+                source = conn.execute(
+                    "SELECT id,project_id FROM vres.sources WHERE source_key=%s", (source_key,)
+                ).fetchone()
                 if not source:
                     raise KeyError(f"Unknown source {source_key}")
                 if source["project_id"] is not None and source["project_id"] != knowledge["project_id"]:
