@@ -23,6 +23,16 @@ def test_python_runtime_staged_before_active_pointer_changes():
     assert 'plugin marketplace remove' not in text
 
 
+def test_atomic_pointer_replace_uses_real_backup_path_on_windows_powershell():
+    text = (ROOT / 'install.ps1').read_text()
+    atomic = text.split('function Write-JsonAtomic', 1)[1].split('function Assert-Managed', 1)[0]
+    assert '$backup = "$Path.$id.bak"' in atomic
+    assert '[IO.File]::Replace($tmp, $Path, $backup)' in atomic
+    assert '[IO.File]::Replace($tmp, $Path, $null)' not in atomic
+    assert 'Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue' in atomic
+    assert 'Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue' in atomic
+
+
 def test_update_uses_same_transaction_implementation():
     text = (ROOT/'update.ps1').read_text()
     assert "install.ps1') -Update" in text
