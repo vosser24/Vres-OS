@@ -33,6 +33,9 @@ def _host_evidence(
     *,
     provider: str,
     model: str,
+    effort: str | None,
+    success: bool,
+    runtime_ms: int,
     input_tokens: int,
     output_tokens: int,
     execution_evidence: dict[str, Any],
@@ -49,6 +52,8 @@ def _host_evidence(
         "provider_model": safe.get("provider_model"),
         "identity_source": safe.get("identity_source"),
         "usage_source": safe.get("usage_source"),
+        "effort_source": safe.get("effort_source"),
+        "runtime_source": safe.get("runtime_source"),
     }
     if any(not isinstance(value, str) or not value.strip() for value in required_text.values()):
         raise ValueError("Host model execution evidence is missing adapter/provider identity provenance")
@@ -56,6 +61,12 @@ def _host_evidence(
         raise ValueError("Host model evidence identity does not match the stored provider/model")
     if safe["identity_source"] != "provider" or safe["usage_source"] != "provider":
         raise ValueError("Host model identity and usage must come from provider-emitted metadata")
+    if safe["effort_source"] != "adapter_request" or safe.get("requested_effort") != effort:
+        raise ValueError("Stored model effort does not match the adapter invocation request")
+    if safe["runtime_source"] != "adapter_monotonic" or safe.get("runtime_ms") != runtime_ms:
+        raise ValueError("Stored runtime does not match the adapter monotonic measurement")
+    if type(safe.get("completion_success")) is not bool or safe["completion_success"] != success:
+        raise ValueError("Stored completion status does not match the adapter result")
     usage = safe.get("provider_usage")
     if not isinstance(usage, dict):
         raise ValueError("Host model execution evidence requires provider_usage")
@@ -97,6 +108,9 @@ def _host_run(conn, run_id: int) -> dict[str, Any]:
     _host_evidence(
         provider=data["provider"],
         model=data["model"],
+        effort=data["effort"],
+        success=bool(data["success"]),
+        runtime_ms=int(data["runtime_ms"]),
         input_tokens=int(data["input_tokens"]),
         output_tokens=int(data["output_tokens"]),
         execution_evidence=data["execution_evidence"],
@@ -190,6 +204,9 @@ class ModelExperimentService:
         evidence = _host_evidence(
             provider=provider,
             model=model,
+            effort=effort,
+            success=success,
+            runtime_ms=runtime_ms,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             execution_evidence=execution_evidence,
