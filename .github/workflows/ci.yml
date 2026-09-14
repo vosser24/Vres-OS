@@ -49,24 +49,28 @@ jobs:
       - name: Repository-wide critical Python lint
         run: python -m ruff check src tests scripts --select E9,F63,F7,F82
 
-      - name: Strict lint for new authority surface
+      - name: Strict lint for authority and replay evidence surfaces
         run: >-
           python -m ruff check
           src/vres_os/authority.py
           src/vres_os/company_mcp.py
           src/vres_os/procedures.py
+          src/vres_os/replay.py
+          src/vres_os/validation.py
           tests/test_company_authority.py
+          tests/test_replay_attestation.py
           tests/integration/test_company_authority_journey.py
+          tests/integration/test_replay_attestation_journey.py
           --ignore E501,I001
 
       - name: Full test suite with PostgreSQL integration
         run: python -m pytest -o addopts= -q -ra
 
-      - name: Installed company MCP import smoke
+      - name: Installed runtime import smoke
         run: >-
-          python -c "import importlib.resources, vres_os.company_mcp as c;
-          assert callable(c.main);
-          assert len(list(importlib.resources.files('vres_os').joinpath('migrations').iterdir())) >= 10"
+          python -c "import importlib.resources, vres_os.company_mcp as c, vres_os.replay as r;
+          assert callable(c.main) and hasattr(r, 'ReplayService');
+          assert len(list(importlib.resources.files('vres_os').joinpath('migrations').iterdir())) >= 11"
 
       - name: Local release gate
         run: |
