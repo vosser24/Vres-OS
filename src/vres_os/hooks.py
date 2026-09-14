@@ -10,9 +10,14 @@ from .config import ConfigStore
 from .db import DatabaseUnavailable
 from .paths import logs_dir
 from .project import discover_project
-from .repository import Repository
-from .transcript import last_assistant_snapshot
 from .redaction import redact_text
+from .repository import Repository
+from .session_prompts import (
+    commit_staged_user_instruction,
+    is_system_prompt_event,
+    stage_user_instruction,
+)
+from .transcript import last_assistant_snapshot
 
 
 def _input() -> dict[str, Any]:
@@ -109,18 +114,23 @@ def user_prompt() -> None:
     if not isinstance(prompt, str) or not prompt:
         return
     context = f"VRES_CURRENT_SESSION_ID={_session_id(payload) or 'UNKNOWN'}"
+    if is_system_prompt_event(prompt):
+        # Claude Code background-task notifications are host/system events, not user intent.
+        sys.stdout.write(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": context}}))
+        return
     try:
         repo = Repository()
         project_id = _project_id(repo, payload)
         sid = _session_id(payload)
         if sid:
             repo.open_session(project_id, sid)
+            # Do not attribute the prompt to the currently focused task yet. The model may
+            # create/switch tasks during this turn; Stop commits it to the final binding.
+            stage_user_instruction(project_id, sid, prompt)
         task = repo.active_task(project_id, sid)
         if not task:
             sys.stdout.write(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": context}}))
             return
-        repo.update_state(task.task_key, latest_user_instruction=prompt)
-        repo.record_event(task.task_key, "USER_INSTRUCTION", "user", {"text": prompt}, sid)
         if repo.needs_context_rehydration(task.task_key):
             state = repo.resume_context(project_id, provider_session_id=sid)
             if state and not state.get("ambiguous"):
@@ -134,7 +144,7 @@ def user_prompt() -> None:
                 context += "\n" + _resume_message(state, label="VRES POST-COMPACTION CONTINUITY")
     except Exception as exc:
         _log_hook_error("UserPromptSubmit", exc)
-        context += "\nVRES_PERSISTENCE_WARNING: user instruction was not safely persisted; do not assume it survived."
+        context += "\nVRES_PERSISTENCE_WARNING: user instruction was not safely staged; do not assume it survived."
     sys.stdout.write(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": context}}))
 
 
@@ -208,6 +218,7 @@ def session_end() -> None:
         reason = str(payload.get("reason") or payload.get("source") or "session_end")
         task = repo.active_task(project_id, sid)
         if task:
+            commit_staged_user_instruction(project_id, sid, task.task_key)
             repo.record_event(task.task_key, "SESSION_END", "vres-lifecycle", {"reason": reason}, sid)
         if sid:
             repo.close_session(project_id, sid, reason)
@@ -227,6 +238,7 @@ def stop() -> None:
         sid = _session_id(payload)
         task = repo.active_task(project_id, sid)
         if task:
+            commit_staged_user_instruction(project_id, sid, task.task_key)
             snap = last_assistant_snapshot(payload)
             if snap:
                 repo.record_event(
@@ -252,4 +264,7 @@ def validator_stop() -> None:
     except Exception as exc:
         # Never convert a broken reviewer hook into a passing task.
         _log_hook_error("SubagentStop", exc)
-        sys.stderr.write("Vres validator evidence was not accepted; task remains pending. See local redacted hook log.\n")
+        detail = redact_text(str(exc))[:800]
+        sys.stderr.write(
+            f"Vres validator evidence was not accepted: {detail}. Task remains pending; fresh validation may be required.\n"
+        )
