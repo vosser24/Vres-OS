@@ -119,6 +119,28 @@ def test_company_candidate_subject_binds_baseline_candidate_and_method():
     assert company_subject("procedure_optimize", changed_method)[0] != key
 
 
+def test_company_candidate_preview_reuses_existing_exact_experiment_version(monkeypatch):
+    import vres_os.executor as executor
+
+    method = [{"op": "sort", "field": "values"}]
+    conn = ScriptedConnection(
+        [
+            ("pg_advisory_xact_lock", None),
+            ("FROM vres.procedures", _global_proc()),
+            ("FROM vres.procedure_versions", _baseline()),
+            ("FROM vres.optimization_candidates", {"candidate_version": 2}),
+        ]
+    )
+    monkeypatch.setattr(executor, "_connect", lambda: conn)
+    preview = ProcedureExecutorService().preview_company_candidate(
+        procedure_key="PROC-GLOBAL",
+        method=method,
+    )
+    assert preview["candidate_version"] == 2
+    assert preview["subject"]["candidate_version"] == 2
+    assert not any("COALESCE(MAX(version_no),0)" in sql for sql, _ in conn.calls)
+
+
 def test_company_candidate_registration_fails_closed_without_exact_approval(monkeypatch):
     import vres_os.executor as executor
 
