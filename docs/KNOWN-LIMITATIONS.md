@@ -8,7 +8,7 @@ A green local release gate does not change the boundaries below.
 
 | Capability | Actual preview behavior | What is required before enabling the larger promise |
 |---|---|---|
-| General automatic procedural optimization | Candidate experiments remain non-promoting when they rely on caller-reported telemetry. A separate replay layer now accepts only runtime-classified paired runs, binds exact input/output digests and contract fingerprints to a frozen protected-validator request, rejects stale/mismatched evidence, and can promote only a current Pareto-superior attested candidate. The runtime-run and promotion sinks are not exposed through MCP. | A bounded runtime-owned production executor that generates the paired measurements from registered procedures; reliable provider/token accounting where token comparison is used; additional fault/concurrency/rollback acceptance. |
+| General automatic procedural optimization | Caller-reported telemetry remains non-promoting. Project-scoped procedures using the code-owned `vres:builtin:json-recipe:v1` executor can create a protected-contract-identical candidate, generate runtime-owned paired measurements on the same input, bind them to protected replay validation, and auto-promote only after output-equivalence/no-regression attestation and Pareto superiority. Company-wide automatic promotion is rejected in both the candidate and replay service paths. | Target-Windows executor acceptance; fault/concurrency/rollback testing; dedicated company optimization authority before global promotion; and separate registration/evidence for any additional executor family. |
 | Learned automatic model replacement | Recommendations use registered policies. Recorded telemetry is advisory. | Independently measured comparable runs and a policy-promotion authority, with the same evidence discipline as procedure replay. |
 | Arbitrary transparent session replacement | Hooks checkpoint and restore material state around native sessions/compaction. There is no custom terminal host that replaces every Claude context invisibly. | Actual host lifecycle implementation and end-to-end tests. |
 | Infinite nested executive hierarchy | Chairman coordinates ordinary subagents; directors return staffing requests rather than recursively spawning unsupported workers. | Supported nested runtime or a separately tested external coordinator. |
@@ -16,29 +16,38 @@ A green local release gate does not change the boundaries below.
 | Annual unattended market research | Domain due dates and explicit refresh records exist. No annual background scheduler is installed. | A separately authorized scheduler and actual research/validation execution. |
 | Automatic best-expert hiring | Roles/skills/capability records aid routing; shared catalog definitions require exact company approval. No benchmark establishes that a generated persona is the world's best expert. | Domain-specific competence evaluations and documented evidence retrieval. |
 | Automatic company DB reporting | Vres manages its own memory database. It does not automatically discover or authorize arbitrary reporting databases. | Explicit read-only data-source integration and query validation. |
-| Generic recipe execution | Accepted contracts and implementation references can be retrieved. There is no general arbitrary-code procedure runner. The replay evidence sink exists but is intentionally not an MCP capability. | Registered deterministic executors with verified input/output and permissions contracts, bounded process execution, and runtime-owned measurement provenance. |
+| Generic recipe execution | Vres has one registered deterministic JSON recipe family with bounded `copy`, `rename`, `set`, `delete`, `pick`, `sort`, `sum` and `count` operations. It executes in an isolated no-shell worker with time/input/output budgets and contract validation. Arbitrary Python, shell, imports, filesystem/network operations, external programs and unregistered implementation references are not executable through this path. | Every additional executor family needs explicit code registration, bounded permissions, verified input/output contracts, runtime-owned measurement provenance and its own target-platform validation. A universal arbitrary-code runner remains out of scope. |
 
 ## Executed and unexecuted target dependencies
 
 Repository CI starts PostgreSQL 16, applies the packaged migrations through the guarded integration fixture,
-and runs the full test suite including company-authority and optimization-replay journeys. The authority journey
-covers exact-approved global sources, durable knowledge, registry objects, capability definitions and accepted
-procedure baselines, including scope provenance and changed-content rejection. The replay journey covers a
-reported candidate that cannot self-promote, runtime-classified baseline/candidate runs on the same input,
-frozen replay context, an observed Fable validator completion, replay attestation, Pareto assessment and
-promotion with retained evidence provenance. That is real PostgreSQL execution on the recorded Linux runner;
-it is not Windows acceptance, production-load testing, lock-contention proof, or proof that arbitrary procedure
-implementations can yet be executed safely.
+and runs the full test suite including company-authority, optimization-replay and bounded-executor journeys. The
+authority journey covers exact-approved global sources, durable knowledge, registry objects, capability
+definitions and accepted procedure baselines, including scope provenance and changed-content rejection. The
+replay journey covers a reported candidate that cannot self-promote, runtime-classified baseline/candidate runs
+on the same input, frozen replay context, an observed Fable validator completion, replay attestation, Pareto
+assessment and promotion with retained evidence provenance.
 
-The replay integration uses an integration-only runtime-run producer to prove the evidence and promotion state
-machine. It is not a production generic executor. Until a bounded registered executor owns that sink, an MCP
-caller cannot turn its own metrics into runtime measurements and ordinary candidate evaluation remains
-non-promoting.
+The bounded-executor journey goes further: it creates a project-scoped accepted procedure using the registered
+JSON recipe implementation, registers a protected-contract-identical candidate, executes the baseline and
+candidate through the actual isolated `vres_os.procedure_worker` on the same 10,000-value input, records the
+worker-produced timing and canonical input/output digests as runtime evidence, verifies identical output,
+records the protected replay validation, and promotes the measured Pareto-superior candidate. The executor does
+not persist a fabricated quality score; when both deterministic runs lack a numeric quality score, the exact
+protected-contract replay plus host-observed output equivalence supplies only the no-quality-regression basis for
+the Pareto gate. The full PostgreSQL CI run for this tranche passed 254 tests on the recorded Linux runner.
+
+That is real Linux/Python/PostgreSQL execution of the tested registered executor. It is not Windows acceptance,
+production-load testing, lock-contention proof, a universal recipe sandbox, or authorization to execute arbitrary
+procedure implementations. Company-wide procedures are also not automatically replaceable: the automatic
+candidate and replay-promotion services fail closed for global scope pending dedicated company optimization
+authority.
 
 This audit environment still has not executed the Windows/PowerShell installer, Windows Credential Manager,
-live Claude Code plugin/hooks/models, the real MCP SDK transport, live Codex, or a downloaded
-SentenceTransformer. Installed-module smoke tests and mocked/scripted boundaries are not substitutes for those
-runtimes. See LIVE-VERIFICATION.md for the required target tests.
+live Claude Code plugin/hooks/models, the real MCP SDK transport, live Codex, the bounded recipe worker on the
+target Windows installation, or a downloaded SentenceTransformer. Installed-module smoke tests and
+Linux/subprocess integration are not substitutes for those target runtimes. See LIVE-VERIFICATION.md for the
+required target tests.
 
 The wheel is built with the declared build backend prepared in the CI environment and its package contents
 checked. Runtime dependencies remain bounded version ranges, not a tested Windows lockfile. The installer
@@ -54,25 +63,30 @@ system, or protection against a local agent/operator allowed arbitrary shell acc
 The validation hook checks a native subagent event, model-family evidence, registered session, frozen
 state, reviewed artifact hashes and a structured report. Replay-scoped validation additionally freezes a replay
 key and exact baseline/candidate run/contract context. It does not prove every criterion was actually exercised,
-that the same OS user could not forge inputs, or that a future executor is safe merely because the evidence
-schema exists. High effort is configured rather than cryptographically attested.
+or that the same OS user could not forge inputs. The bounded JSON worker narrows its own executable language,
+but it is still application-level isolation running under the same local OS account rather than a security
+sandbox against a hostile local administrator. High effort is configured rather than cryptographically attested.
 
 Project-local approvals point to a real persisted user turn and a specific action/subject. Company-authority
 writes add an exact redacted subject fingerprint and dedicated `company_<action>` approval type. Changing the
 approved company content changes that fingerprint and fails closed. Accepted company-wide procedure approval
 binds the reusable procedure contract, implementation reference and any initial baseline metrics to the same
-scope provenance stored on the procedure. This is still application-level provenance, not a cryptographic
-signature or independent identity system. Conditional/ambiguous assent must not be broadened.
+scope provenance stored on the procedure. Automatic global candidate registration and replay promotion are
+separately rejected; accepting a company-wide baseline does not silently authorize future automatic replacement.
+This is still application-level provenance, not a cryptographic signature or independent identity system.
+Conditional/ambiguous assent must not be broadened.
 
 Replay evidence uses `RESTRICT` references from attestations/optimization decisions to the runs and validation
 request that justified promotion. This is intended to preserve the evidence chain. Administrators with direct
 DB privileges can still modify or delete data by operating outside the cooperative application workflow; Vres
 is not a tamper-proof ledger.
 
-Redaction covers common credential patterns, not all possible secrets. Never place real credentials in
-chat, source documents, transcripts, test fixtures or Git. PostgreSQL administrators and local users with
-filesystem/vault privileges remain able to access data. Vres does not encrypt all database contents itself.
-Use infrastructure encryption, access controls and backups appropriate to the deployment.
+Redaction covers common credential patterns, not all possible secrets. The registered JSON executor also refuses
+payloads or recipe constants whose persisted redacted representation differs from the supplied value, because
+this initial deterministic executor is non-secret only. Never place real credentials in chat, source documents,
+transcripts, test fixtures or Git. PostgreSQL administrators and local users with filesystem/vault privileges
+remain able to access data. Vres does not encrypt all database contents itself. Use infrastructure encryption,
+access controls and backups appropriate to the deployment.
 
 Project filtering is an application boundary, not PostgreSQL row-level multi-tenant isolation. Knowing a
 DB password or having arbitrary local shell access can bypass it. Do not expose this MCP server to strangers.
