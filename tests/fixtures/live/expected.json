@@ -1,0 +1,130 @@
+{
+  "day1_A.xlsx": {
+    "rows": 13,
+    "sheets": [
+      "Report",
+      "Ignore This Sheet"
+    ]
+  },
+  "day1_B.xlsx": {
+    "rows": 13,
+    "sheets": [
+      "Report",
+      "Ignore This Sheet"
+    ]
+  },
+  "day1_expected": {
+    "total_net_sales_all_products": 10205,
+    "top10": [
+      {
+        "SKU": "000012",
+        "Net Sales": 1565
+      },
+      {
+        "SKU": "000011",
+        "Net Sales": 1435
+      },
+      {
+        "SKU": "000010",
+        "Net Sales": 1305
+      },
+      {
+        "SKU": "000009",
+        "Net Sales": 1175
+      },
+      {
+        "SKU": "000008",
+        "Net Sales": 1045
+      },
+      {
+        "SKU": "000007",
+        "Net Sales": 895
+      },
+      {
+        "SKU": "000006",
+        "Net Sales": 785
+      },
+      {
+        "SKU": "000005",
+        "Net Sales": 655
+      },
+      {
+        "SKU": "000004",
+        "Net Sales": 525
+      },
+      {
+        "SKU": "000003",
+        "Net Sales": 420
+      }
+    ],
+    "input_rows": 26,
+    "unique_products": 12,
+    "metric": "Net Sales",
+    "merge": "append then sum by SKU",
+    "first_sheet_only": true
+  },
+  "day2_A.xlsx": {
+    "rows": 13,
+    "sheets": [
+      "Report",
+      "Ignore This Sheet"
+    ]
+  },
+  "day2_B.xlsx": {
+    "rows": 13,
+    "sheets": [
+      "Report",
+      "Ignore This Sheet"
+    ]
+  },
+  "day2_expected": {
+    "total_net_sales_all_products": 20350,
+    "top10": [
+      {
+        "SKU": "000012",
+        "Net Sales": 3125
+      },
+      {
+        "SKU": "000011",
+        "Net Sales": 2865
+      },
+      {
+        "SKU": "000010",
+        "Net Sales": 2605
+      },
+      {
+        "SKU": "000009",
+        "Net Sales": 2345
+      },
+      {
+        "SKU": "000008",
+        "Net Sales": 2085
+      },
+      {
+        "SKU": "000007",
+        "Net Sales": 1785
+      },
+      {
+        "SKU": "000006",
+        "Net Sales": 1565
+      },
+      {
+        "SKU": "000005",
+        "Net Sales": 1305
+      },
+      {
+        "SKU": "000004",
+        "Net Sales": 1045
+      },
+      {
+        "SKU": "000003",
+        "Net Sales": 835
+      }
+    ],
+    "input_rows": 26,
+    "unique_products": 12,
+    "metric": "Net Sales",
+    "merge": "append then sum by SKU",
+    "first_sheet_only": true
+  }
+}
