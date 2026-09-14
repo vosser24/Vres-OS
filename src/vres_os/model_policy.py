@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+
 from .metrics import validate_metrics
 
 PROTECTED_VALIDATION_PHASE = "validate"
@@ -71,8 +72,14 @@ class ModelPolicyService:
         if phase not in {"plan", "build", "validate", "summarize", "research", "analyze", "debug"}:
             raise ValueError("Unknown model phase; do not guess a weaker model for an unrecognized role")
         if phase == PROTECTED_VALIDATION_PHASE:
-            return {"provider": "claude", "model": "fable", "effort": "high", "protected": True,
-                    "source": "protected-validator", "fallback_allowed": False}
+            return {
+                "provider": "claude",
+                "model": "fable",
+                "effort": "high",
+                "protected": True,
+                "source": "protected-validator",
+                "fallback_allowed": False,
+            }
         with _connect() as conn:
             row = conn.execute(
                 """
@@ -84,23 +91,25 @@ class ModelPolicyService:
                 (phase, task_family),
             ).fetchone()
         if not row:
-            fallback = {
+            return {
                 "provider": "claude",
                 "model": "fable" if phase == PROTECTED_VALIDATION_PHASE else "default",
                 "effort": "high" if phase == PROTECTED_VALIDATION_PHASE else "medium",
                 "source": "fallback",
             }
-            return fallback
         baseline = dict(row)
         baseline["source"] = "policy"
-        baseline_metrics = self._metrics(phase, task_family, row["provider"], row["model"], row["effort"])
-        baseline["evidence"] = baseline_metrics
-        # The quality judge is deliberately expensive and is not downshifted by cost/token optimization.
-        if phase == PROTECTED_VALIDATION_PHASE:
-            baseline["protected"] = True
-            return baseline
+        baseline["evidence"] = self._metrics(
+            phase,
+            task_family,
+            row["provider"],
+            row["model"],
+            row["effort"],
+        )
         baseline["empirical_auto_selection"] = False
-        baseline["reason"] = "Paired host-measured replay evidence is not yet available; telemetry is advisory only"
+        baseline["reason"] = (
+            "Paired host-measured replay evidence is not yet available; telemetry is advisory only"
+        )
         return baseline
 
     def record_run(self, **values: Any) -> None:
@@ -108,13 +117,26 @@ class ModelPolicyService:
         if values.get("phase") == PROTECTED_VALIDATION_PHASE and values.get("model") is None:
             raise ValueError("Validation telemetry must identify the validator model")
         cols = [
-            "task_id", "task_family", "phase", "provider", "model", "effort", "success",
-            "quality_score", "runtime_ms", "input_tokens", "output_tokens", "estimated_cost",
-            "retries", "validator_result",
+            "task_id",
+            "task_family",
+            "phase",
+            "provider",
+            "model",
+            "effort",
+            "success",
+            "quality_score",
+            "runtime_ms",
+            "input_tokens",
+            "output_tokens",
+            "estimated_cost",
+            "retries",
+            "validator_result",
+            "measurement_source",
         ]
-        params = [values.get(c) for c in cols]
+        params = [values.get(c) for c in cols[:-1]] + ["reported"]
         with _connect() as conn, conn.transaction():
             conn.execute(
-                f"INSERT INTO vres.model_runs({','.join(cols)}) VALUES ({','.join(['%s']*len(cols))})",
+                f"INSERT INTO vres.model_runs({','.join(cols)}) "
+                f"VALUES ({','.join(['%s'] * len(cols))})",
                 params,
             )
