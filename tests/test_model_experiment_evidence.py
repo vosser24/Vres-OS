@@ -94,12 +94,9 @@ def test_host_evidence_requires_provider_identity_usage_runtime_effort_and_statu
     }
     with pytest.raises(ValueError, match="identity"):
         _host_evidence(**common, execution_evidence=_evidence(model="other"))
+    token_mismatch = dict(common, input_tokens=11)
     with pytest.raises(ValueError, match="token metrics"):
-        _host_evidence(
-            **common,
-            input_tokens=11,
-            execution_evidence=_evidence(),
-        )
+        _host_evidence(**token_mismatch, execution_evidence=_evidence())
     with pytest.raises(ValueError, match="effort"):
         _host_evidence(
             **common,
