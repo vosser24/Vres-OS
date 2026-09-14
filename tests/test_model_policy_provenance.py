@@ -29,3 +29,26 @@ def test_ordinary_model_run_is_explicitly_reported(monkeypatch):
     assert "measurement_source" in sql
     assert params[-1] == "reported"
     assert "host" not in params
+
+
+def test_advisory_model_metrics_explicitly_exclude_host_experiment_rows(monkeypatch):
+    import vres_os.model_policy as module
+
+    conn = ScriptedConnection(
+        [
+            (
+                "measurement_source='reported'",
+                {
+                    "runs": 2,
+                    "success_rate": 1,
+                    "quality": 0.9,
+                    "runtime": 100,
+                    "tokens": 15,
+                },
+            )
+        ]
+    )
+    monkeypatch.setattr(module, "_connect", lambda: conn)
+    metrics = ModelPolicyService()._metrics("analyze", "analysis", "claude", "fable", "high")
+    assert metrics["runs"] == 2
+    assert "measurement_source='reported'" in conn.calls[0][0]
