@@ -365,19 +365,19 @@ def company_procedure_replay_promote(
 ) -> dict:
     """Preview or perform the exact company-authorized promotion of an already-attested replay."""
     service = ReplayService()
+    if approval_key:
+        return service.promote_company_attested(replay_key, approval_key)
     preview = service.preview_company_promotion(replay_key)
-    if not approval_key:
-        subject = preview["subject"]
-        return _preview(
-            "procedure_optimize",
-            subject,
-            replay_key=replay_key,
-            procedure_key=subject["procedure_key"],
-            candidate_version=subject["candidate_version"],
-            phase="promote_attested",
-            assessment=preview["assessment"],
-        )
-    return service.promote_company_attested(replay_key, approval_key)
+    subject = preview["subject"]
+    return _preview(
+        "procedure_optimize",
+        subject,
+        replay_key=replay_key,
+        procedure_key=subject["procedure_key"],
+        candidate_version=subject["candidate_version"],
+        phase="promote_attested",
+        assessment=preview["assessment"],
+    )
 
 
 @mcp.tool()
