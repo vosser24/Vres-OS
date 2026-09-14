@@ -15,6 +15,7 @@ from .procedure_recipe import BUILTIN_JSON_RECIPE_V1
 from .procedures import ProcedureService, procedure_accept_subject
 from .redaction import redact, redact_text
 from .registry import RegistryService, registry_publish_subject
+from .replay import ReplayService
 from .sources import SourceService, source_publish_subject
 
 
@@ -327,6 +328,56 @@ def company_procedure_accept(
         "baseline_metrics_recorded": bool(metrics),
         "company_wide": True,
     }
+
+
+@mcp.tool()
+def company_procedure_candidate_register(
+    procedure_key: str,
+    method: list[Any],
+    approval_key: str | None = None,
+) -> dict:
+    """Preview or create one exact company-wide bounded-executor optimization candidate."""
+    service = ProcedureExecutorService()
+    preview = service.preview_company_candidate(
+        procedure_key=procedure_key,
+        method=method,
+    )
+    if not approval_key:
+        return _preview(
+            "procedure_optimize",
+            preview["subject"],
+            procedure_key=procedure_key,
+            candidate_version=preview["candidate_version"],
+            phase="candidate_register",
+        )
+    result = service.register_candidate(
+        procedure_key=procedure_key,
+        method=method,
+        approval_key=approval_key,
+    )
+    return {**result, "procedure_key": procedure_key, "company_wide": True}
+
+
+@mcp.tool()
+def company_procedure_replay_promote(
+    replay_key: str,
+    approval_key: str | None = None,
+) -> dict:
+    """Preview or perform the exact company-authorized promotion of an already-attested replay."""
+    service = ReplayService()
+    preview = service.preview_company_promotion(replay_key)
+    if not approval_key:
+        subject = preview["subject"]
+        return _preview(
+            "procedure_optimize",
+            subject,
+            replay_key=replay_key,
+            procedure_key=subject["procedure_key"],
+            candidate_version=subject["candidate_version"],
+            phase="promote_attested",
+            assessment=preview["assessment"],
+        )
+    return service.promote_company_attested(replay_key, approval_key)
 
 
 @mcp.tool()
