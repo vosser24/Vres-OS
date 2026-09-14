@@ -19,9 +19,7 @@ Start here: [Windows installation](docs/INSTALL-WINDOWS.md) · [live verificatio
 - Optional local embedding jobs with retry/lease protection and a bounded semantic fallback when pgvector is absent.
 - Research refresh records tied to an actual reviewed JSON artifact.
 - A staged Windows installer, user-scoped personal plugin, matching update path and data-preserving uninstall.
-- Dedicated company-authority tools for company-wide source, durable-knowledge and registry publication, plus shared capability catalog registration. These use preview → persisted user approval → exact redacted subject fingerprint → write, and the service layer fails closed when the approval is absent or does not match.
-
-Company-wide procedure publication remains held: project-local accepted procedures work, but a global procedure will not be enabled until its complete behavioral contract and any baseline measurements are bound to the company approval event.
+- Dedicated company-authority tools for company-wide source, durable-knowledge and registry publication, shared capability catalog registration, and accepted procedure baselines. These use preview → persisted user approval → exact redacted subject fingerprint → write, and the service layer fails closed when the approval is absent or does not match. Procedure approvals bind the full reusable contract, implementation reference and any initial baseline measurements.
 
 These mechanisms have different evidence levels. Local tests execute Python/parsers/subprocesses. GitHub CI now also executes the full test suite against PostgreSQL 16, including migration 010 and the company-authority journey. Windows PowerShell/credential handling, actual Claude/Codex integration and real embeddings still need the live runbook.
 
@@ -29,7 +27,7 @@ These mechanisms have different evidence levels. Local tests execute Python/pars
 
 **Automatic optimization is held.** A pure Pareto gate exists, but agent-reported runtime/tokens and `independent=true` are not trustworthy paired replay. This preview will not silently promote candidates or alter model policy on those assertions.
 
-**Company-wide authority is explicit, not ambient.** Ordinary project tools still default to the current project and reject global writes. Dedicated `company_*` tools can publish approved sources, knowledge, registry objects and capability definitions only after an exact-subject approval. Existing global seeds remain readable. Company-wide procedures are still held as described above.
+**Company-wide authority is explicit, not ambient.** Ordinary project tools still default to the current project and reject global writes. Dedicated `company_*` tools can publish approved sources, knowledge, registry objects, capability definitions and accepted procedure baselines only after an exact-subject approval. Existing global seeds remain readable.
 
 **Continuity is checkpoint recovery, not magical memory.** Persisted state survives; unsaved reasoning does not. Native Claude compaction is supported by hooks, but Vres does not own transparent arbitrary context rollover. Several unfinished tasks require explicit disambiguation when a new session has no binding.
 
