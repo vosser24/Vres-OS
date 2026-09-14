@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import uuid
-import re
+from typing import Any
+
+from .authority import company_approval_type, company_subject
 from .redaction import redact_text
 
 
@@ -13,8 +15,21 @@ def _connect():
 
 def explicit_acceptance(text: str) -> bool:
     normalized = text.strip().casefold().rstrip(".! ")
-    return normalized in {"ok", "okay", "yes", "approved", "accept", "i approve", "looks good",
-                          "go ahead", "proceed", "ναι", "εντάξει", "εγκρίνεται", "το εγκρίνω"}
+    return normalized in {
+        "ok",
+        "okay",
+        "yes",
+        "approved",
+        "accept",
+        "i approve",
+        "looks good",
+        "go ahead",
+        "proceed",
+        "ναι",
+        "εντάξει",
+        "εγκρίνεται",
+        "το εγκρίνω",
+    }
 
 
 def require_approval(conn, approval_key: str, project_id: int | None, approval_type: str, subject_key: str) -> int:
@@ -32,18 +47,30 @@ def require_approval(conn, approval_key: str, project_id: int | None, approval_t
     return int(row["id"])
 
 
+def require_company_approval(
+    conn,
+    approval_key: str | None,
+    action: str,
+    subject: dict[str, Any],
+) -> int:
+    if not approval_key:
+        raise ValueError("Company-wide write requires an explicit exact-scope approval")
+    subject_key, _ = company_subject(action, subject)
+    return require_approval(conn, approval_key, None, action, subject_key)
+
+
 class ApprovalService:
     """Turn an explicit persisted user turn into durable approval provenance."""
 
-    def record_latest_user_approval(
+    def _record(
         self,
         *,
         task_key: str,
         approval_type: str,
         statement: str,
-        subject_key: str | None = None,
+        subject_key: str,
     ) -> str:
-        if not subject_key or not subject_key.strip():
+        if not subject_key.strip():
             raise ValueError("Approval must name an exact subject")
         if not approval_type.strip() or not statement.strip():
             raise ValueError("approval_type and statement are required")
@@ -68,14 +95,26 @@ class ApprovalService:
             if not user_text:
                 raise ValueError("Latest user instruction has no text to serve as approval provenance")
             is_rejection = approval_type == "procedure_candidate_reject"
-            accepted = (user_text.strip().casefold().rstrip(".! ") in {"no", "reject", "keep current", "keep mine", "όχι"}) if is_rejection else explicit_acceptance(user_text)
+            accepted = (
+                user_text.strip().casefold().rstrip(".! ")
+                in {"no", "reject", "keep current", "keep mine", "όχι"}
+                if is_rejection
+                else explicit_acceptance(user_text)
+            )
             if not accepted:
                 raise ValueError("Latest user turn is not unconditional acceptance; clarify the exact decision")
-            if approval_type.startswith("company_"):
-                raise ValueError("Company-wide promotion requires a dedicated explicit-scope approval workflow; disabled in this candidate")
-            conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", ("approval-event:" + str(event["id"]),))
-            prior = conn.execute("SELECT approval_type,subject_key FROM vres.approval_events WHERE source_event_id=%s", (event["id"],)).fetchall()
-            if any((r["approval_type"],r["subject_key"]) != (approval_type,subject_key) for r in prior):
+            conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
+                ("approval-event:" + str(event["id"]),),
+            )
+            prior = conn.execute(
+                "SELECT approval_type,subject_key FROM vres.approval_events WHERE source_event_id=%s",
+                (event["id"],),
+            ).fetchall()
+            if any(
+                (r["approval_type"], r["subject_key"]) != (approval_type, subject_key)
+                for r in prior
+            ):
                 raise ValueError("This user turn already authorized another exact subject; obtain a new approval")
             key = f"APPROVAL-{uuid.uuid4().hex[:12]}"
             row = conn.execute(
@@ -105,6 +144,50 @@ class ApprovalService:
                 if row["statement"] != redact_text(statement):
                     raise ValueError("Approval retry changes the approved statement")
         return str(row["approval_key"])
+
+    def record_latest_user_approval(
+        self,
+        *,
+        task_key: str,
+        approval_type: str,
+        statement: str,
+        subject_key: str | None = None,
+    ) -> str:
+        if approval_type.startswith("company_"):
+            raise ValueError(
+                "Company-wide promotion requires the dedicated exact-scope approval workflow"
+            )
+        if not subject_key or not subject_key.strip():
+            raise ValueError("Approval must name an exact subject")
+        return self._record(
+            task_key=task_key,
+            approval_type=approval_type,
+            statement=statement,
+            subject_key=subject_key,
+        )
+
+    def record_company_approval(
+        self,
+        *,
+        task_key: str,
+        action: str,
+        subject: dict[str, Any],
+        statement: str,
+    ) -> dict[str, Any]:
+        subject_key, normalized = company_subject(action, subject)
+        approval_type = company_approval_type(action)
+        key = self._record(
+            task_key=task_key,
+            approval_type=approval_type,
+            statement=statement,
+            subject_key=subject_key,
+        )
+        return {
+            "approval_key": key,
+            "approval_type": approval_type,
+            "subject_key": subject_key,
+            "subject": normalized,
+        }
 
     def get(self, approval_key: str) -> dict:
         with _connect() as conn:

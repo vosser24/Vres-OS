@@ -40,6 +40,21 @@ def test_governance_migration_adds_authoritative_objects_and_approval_provenance
     assert "'fable'" in sql
 
 
+def test_company_authority_migration_preserves_scope_approval_provenance():
+    sql = _migration("010_company_authority.sql")
+    for table in [
+        "vres.sources",
+        "vres.knowledge_items",
+        "vres.procedures",
+        "vres.registry_objects",
+        "vres.capabilities",
+    ]:
+        assert f"ALTER TABLE {table}" in sql
+    assert sql.count("scope_approval_event_id") >= 5
+    assert "ON DELETE RESTRICT" in sql
+    assert "idx_approval_events_type_subject" in sql
+
+
 def test_initial_migration_does_not_make_pg_trgm_a_hard_requirement():
     sql = _migration("001_initial.sql")
     assert "pg_available_extensions" in sql

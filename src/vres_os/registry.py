@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from .approvals import require_company_approval
 from .redaction import redact, redact_text
 
 _ALLOWED_TYPES = {
@@ -14,6 +15,28 @@ def _connect():
     from .db import connect
 
     return connect()
+
+
+def registry_publish_subject(
+    object_key: str,
+    object_type: str,
+    name: str,
+    description: str,
+    status: str,
+    version: str | None,
+    owner_role: str | None,
+    metadata: dict[str, Any] | None,
+) -> dict[str, Any]:
+    return {
+        "object_key": object_key.strip(),
+        "object_type": object_type.strip().lower(),
+        "name": redact_text(name),
+        "description": redact_text(description),
+        "status": status,
+        "version": version,
+        "owner_role": owner_role,
+        "metadata": redact(metadata or {}),
+    }
 
 
 class RegistryService:
@@ -29,18 +52,31 @@ class RegistryService:
         version: str | None = None,
         owner_role: str | None = None,
         metadata: dict[str, Any] | None = None,
+        approval_key: str | None = None,
     ) -> str:
-        object_type = object_type.strip().lower()
+        subject = registry_publish_subject(
+            object_key, object_type, name, description, status, version, owner_role, metadata
+        )
+        object_key = subject["object_key"]
+        object_type = subject["object_type"]
+        name = subject["name"]
+        description = subject["description"]
+        safe_meta = subject["metadata"]
         if object_type not in _ALLOWED_TYPES:
             raise ValueError(f"Unsupported registry object type {object_type}")
-        if not object_key.strip() or not name.strip():
+        if not object_key or not name.strip():
             raise ValueError("object_key and name are required")
         if status not in {"active", "deprecated", "retired", "proposed"}:
             raise ValueError("Unsupported registry status")
-        name, description = redact_text(name), redact_text(description)
-        safe_meta = redact(metadata or {})
         with _connect() as conn, conn.transaction():
-            conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", ("registry:" + object_key,))
+            scope_approval_id = None
+            if project_id is None:
+                scope_approval_id = require_company_approval(
+                    conn, approval_key, "registry_publish", subject
+                )
+            conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", ("registry:" + object_key,)
+            )
             existing = conn.execute(
                 "SELECT object_type,project_id FROM vres.registry_objects WHERE object_key=%s",
                 (object_key,),
@@ -48,17 +84,34 @@ class RegistryService:
             if existing and (
                 existing["object_type"] != object_type or existing["project_id"] != project_id
             ):
-                raise ValueError("Registry identity is immutable: object_type/project scope cannot change for an existing key")
+                raise ValueError(
+                    "Registry identity is immutable: object_type/project scope cannot change for an existing key"
+                )
             conn.execute(
                 """
                 INSERT INTO vres.registry_objects(
-                  object_key,object_type,project_id,name,description,status,version,owner_role,metadata
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)
+                  object_key,object_type,project_id,name,description,status,version,owner_role,metadata,
+                  scope_approval_event_id
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s)
                 ON CONFLICT(object_key) DO UPDATE SET
                   name=excluded.name,description=excluded.description,status=excluded.status,
-                  version=excluded.version,owner_role=excluded.owner_role,metadata=excluded.metadata,updated_at=now()
+                  version=excluded.version,owner_role=excluded.owner_role,metadata=excluded.metadata,
+                  scope_approval_event_id=COALESCE(
+                    vres.registry_objects.scope_approval_event_id,excluded.scope_approval_event_id
+                  ),updated_at=now()
                 """,
-                (object_key, object_type, project_id, name, description, status, version, owner_role, json.dumps(safe_meta)),
+                (
+                    object_key,
+                    object_type,
+                    project_id,
+                    name,
+                    description,
+                    status,
+                    version,
+                    owner_role,
+                    json.dumps(safe_meta),
+                    scope_approval_id,
+                ),
             )
         return object_key
 

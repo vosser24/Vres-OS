@@ -47,7 +47,7 @@ dev = [
 
 [project.scripts]
 vres = "vres_os.cli:app"
-vres-mcp = "vres_os.mcp_server:main"
+vres-mcp = "vres_os.company_mcp:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

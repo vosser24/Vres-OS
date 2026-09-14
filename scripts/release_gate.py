@@ -44,6 +44,13 @@ def command(args: list[str], output: Path, name: str, *, cwd: Path = ROOT, env: 
     return result.stdout
 
 
+def _tool_names(path: Path) -> list[str]:
+    tree = ast.parse(path.read_text(encoding='utf-8'))
+    return sorted(n.name for n in tree.body if isinstance(n, ast.FunctionDef)
+                  and any(isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute)
+                          and d.func.attr == 'tool' for d in n.decorator_list))
+
+
 def structure():
     import yaml
     from packaging.version import Version
@@ -103,14 +110,21 @@ def structure():
             target = link.split('#')[0]
             if target:
                 assert (p.parent / target).exists(), f'Broken local documentation link {p}: {target}'
-    native_tools = ast.parse((ROOT / 'src/vres_os/mcp_server.py').read_text())
-    names = sorted(n.name for n in native_tools.body if isinstance(n, ast.FunctionDef)
-                   and any(isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute)
-                           and d.func.attr == 'tool' for d in n.decorator_list))
+    names = _tool_names(ROOT / 'src/vres_os/mcp_server.py')
+    company_names = _tool_names(ROOT / 'src/vres_os/company_mcp.py')
     assert 'procedure_get' in names and 'optimization_gate' not in names and 'validation_record' not in names
     assert len(names) == len(set(names))
+    assert {
+        'company_approval_record',
+        'company_source_register',
+        'company_knowledge_propose',
+        'company_registry_register',
+        'company_capability_register',
+    } <= set(company_names)
+    assert len(company_names) == len(set(company_names))
     return {'package_version': config['project']['version'], 'plugin_version': manifest['version'],
             'agents': sorted(agents), 'skills': sorted(skills), 'mcp_tools': names,
+            'company_mcp_tools': company_names,
             'migrations': {p.name: digest(p.read_bytes()) for p in migrations},
             'table_inventory': sorted(tables), 'migration_proof': 'numbering/hash/inventory only; no PostgreSQL execution'}
 
@@ -140,11 +154,12 @@ def package(output: Path, env: dict):
                 output, 'wheel-install', cwd=Path(d), env=env)
         smoke = """import sys, pathlib, importlib.resources
 sys.path.insert(0, sys.argv[1])
-import vres_os, vres_os.cli, vres_os.metrics, vres_os.optimization
+import vres_os, vres_os.cli, vres_os.metrics, vres_os.optimization, vres_os.company_mcp
 assert pathlib.Path(vres_os.__file__).resolve().is_relative_to(pathlib.Path(sys.argv[1]).resolve())
-assert len(list(importlib.resources.files('vres_os').joinpath('migrations').iterdir())) >= 9
+assert callable(vres_os.company_mcp.main)
+assert len(list(importlib.resources.files('vres_os').joinpath('migrations').iterdir())) >= 10
 print('installed runtime source:', vres_os.__file__)
-print('selected imports and migration resources: passed')
+print('selected imports, company MCP and migration resources: passed')
 """
         command([sys.executable, '-I', '-X', 'utf8', '-c', smoke, str(target)], output, 'wheel-import-smoke', cwd=Path(d), env=env)
     return {'filename': path.name, 'sha256': digest(path.read_bytes()), 'bytes': path.stat().st_size,

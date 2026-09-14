@@ -215,6 +215,7 @@ def test_capability_change_does_not_inherit_old_proof(monkeypatch):
     import vres_os.capabilities as capabilities
     conn=ScriptedConnection([('pg_advisory_xact_lock',None),('SELECT name',{'name':'Old','description':'Old knowledge','domain':'data'})])
     monkeypatch.setattr(capabilities,'_connect',lambda:conn)
+    monkeypatch.setattr(capabilities,'require_company_approval',lambda *a,**k:11)
     with pytest.raises(ValueError,match='new key'):
         capabilities.CapabilityService().register('CAP','New','Different','data','cto')
 

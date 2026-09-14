@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from .approvals import require_company_approval
 from .redaction import redact, redact_text
 
 
@@ -10,6 +11,22 @@ def _connect():
     from .db import connect
 
     return connect()
+
+
+def capability_register_subject(
+    key: str,
+    name: str,
+    description: str,
+    domain: str | None,
+    owner_role: str | None,
+) -> dict[str, Any]:
+    return {
+        "capability_key": key.strip(),
+        "name": redact_text(name),
+        "description": redact_text(description),
+        "domain": domain,
+        "owner_role": owner_role,
+    }
 
 
 class CapabilityService:
@@ -34,23 +51,52 @@ class CapabilityService:
             ).fetchall()
         return [dict(r) for r in rows]
 
-    def register(self, key: str, name: str, description: str, domain: str | None, owner_role: str | None) -> str:
-        if not key.strip() or not name.strip() or not description.strip():
+    def register(
+        self,
+        key: str,
+        name: str,
+        description: str,
+        domain: str | None,
+        owner_role: str | None,
+        *,
+        approval_key: str | None = None,
+    ) -> str:
+        subject = capability_register_subject(key, name, description, domain, owner_role)
+        key = subject["capability_key"]
+        name = subject["name"]
+        description = subject["description"]
+        if not key or not name.strip() or not description.strip():
             raise ValueError("capability key, name and description are required")
-        name, description = redact_text(name), redact_text(description)
         with _connect() as conn, conn.transaction():
-            conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", ("capability:" + key,))
-            old = conn.execute("SELECT name,description,domain FROM vres.capabilities WHERE capability_key=%s", (key,)).fetchone()
-            if old and (old["name"],old["description"],old["domain"]) != (name,description,domain):
-                raise ValueError("Changed capability needs a new key; past proofs cannot transfer to different expertise")
+            scope_approval_id = require_company_approval(
+                conn, approval_key, "capability_register", subject
+            )
+            conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", ("capability:" + key,)
+            )
+            old = conn.execute(
+                "SELECT name,description,domain FROM vres.capabilities WHERE capability_key=%s", (key,)
+            ).fetchone()
+            if old and (old["name"], old["description"], old["domain"]) != (
+                name,
+                description,
+                domain,
+            ):
+                raise ValueError(
+                    "Changed capability needs a new key; past proofs cannot transfer to different expertise"
+                )
             conn.execute(
                 """
-                INSERT INTO vres.capabilities(capability_key,name,description,domain,owner_role,status)
-                VALUES (%s,%s,%s,%s,%s,'active')
+                INSERT INTO vres.capabilities(
+                  capability_key,name,description,domain,owner_role,status,scope_approval_event_id
+                ) VALUES (%s,%s,%s,%s,%s,'active',%s)
                 ON CONFLICT(capability_key) DO UPDATE SET name=excluded.name,description=excluded.description,
-                  domain=excluded.domain,owner_role=excluded.owner_role,status='active'
+                  domain=excluded.domain,owner_role=excluded.owner_role,status='active',
+                  scope_approval_event_id=COALESCE(
+                    vres.capabilities.scope_approval_event_id,excluded.scope_approval_event_id
+                  )
                 """,
-                (key, name, description, domain, owner_role),
+                (key, name, description, domain, owner_role, scope_approval_id),
             )
         return key
 
