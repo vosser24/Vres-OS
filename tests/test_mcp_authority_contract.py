@@ -20,6 +20,15 @@ def test_mcp_does_not_expose_runtime_replay_sink_or_auto_promotion():
     assert "def replay_promote(" not in combined
 
 
+def test_mcp_does_not_expose_host_model_evidence_or_policy_mutation_sinks():
+    combined = TEXT + "\n" + COMPANY_TEXT
+    assert "def record_host_run(" not in combined
+    assert "def model_experiment_attest(" not in combined
+    assert "def model_experiment_promote(" not in combined
+    assert "def model_policy_promote(" not in combined
+    assert "measurement_source: str" not in combined
+
+
 def test_mcp_exposes_authoritative_approval_and_lifecycle_tools():
     for function in [
         "approval_record", "knowledge_get", "knowledge_promote", "knowledge_supersede",
