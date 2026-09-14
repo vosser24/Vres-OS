@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .metrics import validate_metrics
-from .optimization import pareto_gate
+from .optimization import contracts_equivalent, pareto_gate
 from .procedures import fingerprint
 from .redaction import redact
 from .validation import ValidationService
@@ -85,6 +85,17 @@ def _assert_pair(baseline: dict[str, Any], candidate: dict[str, Any]) -> None:
         raise ValueError("Paired replay runs must belong to the same replay task")
     if baseline["input_digest"] != candidate["input_digest"]:
         raise ValueError("Paired replay runs must use the exact same input digest")
+    if not contracts_equivalent(baseline, candidate):
+        raise ValueError(
+            "Automatic replay requires identical protected input, invariant, validation and output contracts"
+        )
+
+
+def _assert_project_auto_promotion_scope(row: dict[str, Any]) -> None:
+    if row.get("project_id") is None:
+        raise ValueError(
+            "Automatic promotion of company-wide procedures requires dedicated company optimization authority"
+        )
 
 
 def _context(baseline: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
@@ -102,12 +113,20 @@ def _context(baseline: dict[str, Any], candidate: dict[str, Any]) -> dict[str, A
     }
 
 
-class ReplayService:
-    """Bind runtime measurements to host-observed independent replay validation.
+def _attested_quality_pair(
+    baseline: dict[str, Any], candidate: dict[str, Any], output_equivalent: bool
+) -> tuple[float | None, float | None]:
+    baseline_quality = baseline.get("quality_score")
+    candidate_quality = candidate.get("quality_score")
+    if baseline_quality is None and candidate_quality is None and output_equivalent:
+        return 1.0, 1.0
+    if baseline_quality is None or candidate_quality is None:
+        return None, None
+    return float(baseline_quality), float(candidate_quality)
 
-    This service does not execute arbitrary procedures. It only accepts runs marked
-    by a runtime-owned executor path and never upgrades caller-reported telemetry.
-    """
+
+class ReplayService:
+    """Bind runtime measurements to host-observed independent replay validation."""
 
     def record_runtime_run(
         self,
@@ -302,6 +321,16 @@ class ReplayService:
                 raise KeyError(replay_key)
             baseline = _runtime_run(conn, int(attestation["baseline_run_id"]))
             candidate = _runtime_run(conn, int(attestation["candidate_run_id"]))
+            _assert_pair(baseline, candidate)
+        if baseline.get("project_id") is None:
+            return {
+                "auto_promote": False,
+                "reason": (
+                    "Automatic promotion of company-wide procedures requires dedicated company "
+                    "optimization authority"
+                ),
+                "replay_key": replay_key,
+            }
         stale = (
             int(baseline["preferred_version"]) != int(attestation["baseline_version"])
             or candidate["version_status"] != "candidate"
@@ -312,14 +341,28 @@ class ReplayService:
         )
         if stale:
             return {"auto_promote": False, "reason": "replay attestation is stale"}
+        baseline_quality, candidate_quality = _attested_quality_pair(
+            baseline, candidate, bool(attestation["output_equivalent"])
+        )
         gate = pareto_gate(
-            baseline_quality=float(baseline["quality_score"]),
-            candidate_quality=float(candidate["quality_score"]),
-            baseline_runtime_ms=int(baseline["runtime_ms"]),
-            candidate_runtime_ms=int(candidate["runtime_ms"]),
-            baseline_tokens=int(baseline["input_tokens"]) + int(baseline["output_tokens"]),
-            candidate_tokens=int(candidate["input_tokens"])
-            + int(candidate["output_tokens"]),
+            baseline_quality=baseline_quality,
+            candidate_quality=candidate_quality,
+            baseline_runtime_ms=(
+                int(baseline["runtime_ms"]) if baseline["runtime_ms"] is not None else None
+            ),
+            candidate_runtime_ms=(
+                int(candidate["runtime_ms"]) if candidate["runtime_ms"] is not None else None
+            ),
+            baseline_tokens=(
+                int(baseline["input_tokens"]) + int(baseline["output_tokens"])
+                if baseline["input_tokens"] is not None and baseline["output_tokens"] is not None
+                else None
+            ),
+            candidate_tokens=(
+                int(candidate["input_tokens"]) + int(candidate["output_tokens"])
+                if candidate["input_tokens"] is not None and candidate["output_tokens"] is not None
+                else None
+            ),
             protected_regression=bool(attestation["protected_regression"])
             or not bool(attestation["output_equivalent"]),
             validation_passed=True,
@@ -328,6 +371,11 @@ class ReplayService:
             "auto_promote": gate.auto_promote,
             "reason": gate.reason,
             "replay_key": replay_key,
+            "quality_basis": (
+                "host-observed output equivalence"
+                if baseline.get("quality_score") is None and candidate.get("quality_score") is None
+                else "runtime quality metrics"
+            ),
         }
 
     def promote_attested(self, replay_key: str) -> dict[str, Any]:
@@ -346,6 +394,8 @@ class ReplayService:
                 raise KeyError(replay_key)
             baseline = _runtime_run(conn, int(attestation["baseline_run_id"]))
             candidate_run = _runtime_run(conn, int(attestation["candidate_run_id"]))
+            _assert_pair(baseline, candidate_run)
+            _assert_project_auto_promotion_scope(baseline)
             proc = conn.execute(
                 "SELECT preferred_version FROM vres.procedures WHERE id=%s FOR UPDATE",
                 (attestation["procedure_id"],),

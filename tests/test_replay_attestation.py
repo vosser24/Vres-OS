@@ -6,7 +6,13 @@ import pytest
 
 from test_audit_regressions import ScriptedConnection
 from vres_os.procedures import fingerprint
-from vres_os.replay import ReplayService, _assert_pair, _contract_fingerprint
+from vres_os.replay import (
+    ReplayService,
+    _assert_pair,
+    _assert_project_auto_promotion_scope,
+    _attested_quality_pair,
+    _contract_fingerprint,
+)
 
 
 def _run(**changes):
@@ -67,6 +73,46 @@ def test_paired_replay_requires_same_runtime_task_and_input():
         _assert_pair(baseline, _run(id=2, version_no=2, task_id=10))
     with pytest.raises(ValueError, match="same input digest"):
         _assert_pair(baseline, _run(id=2, version_no=2, input_digest="input-b"))
+
+
+def test_paired_replay_rejects_protected_contract_drift():
+    baseline = _run()
+    with pytest.raises(ValueError, match="identical protected"):
+        _assert_pair(
+            baseline,
+            _run(
+                id=2,
+                version_no=2,
+                input_contract={"x": "string"},
+                method=["improved implementation"],
+            ),
+        )
+    _assert_pair(
+        baseline,
+        _run(
+            id=2,
+            version_no=2,
+            method=["improved implementation"],
+            implementation_ref="vres:test:v2",
+        ),
+    )
+
+
+def test_company_wide_replay_cannot_auto_promote_without_dedicated_authority():
+    _assert_project_auto_promotion_scope(_run(project_id=7))
+    with pytest.raises(ValueError, match="company-wide procedures"):
+        _assert_project_auto_promotion_scope(_run(project_id=None))
+
+
+def test_attested_equivalence_can_supply_no_regression_quality_without_fake_executor_score():
+    baseline = _run(quality_score=None)
+    candidate = _run(id=2, version_no=2, quality_score=None)
+    assert _attested_quality_pair(baseline, candidate, True) == (1.0, 1.0)
+    assert _attested_quality_pair(baseline, candidate, False) == (None, None)
+    assert _attested_quality_pair(_run(quality_score=None), _run(id=2, version_no=2), True) == (
+        None,
+        None,
+    )
 
 
 def test_runtime_run_sink_requires_execution_evidence_before_database(monkeypatch):

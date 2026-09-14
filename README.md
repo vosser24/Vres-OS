@@ -21,20 +21,22 @@ Start here: [Windows installation](docs/INSTALL-WINDOWS.md) · [live verificatio
 - A staged Windows installer, user-scoped personal plugin, matching update path and data-preserving uninstall.
 - Dedicated company-authority tools for company-wide source, durable-knowledge and registry publication, shared capability catalog registration, and accepted procedure baselines. These use preview → persisted user approval → exact redacted subject fingerprint → write, and the service layer fails closed when the approval is absent or does not match. Procedure approvals bind the full reusable contract, implementation reference and any initial baseline measurements.
 - Host-attested procedure replay evidence. Runtime-classified paired runs are bound to the same input digest, exact baseline/candidate contract fingerprints, a frozen validation context and a host-observed protected-validator result before the Pareto gate can authorize promotion. Caller-reported telemetry cannot enter that path, and the trusted runtime-run/promotion sinks are not exposed through MCP.
+- A registered deterministic procedure executor for the code-owned `vres:builtin:json-recipe:v1` implementation family. Its bounded JSON recipe operations are `copy`, `rename`, `set`, `delete`, `pick`, `sort`, `sum` and `count`; the worker is invoked without a shell, enforces input/output/time budgets, validates contracts, hashes canonical input/output and records runtime-owned evidence. The recipe language exposes no arbitrary Python, imports, shell, filesystem or network operation.
+- Project-scoped automatic promotion for that registered executor path only: protected contracts must remain identical, baseline and candidate must run on the exact same input, protected validation must attest output equivalence/no protected regression, and the candidate must be Pareto-superior. Deterministic recipes do not invent a stored quality score; host-observed output equivalence supplies the no-regression quality basis for the gate.
 
-These mechanisms have different evidence levels. Local tests execute Python/parsers/subprocesses. GitHub CI also executes the full suite against PostgreSQL 16, including migrations 010–011, company-authority journeys and the replay → protected validation → attestation → promotion journey. Windows PowerShell/credential handling, actual Claude/Codex integration, a production procedure executor and real embeddings still need their live gates.
+These mechanisms have different evidence levels. Local tests execute Python/parsers/subprocesses. GitHub CI also executes the full suite against PostgreSQL 16, including migrations 010–011, company-authority journeys, replay → protected validation → attestation → promotion, and a real bounded-worker baseline/candidate journey whose measurements are produced by the registered executor. Windows PowerShell/credential handling, actual Claude/Codex integration, target-Windows execution of the bounded worker and real embeddings still need their live gates.
 
 ## What is deliberately not claimed
 
-**General automatic optimization is still held.** The repository now contains a tested host-attested replay/attestation/promotion path, but there is not yet a production bounded executor that can generate trusted paired procedure runs. Agent-reported runtime/tokens, caller-supplied `independent=true`, or ordinary `procedure_evaluate_candidate` calls cannot auto-promote. Until a registered runtime-owned executor supplies the measurements, candidates remain advisory/user-decided.
+**General automatic optimization is still held.** Project-scoped procedures using the registered deterministic JSON executor can now enter the measured replay/attestation/Pareto promotion path. That does not authorize arbitrary Python, shell commands, arbitrary implementation references, LLM-generated executable code, or caller-supplied measurements. Ordinary `procedure_evaluate_candidate` remains non-promoting, and automatic company-wide procedure replacement is separately held pending dedicated company optimization authority.
 
-**Company-wide authority is explicit, not ambient.** Ordinary project tools still default to the current project and reject global writes. Dedicated `company_*` tools can publish approved sources, knowledge, registry objects, capability definitions and accepted procedure baselines only after an exact-subject approval. Existing global seeds remain readable.
+**Company-wide authority is explicit, not ambient.** Ordinary project tools still default to the current project and reject global writes. Dedicated `company_*` tools can publish approved sources, knowledge, registry objects, capability definitions and accepted procedure baselines only after an exact-subject approval. Existing global seeds remain readable. A company-wide procedure may be read or executed through an eligible registered implementation, but the automatic candidate/promotion path rejects global scope until a dedicated company optimization authority is defined and tested.
 
 **Continuity is checkpoint recovery, not magical memory.** Persisted state survives; unsaved reasoning does not. Native Claude compaction is supported by hooks, but Vres does not own transparent arbitrary context rollover. Several unfinished tasks require explicit disambiguation when a new session has no binding.
 
 **Review evidence is host-observed, not cryptographic attestation.** A local user/process with the same credentials and arbitrary execution can bypass cooperative workflow controls. Native tools are not an OS security boundary. Replay attestations improve application provenance; they do not create a cryptographic root of trust.
 
-**Procedures are registered recipes, not a general verified executable compiler.** The Chairman can retrieve accepted contracts and implementation references, but arbitrary recipes are not executed as trusted code. A bounded, registered deterministic executor layer is still required before general procedure execution or unattended optimization can be claimed.
+**Registered recipes are not a general verified executable compiler.** Vres can execute the bounded code-owned JSON recipe family described above, but it does not treat arbitrary procedure text, Python, shell, external programs or generated code as trusted executable recipes. New executor families require explicit code registration plus their own input/output, permission and validation contracts.
 
 ## Windows preview installation
 
@@ -67,6 +69,7 @@ User ↔ Chairman
           ├─ PostgreSQL: tasks, sessions, findings, procedures, approvals
           ├─ Sources / bounded ingestion / retrieval / optional embeddings
           ├─ Protected validator / artifact fingerprints / replay attestations
+          ├─ Registered deterministic procedure worker / runtime evidence
           └─ Native execution adapters: Claude tools, read-only Codex
 ```
 

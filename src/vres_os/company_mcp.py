@@ -7,9 +7,11 @@ from typing import Any
 from .approvals import ApprovalService
 from .authority import company_subject
 from .capabilities import CapabilityService, capability_register_subject
+from .executor import ProcedureExecutorService, registered_implementation_refs
 from .knowledge import KnowledgeService
-from .mcp_server import _require_node, mcp
+from .mcp_server import _project, _require_node, mcp
 from .metrics import validate_metrics
+from .procedure_recipe import BUILTIN_JSON_RECIPE_V1
 from .procedures import ProcedureService, procedure_accept_subject
 from .redaction import redact, redact_text
 from .registry import RegistryService, registry_publish_subject
@@ -325,6 +327,91 @@ def company_procedure_accept(
         "baseline_metrics_recorded": bool(metrics),
         "company_wide": True,
     }
+
+
+@mcp.tool()
+def procedure_executor_catalog() -> dict:
+    """Describe the bounded runtime-owned procedure implementation families available to Vres."""
+    return {
+        "implementation_refs": list(registered_implementation_refs()),
+        "default": BUILTIN_JSON_RECIPE_V1,
+        "json_recipe_v1_operations": ["copy", "rename", "set", "delete", "pick", "sort", "sum", "count"],
+        "arbitrary_python": False,
+        "shell": False,
+        "network": False,
+        "filesystem": False,
+    }
+
+
+@mcp.tool()
+def procedure_candidate_register(
+    procedure_key: str,
+    method: list[Any],
+) -> dict:
+    """Register a project-scoped bounded-executor candidate with protected contracts copied unchanged."""
+    _require_node("procedure", procedure_key, write=True)
+    return ProcedureExecutorService().register_candidate(
+        procedure_key=procedure_key,
+        method=method,
+    )
+
+
+@mcp.tool()
+def procedure_registered_execute(
+    task_key: str,
+    procedure_key: str,
+    input_value: dict[str, Any],
+    version_no: int | None = None,
+    timeout: float = 30.0,
+) -> dict:
+    """Execute only a registered bounded procedure implementation and record runtime-owned measurements."""
+    _require_node("task", task_key, write=True)
+    _require_node("procedure", procedure_key)
+    return ProcedureExecutorService().execute(
+        procedure_key=procedure_key,
+        task_key=task_key,
+        input_value=input_value,
+        version_no=version_no,
+        timeout=timeout,
+    )
+
+
+@mcp.tool()
+def procedure_replay_prepare(
+    task_key: str,
+    baseline_run_id: int,
+    candidate_run_id: int,
+    artifact_paths: list[str],
+) -> dict:
+    """Freeze paired bounded-executor evidence and prepare protected replay validation."""
+    _require_node("task", task_key, write=True)
+    pid, project = _project()
+    return ProcedureExecutorService().prepare_replay(
+        baseline_run_id=baseline_run_id,
+        candidate_run_id=candidate_run_id,
+        task_key=task_key,
+        project_id=pid,
+        root=project.root,
+        paths=artifact_paths,
+    )
+
+
+@mcp.tool()
+def procedure_replay_finalize(
+    task_key: str,
+    replay_key: str,
+    request_key: str,
+) -> dict:
+    """Finalize protected replay evidence and auto-promote only when every fail-closed gate passes."""
+    _require_node("task", task_key, write=True)
+    pid, project = _project()
+    return ProcedureExecutorService().finalize_replay(
+        replay_key=replay_key,
+        request_key=request_key,
+        task_key=task_key,
+        project_id=pid,
+        root=project.root,
+    )
 
 
 def main() -> None:
