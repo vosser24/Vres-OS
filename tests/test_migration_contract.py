@@ -67,6 +67,16 @@ def test_optimization_attestation_migration_separates_reported_and_runtime_evide
     assert "ON DELETE RESTRICT" in sql
 
 
+def test_model_run_provenance_migration_separates_reported_and_host_evidence():
+    sql = _migration("012_model_run_provenance.sql")
+    assert "ALTER TABLE vres.model_runs" in sql
+    assert "measurement_source" in sql
+    assert "'reported','host'" in sql
+    assert "input_digest" in sql and "output_digest" in sql
+    assert "execution_evidence" in sql
+    assert "idx_model_runs_measurement_source" in sql
+
+
 def test_initial_migration_does_not_make_pg_trgm_a_hard_requirement():
     sql = _migration("001_initial.sql")
     assert "pg_available_extensions" in sql

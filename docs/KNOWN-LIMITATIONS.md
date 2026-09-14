@@ -9,7 +9,7 @@ A green local release gate does not change the boundaries below.
 | Capability | Actual preview behavior | What is required before enabling the larger promise |
 |---|---|---|
 | General automatic procedural optimization | Caller-reported telemetry remains non-promoting. Project-scoped procedures using the code-owned `vres:builtin:json-recipe:v1` executor can create a protected-contract-identical candidate, generate runtime-owned paired measurements on the same input, bind them to protected replay validation, and auto-promote only after output-equivalence/no-regression attestation and Pareto superiority. Company-wide automatic promotion is rejected in both the candidate and replay service paths. | Target-Windows executor acceptance; fault/concurrency/rollback testing; dedicated company optimization authority before global promotion; and separate registration/evidence for any additional executor family. |
-| Learned automatic model replacement | Recommendations use registered policies. Recorded telemetry is advisory. | Independently measured comparable runs and a policy-promotion authority, with the same evidence discipline as procedure replay. |
+| Learned automatic model replacement | Recommendations use registered policies. Ordinary `model_record_run` telemetry is explicitly persisted as `measurement_source='reported'`. Migration 012 reserves a separate `host` evidence class plus exact input/output digests and execution evidence, but there is no host model-experiment writer and no telemetry path can mutate model policy. | A live-provider experiment path that proves exact model identity and provider-emitted usage on comparable inputs, independent quality/equivalence evaluation, and a separate policy-promotion authority. Protected validation must remain non-downshiftable. |
 | Arbitrary transparent session replacement | Hooks checkpoint and restore material state around native sessions/compaction. There is no custom terminal host that replaces every Claude context invisibly. | Actual host lifecycle implementation and end-to-end tests. |
 | Infinite nested executive hierarchy | Chairman coordinates ordinary subagents; directors return staffing requests rather than recursively spawning unsupported workers. | Supported nested runtime or a separately tested external coordinator. |
 | Chaotic company-disk project reconstruction | Mechanical folder ingestion assigns a nominated project. It does not autonomously infer an entire trustworthy company taxonomy. | Project-discovery evaluation and review of ambiguous assignments. |
@@ -35,19 +35,26 @@ worker-produced timing and canonical input/output digests as runtime evidence, v
 records the protected replay validation, and promotes the measured Pareto-superior candidate. The executor does
 not persist a fabricated quality score; when both deterministic runs lack a numeric quality score, the exact
 protected-contract replay plus host-observed output equivalence supplies only the no-quality-regression basis for
-the Pareto gate. The full PostgreSQL CI run for this tranche passed 254 tests on the recorded Linux runner.
+the Pareto gate. The full PostgreSQL CI run for that tranche passed 254 tests on the recorded Linux runner.
 
-That is real Linux/Python/PostgreSQL execution of the tested registered executor. It is not Windows acceptance,
-production-load testing, lock-contention proof, a universal recipe sandbox, or authorization to execute arbitrary
-procedure implementations. Company-wide procedures are also not automatically replaceable: the automatic
-candidate and replay-promotion services fail closed for global scope pending dedicated company optimization
-authority.
+Migration `012_model_run_provenance.sql` has also executed against PostgreSQL 16 in CI. It preserves existing
+model telemetry as `reported` and reserves `host` provenance plus input/output digests and execution evidence for
+future comparable model experiments. The ordinary model telemetry service explicitly writes `reported` rather
+than relying on the schema default. The provenance-only validation head passed 256 tests against PostgreSQL 16.
+This does **not** mean a Claude/Codex model experiment was run: no host-evidence writer exists in that tranche,
+and no model policy changed.
+
+That is real Linux/Python/PostgreSQL execution of the tested registered executor and model-run provenance schema.
+It is not Windows acceptance, production-load testing, lock-contention proof, a universal recipe sandbox, or
+proof that live provider model usage can be measured comparably. Company-wide procedures are also not
+automatically replaceable: the automatic candidate and replay-promotion services fail closed for global scope
+pending dedicated company optimization authority.
 
 This audit environment still has not executed the Windows/PowerShell installer, Windows Credential Manager,
-live Claude Code plugin/hooks/models, the real MCP SDK transport, live Codex, the bounded recipe worker on the
-target Windows installation, or a downloaded SentenceTransformer. Installed-module smoke tests and
-Linux/subprocess integration are not substitutes for those target runtimes. See LIVE-VERIFICATION.md for the
-required target tests.
+live Claude Code plugin/hooks/models, a live paired model experiment, the real MCP SDK transport, live Codex,
+the bounded recipe worker on the target Windows installation, or a downloaded SentenceTransformer.
+Installed-module smoke tests and Linux/subprocess integration are not substitutes for those target runtimes.
+See LIVE-VERIFICATION.md for the required target tests.
 
 The wheel is built with the declared build backend prepared in the CI environment and its package contents
 checked. Runtime dependencies remain bounded version ranges, not a tested Windows lockfile. The installer
@@ -75,6 +82,11 @@ scope provenance stored on the procedure. Automatic global candidate registratio
 separately rejected; accepting a company-wide baseline does not silently authorize future automatic replacement.
 This is still application-level provenance, not a cryptographic signature or independent identity system.
 Conditional/ambiguous assent must not be broadened.
+
+Model policies are shared operational routing state. The new `host` provenance label is only an evidence class;
+it is not authority to alter that shared policy. A future promotion path must independently establish the exact
+policy subject and the authorization for changing it. The protected Fable/high validation role must not be
+silently replaced by empirical cost or token optimization.
 
 Replay evidence uses `RESTRICT` references from attestations/optimization decisions to the runs and validation
 request that justified promotion. This is intended to preserve the evidence chain. Administrators with direct
