@@ -72,10 +72,23 @@ function Find-Python {
     return $null
 }
 function Write-JsonAtomic([string]$Path, $Value) {
-    $tmp = "$Path.$([guid]::NewGuid().ToString('N')).tmp"
-    [IO.File]::WriteAllText($tmp, ($Value | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
-    if (Test-Path -LiteralPath $Path) { [IO.File]::Replace($tmp, $Path, $null) }
-    else { [IO.File]::Move($tmp, $Path) }
+    $id = [guid]::NewGuid().ToString('N')
+    $tmp = "$Path.$id.tmp"
+    $backup = "$Path.$id.bak"
+    try {
+        [IO.File]::WriteAllText($tmp, ($Value | ConvertTo-Json -Depth 10), (New-Object System.Text.UTF8Encoding $false))
+        if (Test-Path -LiteralPath $Path) {
+            # Windows PowerShell 5.1 can bind a PowerShell $null passed to File.Replace's
+            # backup-path parameter as an illegal empty path. A real same-directory backup
+            # keeps replacement atomic and avoids that native/.NET binder edge case.
+            [IO.File]::Replace($tmp, $Path, $backup)
+        } else {
+            [IO.File]::Move($tmp, $Path)
+        }
+    } finally {
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
+    }
 }
 function Assert-Managed([string]$Path) {
     if (Test-Path -LiteralPath $Path) {
