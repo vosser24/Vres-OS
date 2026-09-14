@@ -39,17 +39,35 @@ function Winget-Install([string]$Id) {
     Run 'winget' @('install','--id',$Id,'--exact','--source','winget','--accept-package-agreements','--accept-source-agreements')
     Refresh-Path
 }
+function Probe-Python([string]$Exe, [string[]]$Arguments) {
+    # Native launchers such as py.exe write selector-missing messages to stderr.
+    # Under the installer's global Stop preference, Windows PowerShell can turn
+    # that expected probe failure into a terminating NativeCommandError before
+    # Find-Python can inspect LASTEXITCODE. Suppress native probe errors only
+    # for this bounded discovery call, then restore strict installer behavior.
+    $savedErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'SilentlyContinue'
+        $result = & $Exe @Arguments 2>$null
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $savedErrorActionPreference
+    }
+    if ($exitCode -eq 0) { return ($result | Select-Object -Last 1) }
+    return $null
+}
 function Find-Python {
     # A newer unsupported default Python must not hide an installed supported version.
+    $probe = "import sys; print(sys.executable); raise SystemExit(0 if (3,12) <= sys.version_info[:2] < (3,14) else 1)"
     if (Have 'py') {
         foreach ($selector in @('-3.13','-3.12')) {
-            $result = & py $selector -c "import sys; print(sys.executable); raise SystemExit(0 if (3,12) <= sys.version_info[:2] < (3,14) else 1)" 2>$null
-            if ($LASTEXITCODE -eq 0) { return ($result | Select-Object -Last 1) }
+            $result = Probe-Python 'py' @($selector,'-c',$probe)
+            if ($result) { return $result }
         }
     }
     if (Have 'python') {
-        $result = & python -c "import sys; print(sys.executable); raise SystemExit(0 if (3,12) <= sys.version_info[:2] < (3,14) else 1)" 2>$null
-        if ($LASTEXITCODE -eq 0) { return ($result | Select-Object -Last 1) }
+        $result = Probe-Python 'python' @('-c',$probe)
+        if ($result) { return $result }
     }
     return $null
 }
