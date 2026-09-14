@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import sys
 import time
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 
 from .db import _driver
 
@@ -17,6 +17,14 @@ from .db import migrate
 from .project import discover_project
 from .repository import Repository
 from .secrets import SecretStore
+
+
+@dataclass(slots=True)
+class _ProvisionedLocalDatabase:
+    runtime_password: str
+    admin_dsn: str
+    database: str
+    runtime_user: str
 
 
 def command_exists(name: str) -> bool:
@@ -62,7 +70,24 @@ def _test_database(*, host: str, port: int, database: str, user: str, password: 
         conn.execute("SELECT 1")
 
 
-def _provision_local_database(*, host: str, port: int, database: str, runtime_user: str, sslmode: str) -> str:
+def _cleanup_provisioned_local_database(provisioned: _ProvisionedLocalDatabase) -> None:
+    """Remove only the role/database created by this exact setup attempt."""
+    from psycopg import sql
+
+    with _driver().connect(provisioned.admin_dsn, autocommit=True) as conn:
+        conn.execute(
+            sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(
+                sql.Identifier(provisioned.database)
+            )
+        )
+        conn.execute(
+            sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(provisioned.runtime_user))
+        )
+
+
+def _provision_local_database(
+    *, host: str, port: int, database: str, runtime_user: str, sslmode: str
+) -> _ProvisionedLocalDatabase:
     admin_user = _ask("PostgreSQL administrator user", "postgres")
     admin_password = getpass.getpass("PostgreSQL administrator password (not stored): ")
     if not admin_password:
@@ -83,12 +108,34 @@ def _provision_local_database(*, host: str, port: int, database: str, runtime_us
             )
         conn.execute(sql.SQL("CREATE ROLE {} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD {}")
                      .format(sql.Identifier(runtime_user), sql.Literal(runtime_password)))
-        conn.execute(sql.SQL("CREATE DATABASE {} OWNER {}")
-                     .format(sql.Identifier(database), sql.Identifier(runtime_user)))
-    _test_database(
-        host=host, port=port, database=database, user=runtime_user, password=runtime_password, sslmode=sslmode
+        try:
+            conn.execute(sql.SQL("CREATE DATABASE {} OWNER {}")
+                         .format(sql.Identifier(database), sql.Identifier(runtime_user)))
+        except Exception:
+            # CREATE DATABASE cannot be transactional. Roll back the role that this call just created.
+            conn.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(runtime_user)))
+            raise
+    provisioned = _ProvisionedLocalDatabase(
+        runtime_password=runtime_password,
+        admin_dsn=admin_dsn,
+        database=database,
+        runtime_user=runtime_user,
     )
-    return runtime_password
+    try:
+        _test_database(
+            host=host, port=port, database=database, user=runtime_user,
+            password=runtime_password, sslmode=sslmode,
+        )
+    except Exception as exc:
+        try:
+            _cleanup_provisioned_local_database(provisioned)
+        except Exception as cleanup_exc:
+            raise RuntimeError(
+                "New Vres database/user were created but their connectivity test failed and automatic cleanup also failed. "
+                "Inspect the dedicated database and role before retrying."
+            ) from cleanup_exc
+        raise exc
+    return provisioned
 
 
 def _interactive_setup() -> None:
@@ -99,6 +146,7 @@ def _interactive_setup() -> None:
     secret_store = SecretStore()
     previous_secret = secret_store.get(cfg.database.password_key)
     secret_changed = False
+    provisioned: _ProvisionedLocalDatabase | None = None
     print("\nVres-OS secure first-run setup")
     print("================================")
     print("Passwords entered in this window are not sent through Claude, Codex, or MCP.")
@@ -122,10 +170,11 @@ def _interactive_setup() -> None:
         if auto_provision:
             print("\nVres needs the PostgreSQL administrator password once to provision its isolated account.")
             print("That administrator password is never persisted.")
-            runtime_password = _provision_local_database(
+            provisioned = _provision_local_database(
                 host=cfg.database.host, port=cfg.database.port, database=cfg.database.database,
                 runtime_user=cfg.database.user, sslmode=cfg.database.sslmode,
             )
+            runtime_password = provisioned.runtime_password
         else:
             print("\nUse an existing PostgreSQL database/user.")
             runtime_password = getpass.getpass("Vres runtime PostgreSQL password: ")
@@ -160,6 +209,7 @@ def _interactive_setup() -> None:
         store.save(cfg)
         print("Core self-test passed. Vres-OS setup is active.")
     except Exception as exc:
+        cleanup_failed = False
         # A repair failure must not destroy the previously working credential/profile.
         if secret_changed:
             if previous_secret is not None:
@@ -167,9 +217,20 @@ def _interactive_setup() -> None:
             else:
                 secret_store.delete(cfg.database.password_key)
         store.save(previous_cfg)
+        if provisioned is not None:
+            try:
+                _cleanup_provisioned_local_database(provisioned)
+            except Exception:
+                cleanup_failed = True
         from .redaction import redact_text
         print(f"\nVres setup failed: {redact_text(str(exc))}")
-        print("Previous configuration restored. Any newly created database/role was left intact for diagnosis.")
+        print("Previous configuration restored.")
+        if provisioned is not None and not cleanup_failed:
+            print("The database and role created by this failed setup attempt were removed; the same names can be retried.")
+        elif provisioned is not None:
+            print("Automatic cleanup of the newly created database/role failed. Inspect those dedicated resources before retrying.")
+        else:
+            print("No existing database or role was deleted or reset.")
         raise SystemExit(2) from exc
     print("Close this window and return to Claude Code.")
 
@@ -195,10 +256,17 @@ def launch_secure_setup_and_wait(timeout_seconds: int = 2) -> dict:
         return {"ready": False, "launched": False, "in_progress": True}
     flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
     from .processes import worker_command
-    proc = subprocess.Popen(worker_command("vres_os.cli", "setup"), creationflags=flags)
+    # A setup console must not inherit the MCP stdio transport handles. With a new
+    # console and no standard-handle redirection Windows supplies interactive console
+    # input/output to the child while close_fds isolates unrelated parent handles.
+    proc = subprocess.Popen(
+        worker_command("vres_os.cli", "setup"),
+        creationflags=flags,
+        close_fds=True,
+    )
     started = time.monotonic()
     while time.monotonic() - started < timeout_seconds:
-        time.sleep(1)
+        time.sleep(min(0.1, timeout_seconds))
         if ConfigStore().load().configured:
             return {"ready": True, "launched": True}
         code = proc.poll()
