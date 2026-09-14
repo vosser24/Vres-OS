@@ -19,17 +19,17 @@ Start here: [Windows installation](docs/INSTALL-WINDOWS.md) · [live verificatio
 - Optional local embedding jobs with retry/lease protection and a bounded semantic fallback when pgvector is absent.
 - Research refresh records tied to an actual reviewed JSON artifact.
 - A staged Windows installer, user-scoped personal plugin, matching update path and data-preserving uninstall.
+- Dedicated company-authority tools for company-wide source, durable-knowledge and registry publication, plus shared capability catalog registration. These use preview → persisted user approval → exact redacted subject fingerprint → write, and the service layer fails closed when the approval is absent or does not match.
 
-Shared capability catalog registration through MCP is also held pending explicit catalog authority.
-A task-scoped specialist can still be used without publishing it globally.
+Company-wide procedure publication remains held: project-local accepted procedures work, but a global procedure will not be enabled until its complete behavioral contract and any baseline measurements are bound to the company approval event.
 
-These mechanisms have different evidence levels. Local tests execute Python/parsers/subprocesses. PostgreSQL SQL, Windows PowerShell/credential handling, actual Claude/Codex integration and real embeddings still need the live runbook.
+These mechanisms have different evidence levels. Local tests execute Python/parsers/subprocesses. GitHub CI now also executes the full test suite against PostgreSQL 16, including migration 010 and the company-authority journey. Windows PowerShell/credential handling, actual Claude/Codex integration and real embeddings still need the live runbook.
 
 ## What is deliberately not claimed
 
 **Automatic optimization is held.** A pure Pareto gate exists, but agent-reported runtime/tokens and `independent=true` are not trustworthy paired replay. This preview will not silently promote candidates or alter model policy on those assertions.
 
-**Company-wide publication is held.** New writes default to the current project. A distinct authoritative scope-approval flow is not implemented. Existing global seeds can be read.
+**Company-wide authority is explicit, not ambient.** Ordinary project tools still default to the current project and reject global writes. Dedicated `company_*` tools can publish approved sources, knowledge, registry objects and capability definitions only after an exact-subject approval. Existing global seeds remain readable. Company-wide procedures are still held as described above.
 
 **Continuity is checkpoint recovery, not magical memory.** Persisted state survives; unsaved reasoning does not. Native Claude compaction is supported by hooks, but Vres does not own transparent arbitrary context rollover. Several unfinished tasks require explicit disambiguation when a new session has no binding.
 
@@ -80,7 +80,7 @@ python -m pip install ".[full,dev]"
 python scripts\release_gate.py --output C:\VresEvidence\static
 ```
 
-The gate runs tests, compiles Python, checks plugin frontmatter/tool references, audits migration file ordering and provenance, builds a wheel, verifies packaged bytes, and imports installed wheel modules outside the source checkout. It is **not** a substitute for running SQL or PowerShell.
+The gate runs tests, compiles Python, checks plugin frontmatter/tool references, audits migration file ordering and provenance, builds a wheel offline from the prepared build environment, verifies packaged bytes, and imports installed wheel modules outside the source checkout. The local gate itself is **not** a substitute for running SQL or PowerShell. The repository CI adds a PostgreSQL 16 service and runs the full suite with the opt-in integration guard enabled before running the local release gate.
 
 The released evidence bundle contains actual logs, JUnit results, coverage data, dependency inventory and a per-file validation ledger. The source ZIP and Git bundle are exported from one final commit; checksums and a machine-readable release manifest identify them. Historical conversation test counts are not release evidence.
 
