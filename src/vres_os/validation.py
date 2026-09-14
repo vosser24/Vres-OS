@@ -20,7 +20,9 @@ STATE_FIELDS = (
     "current_step",
     "state_summary",
     "next_action",
-    "latest_user_instruction",
+    # latest_user_instruction is continuity/provenance metadata. Material user intent
+    # must be reflected in objective/state/constraints before review; otherwise a
+    # post-review lifecycle write would spuriously stale an otherwise frozen review.
     "open_questions",
     "assumptions",
     "constraints",
@@ -157,7 +159,9 @@ class ValidationService:
                 ),
             )
         instruction = (
-            "Return one JSON report with request_key, outcome, checks[{status,evidence}]."
+            "Return ONLY one JSON object. Use lowercase outcome exactly 'passed' or 'failed'. "
+            "Each checks item must use lowercase status exactly 'passed', 'failed', or 'not_run' and include evidence. "
+            "Shape: {request_key, outcome, checks:[{status,evidence}]}."
         )
         if context_type is not None:
             instruction += " Preserve context_key exactly and return it as context_key."
