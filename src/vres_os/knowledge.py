@@ -4,8 +4,8 @@ import json
 from datetime import datetime
 from typing import Any
 
+from .approvals import require_approval, require_company_approval
 from .redaction import redact, redact_text
-from .approvals import require_approval
 from .relations import relate as persist_relation
 
 _ALLOWED_STATUSES = {
@@ -59,36 +59,61 @@ class KnowledgeService:
         metadata: dict[str, Any] | None = None,
         approval_key: str | None = None,
     ) -> str:
+        key = key.strip()
         knowledge_type = knowledge_type.strip().lower()
         if knowledge_type not in _EVIDENCE_REQUIRED_TYPES | _APPROVAL_REQUIRED_TYPES:
             raise ValueError(f"Unsupported knowledge type {knowledge_type!r}")
         if status not in _ALLOWED_STATUSES - {"superseded"}:
             raise ValueError(f"Unsupported initial knowledge status {status}")
-        if not key.strip() or not title.strip() or not statement.strip():
+        if not key or not title.strip() or not statement.strip():
             raise ValueError("knowledge key, title and statement are required")
         _validate_confidence(confidence)
         if knowledge_type in _EVIDENCE_REQUIRED_TYPES and status in {"validated", "canonical"}:
             raise ValueError(
                 f"New {knowledge_type} must start proposed/observed; attach evidence before promotion to {status}"
             )
+        safe_title = redact_text(title)
+        safe_statement = redact_text(statement)
         safe_scope = redact(scope or {})
         safe_meta = redact(metadata or {})
+        company_subject = {
+            "knowledge_key": key,
+            "knowledge_type": knowledge_type,
+            "title": safe_title,
+            "statement": safe_statement,
+            "status": status,
+            "scope": safe_scope,
+            "confidence": confidence,
+            "source_owner": source_owner,
+            "review_after": review_after.isoformat() if review_after else None,
+            "metadata": safe_meta,
+        }
         with _connect() as conn, conn.transaction():
             if conn.execute("SELECT 1 FROM vres.knowledge_items WHERE knowledge_key=%s", (key,)).fetchone():
                 raise ValueError(f"Knowledge key {key} already exists; use update/supersede, never overwrite")
-            approval_id = _approval_id(conn, approval_key, project_id, key)
+            scope_approval_id = None
+            approval_id = None
+            if project_id is None:
+                scope_approval_id = require_company_approval(
+                    conn, approval_key, "knowledge_publish", company_subject
+                )
+                if knowledge_type in _APPROVAL_REQUIRED_TYPES and status == "canonical":
+                    approval_id = scope_approval_id
+            else:
+                approval_id = _approval_id(conn, approval_key, project_id, key)
             if knowledge_type in _APPROVAL_REQUIRED_TYPES and status == "canonical" and not approval_id:
                 raise ValueError(f"Canonical {knowledge_type} requires a recorded user approval event")
             conn.execute(
                 """
                 INSERT INTO vres.knowledge_items(
                   knowledge_key,project_id,knowledge_type,title,statement,status,scope,confidence,
-                  source_owner,review_after,metadata,approval_event_id
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s::jsonb,%s)
+                  source_owner,review_after,metadata,approval_event_id,scope_approval_event_id
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s::jsonb,%s,%s)
                 """,
                 (
-                    key, project_id, knowledge_type, redact_text(title), redact_text(statement), status, json.dumps(safe_scope),
-                    confidence, source_owner, review_after, json.dumps(safe_meta), approval_id,
+                    key, project_id, knowledge_type, safe_title, safe_statement, status,
+                    json.dumps(safe_scope), confidence, source_owner, review_after, json.dumps(safe_meta),
+                    approval_id, scope_approval_id,
                 ),
             )
         return key
@@ -155,7 +180,15 @@ class KnowledgeService:
                 raise ValueError(f"{row['knowledge_type']} cannot become {target} without attached evidence")
             approval_id = None
             if target == "canonical" and row["knowledge_type"] in _APPROVAL_REQUIRED_TYPES:
-                approval_id = _approval_id(conn, approval_key, row["project_id"], knowledge_key)
+                if row["project_id"] is None:
+                    approval_id = require_company_approval(
+                        conn,
+                        approval_key,
+                        "knowledge_publish",
+                        {"knowledge_key": knowledge_key, "target_status": target},
+                    ) if approval_key else None
+                else:
+                    approval_id = _approval_id(conn, approval_key, row["project_id"], knowledge_key)
                 if not approval_id:
                     existing = conn.execute(
                         "SELECT approval_event_id FROM vres.knowledge_items WHERE id=%s", (row["id"],)
