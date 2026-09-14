@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import json
 import uuid
-from contextlib import nullcontext
 from datetime import datetime
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+from .approvals import require_company_approval
 from .chunking import chunk_text
 from .redaction import redact, redact_text
 
@@ -44,12 +44,32 @@ class SourceService:
         path_or_uri: str | None = None, content_hash: str | None = None, version: str | None = None,
         project_id: int | None = None, authority_level: str | None = None,
         created_at: datetime | None = None, metadata: dict[str, Any] | None = None,
+        approval_key: str | None = None,
     ) -> tuple[str, int]:
-        if not source_type.strip() or not title.strip():
+        source_type = source_type.strip()
+        if not source_type or not title.strip():
             raise ValueError("source_type and title are required")
+        safe_title = redact_text(title)
         safe_meta = redact(metadata or {})
         safe_uri = _safe_uri(path_or_uri)
         safe_origin = redact_text(origin) if origin else origin
+        scope_approval_id = None
+        if project_id is None:
+            scope_approval_id = require_company_approval(
+                conn,
+                approval_key,
+                "source_publish",
+                {
+                    "source_type": source_type,
+                    "title": safe_title,
+                    "origin": safe_origin,
+                    "path_or_uri": safe_uri,
+                    "content_hash": content_hash,
+                    "version": version,
+                    "authority_level": authority_level,
+                    "metadata": safe_meta,
+                },
+            )
         source_key = f"SRC-{uuid.uuid4().hex[:12]}"
         existing = None
         if content_hash:
@@ -62,17 +82,22 @@ class SourceService:
             ).fetchone()
         if existing:
             source_key, source_id = existing["source_key"], int(existing["id"])
+            if scope_approval_id is not None:
+                conn.execute(
+                    "UPDATE vres.sources SET scope_approval_event_id=COALESCE(scope_approval_event_id,%s) WHERE id=%s",
+                    (scope_approval_id, source_id),
+                )
         else:
             row = conn.execute(
                 """
                 INSERT INTO vres.sources(
                   source_key,source_type,title,origin,path_or_uri,content_hash,version,project_id,
-                  authority_level,created_at,metadata
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb) RETURNING id
+                  authority_level,created_at,metadata,scope_approval_event_id
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s) RETURNING id
                 """,
                 (
-                    source_key, source_type, redact_text(title), safe_origin, safe_uri, content_hash, version,
-                    project_id, authority_level, created_at, json.dumps(safe_meta),
+                    source_key, source_type, safe_title, safe_origin, safe_uri, content_hash, version,
+                    project_id, authority_level, created_at, json.dumps(safe_meta), scope_approval_id,
                 ),
             ).fetchone()
             source_id = int(row["id"])
