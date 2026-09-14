@@ -49,6 +49,7 @@ class ModelPolicyService:
                        percentile_cont(0.5) WITHIN GROUP (ORDER BY input_tokens+output_tokens) AS tokens
                   FROM vres.model_runs
                  WHERE phase=%s AND provider=%s AND model=%s
+                   AND measurement_source='reported'
                    AND (%s IS NULL OR effort=%s)
                    AND (%s IS NULL OR task_family=%s)
                    AND success IS NOT NULL AND quality_score IS NOT NULL AND runtime_ms IS NOT NULL
