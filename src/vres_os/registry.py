@@ -17,6 +17,28 @@ def _connect():
     return connect()
 
 
+def registry_publish_subject(
+    object_key: str,
+    object_type: str,
+    name: str,
+    description: str,
+    status: str,
+    version: str | None,
+    owner_role: str | None,
+    metadata: dict[str, Any] | None,
+) -> dict[str, Any]:
+    return {
+        "object_key": object_key.strip(),
+        "object_type": object_type.strip().lower(),
+        "name": redact_text(name),
+        "description": redact_text(description),
+        "status": status,
+        "version": version,
+        "owner_role": owner_role,
+        "metadata": redact(metadata or {}),
+    }
+
+
 class RegistryService:
     def register(
         self,
@@ -32,26 +54,20 @@ class RegistryService:
         metadata: dict[str, Any] | None = None,
         approval_key: str | None = None,
     ) -> str:
-        object_key = object_key.strip()
-        object_type = object_type.strip().lower()
+        subject = registry_publish_subject(
+            object_key, object_type, name, description, status, version, owner_role, metadata
+        )
+        object_key = subject["object_key"]
+        object_type = subject["object_type"]
+        name = subject["name"]
+        description = subject["description"]
+        safe_meta = subject["metadata"]
         if object_type not in _ALLOWED_TYPES:
             raise ValueError(f"Unsupported registry object type {object_type}")
         if not object_key or not name.strip():
             raise ValueError("object_key and name are required")
         if status not in {"active", "deprecated", "retired", "proposed"}:
             raise ValueError("Unsupported registry status")
-        name, description = redact_text(name), redact_text(description)
-        safe_meta = redact(metadata or {})
-        subject = {
-            "object_key": object_key,
-            "object_type": object_type,
-            "name": name,
-            "description": description,
-            "status": status,
-            "version": version,
-            "owner_role": owner_role,
-            "metadata": safe_meta,
-        }
         with _connect() as conn, conn.transaction():
             scope_approval_id = None
             if project_id is None:
@@ -68,7 +84,9 @@ class RegistryService:
             if existing and (
                 existing["object_type"] != object_type or existing["project_id"] != project_id
             ):
-                raise ValueError("Registry identity is immutable: object_type/project scope cannot change for an existing key")
+                raise ValueError(
+                    "Registry identity is immutable: object_type/project scope cannot change for an existing key"
+                )
             conn.execute(
                 """
                 INSERT INTO vres.registry_objects(
