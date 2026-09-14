@@ -15,7 +15,7 @@ Start here: [Windows installation](docs/INSTALL-WINDOWS.md) · [live verificatio
 - Knowledge sources, typed semantic relations with additive evidence, findings, approval-backed governance and immutable statements.
 - Accepted procedure contracts, correction history, retry-safe baseline registration, candidate records and explicit user decisions.
 - Protected Fable/high validator role, observed transcript/model checks, task/artifact fingerprints, stale-PASS rejection.
-- Model policy recommendations and advisory telemetry. Model-run provenance distinguishes ordinary caller-reported telemetry from a separately reserved host-observed evidence class with exact input/output digests and execution evidence; no host model-experiment writer or automatic model-policy mutation is enabled yet.
+- Model policy recommendations and advisory telemetry. Model-run provenance distinguishes ordinary caller-reported telemetry from a separately reserved host-observed evidence class with exact input/output digests and execution evidence. Migration 014 additionally provides an immutable paired model-experiment attestation path bound to protected validation. CI proves that state machine with synthetic provider envelopes; no live provider experiment runner or automatic model-policy mutation is enabled yet.
 - Bounded read-only Codex review execution.
 - Optional local embedding jobs with retry/lease protection and a bounded semantic fallback when pgvector is absent.
 - Research refresh records tied to an actual reviewed JSON artifact.
@@ -26,19 +26,19 @@ Start here: [Windows installation](docs/INSTALL-WINDOWS.md) · [live verificatio
 - Project-scoped automatic promotion for that registered executor path: protected contracts must remain identical, baseline and candidate must run on the exact same input, protected validation must attest output equivalence/no protected regression, and the candidate must be Pareto-superior. Deterministic recipes do not invent a stored quality score; host-observed output equivalence supplies the no-regression quality basis for the gate.
 - Company-wide promotion for that same bounded executor path only under explicit authority. Creating the exact global candidate requires a company optimization approval; after runtime measurement and protected replay attestation, making that exact candidate globally preferred requires a fresh promotion approval bound to the replay, versions, run IDs, validation request, digests and contract fingerprints. No approval is inferred from the baseline publication or from technical superiority alone.
 
-These mechanisms have different evidence levels. Local tests execute Python/parsers/subprocesses. GitHub CI also executes the full suite against PostgreSQL 16, including migrations 010–013, company publication/baseline authority, replay → protected validation → attestation → promotion, the real bounded-worker baseline/candidate journey, reported-vs-host model-run provenance, and the three-approval company optimization journey. Windows PowerShell/credential handling, actual Claude/Codex model experiments, target-Windows execution of the bounded worker and real embeddings still need their live gates.
+These mechanisms have different evidence levels. Local tests execute Python/parsers/subprocesses. GitHub CI also executes the full suite against PostgreSQL 16, including migrations 010–014, company publication/baseline authority, replay → protected validation → attestation → promotion, the real bounded-worker baseline/candidate journey, reported-vs-host model-run provenance, the three-approval company optimization journey, and the model-experiment evidence state machine using synthetic provider envelopes. Windows PowerShell/credential handling, actual Claude/Codex model experiments, target-Windows execution of the bounded worker and real embeddings still need their live gates.
 
 ## What is deliberately not claimed
 
 **General automatic optimization is still held.** Project-scoped procedures using the registered deterministic JSON executor can enter the measured replay/attestation/Pareto auto-promotion path. Company-wide procedures using that executor can be optimized only through explicit candidate and promotion approvals around the same evidence chain. None of this authorizes arbitrary Python, shell commands, arbitrary implementation references, LLM-generated executable code, caller-supplied measurements, or unattended global replacement. Ordinary `procedure_evaluate_candidate` remains non-promoting.
 
-**Learned automatic model replacement is still held.** Ordinary model telemetry is explicitly marked `reported`, and the schema reserves a separate `host` evidence class with exact digests/evidence. No ordinary MCP telemetry call can become host evidence. Vres still lacks a live-provider experiment runner that can execute comparable model candidates and capture trustworthy provider-emitted usage/identity, and no model policy is automatically mutated from telemetry.
+**Learned automatic model replacement is still held.** Ordinary model telemetry is explicitly marked `reported`, and the schema reserves a separate `host` evidence class with exact digests/evidence. Migration 014 can attest a paired host-evidence experiment only after same-input checks and protected Fable validation, but the current CI producer is synthetic rather than a live vendor adapter. No ordinary MCP telemetry call can become host evidence, a single paired observation is never model-policy authority, and no model policy is automatically mutated from telemetry or experiment evidence.
 
 **Company-wide authority is explicit, not ambient.** Ordinary project tools still default to the current project and reject global writes. Dedicated `company_*` tools can publish approved sources, knowledge, registry objects, capability definitions and accepted procedure baselines only after an exact-subject approval. Existing global seeds remain readable. For a company-wide registered procedure, baseline acceptance, candidate creation and final attested promotion are distinct authority events; approval of one cannot be silently broadened into another.
 
 **Continuity is checkpoint recovery, not magical memory.** Persisted state survives; unsaved reasoning does not. Native Claude compaction is supported by hooks, but Vres does not own transparent arbitrary context rollover. Several unfinished tasks require explicit disambiguation when a new session has no binding.
 
-**Review evidence is host-observed, not cryptographic attestation.** A local user/process with the same credentials and arbitrary execution can bypass cooperative workflow controls. Native tools are not an OS security boundary. Replay attestations improve application provenance; they do not create a cryptographic root of trust.
+**Review evidence is host-observed, not cryptographic attestation.** A local user/process with the same credentials and arbitrary execution can bypass cooperative workflow controls. Native tools are not an OS security boundary. Replay and model-experiment attestations improve application provenance; they do not create a cryptographic root of trust.
 
 **Registered recipes are not a general verified executable compiler.** Vres can execute the bounded code-owned JSON recipe family described above, but it does not treat arbitrary procedure text, Python, shell, external programs or generated code as trusted executable recipes. New executor families require explicit code registration plus their own input/output, permission and validation contracts.
 
@@ -72,7 +72,7 @@ User ↔ Chairman
           ├─ Directors / temporary capabilities
           ├─ PostgreSQL: tasks, sessions, findings, procedures, approvals
           ├─ Sources / bounded ingestion / retrieval / optional embeddings
-          ├─ Protected validator / artifact fingerprints / replay attestations
+          ├─ Protected validator / artifact fingerprints / replay/model experiment attestations
           ├─ Registered deterministic procedure worker / runtime evidence
           └─ Native execution adapters: Claude tools, read-only Codex
 ```

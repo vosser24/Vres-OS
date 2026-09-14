@@ -88,6 +88,18 @@ def test_company_optimization_migration_separates_candidate_and_promotion_author
     assert "idx_optimization_candidate_approvals" in sql
 
 
+def test_model_experiment_migration_binds_host_runs_to_protected_validation():
+    sql = _migration("014_model_experiment_attestation.sql")
+    assert "vres.model_experiment_attestations" in sql
+    assert "baseline_run_id" in sql and "candidate_run_id" in sql
+    assert "validation_request_id" in sql
+    assert "baseline_identity" in sql and "candidate_identity" in sql
+    assert "candidate_quality_not_worse" in sql
+    assert "protected_regression" in sql
+    assert sql.count("ON DELETE RESTRICT") >= 3
+    assert "idx_model_experiment_phase" in sql
+
+
 def test_initial_migration_does_not_make_pg_trgm_a_hard_requirement():
     sql = _migration("001_initial.sql")
     assert "pg_available_extensions" in sql
