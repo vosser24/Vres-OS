@@ -68,6 +68,24 @@ def _contract_fingerprint(
     )
 
 
+def _candidate_experiment_key(
+    *,
+    procedure_key: str,
+    baseline_version: int,
+    method: list[Any],
+    implementation_ref: str,
+) -> str:
+    return fingerprint(
+        {
+            "kind": "registered-executor-candidate",
+            "procedure_key": procedure_key,
+            "baseline_version": int(baseline_version),
+            "method": method,
+            "implementation_ref": implementation_ref,
+        }
+    )
+
+
 def company_candidate_subject(
     *,
     procedure_key: str,
@@ -146,22 +164,36 @@ class ProcedureExecutorService:
                 )
             if baseline["method"] == method:
                 raise ValueError("Candidate recipe is identical to the preferred baseline")
-            next_version = int(
-                conn.execute(
-                    "SELECT COALESCE(MAX(version_no),0) AS n FROM vres.procedure_versions "
-                    "WHERE procedure_id=%s",
-                    (proc["id"],),
-                ).fetchone()["n"]
-            ) + 1
+            experiment_key = _candidate_experiment_key(
+                procedure_key=procedure_key,
+                baseline_version=int(baseline["version_no"]),
+                method=method,
+                implementation_ref=implementation_ref,
+            )
+            prior = conn.execute(
+                "SELECT candidate_version FROM vres.optimization_candidates "
+                "WHERE procedure_id=%s AND experiment_key=%s",
+                (proc["id"], experiment_key),
+            ).fetchone()
+            if prior:
+                candidate_version = int(prior["candidate_version"])
+            else:
+                candidate_version = int(
+                    conn.execute(
+                        "SELECT COALESCE(MAX(version_no),0) AS n FROM vres.procedure_versions "
+                        "WHERE procedure_id=%s",
+                        (proc["id"],),
+                    ).fetchone()["n"]
+                ) + 1
             subject = company_candidate_subject(
                 procedure_key=procedure_key,
                 proc=proc,
                 baseline=baseline,
-                candidate_version=next_version,
+                candidate_version=candidate_version,
                 method=method,
                 implementation_ref=implementation_ref,
             )
-        return {"candidate_version": next_version, "subject": subject}
+        return {"candidate_version": candidate_version, "subject": subject}
 
     def register_candidate(
         self,
@@ -206,14 +238,11 @@ class ProcedureExecutorService:
                 )
             if baseline["method"] == method:
                 raise ValueError("Candidate recipe is identical to the preferred baseline")
-            experiment_key = fingerprint(
-                {
-                    "kind": "registered-executor-candidate",
-                    "procedure_key": procedure_key,
-                    "baseline_version": int(baseline["version_no"]),
-                    "method": method,
-                    "implementation_ref": implementation_ref,
-                }
+            experiment_key = _candidate_experiment_key(
+                procedure_key=procedure_key,
+                baseline_version=int(baseline["version_no"]),
+                method=method,
+                implementation_ref=implementation_ref,
             )
             prior = conn.execute(
                 "SELECT candidate_version,decision,reason,candidate_approval_event_id "
