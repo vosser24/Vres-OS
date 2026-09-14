@@ -110,6 +110,13 @@ skipped PostgreSQL integration modules**. Both lint layers, installed-wheel smok
 The uploaded release-gate evidence artifact for that run was ID `10343711282`; the uploaded ZIP SHA-256 was
 `3b9b4d04f23088638970a70942abb07b642ceed819f266fd112e2730717db395`.
 
+The exact final documentation head `92ba4c5e3302dfbeb154a55ae661294756e8abe4` repeated the complete gate in
+GitHub Actions run `34838586900`, job `103958023228`: both lint layers passed, the PostgreSQL 16 suite passed
+**277/277**, installed-wheel smoke through migration 014 passed, and the credential-stripped local gate passed
+**270 tests with 7 intentionally skipped PostgreSQL integration modules**. Evidence upload and cleanup also
+passed. The final uploaded release-gate evidence artifact for that exact head was ID `10345326260`; its ZIP
+SHA-256 was `3b2801fdf3be14a41be69d6e869533144e29a6a11603eb264611927083210f08`.
+
 The bounded executor and company optimization evidence remain deliberately narrow. They prove the registered
 JSON recipe implementation and exact-approved global authority workflow on the recorded Linux/Python runner,
 not arbitrary Python or shell execution, not a universal procedure compiler, not unattended company-wide
