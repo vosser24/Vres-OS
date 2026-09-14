@@ -66,6 +66,7 @@ jobs:
           tests/test_executor.py
           tests/test_procedure_recipe.py
           tests/integration/test_company_authority_journey.py
+          tests/integration/test_company_optimization_journey.py
           tests/integration/test_replay_attestation_journey.py
           tests/integration/test_bounded_executor_journey.py
           --ignore E501,I001
@@ -78,7 +79,7 @@ jobs:
           python -c "import importlib.resources, vres_os.company_mcp as c, vres_os.replay as r,
           vres_os.executor as e, vres_os.procedure_worker as w;
           assert callable(c.main) and hasattr(r, 'ReplayService') and hasattr(e, 'ProcedureExecutorService') and callable(w.main);
-          assert len(list(importlib.resources.files('vres_os').joinpath('migrations').iterdir())) >= 11"
+          assert len(list(importlib.resources.files('vres_os').joinpath('migrations').iterdir())) >= 12"
 
       - name: Local release gate
         run: |
