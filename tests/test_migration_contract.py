@@ -67,8 +67,18 @@ def test_optimization_attestation_migration_separates_reported_and_runtime_evide
     assert "ON DELETE RESTRICT" in sql
 
 
+def test_model_run_provenance_migration_separates_reported_and_host_evidence():
+    sql = _migration("012_model_run_provenance.sql")
+    assert "ALTER TABLE vres.model_runs" in sql
+    assert "measurement_source" in sql
+    assert "'reported','host'" in sql
+    assert "input_digest" in sql and "output_digest" in sql
+    assert "execution_evidence" in sql
+    assert "idx_model_runs_measurement_source" in sql
+
+
 def test_company_optimization_migration_separates_candidate_and_promotion_authority():
-    sql = _migration("012_company_optimization_authority.sql")
+    sql = _migration("013_company_optimization_authority.sql")
     assert "ALTER TABLE vres.procedure_versions" in sql
     assert "scope_approval_event_id" in sql
     assert "candidate_approval_event_id" in sql
