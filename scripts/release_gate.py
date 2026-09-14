@@ -92,7 +92,7 @@ def structure():
     migrations = sorted((ROOT / 'src/vres_os/migrations').glob('*.sql'))
     numbers = [int(p.name[:3]) for p in migrations]
     assert numbers == list(range(1, len(migrations)+1)), numbers
-    assert len(migrations) >= 12
+    assert len(migrations) >= 13
     for p in migrations:
         if p.name in baseline:
             assert digest(p.read_bytes()) == baseline[p.name], f'Recovered migration changed: {p.name}'
@@ -122,6 +122,8 @@ def structure():
         'company_registry_register',
         'company_capability_register',
         'company_procedure_accept',
+        'company_procedure_candidate_register',
+        'company_procedure_replay_promote',
         'procedure_executor_catalog',
         'procedure_candidate_register',
         'procedure_registered_execute',
@@ -177,9 +179,9 @@ assert hasattr(vres_os.replay, 'ReplayService')
 assert hasattr(vres_os.executor, 'ProcedureExecutorService')
 assert callable(vres_os.procedure_worker.main)
 assert hasattr(vres_os.model_policy, 'ModelPolicyService')
-assert len(list(importlib.resources.files('vres_os').joinpath('migrations').iterdir())) >= 12
+assert len(list(importlib.resources.files('vres_os').joinpath('migrations').iterdir())) >= 13
 print('installed runtime source:', vres_os.__file__)
-print('selected imports, authority/replay/executor/model-provenance surfaces and migration resources: passed')
+print('selected imports, authority/replay/executor/model-provenance/company-optimization surfaces and migration resources: passed')
 """
         command([sys.executable, '-I', '-X', 'utf8', '-c', smoke, str(target)], output, 'wheel-import-smoke', cwd=Path(d), env=env)
     return {'filename': path.name, 'sha256': digest(path.read_bytes()), 'bytes': path.stat().st_size,

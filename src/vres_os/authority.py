@@ -11,6 +11,7 @@ COMPANY_ACTIONS = frozenset(
         "source_publish",
         "knowledge_publish",
         "procedure_accept",
+        "procedure_optimize",
         "registry_publish",
         "capability_register",
     }

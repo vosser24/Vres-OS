@@ -5,6 +5,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from .approvals import require_company_approval
 from .metrics import validate_metrics
 from .optimization import contracts_equivalent, pareto_gate
 from .procedures import fingerprint
@@ -123,6 +124,86 @@ def _attested_quality_pair(
     if baseline_quality is None or candidate_quality is None:
         return None, None
     return float(baseline_quality), float(candidate_quality)
+
+
+def _technical_assessment(
+    attestation: dict[str, Any],
+    baseline: dict[str, Any],
+    candidate: dict[str, Any],
+) -> dict[str, Any]:
+    stale = (
+        int(baseline["preferred_version"]) != int(attestation["baseline_version"])
+        or candidate["version_status"] != "candidate"
+        or baseline["effective_contract_fingerprint"]
+        != attestation["baseline_contract_fingerprint"]
+        or candidate["effective_contract_fingerprint"]
+        != attestation["candidate_contract_fingerprint"]
+    )
+    if stale:
+        return {"auto_promote": False, "reason": "replay attestation is stale"}
+    baseline_quality, candidate_quality = _attested_quality_pair(
+        baseline, candidate, bool(attestation["output_equivalent"])
+    )
+    gate = pareto_gate(
+        baseline_quality=baseline_quality,
+        candidate_quality=candidate_quality,
+        baseline_runtime_ms=(
+            int(baseline["runtime_ms"]) if baseline["runtime_ms"] is not None else None
+        ),
+        candidate_runtime_ms=(
+            int(candidate["runtime_ms"]) if candidate["runtime_ms"] is not None else None
+        ),
+        baseline_tokens=(
+            int(baseline["input_tokens"]) + int(baseline["output_tokens"])
+            if baseline["input_tokens"] is not None and baseline["output_tokens"] is not None
+            else None
+        ),
+        candidate_tokens=(
+            int(candidate["input_tokens"]) + int(candidate["output_tokens"])
+            if candidate["input_tokens"] is not None and candidate["output_tokens"] is not None
+            else None
+        ),
+        protected_regression=bool(attestation["protected_regression"])
+        or not bool(attestation["output_equivalent"]),
+        validation_passed=True,
+    )
+    return {
+        "auto_promote": gate.auto_promote,
+        "reason": gate.reason,
+        "replay_key": attestation["replay_key"],
+        "quality_basis": (
+            "host-observed output equivalence"
+            if baseline.get("quality_score") is None and candidate.get("quality_score") is None
+            else "runtime quality metrics"
+        ),
+    }
+
+
+def company_promotion_subject(
+    attestation: dict[str, Any],
+    baseline: dict[str, Any],
+    candidate: dict[str, Any],
+) -> dict[str, Any]:
+    """Return the exact subject authorized to make one attested global candidate preferred."""
+    return {
+        "phase": "promote_attested",
+        "decision": "company_promoted",
+        "procedure_key": baseline["procedure_key"],
+        "expected_preferred_version": int(attestation["baseline_version"]),
+        "candidate_version": int(attestation["candidate_version"]),
+        "replay_key": attestation["replay_key"],
+        "replay_attestation_id": int(attestation["id"]),
+        "baseline_run_id": int(attestation["baseline_run_id"]),
+        "candidate_run_id": int(attestation["candidate_run_id"]),
+        "validation_request_id": int(attestation["validation_request_id"]),
+        "input_digest": attestation["input_digest"],
+        "baseline_output_digest": baseline["output_digest"],
+        "candidate_output_digest": candidate["output_digest"],
+        "baseline_contract_fingerprint": attestation["baseline_contract_fingerprint"],
+        "candidate_contract_fingerprint": attestation["candidate_contract_fingerprint"],
+        "output_equivalent": bool(attestation["output_equivalent"]),
+        "protected_regression": bool(attestation["protected_regression"]),
+    }
 
 
 class ReplayService:
@@ -319,6 +400,7 @@ class ReplayService:
             ).fetchone()
             if not attestation:
                 raise KeyError(replay_key)
+            attestation = dict(attestation)
             baseline = _runtime_run(conn, int(attestation["baseline_run_id"]))
             candidate = _runtime_run(conn, int(attestation["candidate_run_id"]))
             _assert_pair(baseline, candidate)
@@ -331,51 +413,30 @@ class ReplayService:
                 ),
                 "replay_key": replay_key,
             }
-        stale = (
-            int(baseline["preferred_version"]) != int(attestation["baseline_version"])
-            or candidate["version_status"] != "candidate"
-            or baseline["effective_contract_fingerprint"]
-            != attestation["baseline_contract_fingerprint"]
-            or candidate["effective_contract_fingerprint"]
-            != attestation["candidate_contract_fingerprint"]
-        )
-        if stale:
-            return {"auto_promote": False, "reason": "replay attestation is stale"}
-        baseline_quality, candidate_quality = _attested_quality_pair(
-            baseline, candidate, bool(attestation["output_equivalent"])
-        )
-        gate = pareto_gate(
-            baseline_quality=baseline_quality,
-            candidate_quality=candidate_quality,
-            baseline_runtime_ms=(
-                int(baseline["runtime_ms"]) if baseline["runtime_ms"] is not None else None
-            ),
-            candidate_runtime_ms=(
-                int(candidate["runtime_ms"]) if candidate["runtime_ms"] is not None else None
-            ),
-            baseline_tokens=(
-                int(baseline["input_tokens"]) + int(baseline["output_tokens"])
-                if baseline["input_tokens"] is not None and baseline["output_tokens"] is not None
-                else None
-            ),
-            candidate_tokens=(
-                int(candidate["input_tokens"]) + int(candidate["output_tokens"])
-                if candidate["input_tokens"] is not None and candidate["output_tokens"] is not None
-                else None
-            ),
-            protected_regression=bool(attestation["protected_regression"])
-            or not bool(attestation["output_equivalent"]),
-            validation_passed=True,
-        )
+        return _technical_assessment(attestation, baseline, candidate)
+
+    def preview_company_promotion(self, replay_key: str) -> dict[str, Any]:
+        with _connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM vres.procedure_replay_attestations WHERE replay_key=%s",
+                (replay_key,),
+            ).fetchone()
+            if not row:
+                raise KeyError(replay_key)
+            attestation = dict(row)
+            baseline = _runtime_run(conn, int(attestation["baseline_run_id"]))
+            candidate = _runtime_run(conn, int(attestation["candidate_run_id"]))
+            _assert_pair(baseline, candidate)
+        if baseline.get("project_id") is not None:
+            raise ValueError("Company promotion preview requires a company-wide procedure")
+        assessment = _technical_assessment(attestation, baseline, candidate)
+        if not assessment["auto_promote"]:
+            raise ValueError(
+                f"Company replay is not technically eligible for promotion: {assessment['reason']}"
+            )
         return {
-            "auto_promote": gate.auto_promote,
-            "reason": gate.reason,
-            "replay_key": replay_key,
-            "quality_basis": (
-                "host-observed output equivalence"
-                if baseline.get("quality_score") is None and candidate.get("quality_score") is None
-                else "runtime quality metrics"
-            ),
+            "subject": company_promotion_subject(attestation, baseline, candidate),
+            "assessment": assessment,
         }
 
     def promote_attested(self, replay_key: str) -> dict[str, Any]:
@@ -447,4 +508,121 @@ class ReplayService:
             "decision": "auto_promoted",
             "preferred_version": int(attestation["candidate_version"]),
             "replay_key": replay_key,
+        }
+
+    def promote_company_attested(
+        self,
+        replay_key: str,
+        approval_key: str | None,
+    ) -> dict[str, Any]:
+        with _connect() as conn, conn.transaction():
+            row = conn.execute(
+                "SELECT * FROM vres.procedure_replay_attestations "
+                "WHERE replay_key=%s FOR UPDATE",
+                (replay_key,),
+            ).fetchone()
+            if not row:
+                raise KeyError(replay_key)
+            attestation = dict(row)
+            baseline = _runtime_run(conn, int(attestation["baseline_run_id"]))
+            candidate_run = _runtime_run(conn, int(attestation["candidate_run_id"]))
+            _assert_pair(baseline, candidate_run)
+            if baseline.get("project_id") is not None:
+                raise ValueError("Company promotion requires a company-wide procedure")
+            subject = company_promotion_subject(attestation, baseline, candidate_run)
+            decision = conn.execute(
+                """
+                SELECT id,decision,replay_attestation_id,candidate_approval_event_id,
+                       promotion_approval_event_id
+                  FROM vres.optimization_candidates
+                 WHERE procedure_id=%s AND candidate_version=%s FOR UPDATE
+                """,
+                (attestation["procedure_id"], attestation["candidate_version"]),
+            ).fetchone()
+            if not decision:
+                raise ValueError("Company optimization decision record is missing")
+            if decision["decision"] == "company_promoted":
+                promotion_approval_id = require_company_approval(
+                    conn,
+                    approval_key,
+                    "procedure_optimize",
+                    subject,
+                )
+                if decision["promotion_approval_event_id"] != promotion_approval_id:
+                    raise ValueError("Existing company promotion is bound to another exact approval")
+                return {
+                    "decision": "company_promoted",
+                    "preferred_version": int(attestation["candidate_version"]),
+                    "replay_key": replay_key,
+                    "replayed_request": True,
+                }
+            if decision["decision"] != "pending":
+                raise ValueError("Company optimization candidate is no longer pending")
+            if not decision["candidate_approval_event_id"]:
+                raise ValueError("Company optimization candidate lacks exact candidate authority")
+            if decision["replay_attestation_id"] != attestation["id"]:
+                raise ValueError("Company optimization decision is not bound to this replay attestation")
+            proc = conn.execute(
+                "SELECT preferred_version FROM vres.procedures WHERE id=%s FOR UPDATE",
+                (attestation["procedure_id"],),
+            ).fetchone()
+            if int(proc["preferred_version"]) != int(attestation["baseline_version"]):
+                raise ValueError("Preferred baseline changed before company promotion")
+            candidate = conn.execute(
+                """
+                SELECT id,status,scope_approval_event_id
+                  FROM vres.procedure_versions
+                 WHERE procedure_id=%s AND version_no=%s FOR UPDATE
+                """,
+                (attestation["procedure_id"], attestation["candidate_version"]),
+            ).fetchone()
+            if not candidate or candidate["status"] != "candidate":
+                raise ValueError("Company candidate changed before promotion")
+            if candidate["scope_approval_event_id"] != decision["candidate_approval_event_id"]:
+                raise ValueError("Company candidate scope provenance does not match its optimization decision")
+            assessment = _technical_assessment(attestation, baseline, candidate_run)
+            if not assessment["auto_promote"]:
+                raise ValueError(
+                    f"Company replay is not technically eligible for promotion: {assessment['reason']}"
+                )
+            promotion_approval_id = require_company_approval(
+                conn,
+                approval_key,
+                "procedure_optimize",
+                subject,
+            )
+            conn.execute(
+                "UPDATE vres.procedure_versions SET status='superseded' "
+                "WHERE procedure_id=%s AND version_no=%s",
+                (attestation["procedure_id"], attestation["baseline_version"]),
+            )
+            conn.execute(
+                """
+                UPDATE vres.procedure_versions
+                   SET status='preferred',accepted_by='company-runtime-replay',accepted_at=now(),
+                       approval_event_id=%s,scope_approval_event_id=%s
+                 WHERE id=%s
+                """,
+                (promotion_approval_id, promotion_approval_id, candidate["id"]),
+            )
+            conn.execute(
+                "UPDATE vres.procedures SET preferred_version=%s,updated_at=now() WHERE id=%s",
+                (attestation["candidate_version"], attestation["procedure_id"]),
+            )
+            conn.execute(
+                """
+                UPDATE vres.optimization_candidates
+                   SET decision='company_promoted',replay_attestation_id=%s,
+                       promotion_approval_event_id=%s,
+                       reason='company-authorized host-observed Pareto-superior paired replay'
+                 WHERE id=%s
+                """,
+                (attestation["id"], promotion_approval_id, decision["id"]),
+            )
+        return {
+            "decision": "company_promoted",
+            "preferred_version": int(attestation["candidate_version"]),
+            "replay_key": replay_key,
+            "replayed_request": False,
+            "quality_basis": assessment.get("quality_basis"),
         }

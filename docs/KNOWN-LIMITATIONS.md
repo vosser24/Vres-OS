@@ -8,7 +8,7 @@ A green local release gate does not change the boundaries below.
 
 | Capability | Actual preview behavior | What is required before enabling the larger promise |
 |---|---|---|
-| General automatic procedural optimization | Caller-reported telemetry remains non-promoting. Project-scoped procedures using the code-owned `vres:builtin:json-recipe:v1` executor can create a protected-contract-identical candidate, generate runtime-owned paired measurements on the same input, bind them to protected replay validation, and auto-promote only after output-equivalence/no-regression attestation and Pareto superiority. Company-wide automatic promotion is rejected in both the candidate and replay service paths. | Target-Windows executor acceptance; fault/concurrency/rollback testing; dedicated company optimization authority before global promotion; and separate registration/evidence for any additional executor family. |
+| General automatic procedural optimization | Caller-reported telemetry remains non-promoting. Project-scoped procedures using the code-owned `vres:builtin:json-recipe:v1` executor can create a protected-contract-identical candidate, generate runtime-owned paired measurements on the same input, bind them to protected replay validation, and auto-promote only after output-equivalence/no-regression attestation and Pareto superiority. Company-wide procedures using that same executor can enter the same measured replay path only through explicit authority: exact candidate creation requires one `company_procedure_optimize` approval, and final attested promotion requires a fresh exact approval bound to the replay evidence. | Target-Windows executor acceptance; fault/concurrency/rollback testing; an explicit policy if unattended company-wide replacement is ever desired; and separate registration/evidence for any additional executor family. |
 | Learned automatic model replacement | Recommendations use registered policies. Ordinary `model_record_run` telemetry is explicitly persisted as `measurement_source='reported'`. Migration 012 reserves a separate `host` evidence class plus exact input/output digests and execution evidence, but there is no host model-experiment writer and no telemetry path can mutate model policy. | A live-provider experiment path that proves exact model identity and provider-emitted usage on comparable inputs, independent quality/equivalence evaluation, and a separate policy-promotion authority. Protected validation must remain non-downshiftable. |
 | Arbitrary transparent session replacement | Hooks checkpoint and restore material state around native sessions/compaction. There is no custom terminal host that replaces every Claude context invisibly. | Actual host lifecycle implementation and end-to-end tests. |
 | Infinite nested executive hierarchy | Chairman coordinates ordinary subagents; directors return staffing requests rather than recursively spawning unsupported workers. | Supported nested runtime or a separately tested external coordinator. |
@@ -21,12 +21,12 @@ A green local release gate does not change the boundaries below.
 ## Executed and unexecuted target dependencies
 
 Repository CI starts PostgreSQL 16, applies the packaged migrations through the guarded integration fixture,
-and runs the full test suite including company-authority, optimization-replay and bounded-executor journeys. The
-authority journey covers exact-approved global sources, durable knowledge, registry objects, capability
-definitions and accepted procedure baselines, including scope provenance and changed-content rejection. The
-replay journey covers a reported candidate that cannot self-promote, runtime-classified baseline/candidate runs
-on the same input, frozen replay context, an observed Fable validator completion, replay attestation, Pareto
-assessment and promotion with retained evidence provenance.
+and runs the full test suite including company-authority, optimization-replay, bounded-executor and company-
+optimization journeys. The authority journey covers exact-approved global sources, durable knowledge, registry
+objects, capability definitions and accepted procedure baselines, including scope provenance and changed-content
+rejection. The replay journey covers a reported candidate that cannot self-promote, runtime-classified
+baseline/candidate runs on the same input, frozen replay context, an observed Fable validator completion, replay
+attestation, Pareto assessment and promotion with retained evidence provenance.
 
 The bounded-executor journey goes further: it creates a project-scoped accepted procedure using the registered
 JSON recipe implementation, registers a protected-contract-identical candidate, executes the baseline and
@@ -35,7 +35,7 @@ worker-produced timing and canonical input/output digests as runtime evidence, v
 records the protected replay validation, and promotes the measured Pareto-superior candidate. The executor does
 not persist a fabricated quality score; when both deterministic runs lack a numeric quality score, the exact
 protected-contract replay plus host-observed output equivalence supplies only the no-quality-regression basis for
-the Pareto gate. The full PostgreSQL CI run for that tranche passed 254 tests on the recorded Linux runner.
+the Pareto gate. The bounded-executor tranche passed 254 tests on its recorded Linux/PostgreSQL head.
 
 Migration `012_model_run_provenance.sql` has also executed against PostgreSQL 16 in CI. It preserves existing
 model telemetry as `reported` and reserves `host` provenance plus input/output digests and execution evidence for
@@ -44,11 +44,19 @@ than relying on the schema default. The provenance-only validation head passed 2
 This does **not** mean a Claude/Codex model experiment was run: no host-evidence writer exists in that tranche,
 and no model policy changed.
 
-That is real Linux/Python/PostgreSQL execution of the tested registered executor and model-run provenance schema.
-It is not Windows acceptance, production-load testing, lock-contention proof, a universal recipe sandbox, or
-proof that live provider model usage can be measured comparably. Company-wide procedures are also not
-automatically replaceable: the automatic candidate and replay-promotion services fail closed for global scope
-pending dedicated company optimization authority.
+Migration `013_company_optimization_authority.sql` and the company optimization journey execute against the same
+disposable PostgreSQL 16 gate. The journey proves three distinct authority events: baseline publication,
+candidate creation and final attested promotion. Candidate and promotion approvals are stored separately, the
+promotion subject binds the replay attestation, run IDs, validation request, exact digests and contract
+fingerprints, and the candidate approval cannot be reused as the promotion approval. The retry-hardened code head
+passed 268 tests in the full PostgreSQL suite; the local credential-stripped gate passed 262 with six database
+integration modules intentionally skipped.
+
+That is real Linux/Python/PostgreSQL execution of the tested registered executor, model-run provenance schema and
+exact-approved global optimization workflow. It is not Windows acceptance, production-load testing,
+lock-contention proof, a universal recipe sandbox, proof that live provider model usage can be measured
+comparably, or authority for unattended company-wide replacement. Global optimization remains an explicit user
+authority boundary even when the candidate is technically Pareto-superior.
 
 This audit environment still has not executed the Windows/PowerShell installer, Windows Credential Manager,
 live Claude Code plugin/hooks/models, a live paired model experiment, the real MCP SDK transport, live Codex,
@@ -78,20 +86,23 @@ Project-local approvals point to a real persisted user turn and a specific actio
 writes add an exact redacted subject fingerprint and dedicated `company_<action>` approval type. Changing the
 approved company content changes that fingerprint and fails closed. Accepted company-wide procedure approval
 binds the reusable procedure contract, implementation reference and any initial baseline metrics to the same
-scope provenance stored on the procedure. Automatic global candidate registration and replay promotion are
-separately rejected; accepting a company-wide baseline does not silently authorize future automatic replacement.
-This is still application-level provenance, not a cryptographic signature or independent identity system.
-Conditional/ambiguous assent must not be broadened.
+scope provenance stored on the procedure. That baseline approval does not authorize optimization. A bounded
+company candidate requires a separate exact optimization approval, and making an attested candidate globally
+preferred requires another exact approval tied to the frozen replay evidence. Candidate and promotion provenance
+are stored separately and retries must use the same exact approval. This is still application-level provenance,
+not a cryptographic signature or independent identity system. Conditional/ambiguous assent must not be
+broadened.
 
-Model policies are shared operational routing state. The new `host` provenance label is only an evidence class;
-it is not authority to alter that shared policy. A future promotion path must independently establish the exact
+Model policies are shared operational routing state. The `host` provenance label is only an evidence class; it
+is not authority to alter that shared policy. A future promotion path must independently establish the exact
 policy subject and the authorization for changing it. The protected Fable/high validation role must not be
 silently replaced by empirical cost or token optimization.
 
 Replay evidence uses `RESTRICT` references from attestations/optimization decisions to the runs and validation
-request that justified promotion. This is intended to preserve the evidence chain. Administrators with direct
-DB privileges can still modify or delete data by operating outside the cooperative application workflow; Vres
-is not a tamper-proof ledger.
+request that justified promotion. Company optimization additionally retains exact candidate and promotion
+approval references. This is intended to preserve the evidence chain. Administrators with direct DB privileges
+can still modify or delete data by operating outside the cooperative application workflow; Vres is not a
+tamper-proof ledger.
 
 Redaction covers common credential patterns, not all possible secrets. The registered JSON executor also refuses
 payloads or recipe constants whose persisted redacted representation differs from the supplied value, because

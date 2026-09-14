@@ -207,5 +207,7 @@ def test_company_mcp_extension_is_the_installed_entrypoint():
         "company_registry_register",
         "company_capability_register",
         "company_procedure_accept",
+        "company_procedure_candidate_register",
+        "company_procedure_replay_promote",
     ]:
         assert f"def {function}(" in tools

@@ -77,6 +77,17 @@ def test_model_run_provenance_migration_separates_reported_and_host_evidence():
     assert "idx_model_runs_measurement_source" in sql
 
 
+def test_company_optimization_migration_separates_candidate_and_promotion_authority():
+    sql = _migration("013_company_optimization_authority.sql")
+    assert "ALTER TABLE vres.procedure_versions" in sql
+    assert "scope_approval_event_id" in sql
+    assert "candidate_approval_event_id" in sql
+    assert "promotion_approval_event_id" in sql
+    assert "'company_promoted'" in sql
+    assert "ON DELETE RESTRICT" in sql
+    assert "idx_optimization_candidate_approvals" in sql
+
+
 def test_initial_migration_does_not_make_pg_trgm_a_hard_requirement():
     sql = _migration("001_initial.sql")
     assert "pg_available_extensions" in sql

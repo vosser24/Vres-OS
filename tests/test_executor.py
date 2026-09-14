@@ -5,9 +5,47 @@ import json
 import pytest
 
 from test_audit_regressions import ScriptedConnection
-from vres_os.executor import ProcedureExecutorService
+from vres_os.authority import company_subject
+from vres_os.executor import (
+    ProcedureExecutorService,
+    company_candidate_subject,
+)
 from vres_os.procedure_recipe import BUILTIN_JSON_RECIPE_V1, canonical_json
 from vres_os.processes import run_bounded, worker_command
+
+
+def _global_proc() -> dict:
+    return {
+        "id": 3,
+        "project_id": None,
+        "preferred_version": 1,
+        "name": "Global recipe",
+        "description": "Global",
+        "task_family": "test",
+    }
+
+
+def _baseline() -> dict:
+    return {
+        "version_no": 1,
+        "input_contract": {
+            "type": "object",
+            "required": ["values"],
+            "properties": {"values": {"type": "array"}},
+            "additionalProperties": False,
+        },
+        "method": [{"op": "sort", "field": "values", "reverse": True}],
+        "invariants": ["same values"],
+        "validation_contract": ["exact output"],
+        "output_contract": {
+            "type": "object",
+            "required": ["values"],
+            "properties": {"values": {"type": "array"}},
+            "additionalProperties": False,
+        },
+        "implementation_ref": BUILTIN_JSON_RECIPE_V1,
+        "contract_fingerprint": None,
+    }
 
 
 def test_worker_allowlist_includes_only_named_vres_modules():
@@ -48,28 +86,127 @@ def test_executor_refuses_secret_like_input_before_database(monkeypatch):
         )
 
 
-def test_automatic_candidate_registration_rejects_company_scope(monkeypatch):
+def test_company_candidate_subject_binds_baseline_candidate_and_method():
+    proc = _global_proc()
+    baseline = _baseline()
+    method = [{"op": "sort", "field": "values"}]
+    subject = company_candidate_subject(
+        procedure_key="PROC-GLOBAL",
+        proc=proc,
+        baseline=baseline,
+        candidate_version=2,
+        method=method,
+        implementation_ref=BUILTIN_JSON_RECIPE_V1,
+    )
+    key, _ = company_subject("procedure_optimize", subject)
+    changed_version = company_candidate_subject(
+        procedure_key="PROC-GLOBAL",
+        proc=proc,
+        baseline=baseline,
+        candidate_version=3,
+        method=method,
+        implementation_ref=BUILTIN_JSON_RECIPE_V1,
+    )
+    changed_method = company_candidate_subject(
+        procedure_key="PROC-GLOBAL",
+        proc=proc,
+        baseline=baseline,
+        candidate_version=2,
+        method=[{"op": "pick", "fields": ["values"]}],
+        implementation_ref=BUILTIN_JSON_RECIPE_V1,
+    )
+    assert company_subject("procedure_optimize", changed_version)[0] != key
+    assert company_subject("procedure_optimize", changed_method)[0] != key
+
+
+def test_company_candidate_preview_reuses_existing_exact_experiment_version(monkeypatch):
+    import vres_os.executor as executor
+
+    method = [{"op": "sort", "field": "values"}]
+    conn = ScriptedConnection(
+        [
+            ("pg_advisory_xact_lock", None),
+            ("FROM vres.procedures", _global_proc()),
+            ("FROM vres.procedure_versions", _baseline()),
+            ("FROM vres.optimization_candidates", {"candidate_version": 2}),
+        ]
+    )
+    monkeypatch.setattr(executor, "_connect", lambda: conn)
+    preview = ProcedureExecutorService().preview_company_candidate(
+        procedure_key="PROC-GLOBAL",
+        method=method,
+    )
+    assert preview["candidate_version"] == 2
+    assert preview["subject"]["candidate_version"] == 2
+    assert not any("COALESCE(MAX(version_no),0)" in sql for sql, _ in conn.calls)
+
+
+def test_company_candidate_registration_fails_closed_without_exact_approval(monkeypatch):
     import vres_os.executor as executor
 
     conn = ScriptedConnection(
         [
             ("pg_advisory_xact_lock", None),
-            (
-                "FROM vres.procedures",
-                {
-                    "id": 3,
-                    "project_id": None,
-                    "preferred_version": 1,
-                    "name": "Global recipe",
-                    "description": "Global",
-                    "task_family": "test",
-                },
-            ),
+            ("FROM vres.procedures", _global_proc()),
+            ("FROM vres.procedure_versions", _baseline()),
+            ("FROM vres.optimization_candidates", None),
+            ("COALESCE(MAX(version_no),0)", {"n": 1}),
         ]
     )
     monkeypatch.setattr(executor, "_connect", lambda: conn)
-    with pytest.raises(ValueError, match="Company-wide automatic"):
+    with pytest.raises(ValueError, match="explicit exact-scope approval"):
         ProcedureExecutorService().register_candidate(
             procedure_key="PROC-GLOBAL",
             method=[{"op": "sort", "field": "values"}],
         )
+
+
+def test_company_candidate_registration_persists_exact_scope_provenance(monkeypatch):
+    import vres_os.executor as executor
+
+    proc = _global_proc()
+    baseline = _baseline()
+    method = [{"op": "sort", "field": "values"}]
+    subject = company_candidate_subject(
+        procedure_key="PROC-GLOBAL",
+        proc=proc,
+        baseline=baseline,
+        candidate_version=2,
+        method=method,
+        implementation_ref=BUILTIN_JSON_RECIPE_V1,
+    )
+    subject_key, _ = company_subject("procedure_optimize", subject)
+    conn = ScriptedConnection(
+        [
+            ("pg_advisory_xact_lock", None),
+            ("FROM vres.procedures", proc),
+            ("FROM vres.procedure_versions", baseline),
+            ("FROM vres.optimization_candidates", None),
+            ("COALESCE(MAX(version_no),0)", {"n": 1}),
+            (
+                "FROM vres.approval_events",
+                {
+                    "id": 77,
+                    "project_id": 9,
+                    "approval_type": "company_procedure_optimize",
+                    "subject_key": subject_key,
+                },
+            ),
+            ("INSERT INTO vres.procedure_versions", None),
+            ("INSERT INTO vres.optimization_candidates", None),
+        ]
+    )
+    monkeypatch.setattr(executor, "_connect", lambda: conn)
+    result = ProcedureExecutorService().register_candidate(
+        procedure_key="PROC-GLOBAL",
+        method=method,
+        approval_key="APPROVAL-GLOBAL",
+    )
+    assert result["candidate_version"] == 2
+    assert result["company_wide"] is True
+    version_insert = next(call for call in conn.calls if "INSERT INTO vres.procedure_versions" in call[0])
+    candidate_insert = next(
+        call for call in conn.calls if "INSERT INTO vres.optimization_candidates" in call[0]
+    )
+    assert version_insert[1][-1] == 77
+    assert candidate_insert[1][-1] == 77

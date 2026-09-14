@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .approvals import require_company_approval
 from .procedure_recipe import (
     BUILTIN_JSON_RECIPE_V1,
     canonical_json,
@@ -41,6 +42,77 @@ def registered_implementation_refs() -> tuple[str, ...]:
     return (BUILTIN_JSON_RECIPE_V1,)
 
 
+def _contract_fingerprint(
+    proc: dict[str, Any],
+    version: dict[str, Any],
+    *,
+    method: list[Any] | None = None,
+    implementation_ref: str | None = None,
+) -> str:
+    if method is None and implementation_ref is None and version.get("contract_fingerprint"):
+        return str(version["contract_fingerprint"])
+    return fingerprint(
+        {
+            "name": proc["name"],
+            "description": proc["description"],
+            "family": proc["task_family"],
+            "input": version["input_contract"],
+            "method": version["method"] if method is None else method,
+            "invariants": version["invariants"],
+            "validation": version["validation_contract"],
+            "output": version["output_contract"],
+            "implementation": (
+                version["implementation_ref"] if implementation_ref is None else implementation_ref
+            ),
+        }
+    )
+
+
+def _candidate_experiment_key(
+    *,
+    procedure_key: str,
+    baseline_version: int,
+    method: list[Any],
+    implementation_ref: str,
+) -> str:
+    return fingerprint(
+        {
+            "kind": "registered-executor-candidate",
+            "procedure_key": procedure_key,
+            "baseline_version": int(baseline_version),
+            "method": method,
+            "implementation_ref": implementation_ref,
+        }
+    )
+
+
+def company_candidate_subject(
+    *,
+    procedure_key: str,
+    proc: dict[str, Any],
+    baseline: dict[str, Any],
+    candidate_version: int,
+    method: list[Any],
+    implementation_ref: str,
+) -> dict[str, Any]:
+    """Return the exact subject authorized to create one global optimization candidate."""
+    return {
+        "phase": "candidate_register",
+        "procedure_key": procedure_key,
+        "baseline_version": int(baseline["version_no"]),
+        "candidate_version": int(candidate_version),
+        "baseline_contract_fingerprint": _contract_fingerprint(proc, baseline),
+        "candidate_contract_fingerprint": _contract_fingerprint(
+            proc,
+            baseline,
+            method=method,
+            implementation_ref=implementation_ref,
+        ),
+        "implementation_ref": implementation_ref,
+        "method": redact(method),
+    }
+
+
 class ProcedureExecutorService:
     """Execute only versioned, runtime-owned deterministic procedure implementations.
 
@@ -48,7 +120,7 @@ class ProcedureExecutorService:
     executable only when its implementation_ref is present in the code-owned registry.
     """
 
-    def register_candidate(
+    def preview_company_candidate(
         self,
         *,
         procedure_key: str,
@@ -66,19 +138,18 @@ class ProcedureExecutorService:
             )
             proc = conn.execute(
                 "SELECT id,project_id,preferred_version,name,description,task_family "
-                "FROM vres.procedures WHERE procedure_key=%s FOR UPDATE",
+                "FROM vres.procedures WHERE procedure_key=%s",
                 (procedure_key,),
             ).fetchone()
             if not proc:
                 raise KeyError(procedure_key)
-            if proc["project_id"] is None:
-                raise ValueError(
-                    "Company-wide automatic candidate registration is held pending dedicated optimization authority"
-                )
+            proc = dict(proc)
+            if proc["project_id"] is not None:
+                raise ValueError("Company optimization preview requires a company-wide procedure")
             baseline = conn.execute(
                 """
                 SELECT version_no,input_contract,method,invariants,validation_contract,
-                       output_contract,implementation_ref
+                       output_contract,implementation_ref,contract_fingerprint
                   FROM vres.procedure_versions
                  WHERE procedure_id=%s AND version_no=%s
                 """,
@@ -86,75 +157,179 @@ class ProcedureExecutorService:
             ).fetchone()
             if not baseline:
                 raise ValueError("Procedure has no preferred baseline")
+            baseline = dict(baseline)
             if baseline["implementation_ref"] != implementation_ref:
                 raise ValueError(
                     "Automatic executor candidate must use the same registered implementation family as baseline"
                 )
             if baseline["method"] == method:
                 raise ValueError("Candidate recipe is identical to the preferred baseline")
-            # The executor candidate copies all protected contracts exactly. Only the
-            # implementation method changes in this automatic optimization path.
-            experiment_key = fingerprint(
-                {
-                    "kind": "registered-executor-candidate",
-                    "procedure_key": procedure_key,
-                    "baseline_version": int(baseline["version_no"]),
-                    "method": method,
-                    "implementation_ref": implementation_ref,
-                }
+            experiment_key = _candidate_experiment_key(
+                procedure_key=procedure_key,
+                baseline_version=int(baseline["version_no"]),
+                method=method,
+                implementation_ref=implementation_ref,
             )
             prior = conn.execute(
-                "SELECT candidate_version,decision,reason FROM vres.optimization_candidates "
+                "SELECT candidate_version FROM vres.optimization_candidates "
                 "WHERE procedure_id=%s AND experiment_key=%s",
                 (proc["id"], experiment_key),
             ).fetchone()
             if prior:
-                return dict(prior) | {"replayed_request": True}
-            next_version = int(
-                conn.execute(
-                    "SELECT COALESCE(MAX(version_no),0) AS n FROM vres.procedure_versions "
-                    "WHERE procedure_id=%s",
-                    (proc["id"],),
-                ).fetchone()["n"]
-            ) + 1
+                candidate_version = int(prior["candidate_version"])
+            else:
+                candidate_version = int(
+                    conn.execute(
+                        "SELECT COALESCE(MAX(version_no),0) AS n FROM vres.procedure_versions "
+                        "WHERE procedure_id=%s",
+                        (proc["id"],),
+                    ).fetchone()["n"]
+                ) + 1
+            subject = company_candidate_subject(
+                procedure_key=procedure_key,
+                proc=proc,
+                baseline=baseline,
+                candidate_version=candidate_version,
+                method=method,
+                implementation_ref=implementation_ref,
+            )
+        return {"candidate_version": candidate_version, "subject": subject}
+
+    def register_candidate(
+        self,
+        *,
+        procedure_key: str,
+        method: list[Any],
+        implementation_ref: str = BUILTIN_JSON_RECIPE_V1,
+        approval_key: str | None = None,
+    ) -> dict[str, Any]:
+        if implementation_ref not in registered_implementation_refs():
+            raise ValueError("Candidate implementation is not a registered bounded executor")
+        validate_recipe(method)
+        _safe_payload(method, "Executable recipe")
+        with _connect() as conn, conn.transaction():
+            conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
+                ("procedure:" + procedure_key,),
+            )
+            proc_row = conn.execute(
+                "SELECT id,project_id,preferred_version,name,description,task_family "
+                "FROM vres.procedures WHERE procedure_key=%s FOR UPDATE",
+                (procedure_key,),
+            ).fetchone()
+            if not proc_row:
+                raise KeyError(procedure_key)
+            proc = dict(proc_row)
+            baseline_row = conn.execute(
+                """
+                SELECT version_no,input_contract,method,invariants,validation_contract,
+                       output_contract,implementation_ref,contract_fingerprint
+                  FROM vres.procedure_versions
+                 WHERE procedure_id=%s AND version_no=%s
+                """,
+                (proc["id"], proc["preferred_version"]),
+            ).fetchone()
+            if not baseline_row:
+                raise ValueError("Procedure has no preferred baseline")
+            baseline = dict(baseline_row)
+            if baseline["implementation_ref"] != implementation_ref:
+                raise ValueError(
+                    "Automatic executor candidate must use the same registered implementation family as baseline"
+                )
+            if baseline["method"] == method:
+                raise ValueError("Candidate recipe is identical to the preferred baseline")
+            experiment_key = _candidate_experiment_key(
+                procedure_key=procedure_key,
+                baseline_version=int(baseline["version_no"]),
+                method=method,
+                implementation_ref=implementation_ref,
+            )
+            prior = conn.execute(
+                "SELECT candidate_version,decision,reason,candidate_approval_event_id "
+                "FROM vres.optimization_candidates WHERE procedure_id=%s AND experiment_key=%s",
+                (proc["id"], experiment_key),
+            ).fetchone()
+            if prior:
+                candidate_version = int(prior["candidate_version"])
+            else:
+                candidate_version = int(
+                    conn.execute(
+                        "SELECT COALESCE(MAX(version_no),0) AS n FROM vres.procedure_versions "
+                        "WHERE procedure_id=%s",
+                        (proc["id"],),
+                    ).fetchone()["n"]
+                ) + 1
+            company_wide = proc["project_id"] is None
+            approval_id = None
+            if company_wide:
+                subject = company_candidate_subject(
+                    procedure_key=procedure_key,
+                    proc=proc,
+                    baseline=baseline,
+                    candidate_version=candidate_version,
+                    method=method,
+                    implementation_ref=implementation_ref,
+                )
+                approval_id = require_company_approval(
+                    conn,
+                    approval_key,
+                    "procedure_optimize",
+                    subject,
+                )
+            elif approval_key:
+                raise ValueError("Company optimization approval applies only to company-wide procedures")
+            if prior:
+                if company_wide and prior["candidate_approval_event_id"] != approval_id:
+                    raise ValueError("Existing company candidate is bound to a different exact approval")
+                return dict(prior) | {
+                    "replayed_request": True,
+                    "company_wide": company_wide,
+                }
             conn.execute(
                 """
                 INSERT INTO vres.procedure_versions(
                   procedure_id,version_no,status,input_contract,method,invariants,
-                  validation_contract,output_contract,rejected_alternatives,implementation_ref
-                ) VALUES (%s,%s,'candidate',%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb,'[]'::jsonb,%s)
+                  validation_contract,output_contract,rejected_alternatives,implementation_ref,
+                  scope_approval_event_id
+                ) VALUES (
+                  %s,%s,'candidate',%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb,
+                  '[]'::jsonb,%s,%s
+                )
                 """,
                 (
                     proc["id"],
-                    next_version,
+                    candidate_version,
                     json.dumps(baseline["input_contract"]),
                     json.dumps(method),
                     json.dumps(baseline["invariants"]),
                     json.dumps(baseline["validation_contract"]),
                     json.dumps(baseline["output_contract"]),
                     implementation_ref,
+                    approval_id,
                 ),
             )
             conn.execute(
                 """
                 INSERT INTO vres.optimization_candidates(
                   procedure_id,baseline_version,candidate_version,protected_regression,
-                  decision,reason,experiment_key
-                ) VALUES (%s,%s,%s,false,'pending',%s,%s)
+                  decision,reason,experiment_key,candidate_approval_event_id
+                ) VALUES (%s,%s,%s,false,'pending',%s,%s,%s)
                 """,
                 (
                     proc["id"],
                     baseline["version_no"],
-                    next_version,
+                    candidate_version,
                     "awaiting bounded runtime replay",
                     experiment_key,
+                    approval_id,
                 ),
             )
         return {
-            "candidate_version": next_version,
+            "candidate_version": candidate_version,
             "decision": "pending",
             "reason": "awaiting bounded runtime replay",
             "replayed_request": False,
+            "company_wide": company_wide,
         }
 
     def execute(
