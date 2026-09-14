@@ -2,6 +2,12 @@
 ALTER TABLE vres.procedure_runs
     ADD COLUMN IF NOT EXISTS measurement_source text NOT NULL DEFAULT 'reported'
     CHECK (measurement_source IN ('reported','runtime'));
+ALTER TABLE vres.procedure_runs
+    ADD COLUMN IF NOT EXISTS input_digest text;
+ALTER TABLE vres.procedure_runs
+    ADD COLUMN IF NOT EXISTS output_digest text;
+ALTER TABLE vres.procedure_runs
+    ADD COLUMN IF NOT EXISTS execution_evidence jsonb NOT NULL DEFAULT '{}'::jsonb;
 
 -- Host-observed validation may carry a durable, exact context. Existing ordinary
 -- validation requests remain context-free.
@@ -24,6 +30,7 @@ CREATE TABLE IF NOT EXISTS vres.procedure_replay_attestations (
     baseline_run_id bigint NOT NULL REFERENCES vres.procedure_runs(id) ON DELETE RESTRICT,
     candidate_run_id bigint NOT NULL REFERENCES vres.procedure_runs(id) ON DELETE RESTRICT,
     validation_request_id bigint NOT NULL REFERENCES vres.validation_requests(id) ON DELETE RESTRICT,
+    input_digest text NOT NULL,
     baseline_contract_fingerprint text NOT NULL,
     candidate_contract_fingerprint text NOT NULL,
     output_equivalent boolean NOT NULL,
