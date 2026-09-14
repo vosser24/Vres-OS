@@ -10,7 +10,7 @@ from mcp.server.fastmcp import FastMCP
 
 from .approvals import ApprovalService
 from .artifacts import ArtifactService
-from .bootstrap import last_setup_result, start_for_project
+from .bootstrap import start_for_project
 from .capabilities import CapabilityService
 from .codex import CodexAdapter
 from .config import ConfigStore
@@ -100,9 +100,6 @@ def vres_status() -> dict:
         "embeddings_enabled": cfg.embeddings_enabled,
     }
     if not cfg.configured:
-        setup_last = last_setup_result()
-        if setup_last:
-            out["setup_last"] = setup_last
         return out
     pid, project = _project()
     out["project"] = {"id": pid, "key": project.key, "name": project.name, "root": str(project.root)}
@@ -181,187 +178,116 @@ def validation_prepare(task_key: str, artifact_paths: list[str]) -> dict:
     """Freeze the current task and reviewed files before delegating to the protected validator."""
     from .validation import ValidationService
     pid, project = _project()
-    _require_node("task", task_key, write=True)
     return ValidationService().prepare(task_key, pid, project.root, artifact_paths)
 
 
 @mcp.tool()
-def validation_record(
-    validation_key: str,
-    task_key: str,
-    passed: bool,
-    baseline_equivalent: bool,
-    summary: str,
-    validator_provider: str,
-    validator_model: str,
-    validation_context: dict[str, Any],
-    independent: bool = True,
-    details: dict[str, Any] | None = None,
-) -> dict:
-    """Record validation only when the validator returns the exact frozen context unchanged."""
-    from .validation import ValidationService
-    _require_node("task", task_key, write=True)
-    return ValidationService().record(
-        validation_key=validation_key,
-        task_key=task_key,
-        passed=passed,
-        baseline_equivalent=baseline_equivalent,
-        summary=summary,
-        validator_provider=validator_provider,
-        validator_model=validator_model,
-        independent=independent,
-        details=details or {},
-        validation_context=validation_context,
-    )
-
-
-@mcp.tool()
-def validation_get(validation_key: str) -> dict:
-    from .validation import ValidationService
-    return ValidationService().get(validation_key)
-
-
-@mcp.tool()
 def task_complete(task_key: str, summary: str) -> dict:
-    """Complete only after independent validation status has been persisted as passed."""
+    """Complete a task only after wanted outcome and acceptance/validation are satisfied."""
     _require_node("task", task_key, write=True)
+    from .validation import ValidationService
+    pid, project = _project()
+    ValidationService().assert_current(task_key, pid, project.root)
     Repository().complete_task(task_key, summary)
-    return {"status": "completed"}
-
-
-@mcp.tool()
-def user_instruction_record(task_key: str, text: str, session_id: str) -> dict:
-    """Persist a user instruction/decision before deriving any explicit approval or durable preference from it."""
-    _require_node("task", task_key, write=True)
-    pid, _ = _project()
-    sid = _current_session(pid, session_id)
-    Repository().record_event(task_key, "USER_INSTRUCTION", "user", {"text": text}, sid)
-    Repository().update_state(task_key, latest_user_instruction=text)
-    return {"recorded": True}
-
-
-@mcp.tool()
-def approval_record(task_key: str, approval_type: str, statement: str, subject_key: str) -> dict:
-    """Record explicit approval bound to the latest persisted user instruction and exact subject."""
-    _require_node("task", task_key, write=True)
-    return {
-        "approval_key": ApprovalService().record_latest_user_approval(
-            task_key=task_key,
-            approval_type=approval_type,
-            statement=statement,
-            subject_key=subject_key,
-        )
-    }
-
-
-@mcp.tool()
-def preference_set(preference_key: str, statement: str, task_key: str) -> dict:
-    """Persist an explicit user preference only when statement matches the latest user instruction verbatim."""
-    _require_node("task", task_key, write=True)
-    return {"preference_key": PreferenceService().set(preference_key, statement, task_key=task_key)}
-
-
-@mcp.tool()
-def preference_list() -> list[dict]:
-    pid, _ = _project()
-    return PreferenceService().list_active(pid)
-
-
-@mcp.tool()
-def source_register(
-    source_key: str,
-    title: str,
-    source_type: str,
-    path_or_uri: str | None = None,
-    authority_level: str = "reference",
-    owner: str | None = None,
-    company_wide: bool = False,
-    metadata: dict[str, Any] | None = None,
-    approval_key: str | None = None,
-) -> dict:
-    pid, _ = _project()
-    target = None if company_wide else pid
-    return {
-        "source_key": SourceService().register(
-            source_key=source_key,
-            title=title,
-            source_type=source_type,
-            path_or_uri=path_or_uri,
-            authority_level=authority_level,
-            owner=owner,
-            project_id=target,
-            metadata=metadata,
-            approval_key=approval_key,
-        )
-    }
-
-
-@mcp.tool()
-def source_ingest(source_key: str, company_wide: bool = False, approval_key: str | None = None) -> dict:
-    pid, _ = _project()
-    target = None if company_wide else pid
-    return SourceService().ingest(source_key, project_id=target, approval_key=approval_key)
+    return {"completed": True}
 
 
 @mcp.tool()
 def knowledge_search(query: str, limit: int = 8) -> list[dict]:
+    """Hybrid institutional search: canonical knowledge + source chunks + optional local semantics."""
     pid, _ = _project()
     return KnowledgeService().hybrid_search(query, limit=limit, project_id=pid)
 
 
 @mcp.tool()
+def source_register(
+    source_type: str,
+    title: str,
+    path_or_uri: str | None = None,
+    origin: str | None = None,
+    content_hash: str | None = None,
+    version: str | None = None,
+    authority_level: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    company_wide: bool = False,
+) -> dict:
+    """Register provenance. Sources are project-local by default; company_wide must be deliberate."""
+    pid, _ = _project()
+    key, source_id = SourceService().register(
+        source_type=source_type, title=title, origin=origin, path_or_uri=path_or_uri,
+        content_hash=content_hash, version=version, project_id=_scope(company_wide, pid),
+        authority_level=authority_level, metadata=metadata,
+    )
+    return {"source_key": key, "source_id": source_id}
+
+
+@mcp.tool()
 def knowledge_propose(
-    knowledge_key: str,
     knowledge_type: str,
     title: str,
     statement: str,
     status: str = "proposed",
-    scope: dict[str, Any] | None = None,
     confidence: float | None = None,
-    source_owner: str | None = None,
+    scope: dict[str, Any] | None = None,
+    review_after: str | None = None,
+    source_owner: str = "chairman",
     company_wide: bool = False,
-    metadata: dict[str, Any] | None = None,
     approval_key: str | None = None,
 ) -> dict:
+    """Propose durable knowledge. Company-wide scope and canonical governance items require explicit provenance."""
     pid, _ = _project()
-    project_id = None if company_wide else pid
-    return {
-        "knowledge_key": KnowledgeService().propose(
-            key=knowledge_key,
-            knowledge_type=knowledge_type,
-            title=title,
-            statement=statement,
-            status=status,
-            scope=scope,
-            confidence=confidence,
-            source_owner=source_owner,
-            project_id=project_id,
-            metadata=metadata,
-            approval_key=approval_key,
-        )
-    }
+    key = f"KNOW-{uuid.uuid4().hex[:12]}"
+    parsed_review = None
+    if review_after:
+        try:
+            parsed_review = datetime.fromisoformat(review_after)
+        except ValueError as exc:
+            raise ValueError("review_after must be ISO-8601") from exc
+    KnowledgeService().propose(
+        key=key, knowledge_type=knowledge_type, title=title, statement=statement,
+        status=status, scope=scope, confidence=confidence, source_owner=source_owner,
+        project_id=_scope(company_wide, pid), review_after=parsed_review, approval_key=approval_key,
+    )
+    return {"knowledge_key": key, "status": status, "company_wide": company_wide}
 
 
 @mcp.tool()
-def knowledge_update(
+def approval_record(task_key: str, approval_type: str, statement: str, subject_key: str | None = None) -> dict:
+    """Create approval provenance from the latest persisted user instruction on this task."""
+    _require_node("task", task_key, write=True)
+    key = ApprovalService().record_latest_user_approval(
+        task_key=task_key, approval_type=approval_type, statement=statement, subject_key=subject_key
+    )
+    return {"approval_key": key}
+
+
+@mcp.tool()
+def knowledge_get(knowledge_key: str) -> dict:
+    """Return one knowledge item with its provenance/evidence."""
+    _require_node("knowledge", knowledge_key)
+    return KnowledgeService().get(knowledge_key)
+
+
+@mcp.tool()
+def knowledge_promote(
     knowledge_key: str,
-    status: str | None = None,
+    status: str,
     confidence: float | None = None,
-    mark_verified: bool = False,
+    review_after: str | None = None,
     approval_key: str | None = None,
 ) -> dict:
+    """Promote/challenge/reject knowledge through the lifecycle; evidence/approval gates are enforced by the service."""
     _require_node("knowledge", knowledge_key, write=True)
+    parsed = datetime.fromisoformat(review_after) if review_after else None
     return KnowledgeService().update(
-        knowledge_key,
-        status=status,
-        confidence=confidence,
-        mark_verified=mark_verified,
-        approval_key=approval_key,
+        knowledge_key, status=status, confidence=confidence, review_after=parsed,
+        mark_verified=status in {"validated", "canonical"}, approval_key=approval_key,
     )
 
 
 @mcp.tool()
 def knowledge_supersede(old_key: str, new_key: str) -> dict:
+    """Replace knowledge without rewriting history. The replacement must be at least as mature and same scope/type."""
     _require_node("knowledge", old_key, write=True)
     _require_node("knowledge", new_key, write=True)
     KnowledgeService().supersede(old_key, new_key)
@@ -369,282 +295,391 @@ def knowledge_supersede(old_key: str, new_key: str) -> dict:
 
 
 @mcp.tool()
-def registry_register(
-    object_key: str,
-    object_type: str,
-    name: str,
-    description: str,
-    status: str = "active",
-    owner_role: str | None = None,
-    version: str | None = None,
-    company_wide: bool = False,
-    metadata: dict[str, Any] | None = None,
-    approval_key: str | None = None,
+def knowledge_attach_evidence(
+    knowledge_key: str,
+    evidence_type: str,
+    source_key: str | None = None,
+    locator: str | None = None,
+    method: str | None = None,
+    limitations: list[str] | None = None,
+    metrics: dict[str, Any] | None = None,
+    reproducible: bool = False,
 ) -> dict:
-    pid, _ = _project()
-    project_id = None if company_wide else pid
-    return {
-        "object_key": RegistryService().register(
-            object_key=object_key,
-            object_type=object_type,
-            name=name,
-            description=description,
-            status=status,
-            owner_role=owner_role,
-            version=version,
-            project_id=project_id,
-            metadata=metadata,
-            approval_key=approval_key,
-        )
-    }
+    """Attach traceable evidence. A finding without evidence should not silently become canonical."""
+    _require_node("knowledge", knowledge_key, write=True)
+    _require_node("source", source_key)
+    SourceService().attach_evidence(
+        knowledge_key=knowledge_key, source_key=source_key, evidence_type=evidence_type,
+        locator=locator, method=method, limitations=limitations, metrics=metrics,
+        reproducible=reproducible,
+    )
+    return {"attached": True}
 
 
 @mcp.tool()
-def registry_search(query: str, limit: int = 10) -> list[dict]:
-    pid, _ = _project()
-    return RegistryService().search(query, project_id=pid, limit=limit)
-
-
-@mcp.tool()
-def relation_add(
+def knowledge_relate(
     source_kind: str,
     source_key: str,
-    relation_type: str,
+    relation: str,
     target_kind: str,
     target_key: str,
     provenance: str,
     confidence: float | None = None,
 ) -> dict:
-    from .relations import relate
+    """Persist a semantic relationship. Recomputable code dependency graphs do not belong here."""
     _require_node(source_kind, source_key, write=True)
-    _require_node(target_kind, target_key, write=True)
-    relate(source_kind, source_key, relation_type, target_kind, target_key, provenance, confidence)
-    return {"recorded": True}
+    _require_node(target_kind, target_key)
+    KnowledgeService().relate(source_kind, source_key, relation, target_kind, target_key, provenance, confidence)
+    return {"related": True}
 
 
 @mcp.tool()
-def impact_query(object_key: str, object_kind: str | None = None, depth: int = 2, limit: int = 200) -> list[dict]:
-    from .relations import impact
+def knowledge_impact(object_key: str, depth: int = 2, object_kind: str | None = None) -> list[dict]:
+    """Traverse persisted semantic relationships around a decision/process/module/finding."""
     pid, _ = _project()
-    return impact(object_key, object_kind=object_kind, project_id=pid, depth=depth, limit=limit)
+    return KnowledgeService().impact(object_key, depth, object_kind=object_kind, project_id=pid)
 
 
 @mcp.tool()
-def procedure_match(query: str, task_family: str | None = None, limit: int = 5) -> list[dict]:
+def artifact_register(
+    title: str,
+    artifact_type: str,
+    path: str | None = None,
+    task_key: str | None = None,
+    source_key: str | None = None,
+    media_type: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict:
+    """Register an output artifact. Structured source remains preferred over re-parsing a rendered PDF."""
+    _require_node("task", task_key, write=True)
+    _require_node("source", source_key)
+    pid, project = _project()
+    if path:
+        candidate_path = (project.root / path).resolve(strict=True)
+        if not candidate_path.is_relative_to(project.root.resolve()):
+            raise ValueError("Artifact path must stay inside the current project")
+        path = str(candidate_path)
+    key = ArtifactService().register(
+        title=title, artifact_type=artifact_type, path=path, project_id=pid,
+        task_key=task_key, source_key=source_key, media_type=media_type, metadata=metadata,
+    )
+    return {"artifact_key": key}
+
+
+@mcp.tool()
+def procedure_get(procedure_key: str, version_no: int | None = None) -> dict:
+    """Retrieve an accepted version's complete method, contracts and corrections before reuse."""
+    _require_node("procedure", procedure_key)
+    return ProcedureService().get(procedure_key, version_no)
+
+
+@mcp.tool()
+def procedure_match(intent: str, task_family: str | None = None, limit: int = 5) -> list[dict]:
+    """Find accepted procedures before inventing a new way to do repeated work."""
     pid, _ = _project()
-    return ProcedureService().find_matches(query, task_family, limit, project_id=pid)
+    return ProcedureService().find_matches(intent, task_family, limit, project_id=pid)
 
 
 @mcp.tool()
 def procedure_accept(
+    task_key: str,
     procedure_key: str,
     name: str,
     description: str,
-    task_family: str | None,
+    task_family: str,
     input_contract: dict[str, Any],
     method: list[Any],
     invariants: list[Any],
     validation_contract: list[Any],
     output_contract: dict[str, Any],
-    approval_key: str,
-    initial_metrics: dict[str, Any] | None = None,
     implementation_ref: str | None = None,
+    company_wide: bool = False,
+    quality_score: float | None = None,
+    runtime_ms: int | None = None,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    model_calls: int | None = None,
 ) -> dict:
+    """Freeze a reusable workflow only after an explicit persisted user approval turn (for example, 'OK')."""
+    _require_node("task", task_key, write=True)
+    if company_wide:
+        raise ValueError("Company-wide procedure publication is held pending scope approval")
     pid, _ = _project()
-    key, version = ProcedureService().accept_baseline(
-        procedure_key=procedure_key,
-        name=name,
-        description=description,
-        task_family=task_family,
-        project_id=pid,
-        input_contract=input_contract,
-        method=method,
-        invariants=invariants,
-        validation_contract=validation_contract,
-        output_contract=output_contract,
-        approval_key=approval_key,
-        initial_metrics=initial_metrics,
-        implementation_ref=implementation_ref,
+    if not procedure_key.strip() or not name.strip() or not description.strip() or not validation_contract:
+        raise ValueError("An accepted procedure requires its identity, description and validation contract")
+    metrics = None
+    if any(v is not None for v in (quality_score, runtime_ms, input_tokens, output_tokens, model_calls)):
+        if not all(v is not None for v in (quality_score, runtime_ms, input_tokens, output_tokens)):
+            raise ValueError("Baseline benchmark requires quality, runtime, input_tokens and output_tokens together")
+        metrics = {
+            "quality_score": quality_score, "runtime_ms": runtime_ms, "input_tokens": input_tokens,
+            "output_tokens": output_tokens, "model_calls": model_calls,
+            "validation": {"accepted_by_user": True, "source": "user-accepted baseline"},
+        }
+    if metrics is not None:
+        validate_metrics(metrics)
+    # Validate the request before recording any durable approval side effect.
+    approval_key = ApprovalService().record_latest_user_approval(
+        task_key=task_key, approval_type="procedure_accept", statement=f"Accept {procedure_key}", subject_key=procedure_key
     )
-    return {"procedure_key": key, "version": version}
+    key, version = ProcedureService().accept_baseline(
+        procedure_key=procedure_key, name=name, description=description, task_family=task_family,
+        project_id=_scope(company_wide, pid), input_contract=input_contract, method=method, invariants=invariants,
+        validation_contract=validation_contract, output_contract=output_contract, approval_key=approval_key,
+        implementation_ref=implementation_ref, initial_metrics=metrics,
+    )
+    return {"procedure_key": key, "preferred_version": version, "approval_key": approval_key,
+            "baseline_metrics_recorded": bool(metrics), "company_wide": company_wide}
 
 
 @mcp.tool()
-def procedure_run_record(
+def procedure_record_run(
     procedure_key: str,
-    task_key: str,
+    quality_score: float,
+    runtime_ms: int,
+    input_tokens: int,
+    output_tokens: int,
     accepted: bool,
-    metrics: dict[str, Any],
-    version_no: int | None = None,
+    task_key: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    effort: str | None = None,
+    validation: dict[str, Any] | None = None,
 ) -> dict:
-    _require_node("procedure", procedure_key)
+    """Record real procedure outcomes so future optimization is evidence-based."""
+    _require_node("procedure", procedure_key, write=True)
     _require_node("task", task_key, write=True)
-    return {
-        "run_id": ProcedureService().record_run(
-            procedure_key,
-            version_no=version_no,
-            task_key=task_key,
-            accepted=accepted,
-            metrics=metrics,
-        )
-    }
+    run_id = ProcedureService().record_run(
+        procedure_key, task_key=task_key, accepted=accepted,
+        metrics={"quality_score": quality_score, "runtime_ms": runtime_ms,
+                 "input_tokens": input_tokens, "output_tokens": output_tokens,
+                 "provider": provider, "model": model, "effort": effort,
+                 "validation": validation or {}},
+    )
+    return {"run_id": run_id}
+
+
+@mcp.tool()
+def procedure_feedback(procedure_key: str, feedback_type: str, statement: str, task_key: str | None = None) -> dict:
+    """Store a correction, invariant, or material rejected approach so the same correction is not repeatedly rediscovered."""
+    _require_node("procedure", procedure_key, write=True)
+    _require_node("task", task_key, write=True)
+    ProcedureService().add_feedback(procedure_key, feedback_type, statement, task_key)
+    return {"stored": True}
 
 
 @mcp.tool()
 def procedure_evaluate_candidate(
     procedure_key: str,
     candidate: dict[str, Any],
-    metrics: dict[str, Any],
+    quality_score: float,
+    runtime_ms: int,
+    input_tokens: int,
+    output_tokens: int,
+    validation: dict[str, Any],
     protected_regression: bool = False,
     business_behavior_change: bool = False,
 ) -> dict:
+    """Register/evaluate a candidate; auto-promotion is held pending host-measured paired replay. User review remains available."""
     _require_node("procedure", procedure_key, write=True)
     return ProcedureService().evaluate_candidate(
-        procedure_key=procedure_key,
-        candidate=candidate,
-        metrics=metrics,
-        protected_regression=protected_regression,
-        business_behavior_change=business_behavior_change,
+        procedure_key=procedure_key, candidate=candidate,
+        metrics={"quality_score": quality_score, "runtime_ms": runtime_ms,
+                 "input_tokens": input_tokens, "output_tokens": output_tokens,
+                 "validation": validation},
+        protected_regression=protected_regression, business_behavior_change=business_behavior_change,
     )
 
 
 @mcp.tool()
 def procedure_decide_candidate(
-    procedure_key: str,
-    candidate_version: int,
-    accept: bool,
-    approval_key: str,
+    task_key: str, procedure_key: str, candidate_version: int, accept: bool
 ) -> dict:
+    """Resolve a non-Pareto/trade-off candidate from an explicit user decision while retaining rollback history."""
     _require_node("procedure", procedure_key, write=True)
-    return ProcedureService().decide_candidate(
+    _require_node("task", task_key, write=True)
+    approval_key = ApprovalService().record_latest_user_approval(
+        task_key=task_key, approval_type="procedure_candidate_decision" if accept else "procedure_candidate_reject",
+        statement=("Accept" if accept else "Reject") + f" {procedure_key} v{candidate_version}",
+        subject_key=f"{procedure_key}:v{candidate_version}",
+    )
+    result = ProcedureService().decide_candidate(
         procedure_key, candidate_version, accept=accept, approval_key=approval_key
     )
+    result["approval_key"] = approval_key
+    return result
 
 
 @mcp.tool()
-def procedure_feedback(
-    procedure_key: str,
-    feedback_type: str,
-    statement: str,
-    task_key: str | None = None,
-) -> dict:
-    _require_node("procedure", procedure_key, write=True)
-    if task_key:
-        _require_node("task", task_key, write=True)
-    ProcedureService().add_feedback(procedure_key, feedback_type, statement, task_key)
-    return {"recorded": True}
-
-
-@mcp.tool()
-def model_policy(phase: str, task_family: str | None = None) -> dict:
-    """Return configured/fallback policy. Validation is pinned to the protected Fable contract."""
+def model_recommend(phase: str, task_family: str | None = None) -> dict:
+    """Recommend configured model+effort; protect validation. Telemetry cannot auto-change policy in this preview."""
     return ModelPolicyService().recommend(phase, task_family)
 
 
 @mcp.tool()
-def model_run_record(
-    task_key: str,
+def model_record_run(
     phase: str,
     provider: str,
     model: str,
     effort: str | None,
-    task_family: str | None,
-    success: bool | None,
-    quality_score: float | None,
-    runtime_ms: int | None,
-    input_tokens: int | None,
-    output_tokens: int | None,
+    success: bool,
+    quality_score: float,
+    runtime_ms: int,
+    input_tokens: int,
+    output_tokens: int,
+    task_family: str | None = None,
     estimated_cost: float | None = None,
+    retries: int = 0,
+    validator_result: str | None = None,
 ) -> dict:
-    """Persist agent-reported telemetry only; host-measured experiment evidence uses a separate non-MCP sink."""
-    _require_node("task", task_key, write=True)
-    values = {
-        "task_key": task_key,
-        "phase": phase,
-        "provider": provider,
-        "model": model,
-        "effort": effort,
-        "task_family": task_family,
-        "success": success,
-        "quality_score": quality_score,
-        "runtime_ms": runtime_ms,
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-        "estimated_cost": estimated_cost,
-        "measurement_source": "reported",
-    }
-    validate_metrics(values)
-    ModelPolicyService().record_run(**values)
-    return {"recorded": True, "measurement_source": "reported"}
+    """Record reported model metrics for audit. These are not host-attested optimization evidence."""
+    ModelPolicyService().record_run(
+        task_id=None, task_family=task_family, phase=phase, provider=provider, model=model, effort=effort,
+        success=success, quality_score=quality_score, runtime_ms=runtime_ms, input_tokens=input_tokens,
+        output_tokens=output_tokens, estimated_cost=estimated_cost, retries=retries,
+        validator_result=validator_result,
+    )
+    return {"recorded": True}
 
 
 @mcp.tool()
-def review_queue(limit: int = 50, route_to: str | None = None) -> list[dict]:
+def capability_resolve(need: str, limit: int = 5) -> list[dict]:
+    """Find proven internal capabilities before fabricating an expert role or silently assuming expertise."""
+    return CapabilityService().resolve(need, limit)
+
+
+@mcp.tool()
+def capability_register(
+    capability_key: str, name: str, description: str, domain: str | None = None, owner_role: str | None = None
+) -> dict:
+    """Shared catalog writes are held pending a dedicated administrator approval contract."""
+    raise ValueError("Shared capability registration is held pending explicit catalog authority; use a task-scoped specialist without publishing a global capability")
+
+
+@mcp.tool()
+def capability_mark_proven(capability_key: str, task_key: str, evidence: dict[str, Any]) -> dict:
+    """Mark capability proven only from a completed/validated task with durable evidence."""
+    _require_node("task", task_key, write=True)
+    CapabilityService().mark_proven(capability_key, task_key=task_key, evidence=evidence)
+    return {"proven": True, "task_key": task_key}
+
+
+@mcp.tool()
+def preference_set(task_key: str, preference_key: str, statement: str) -> dict:
+    """Persist an explicit working preference stated by the user."""
+    _require_node("task", task_key, write=True)
+    PreferenceService().set(preference_key, statement, task_key=task_key)
+    return {"stored": True}
+
+
+@mcp.tool()
+def preference_list() -> list[dict]:
+    """Load active working preferences relevant across procedures."""
+    pid, _ = _project()
+    return PreferenceService().list_active(pid)
+
+
+@mcp.tool()
+def onboard_folder(path: str, process_embeddings: bool = True) -> dict:
+    """Mechanically onboard a legacy folder: hash/dedupe/parse/classify/chunk; semantic ambiguity stays in review queue."""
+    pid, _ = _project()
+    result = OnboardingService().inventory(Path(path), project_id=pid)
+    if process_embeddings and ConfigStore().load().embeddings_enabled and result.get("embedding_jobs_queued"):
+        try:
+            from .workers import launch_embedding_worker
+            result["embedding_worker"] = launch_embedding_worker()
+        except Exception as exc:
+            result["embedding_worker"] = {"launched": False, "error": redact_text(str(exc))}
+    return result
+
+
+@mcp.tool()
+def embeddings_process_pending(limit: int = 64) -> dict:
+    """Process queued durable-knowledge embeddings locally; this consumes compute, not LLM API tokens."""
+    return EmbeddingService().run_pending(limit)
+
+
+@mcp.tool()
+def refresh_due_domains() -> list[dict]:
+    """Return domains whose evidence/market knowledge is due for manual or annual refresh."""
+    return RefreshService().due_domains()
+
+
+@mcp.tool()
+def refresh_start(task_key: str, domain_key: str | None = None, trigger: str = "manual") -> dict:
+    """Open a project-owned research delta; never change company policy automatically."""
+    _require_node("task", task_key, write=True)
+    pid, _ = _project()
+    return {"refresh_key": RefreshService().start(domain_key, trigger, project_id=pid)}
+
+
+@mcp.tool()
+def refresh_complete(refresh_key: str, task_key: str, request_key: str, artifact_path: str,
+                     delta_summary: dict[str, Any], knowledge_version: str | None = None) -> dict:
+    """Publish only the exact JSON delta artifact checked by a current host-observed validator."""
+    _require_node("task", task_key, write=True)
+    pid, project = _project()
+    RefreshService().complete(refresh_key, delta_summary, knowledge_version, task_key=task_key,
+                              project_id=pid, root=project.root, request_key=request_key, artifact_path=artifact_path)
+    return {"completed": True}
+
+
+@mcp.tool()
+def registry_register(
+    object_key: str, object_type: str, name: str, description: str = "",
+    status: str = "active", version: str | None = None, owner_role: str | None = None,
+    metadata: dict[str, Any] | None = None, company_wide: bool = False,
+) -> dict:
+    """Register a canonical LEGO object (module/system/data/process/API/etc.) before relating it semantically."""
+    pid, _ = _project()
+    key = RegistryService().register(
+        object_key=object_key, object_type=object_type, name=name, description=description,
+        project_id=_scope(company_wide, pid), status=status, version=version, owner_role=owner_role, metadata=metadata,
+    )
+    return {"object_key": key, "company_wide": company_wide}
+
+
+@mcp.tool()
+def registry_get(object_key: str) -> dict:
+    """Get one canonical registry object."""
+    _require_node("registry", object_key)
+    return RegistryService().get(object_key)
+
+
+@mcp.tool()
+def registry_search(query: str, limit: int = 10) -> list[dict]:
+    """Find project-local plus company-wide registry objects."""
+    pid, _ = _project()
+    return RegistryService().search(query, project_id=pid, limit=limit)
+
+
+@mcp.tool()
+def review_queue_list(route_to: str | None = None, limit: int = 50) -> list[dict]:
+    """List unresolved onboarding/knowledge exceptions routed for human or director judgment."""
     pid, _ = _project()
     return ReviewQueueService().list_pending(route_to=route_to, limit=limit, project_id=pid)
 
 
 @mcp.tool()
-def review_resolve(review_id: int, resolved_by: str, resolution: dict[str, Any], dismiss: bool = False) -> dict:
+def review_queue_resolve(
+    review_id: int, resolved_by: str, resolution: dict[str, Any], dismiss: bool = False
+) -> dict:
+    """Resolve/dismiss an exception. Resolution does not automatically promote knowledge."""
     pid, _ = _project()
     ReviewQueueService().resolve(review_id, resolved_by=resolved_by, resolution=resolution, dismiss=dismiss, project_id=pid)
-    return {"resolved": review_id, "dismissed": dismiss}
+    return {"review_id": review_id, "status": "dismissed" if dismiss else "resolved"}
 
 
 @mcp.tool()
-def refresh_due() -> list[dict]:
-    return RefreshService().due_domains()
-
-
-@mcp.tool()
-def refresh_complete(domain_key: str, source_key: str, notes: str | None = None) -> dict:
-    RefreshService().record_refresh(domain_key, source_key, notes)
-    return {"recorded": True}
-
-
-@mcp.tool()
-def onboarding_inventory(path: str) -> dict:
-    pid, project = _project()
-    target = Path(path).expanduser().resolve()
-    return OnboardingService().inventory(target, pid, project.root)
-
-
-@mcp.tool()
-def embeddings_queue() -> dict:
-    return {"queued": EmbeddingService().queue_missing()}
-
-
-@mcp.tool()
-def embeddings_run(limit: int = 64) -> dict:
-    return EmbeddingService().run_pending(limit)
-
-
-@mcp.tool()
-def artifact_register(task_key: str, path: str, artifact_type: str, metadata: dict[str, Any] | None = None) -> dict:
-    _require_node("task", task_key, write=True)
-    pid, project = _project()
-    return {
-        "artifact_key": ArtifactService().register(
-            task_key=task_key,
-            project_id=pid,
-            project_root=project.root,
-            path=Path(path),
-            artifact_type=artifact_type,
-            metadata=metadata,
-        )
-    }
-
-
-@mcp.tool()
-def artifact_validate(artifact_key: str, validator_model: str, passed: bool, notes: str) -> dict:
-    _require_node("artifact", artifact_key, write=True)
-    ArtifactService().record_validation(artifact_key, validator_model, passed, notes)
-    return {"validated": artifact_key, "passed": passed}
+def codex_review(prompt: str) -> dict:
+    """Delegate an independent engineering review to Codex in the current project. Never include secrets in prompt."""
+    _, project = _project()
+    result = CodexAdapter().exec(prompt, cwd=project.root)
+    return {"ok": result.ok, "returncode": result.returncode, "output": result.output}
 
 
 def main() -> None:
-    migrate()
-    mcp.run(transport="stdio")
+    mcp.run()
 
 
 if __name__ == "__main__":
