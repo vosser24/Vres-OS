@@ -9,6 +9,7 @@ from vres_os.procedures import fingerprint
 from vres_os.replay import (
     ReplayService,
     _assert_pair,
+    _assert_project_auto_promotion_scope,
     _attested_quality_pair,
     _contract_fingerprint,
 )
@@ -86,7 +87,6 @@ def test_paired_replay_rejects_protected_contract_drift():
                 method=["improved implementation"],
             ),
         )
-    # Method/implementation changes remain eligible when protected contracts are identical.
     _assert_pair(
         baseline,
         _run(
@@ -96,6 +96,12 @@ def test_paired_replay_rejects_protected_contract_drift():
             implementation_ref="vres:test:v2",
         ),
     )
+
+
+def test_company_wide_replay_cannot_auto_promote_without_dedicated_authority():
+    _assert_project_auto_promotion_scope(_run(project_id=7))
+    with pytest.raises(ValueError, match="company-wide procedures"):
+        _assert_project_auto_promotion_scope(_run(project_id=None))
 
 
 def test_attested_equivalence_can_supply_no_regression_quality_without_fake_executor_score():
