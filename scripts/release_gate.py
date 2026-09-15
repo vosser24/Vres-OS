@@ -75,10 +75,28 @@ def structure():
                 if data['name'] == 'validator':
                     assert data['model'] == 'fable' and data['effort'] == 'high'
     hooks = json.loads((plugin / 'hooks/hooks.json').read_text())['hooks']
-    assert {'SessionStart', 'UserPromptSubmit', 'PreCompact', 'PostCompact', 'Stop', 'SessionEnd', 'SubagentStop'} <= hooks.keys()
-    for groups in hooks.values():
+    assert {
+        'SessionStart', 'UserPromptSubmit', 'PostToolUse', 'PostToolUseFailure',
+        'PreCompact', 'PostCompact', 'Stop', 'SessionEnd', 'SubagentStop',
+    } <= hooks.keys()
+    for event, groups in hooks.items():
         for group in groups:
             for hook in group['hooks']:
+                if hook['type'] == 'mcp_tool':
+                    assert event in {'PostToolUse', 'PostToolUseFailure'}
+                    assert hook.get('server') == 'plugin:vres-os:vres'
+                    assert hook.get('tool') == 'reply_activity_observe'
+                    assert hook.get('input') == {
+                        'session_id': '${session_id}',
+                        'tool_name': '${tool_name}',
+                        'tool_use_id': '${tool_use_id}',
+                        'event_name': '${hook_event_name}',
+                    }
+                    matcher = group.get('matcher', '')
+                    assert 'task_checkpoint' in matcher
+                    assert 'task_reply_gate' in matcher
+                    assert 'reply_activity_observe' in matcher
+                    continue
                 assert hook['type'] == 'command' and isinstance(hook.get('args'), list)
                 for arg in hook['args']:
                     if '${CLAUDE_PLUGIN_ROOT}/' in arg:
@@ -113,6 +131,7 @@ def structure():
                 assert (p.parent / target).exists(), f'Broken local documentation link {p}: {target}'
     names = _tool_names(ROOT / 'src/vres_os/mcp_server.py')
     company_names = _tool_names(ROOT / 'src/vres_os/company_mcp.py')
+    entrypoint_names = _tool_names(ROOT / 'src/vres_os/mcp_entrypoint.py')
     assert 'procedure_get' in names and 'optimization_gate' not in names and 'validation_record' not in names
     assert len(names) == len(set(names))
     assert {
@@ -131,6 +150,7 @@ def structure():
         'procedure_replay_finalize',
     } <= set(company_names)
     assert len(company_names) == len(set(company_names))
+    assert entrypoint_names == ['reply_activity_observe']
     for path in [
         ROOT / 'src/vres_os/replay.py',
         ROOT / 'src/vres_os/executor.py',
@@ -138,11 +158,12 @@ def structure():
         ROOT / 'src/vres_os/procedure_worker.py',
         ROOT / 'src/vres_os/model_policy.py',
         ROOT / 'src/vres_os/model_experiments.py',
+        ROOT / 'src/vres_os/mcp_entrypoint.py',
     ]:
         assert path.is_file(), path
     return {'package_version': config['project']['version'], 'plugin_version': manifest['version'],
             'agents': sorted(agents), 'skills': sorted(skills), 'mcp_tools': names,
-            'company_mcp_tools': company_names,
+            'company_mcp_tools': company_names, 'entrypoint_mcp_tools': entrypoint_names,
             'migrations': {p.name: digest(p.read_bytes()) for p in migrations},
             'table_inventory': sorted(tables), 'migration_proof': 'numbering/hash/inventory only; no PostgreSQL execution'}
 
@@ -172,11 +193,13 @@ def package(output: Path, env: dict):
                 output, 'wheel-install', cwd=Path(d), env=env)
         smoke = """import sys, pathlib, importlib.resources
 sys.path.insert(0, sys.argv[1])
-import vres_os, vres_os.cli, vres_os.metrics, vres_os.optimization, vres_os.company_mcp, vres_os.replay
+import vres_os, vres_os.cli, vres_os.metrics, vres_os.optimization, vres_os.company_mcp, vres_os.mcp_entrypoint, vres_os.replay
 import vres_os.executor, vres_os.procedure_recipe, vres_os.procedure_worker, vres_os.model_policy
 import vres_os.model_experiments
 assert pathlib.Path(vres_os.__file__).resolve().is_relative_to(pathlib.Path(sys.argv[1]).resolve())
 assert callable(vres_os.company_mcp.main)
+assert callable(vres_os.mcp_entrypoint.main)
+assert callable(vres_os.mcp_entrypoint.reply_activity_observe)
 assert hasattr(vres_os.replay, 'ReplayService')
 assert hasattr(vres_os.executor, 'ProcedureExecutorService')
 assert callable(vres_os.procedure_worker.main)
@@ -184,7 +207,7 @@ assert hasattr(vres_os.model_policy, 'ModelPolicyService')
 assert hasattr(vres_os.model_experiments, 'ModelExperimentService')
 assert len(list(importlib.resources.files('vres_os').joinpath('migrations').iterdir())) >= 14
 print('installed runtime source:', vres_os.__file__)
-print('selected imports, authority/replay/executor/model-provenance/company-optimization/model-experiment surfaces and migration resources: passed')
+print('selected imports, reply-activity hook, authority/replay/executor/model-provenance/company-optimization/model-experiment surfaces and migration resources: passed')
 """
         command([sys.executable, '-I', '-X', 'utf8', '-c', smoke, str(target)], output, 'wheel-import-smoke', cwd=Path(d), env=env)
     return {'filename': path.name, 'sha256': digest(path.read_bytes()), 'bytes': path.stat().st_size,

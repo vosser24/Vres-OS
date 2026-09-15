@@ -43,11 +43,34 @@ def test_all_skills_have_valid_frontmatter():
 
 def test_hook_commands_resolve_to_shipped_wrappers():
     data = json.loads((PLUGIN / "hooks" / "hooks.json").read_text(encoding="utf-8"))
-    assert {"SessionStart", "UserPromptSubmit", "PreCompact", "PostCompact", "Stop", "SessionEnd"} <= set(data["hooks"])
+    assert {
+        "SessionStart",
+        "UserPromptSubmit",
+        "PostToolUse",
+        "PostToolUseFailure",
+        "PreCompact",
+        "PostCompact",
+        "Stop",
+        "SessionEnd",
+    } <= set(data["hooks"])
     shipped = {"vres-hook.ps1", "vres-session-end.ps1"}
     for event, groups in data["hooks"].items():
         for group in groups:
             for hook in group["hooks"]:
+                if hook["type"] == "mcp_tool":
+                    assert event in {"PostToolUse", "PostToolUseFailure"}
+                    assert hook["server"] == "plugin:vres-os:vres"
+                    assert hook["tool"] == "reply_activity_observe"
+                    assert hook["input"] == {
+                        "session_id": "${session_id}",
+                        "tool_name": "${tool_name}",
+                        "tool_use_id": "${tool_use_id}",
+                        "event_name": "${hook_event_name}",
+                    }
+                    assert "task_checkpoint" in group["matcher"]
+                    assert "task_reply_gate" in group["matcher"]
+                    assert "reply_activity_observe" in group["matcher"]
+                    continue
                 assert hook["type"] == "command"
                 assert hook["command"].lower() in {"powershell.exe", "pwsh.exe"}
                 args = hook.get("args") or []
@@ -68,3 +91,6 @@ def test_mcp_wrapper_is_shipped():
     args = data["mcpServers"]["vres"]["args"]
     assert any("vres-mcp.ps1" in x for x in args)
     assert (PLUGIN / "bin" / "vres-mcp.ps1").exists()
+    entrypoint = ROOT / "src" / "vres_os" / "mcp_entrypoint.py"
+    assert entrypoint.exists()
+    assert "reply_activity_observe" in entrypoint.read_text(encoding="utf-8")
