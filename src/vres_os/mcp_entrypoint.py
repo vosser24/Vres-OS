@@ -5,6 +5,7 @@ from typing import Any
 from .company_mcp import mcp
 from .mcp_server import _current_session, _project, _require_node
 from .reply_guard import observe_reply_activity
+from .task_decisions import TaskDecisionService
 from .task_lifecycle import transition_task_status
 
 
@@ -82,6 +83,89 @@ def task_status_set(
         status,
         reason,
         provider_session_id=sid,
+    )
+
+
+@mcp.tool()
+def task_decision_list(task_key: str, include_history: bool = False) -> list[dict[str, Any]]:
+    """Return structured descriptive decision provenance for one task.
+
+    Decisions are continuity/provenance state only. They are never approvals and do
+    not establish independent validation authority.
+    """
+    _require_node("task", task_key)
+    service = TaskDecisionService()
+    return service.list_history(task_key) if include_history else service.list_active(task_key)
+
+
+@mcp.tool()
+def task_decision_record(
+    task_key: str,
+    text: str,
+    session_id: str,
+    rationale: str | None = None,
+    source_event_id: int | None = None,
+) -> dict[str, Any]:
+    """Record a new descriptive decision with server-derived provenance.
+
+    Without source_event_id the source is the bound Chairman session. To attribute a
+    decision to the user, source_event_id must identify a real persisted
+    USER_INSTRUCTION event on this task. This tool never creates an approval.
+    """
+    pid, _ = _project()
+    sid = _current_session(pid, session_id)
+    _require_node("task", task_key, write=True)
+    return TaskDecisionService().record(
+        task_key=task_key,
+        project_id=pid,
+        provider_session_id=sid,
+        text=text,
+        rationale=rationale,
+        source_event_id=source_event_id,
+    )
+
+
+@mcp.tool()
+def task_decision_supersede(
+    task_key: str,
+    decision_key: str,
+    text: str,
+    session_id: str,
+    rationale: str | None = None,
+    source_event_id: int | None = None,
+) -> dict[str, Any]:
+    """Replace an active descriptive decision while preserving the prior record."""
+    pid, _ = _project()
+    sid = _current_session(pid, session_id)
+    _require_node("task", task_key, write=True)
+    return TaskDecisionService().supersede(
+        task_key=task_key,
+        project_id=pid,
+        provider_session_id=sid,
+        decision_key=decision_key,
+        text=text,
+        rationale=rationale,
+        source_event_id=source_event_id,
+    )
+
+
+@mcp.tool()
+def task_decision_retire(
+    task_key: str,
+    decision_key: str,
+    reason: str,
+    session_id: str,
+) -> dict[str, Any]:
+    """Retire an active descriptive decision without deleting its history."""
+    pid, _ = _project()
+    sid = _current_session(pid, session_id)
+    _require_node("task", task_key, write=True)
+    return TaskDecisionService().retire(
+        task_key=task_key,
+        project_id=pid,
+        provider_session_id=sid,
+        decision_key=decision_key,
+        reason=reason,
     )
 
 
