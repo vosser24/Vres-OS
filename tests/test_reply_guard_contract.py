@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_reply_guard_is_wired_without_prose_inference():
     hooks = (ROOT / "src/vres_os/hooks.py").read_text(encoding="utf-8")
-    mcp = (ROOT / "src/vres_os/mcp_server.py").read_text(encoding="utf-8")
+    mcp = (ROOT / "src/vres_os/mcp_entrypoint.py").read_text(encoding="utf-8")
     guard = (ROOT / "src/vres_os/reply_guard.py").read_text(encoding="utf-8")
 
     assert '"decision": "block"' in hooks
