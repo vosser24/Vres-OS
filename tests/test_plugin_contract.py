@@ -44,15 +44,23 @@ def test_all_skills_have_valid_frontmatter():
 def test_hook_commands_resolve_to_shipped_wrappers():
     data = json.loads((PLUGIN / "hooks" / "hooks.json").read_text(encoding="utf-8"))
     assert {"SessionStart", "UserPromptSubmit", "PreCompact", "PostCompact", "Stop", "SessionEnd"} <= set(data["hooks"])
-    for groups in data["hooks"].values():
+    shipped = {"vres-hook.ps1", "vres-session-end.ps1"}
+    for event, groups in data["hooks"].items():
         for group in groups:
             for hook in group["hooks"]:
                 assert hook["type"] == "command"
                 assert hook["command"].lower() in {"powershell.exe", "pwsh.exe"}
                 args = hook.get("args") or []
                 assert args, "plugin path hooks must use exec-form args"
-                assert any("${CLAUDE_PLUGIN_ROOT}" in arg and "vres-hook.ps1" in arg for arg in args)
-                assert (PLUGIN / "bin" / "vres-hook.ps1").exists()
+                wrapper_args = [arg for arg in args if "${CLAUDE_PLUGIN_ROOT}" in arg]
+                assert wrapper_args, f"{event} must resolve through the shipped plugin root"
+                wrapper_name = Path(wrapper_args[0].replace("\\", "/")).name
+                assert wrapper_name in shipped
+                assert (PLUGIN / "bin" / wrapper_name).exists()
+                if event == "SessionEnd":
+                    assert wrapper_name == "vres-session-end.ps1"
+                else:
+                    assert wrapper_name == "vres-hook.ps1"
 
 
 def test_mcp_wrapper_is_shipped():
