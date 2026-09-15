@@ -4,5 +4,5 @@ $root = Join-Path $env:LOCALAPPDATA 'VresOS'
 $env:PYTHONUTF8 = '1'
 $OutputEncoding = New-Object System.Text.UTF8Encoding $false
 $python = Resolve-VresPython
-& $python -I -X utf8 -m vres_os.company_mcp
+& $python -I -X utf8 -m vres_os.mcp_entrypoint
 exit $LASTEXITCODE
