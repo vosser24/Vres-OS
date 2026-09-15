@@ -11,6 +11,7 @@ from .db import DatabaseUnavailable
 from .paths import logs_dir
 from .project import discover_project
 from .redaction import redact_text
+from .reply_guard import begin_reply_turn, inspect_stop_guard, mark_stop_guard_blocked
 from .repository import Repository
 from .session_lifecycle import host_pid_from_env, reconcile_open_sessions, touch_session_host
 from .session_prompts import (
@@ -145,6 +146,15 @@ def user_prompt() -> None:
             # Do not attribute the prompt to the currently focused task yet. The model may
             # create/switch tasks during this turn; Stop commits it to the final binding.
             stage_user_instruction(project_id, sid, prompt)
+            turn_id = begin_reply_turn(project_id, sid)
+            if turn_id:
+                context += (
+                    f"\nVRES_REPLY_TURN_ID={turn_id}\n"
+                    "Before every final reply while a persistent task is bound, call task_reply_gate. "
+                    "Use advances_state=true only after task_checkpoint when the reply completes, invalidates, "
+                    "or advances persisted next_action/pending_work; use advances_state=false only for a genuinely "
+                    "non-material reply."
+                )
         task = repo.active_task(project_id, sid)
         if not task:
             sys.stdout.write(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": context}}))
@@ -259,6 +269,46 @@ def stop() -> None:
         _observe_session(project_id, sid)
         task = repo.active_task(project_id, sid)
         if task:
+            # Evaluate the turn-scoped reply gate before committing the staged user
+            # instruction. That commit updates task_state.updated_at and would otherwise
+            # make a valid gate look stale. Assistant prose is never interpreted here.
+            guard = inspect_stop_guard(project_id, sid)
+            if not guard.get("allowed"):
+                reason = str(guard.get("reason") or "reply_guard_unsatisfied")
+                recurrent = mark_stop_guard_blocked(
+                    project_id,
+                    sid or "",
+                    task.task_key,
+                    reason=reason,
+                    stop_hook_active=bool(payload.get("stop_hook_active")),
+                )
+                if not recurrent:
+                    sys.stdout.write(
+                        json.dumps(
+                            {
+                                "decision": "block",
+                                "reason": (
+                                    f"Vres authoritative reply guard is not satisfied for {task.task_key} ({reason}). "
+                                    "Before replying, call task_checkpoint first if this reply completes, invalidates, "
+                                    "or advances persisted next_action/pending_work, then call task_reply_gate with "
+                                    "advances_state=true. For a genuinely non-material reply, call task_reply_gate "
+                                    "with advances_state=false. Do not infer progress from the prior assistant draft."
+                                ),
+                            }
+                        )
+                    )
+                    return
+                sys.stdout.write(
+                    json.dumps(
+                        {
+                            "systemMessage": (
+                                f"VRES_REPLY_GUARD_WARNING: {task.task_key} reply guard remained unresolved "
+                                f"after one continuation ({reason}). The reply is being allowed to avoid a Stop loop; "
+                                "authoritative task state may still be stale."
+                            )
+                        }
+                    )
+                )
             commit_staged_user_instruction(project_id, sid, task.task_key)
             snap = last_assistant_snapshot(payload)
             if snap:
@@ -272,6 +322,16 @@ def stop() -> None:
             repo.record_event(task.task_key, "MODEL_STOP", "vres-lifecycle", {}, sid)
     except Exception as exc:
         _log_hook_error("Stop", exc)
+        sys.stdout.write(
+            json.dumps(
+                {
+                    "systemMessage": (
+                        "VRES_REPLY_GUARD_WARNING: Vres could not verify the authoritative pre-reply gate. "
+                        "Persistence may be stale; inspect Vres task state before relying on continuity."
+                    )
+                }
+            )
+        )
 
 
 def validator_stop() -> None:
