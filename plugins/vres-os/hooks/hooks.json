@@ -36,6 +36,44 @@
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "matcher": "^(?!mcp__plugin_vres-os_vres__(task_checkpoint|task_reply_gate|reply_activity_observe)$).+",
+        "hooks": [
+          {
+            "type": "mcp_tool",
+            "server": "plugin:vres-os:vres",
+            "tool": "reply_activity_observe",
+            "input": {
+              "session_id": "${session_id}",
+              "tool_name": "${tool_name}",
+              "tool_use_id": "${tool_use_id}",
+              "event_name": "${hook_event_name}"
+            },
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "^(?!mcp__plugin_vres-os_vres__(task_checkpoint|task_reply_gate|reply_activity_observe)$).+",
+        "hooks": [
+          {
+            "type": "mcp_tool",
+            "server": "plugin:vres-os:vres",
+            "tool": "reply_activity_observe",
+            "input": {
+              "session_id": "${session_id}",
+              "tool_name": "${tool_name}",
+              "tool_use_id": "${tool_use_id}",
+              "event_name": "${hook_event_name}"
+            },
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "PreCompact": [
       {
         "hooks": [
