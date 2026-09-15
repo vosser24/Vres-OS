@@ -106,3 +106,48 @@ CREATE TRIGGER trg_protect_checkpoint_decision_delete
 BEFORE DELETE ON vres.checkpoint_decisions
 FOR EACH ROW
 EXECUTE FUNCTION vres.protect_checkpoint_decision_history();
+
+-- A completed task is terminal and must not remain bound to open Claude sessions.
+-- Keep session rows open for the still-running conversation, but release task_id and
+-- persist the same old/new binding provenance used by explicit/cancellation paths.
+CREATE OR REPLACE FUNCTION vres.release_completed_task_sessions()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    s record;
+    transition jsonb;
+BEGIN
+    IF NEW.status <> 'completed' OR OLD.status = 'completed' THEN
+        RETURN NEW;
+    END IF;
+
+    FOR s IN
+        SELECT id,provider_session_id
+          FROM vres.sessions
+         WHERE task_id=NEW.id AND ended_at IS NULL
+         FOR UPDATE
+    LOOP
+        transition := jsonb_build_object(
+            'source','task_completed',
+            'previous_task_id',NEW.id,
+            'previous_task_key',NEW.task_key,
+            'new_task_id',NULL,
+            'new_task_key',NULL
+        );
+        INSERT INTO vres.task_events(task_id,event_type,actor,payload,session_id)
+        VALUES (NEW.id,'SESSION_UNBOUND','vres-lifecycle',transition,s.provider_session_id);
+        UPDATE vres.sessions SET task_id=NULL WHERE id=s.id;
+    END LOOP;
+
+    UPDATE vres.project_focus SET task_id=NULL,updated_at=now() WHERE task_id=NEW.id;
+    RETURN NEW;
+END
+$$;
+
+DROP TRIGGER IF EXISTS trg_release_completed_task_sessions ON vres.tasks;
+CREATE TRIGGER trg_release_completed_task_sessions
+AFTER UPDATE OF status ON vres.tasks
+FOR EACH ROW
+WHEN (OLD.status IS DISTINCT FROM NEW.status)
+EXECUTE FUNCTION vres.release_completed_task_sessions();
