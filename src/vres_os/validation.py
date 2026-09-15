@@ -106,13 +106,41 @@ def parse_validator_report(text: str) -> dict:
     return report
 
 
+def _assistant_handback_messages(value: Any) -> list[str]:
+    """Extract only host-recorded SubagentHandback messages from assistant output.
+
+    A validator can hand its canonical report back through Claude Code's
+    SubagentHandback tool without repeating the report as a text block. This helper
+    deliberately ignores every other tool_use shape and never reads tool results.
+    """
+    if not isinstance(value, dict):
+        return []
+    content = value.get("content")
+    if not isinstance(content, list):
+        return []
+    result: list[str] = []
+    for block in content[:100]:
+        if not isinstance(block, dict) or block.get("type") != "tool_use":
+            continue
+        if block.get("name") != "SubagentHandback":
+            continue
+        tool_input = block.get("input")
+        if not isinstance(tool_input, dict):
+            continue
+        message = tool_input.get("message")
+        if isinstance(message, str) and message.strip():
+            result.append(message)
+    return result
+
+
 def observed_validator_report(final_text: str, records: list[dict[str, Any]]) -> tuple[dict, str]:
     """Return the newest canonical validator report from host-observed assistant output.
 
     Prefer SubagentStop's final assistant message. If the validator emitted a valid
     canonical report and then a harmless trailing assistant message, recover only
-    from assistant-authored transcript text. Tool results and other transcript data
-    are never eligible evidence for the verdict.
+    from assistant-authored transcript text or the message of an assistant-authored
+    SubagentHandback tool call. Arbitrary tool calls, tool results, and other
+    transcript data are never eligible evidence for the verdict.
     """
     final = final_text.strip() if isinstance(final_text, str) else ""
     if final:
@@ -128,11 +156,14 @@ def observed_validator_report(final_text: str, records: list[dict[str, Any]]) ->
         role = message.get("role") if isinstance(message, dict) else obj.get("role")
         if obj.get("type") != "assistant" and role != "assistant":
             continue
-        texts = _text_from_content(message if message is not None else obj)
-        candidates = []
+        observed = message if isinstance(message, dict) else obj
+        texts = _text_from_content(observed)
+        handbacks = _assistant_handback_messages(observed)
+        candidates: list[str] = []
         if texts:
             candidates.append("\n".join(texts))
             candidates.extend(reversed(texts))
+        candidates.extend(reversed(handbacks))
         seen: set[str] = set()
         for candidate in candidates:
             candidate = candidate.strip()
