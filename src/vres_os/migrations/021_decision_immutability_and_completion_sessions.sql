@@ -19,6 +19,10 @@ RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
+    IF current_setting('vres.allow_decision_ledger_delete', true) = 'on' THEN
+        RETURN NEW;
+    END IF;
+
     IF NEW.decision_key IS DISTINCT FROM OLD.decision_key
        OR NEW.task_id IS DISTINCT FROM OLD.task_id
        OR NEW.text IS DISTINCT FROM OLD.text
