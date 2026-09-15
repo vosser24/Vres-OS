@@ -117,6 +117,13 @@ def test_task_status_contract_removes_legacy_new_vocabulary():
     assert "'new'" not in sql.split("CHECK (status IN", 1)[1]
 
 
+def test_dead_task_project_metadata_contract_is_removed():
+    sql = _migration("019_remove_dead_task_project_metadata.sql")
+    assert "ALTER TABLE vres.projects" in sql
+    assert "ALTER TABLE vres.tasks" in sql
+    assert sql.count("DROP COLUMN IF EXISTS metadata") == 2
+
+
 def test_initial_migration_does_not_make_pg_trgm_a_hard_requirement():
     sql = _migration("001_initial.sql")
     assert "pg_available_extensions" in sql
