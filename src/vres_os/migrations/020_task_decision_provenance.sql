@@ -72,7 +72,7 @@ EXECUTE FUNCTION vres.enforce_task_decision_projection();
 -- Every checkpoint snapshots exactly which immutable decision records were active at that point.
 CREATE TABLE IF NOT EXISTS vres.checkpoint_decisions (
     checkpoint_id bigint NOT NULL REFERENCES vres.checkpoints(id) ON DELETE CASCADE,
-    decision_id bigint NOT NULL REFERENCES vres.task_decisions(id) ON DELETE RESTRICT,
+    decision_id bigint NOT NULL REFERENCES vres.task_decisions(id) ON DELETE CASCADE,
     position integer NOT NULL CHECK (position >= 0),
     PRIMARY KEY(checkpoint_id,decision_id),
     UNIQUE(checkpoint_id,position)
