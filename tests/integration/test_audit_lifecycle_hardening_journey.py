@@ -11,6 +11,95 @@ from vres_os.validation import ValidationService
 from vres_os.validation_audit import record_validation_ingestion_attempt
 
 
+def test_task_begin_seeds_continuation_and_initial_checkpoint(pg_project):
+    repo = Repository()
+    objective = "Carry a meaningful multi-turn objective without an empty continuation state"
+    task = repo.begin_task(pg_project, "Seeded task", objective, "test", "chairman")
+
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT t.id,s.current_phase,s.current_step,s.state_summary,s.next_action,
+                   s.pending_work,s.validation_status
+              FROM vres.tasks t JOIN vres.task_state s ON s.task_id=t.id
+             WHERE t.task_key=%s
+            """,
+            (task,),
+        ).fetchone()
+        checkpoint = conn.execute(
+            """
+            SELECT checkpoint_key,summary,current_position,next_action,context,reason,created_by
+              FROM vres.checkpoints WHERE task_id=%s ORDER BY id DESC LIMIT 1
+            """,
+            (row["id"],),
+        ).fetchone()
+
+    assert row["current_phase"] == "intake"
+    assert row["current_step"] == "intake"
+    assert row["state_summary"]
+    assert objective in row["state_summary"]
+    assert row["next_action"]
+    assert row["pending_work"] == [objective]
+    assert row["validation_status"] == "pending"
+    assert checkpoint["checkpoint_key"].startswith("CP-")
+    assert checkpoint["summary"] == row["state_summary"]
+    assert checkpoint["current_position"] == row["current_step"]
+    assert checkpoint["next_action"] == row["next_action"]
+    assert checkpoint["context"]["initial"] is True
+    assert checkpoint["context"]["pending_work"] == [objective]
+    assert checkpoint["reason"] == "task_begin"
+    assert checkpoint["created_by"] == "chairman"
+
+
+def test_explicit_session_rebind_records_old_and_new_history(pg_project):
+    repo = Repository()
+    first = repo.begin_task(pg_project, "First", "First objective", "test", "chairman")
+    second = repo.begin_task(pg_project, "Second", "Second objective", "test", "chairman")
+    sid = "explicit-rebind-session"
+    repo.open_session(pg_project, sid)
+
+    repo.bind_session(pg_project, sid, first)
+    repo.bind_session(pg_project, sid, second)
+
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT t.task_key,e.event_type,e.actor,e.payload
+              FROM vres.task_events e JOIN vres.tasks t ON t.id=e.task_id
+             WHERE e.session_id=%s AND e.event_type IN ('SESSION_BOUND','SESSION_UNBOUND')
+             ORDER BY e.id
+            """,
+            (sid,),
+        ).fetchall()
+        before = len(rows)
+
+    assert [(r["task_key"], r["event_type"]) for r in rows] == [
+        (first, "SESSION_BOUND"),
+        (first, "SESSION_UNBOUND"),
+        (second, "SESSION_BOUND"),
+    ]
+    assert all(r["actor"] == "chairman" for r in rows)
+    first_bind = rows[0]["payload"]
+    switch_out = rows[1]["payload"]
+    switch_in = rows[2]["payload"]
+    assert first_bind["source"] == "explicit_bind"
+    assert first_bind["previous_task_key"] is None
+    assert first_bind["new_task_key"] == first
+    assert switch_out["previous_task_key"] == first
+    assert switch_out["new_task_key"] == second
+    assert switch_in == switch_out
+
+    # Rebinding the same task is idempotent and must not manufacture history.
+    repo.bind_session(pg_project, sid, second)
+    with connect() as conn:
+        after = conn.execute(
+            "SELECT count(*) AS n FROM vres.task_events WHERE session_id=%s "
+            "AND event_type IN ('SESSION_BOUND','SESSION_UNBOUND')",
+            (sid,),
+        ).fetchone()["n"]
+    assert after == before
+
+
 def test_project_focus_binds_fresh_ambiguous_session(pg_project):
     repo = Repository()
     old_task = repo.begin_task(pg_project, "Old", "Old objective", "test", "chairman")
