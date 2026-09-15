@@ -39,14 +39,14 @@ try {
     $active = Get-Content -Raw -Encoding UTF8 -LiteralPath $activePath | ConvertFrom-Json
     $release = [string]$active.release
     if ($release -notmatch '^\d{14}-[a-f0-9]{8}$') { throw 'Invalid active release id.' }
-    $pythonw = Join-Path $root "releases\$release\venv\Scripts\pythonw.exe"
-    if (-not (Test-Path -LiteralPath $pythonw)) { throw 'Active pythonw runtime is missing.' }
+    $python = Join-Path $root "releases\$release\venv\Scripts\python.exe"
+    if (-not (Test-Path -LiteralPath $python)) { throw 'Active Python runtime is missing.' }
 
     $env:VRES_SESSION_END_ID = $sid
     $env:VRES_SESSION_END_CWD = $cwd
     $env:VRES_SESSION_END_REASON = $reason
 
-    $proc = Start-Process -FilePath $pythonw -ArgumentList @(
+    $proc = Start-Process -FilePath $python -ArgumentList @(
         '-I', '-X', 'utf8', '-m', 'vres_os.session_end_worker'
     ) -WindowStyle Hidden -PassThru
 
