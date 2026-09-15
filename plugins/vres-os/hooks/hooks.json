@@ -103,7 +103,8 @@
               "-File",
               "${CLAUDE_PLUGIN_ROOT}/bin/vres-hook.ps1",
               "session-end"
-            ]
+            ],
+            "async": true
           }
         ]
       }
