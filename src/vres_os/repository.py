@@ -93,16 +93,46 @@ class Repository:
         lead_role: str,
     ) -> str:
         task_key = _key("TASK")
+        cp_key = _key("CP")
+        safe_title = str(redact(title))
+        safe_objective = str(redact(objective))
+        seed_summary = str(_clip(f"Task initialized for objective: {safe_objective}"))
+        seed_step = "intake"
+        seed_next = "Translate the persisted objective into the next concrete action and checkpoint it before material work."
+        seed_pending = _clip([safe_objective], max_text=2000, max_list=10)
         with connect() as conn, conn.transaction():
             row = conn.execute(
                 """
                 INSERT INTO vres.tasks(task_key,project_id,title,objective,task_family,status,lead_role)
                 VALUES (%s,%s,%s,%s,%s,'active',%s) RETURNING id
                 """,
-                (task_key, project_id, redact(title), redact(objective), task_family, lead_role),
+                (task_key, project_id, safe_title, safe_objective, task_family, lead_role),
             ).fetchone()
             task_id = int(row["id"])
-            conn.execute("INSERT INTO vres.task_state(task_id,current_phase,validation_status) VALUES (%s,'intake','pending')", (task_id,))
+            conn.execute(
+                """
+                INSERT INTO vres.task_state(
+                  task_id,current_phase,current_step,state_summary,next_action,pending_work,validation_status
+                ) VALUES (%s,'intake',%s,%s,%s,%s::jsonb,'pending')
+                """,
+                (task_id, seed_step, seed_summary, seed_next, json.dumps(seed_pending)),
+            )
+            conn.execute(
+                """
+                INSERT INTO vres.checkpoints(
+                  checkpoint_key,task_id,summary,current_position,next_action,context,reason,created_by
+                ) VALUES (%s,%s,%s,%s,%s,%s::jsonb,'task_begin',%s)
+                """,
+                (
+                    cp_key,
+                    task_id,
+                    seed_summary,
+                    seed_step,
+                    seed_next,
+                    json.dumps({"initial": True, "pending_work": seed_pending}),
+                    lead_role,
+                ),
+            )
             conn.execute(
                 """
                 INSERT INTO vres.project_focus(project_id,task_id) VALUES (%s,%s)
@@ -228,16 +258,47 @@ class Repository:
             task = conn.execute("SELECT project_id,status FROM vres.tasks WHERE id=%s", (task_id,)).fetchone()
             if not task or int(task["project_id"]) != int(project_id) or task["status"] not in _ACTIVE:
                 raise ValueError("Cannot bind session to a task outside this project or a completed task")
-            bound = conn.execute(
+            session = conn.execute(
                 """
-                UPDATE vres.sessions SET task_id=%s
+                SELECT id,task_id FROM vres.sessions
                  WHERE provider='claude' AND provider_session_id=%s AND project_id=%s AND ended_at IS NULL
-                RETURNING id
+                 ORDER BY started_at DESC LIMIT 1
+                 FOR UPDATE
                 """,
-                (task_id, provider_session_id, project_id),
+                (provider_session_id, project_id),
             ).fetchone()
-            if not bound:
+            if not session:
                 raise ValueError("Cannot bind an unregistered or closed session")
+            previous_task_id = int(session["task_id"]) if session.get("task_id") else None
+            previous_task_key = None
+            if previous_task_id:
+                previous = conn.execute(
+                    "SELECT task_key FROM vres.tasks WHERE id=%s",
+                    (previous_task_id,),
+                ).fetchone()
+                previous_task_key = str(previous["task_key"]) if previous else None
+            if previous_task_id != task_id:
+                conn.execute("UPDATE vres.sessions SET task_id=%s WHERE id=%s", (task_id, session["id"]))
+                transition = {
+                    "source": "explicit_bind",
+                    "previous_task_id": previous_task_id,
+                    "previous_task_key": previous_task_key,
+                    "new_task_id": task_id,
+                    "new_task_key": task_key,
+                }
+                if previous_task_id:
+                    conn.execute(
+                        "INSERT INTO vres.task_events(task_id,event_type,actor,payload,session_id) "
+                        "VALUES (%s,'SESSION_UNBOUND','chairman',%s::jsonb,%s)",
+                        (previous_task_id, json.dumps(transition), provider_session_id),
+                    )
+                    conn.execute("UPDATE vres.tasks SET updated_at=now() WHERE id=%s", (previous_task_id,))
+                conn.execute(
+                    "INSERT INTO vres.task_events(task_id,event_type,actor,payload,session_id) "
+                    "VALUES (%s,'SESSION_BOUND','chairman',%s::jsonb,%s)",
+                    (task_id, json.dumps(transition), provider_session_id),
+                )
+                conn.execute("UPDATE vres.tasks SET updated_at=now() WHERE id=%s", (task_id,))
             conn.execute(
                 """
                 INSERT INTO vres.project_focus(project_id,task_id) VALUES (%s,%s)

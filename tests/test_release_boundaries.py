@@ -86,10 +86,16 @@ def test_open_session_retry_is_idempotent_and_does_not_select_task(monkeypatch):
 
 
 def test_binding_unregistered_session_fails_before_changing_focus(monkeypatch):
-    conn = ScriptedConnection([('SELECT id FROM vres.tasks', {'id': 2}), ('SELECT project_id,status', {'project_id': 7, 'status': 'active'}), ('UPDATE vres.sessions', None)])
+    conn = ScriptedConnection([
+        ('SELECT id FROM vres.tasks', {'id': 2}),
+        ('SELECT project_id,status', {'project_id': 7, 'status': 'active'}),
+        ('SELECT id,task_id FROM vres.sessions', None),
+    ])
     monkeypatch.setattr(repository, 'connect', lambda: conn)
     with pytest.raises(ValueError, match='unregistered'):
         repository.Repository().bind_session(7, 'native-missing', 'T-2')
+    assert not any('UPDATE vres.sessions' in str(sql) for sql, _ in conn.calls)
+    assert not any('project_focus' in str(sql) for sql, _ in conn.calls)
 
 
 def test_prompt_hook_delivers_current_session_even_without_task(monkeypatch, capsys):
