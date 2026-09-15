@@ -26,6 +26,7 @@ STATE_FIELDS = (
     "open_questions",
     "assumptions",
     "constraints",
+    "decisions",
     "completed_work",
     "pending_work",
     "relevant_objects",

@@ -149,11 +149,12 @@ def task_checkpoint(
     open_questions: list[str] | None = None,
     assumptions: list[str] | None = None,
     constraints: list[str] | None = None,
+    decisions: list[str] | None = None,
     relevant_objects: list[str] | None = None,
     validation_status: str | None = None,
     reason: str = "material_transition",
 ) -> dict:
-    """Persist material state so another context/model can continue without rediscovery."""
+    """Persist material state and descriptive decisions so another context/model can continue without rediscovery."""
     _require_node("task", task_key, write=True)
     repo = Repository()
     fields: dict[str, Any] = {"state_summary": summary, "current_step": current_position, "next_action": next_action}
@@ -164,6 +165,7 @@ def task_checkpoint(
         "open_questions": open_questions,
         "assumptions": assumptions,
         "constraints": constraints,
+        "decisions": decisions,
         "relevant_objects": relevant_objects,
         "validation_status": validation_status,
     }

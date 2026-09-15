@@ -49,6 +49,7 @@ class ActiveTask:
     open_questions: list[Any]
     assumptions: list[Any]
     constraints: list[Any]
+    decisions: list[Any]
     completed_work: list[Any]
     pending_work: list[Any]
     relevant_objects: list[Any]
@@ -186,7 +187,7 @@ class Repository:
                 SELECT t.task_key,t.title,t.objective,t.task_family,
                        s.current_phase,s.current_step,s.state_summary,s.next_action,
                        s.latest_user_instruction,s.open_questions,s.assumptions,s.constraints,
-                       s.completed_work,s.pending_work,s.relevant_objects,s.validation_status
+                       s.decisions,s.completed_work,s.pending_work,s.relevant_objects,s.validation_status
                   FROM vres.tasks t JOIN vres.task_state s ON s.task_id=t.id
                  WHERE t.id=%s
                 """,
@@ -283,6 +284,7 @@ class Repository:
             "open_questions",
             "assumptions",
             "constraints",
+            "decisions",
             "completed_work",
             "pending_work",
             "relevant_objects",
@@ -448,6 +450,7 @@ class Repository:
             "open_questions": task.open_questions,
             "assumptions": task.assumptions,
             "constraints": task.constraints,
+            "decisions": task.decisions,
             "completed": task.completed_work,
             "pending": task.pending_work,
             "relevant_objects": task.relevant_objects,
