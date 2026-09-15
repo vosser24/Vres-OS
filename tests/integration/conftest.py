@@ -31,8 +31,15 @@ def pg_project(monkeypatch, tmp_path):
         yield pid
     finally:
         # Delete only records created inside this unique test project. Never DROP schema/database.
+        # Explicit observability writers can create rows whose project/task foreign keys are
+        # intentionally restrictive, so clear those before the synthetic task/project roots.
         with connect() as conn, conn.transaction():
             conn.execute("DELETE FROM vres.validation_ingestion_attempts WHERE project_id=%s", (pid,))
+            conn.execute("DELETE FROM vres.artifacts WHERE project_id=%s", (pid,))
+            conn.execute(
+                "DELETE FROM vres.model_runs WHERE task_id IN (SELECT id FROM vres.tasks WHERE project_id=%s)",
+                (pid,),
+            )
             conn.execute("DELETE FROM vres.knowledge_items WHERE project_id=%s", (pid,))
             conn.execute("DELETE FROM vres.procedures WHERE project_id=%s", (pid,))
             conn.execute("DELETE FROM vres.approval_events WHERE project_id=%s", (pid,))
