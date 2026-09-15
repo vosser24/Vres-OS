@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from vres_os import session_lifecycle
@@ -22,6 +23,20 @@ def test_session_end_launcher_is_instrumented_without_payload_logging():
     assert "event=session-end phase=launch-finish" in source
     assert "event=session-end phase=launch-failed" in source
     assert "lifecycle.log" in source
+    # The first SessionEnd marker must happen before runtime discovery or expensive
+    # process inspection so host timeout diagnosis cannot disappear with the hook.
+    assert source.index("event=session-end phase=launch-start") < source.index("resolve-runtime.ps1")
+    assert source.index("event=session-end phase=launch-start") < source.index("Get-CimInstance Win32_Process")
+    assert "if ($Event -ne 'session-end')" in source
+    assert "host_pid=stored-session-metadata" in source
     # The raw hook payload must never be written to the lifecycle log.
     assert "$payload | Add-Content" not in source
     assert "last_assistant_message" not in source
+
+
+def test_session_end_hook_runs_async_to_escape_host_exit_budget():
+    config = json.loads(Path("plugins/vres-os/hooks/hooks.json").read_text(encoding="utf-8"))
+    hook = config["hooks"]["SessionEnd"][0]["hooks"][0]
+    assert hook["type"] == "command"
+    assert hook["args"][-1] == "session-end"
+    assert hook["async"] is True
