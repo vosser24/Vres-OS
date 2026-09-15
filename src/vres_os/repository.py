@@ -168,6 +168,17 @@ class Repository:
     def active_task(self, project_id: int, provider_session_id: str | None = None) -> ActiveTask | None:
         with connect() as conn:
             task_id = self._selected_task_id(conn, project_id, provider_session_id)
+            if task_id is None and provider_session_id is None:
+                focus = conn.execute(
+                    """
+                    SELECT t.id
+                      FROM vres.project_focus pf
+                      JOIN vres.tasks t ON t.id=pf.task_id
+                     WHERE pf.project_id=%s AND t.project_id=%s AND t.status=ANY(%s)
+                    """,
+                    (project_id, project_id, list(_ACTIVE)),
+                ).fetchone()
+                task_id = int(focus["id"]) if focus else None
             if task_id is None:
                 return None
             row = conn.execute(
