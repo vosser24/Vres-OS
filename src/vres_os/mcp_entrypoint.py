@@ -11,7 +11,7 @@ def reply_activity_observe(
     tool_name: str,
     tool_use_id: str = "",
     event_name: str = "PostToolUse",
-) -> dict:
+) -> str:
     """Internal lifecycle hook: record bounded tool activity for reply freshness.
 
     The Chairman should never call this directly. Claude Code's PostToolUse and
@@ -20,13 +20,14 @@ def reply_activity_observe(
     """
     pid, _ = _project()
     sid = _current_session(pid, session_id)
-    return observe_reply_activity(
+    observe_reply_activity(
         pid,
         sid,
         tool_name,
         tool_use_id=tool_use_id or None,
         event_name=event_name,
     )
+    return ""
 
 
 def main() -> None:
