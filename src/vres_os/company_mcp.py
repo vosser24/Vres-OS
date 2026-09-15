@@ -9,12 +9,13 @@ from .authority import company_subject
 from .capabilities import CapabilityService, capability_register_subject
 from .executor import ProcedureExecutorService, registered_implementation_refs
 from .knowledge import KnowledgeService
-from .mcp_server import _project, _require_node, mcp
+from .mcp_server import _current_session, _project, _require_node, mcp
 from .metrics import validate_metrics
 from .procedure_recipe import BUILTIN_JSON_RECIPE_V1
 from .procedures import ProcedureService, procedure_accept_subject
 from .redaction import redact, redact_text
 from .registry import RegistryService, registry_publish_subject
+from .reply_guard import confirm_reply_gate
 from .replay import ReplayService
 from .sources import SourceService, source_publish_subject
 
@@ -86,6 +87,20 @@ def _baseline_metrics(
     }
     validate_metrics(metrics)
     return metrics
+
+
+@mcp.tool()
+def task_reply_gate(task_key: str, session_id: str, advances_state: bool) -> dict:
+    """Satisfy the turn-scoped pre-reply guard without inferring progress from assistant prose.
+
+    Set advances_state=true only after task_checkpoint when the pending reply itself
+    completes, invalidates, or advances persisted next_action/pending_work. Use false
+    only for a genuinely non-material reply.
+    """
+    pid, _ = _project()
+    sid = _current_session(pid, session_id)
+    _require_node("task", task_key, write=True)
+    return confirm_reply_gate(pid, sid, task_key, advances_state=advances_state)
 
 
 @mcp.tool()
