@@ -1,7 +1,10 @@
+from types import SimpleNamespace
+
 import pytest
 
 pytest.importorskip("psycopg")
 
+from vres_os import session_end_worker
 from vres_os.db import connect
 from vres_os.repository import Repository
 from vres_os.session_lifecycle import reconcile_open_sessions, touch_session_host
@@ -90,3 +93,44 @@ def test_unknown_process_liveness_never_closes_concurrent_session(pg_project):
     ) == []
     assert _session(pg_project, old)["ended_at"] is None
     assert _session(pg_project, current)["ended_at"] is None
+
+
+def test_detached_session_end_worker_closes_bound_session(pg_project, monkeypatch, tmp_path):
+    repo = Repository()
+    task = repo.begin_task(pg_project, "Detached exit", "Close after Claude terminates", "test", "chairman")
+    sid = "detached-exit-session"
+    repo.open_session(pg_project, sid)
+    repo.bind_session(pg_project, sid, task)
+
+    class FixedProjectRepository(Repository):
+        def ensure_project(self, _project):
+            return pg_project
+
+    monkeypatch.setattr(session_end_worker, "Repository", FixedProjectRepository)
+    monkeypatch.setattr(session_end_worker, "discover_project", lambda _cwd: object())
+    monkeypatch.setattr(
+        session_end_worker.ConfigStore,
+        "load",
+        lambda _self: SimpleNamespace(configured=True),
+    )
+    monkeypatch.setattr(session_end_worker, "logs_dir", lambda: tmp_path)
+    monkeypatch.setenv("VRES_SESSION_END_ID", sid)
+    monkeypatch.setenv("VRES_SESSION_END_CWD", str(tmp_path))
+    monkeypatch.setenv("VRES_SESSION_END_REASON", "prompt_input_exit")
+
+    assert session_end_worker.run() == 0
+    row = _session(pg_project, sid)
+    assert row["ended_at"] is not None
+    assert row["end_reason"] == "prompt_input_exit"
+
+    with connect() as conn:
+        event = conn.execute(
+            "SELECT payload FROM vres.task_events WHERE task_id=(SELECT id FROM vres.tasks WHERE task_key=%s) "
+            "AND event_type='SESSION_END' AND session_id=%s ORDER BY id DESC LIMIT 1",
+            (task, sid),
+        ).fetchone()
+    assert event["payload"]["reason"] == "prompt_input_exit"
+    assert event["payload"]["source"] == "detached_session_end_worker"
+    log = (tmp_path / "lifecycle.log").read_text(encoding="utf-8")
+    assert "phase=worker-start" in log
+    assert "phase=worker-finish result=success" in log
