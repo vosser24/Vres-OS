@@ -151,10 +151,24 @@ def structure():
         'procedure_replay_finalize',
     } <= set(company_names)
     assert len(company_names) == len(set(company_names))
-    assert entrypoint_names == ['reply_activity_observe', 'task_status_set']
+    assert entrypoint_names == [
+        'reply_activity_observe',
+        'task_decision_list',
+        'task_decision_record',
+        'task_decision_retire',
+        'task_decision_supersede',
+        'task_status_set',
+    ]
     entrypoint_text = (ROOT / 'src/vres_os/mcp_entrypoint.py').read_text(encoding='utf-8')
     assert 'agent_id' in entrypoint_text and 'subagent_activity' in entrypoint_text
     assert 'task_status_set' in entrypoint_text and 'transition_task_status' in entrypoint_text
+    for decision_tool in (
+        'task_decision_list',
+        'task_decision_record',
+        'task_decision_retire',
+        'task_decision_supersede',
+    ):
+        assert decision_tool in entrypoint_text
     for path in [
         ROOT / 'src/vres_os/replay.py',
         ROOT / 'src/vres_os/executor.py',
@@ -164,6 +178,7 @@ def structure():
         ROOT / 'src/vres_os/model_experiments.py',
         ROOT / 'src/vres_os/mcp_entrypoint.py',
         ROOT / 'src/vres_os/task_lifecycle.py',
+        ROOT / 'src/vres_os/task_decisions.py',
     ]:
         assert path.is_file(), path
     return {'package_version': config['project']['version'], 'plugin_version': manifest['version'],
@@ -200,22 +215,27 @@ def package(output: Path, env: dict):
 sys.path.insert(0, sys.argv[1])
 import vres_os, vres_os.cli, vres_os.metrics, vres_os.optimization, vres_os.company_mcp, vres_os.mcp_entrypoint, vres_os.replay
 import vres_os.executor, vres_os.procedure_recipe, vres_os.procedure_worker, vres_os.model_policy
-import vres_os.model_experiments, vres_os.task_lifecycle
+import vres_os.model_experiments, vres_os.task_lifecycle, vres_os.task_decisions
 assert pathlib.Path(vres_os.__file__).resolve().is_relative_to(pathlib.Path(sys.argv[1]).resolve())
 assert callable(vres_os.company_mcp.main)
 assert callable(vres_os.mcp_entrypoint.main)
 assert callable(vres_os.mcp_entrypoint.reply_activity_observe)
 assert callable(vres_os.mcp_entrypoint.task_status_set)
+assert callable(vres_os.mcp_entrypoint.task_decision_list)
+assert callable(vres_os.mcp_entrypoint.task_decision_record)
+assert callable(vres_os.mcp_entrypoint.task_decision_retire)
+assert callable(vres_os.mcp_entrypoint.task_decision_supersede)
 assert callable(vres_os.mcp_entrypoint._observe_reply_hook_activity)
 assert callable(vres_os.task_lifecycle.transition_task_status)
+assert hasattr(vres_os.task_decisions, 'TaskDecisionService')
 assert hasattr(vres_os.replay, 'ReplayService')
 assert hasattr(vres_os.executor, 'ProcedureExecutorService')
 assert callable(vres_os.procedure_worker.main)
 assert hasattr(vres_os.model_policy, 'ModelPolicyService')
 assert hasattr(vres_os.model_experiments, 'ModelExperimentService')
-assert len(list(importlib.resources.files('vres_os').joinpath('migrations').iterdir())) >= 17
+assert len(list(importlib.resources.files('vres_os').joinpath('migrations').iterdir())) >= 20
 print('installed runtime source:', vres_os.__file__)
-print('selected imports, task lifecycle, subagent-isolated reply activity, authority/replay/executor/model-provenance/company-optimization/model-experiment surfaces and migration resources: passed')
+print('selected imports, structured task-decision provenance, task lifecycle, subagent-isolated reply activity, authority/replay/executor/model-provenance/company-optimization/model-experiment surfaces and migration resources: passed')
 """
         command([sys.executable, '-I', '-X', 'utf8', '-c', smoke, str(target)], output, 'wheel-import-smoke', cwd=Path(d), env=env)
     return {'filename': path.name, 'sha256': digest(path.read_bytes()), 'bytes': path.stat().st_size,
