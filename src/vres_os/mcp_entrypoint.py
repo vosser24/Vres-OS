@@ -3,8 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 from .company_mcp import mcp
-from .mcp_server import _current_session, _project
+from .mcp_server import _current_session, _project, _require_node
 from .reply_guard import observe_reply_activity
+from .task_lifecycle import transition_task_status
 
 
 def _observe_reply_hook_activity(
@@ -55,6 +56,31 @@ def reply_activity_observe(
         agent_id=agent_id,
     )
     return ""
+
+
+@mcp.tool()
+def task_status_set(
+    task_key: str,
+    status: str,
+    reason: str,
+    session_id: str,
+) -> dict[str, Any]:
+    """Park, block, resume, or cancel an unfinished task with durable provenance.
+
+    `completed` is intentionally unavailable here and remains protected by
+    task_complete + fresh validation. Cancellation preserves task state/checkpoints
+    while clearing active focus/session bindings.
+    """
+    pid, _ = _project()
+    sid = _current_session(pid, session_id)
+    _require_node("task", task_key, write=True)
+    return transition_task_status(
+        pid,
+        task_key,
+        status,
+        reason,
+        provider_session_id=sid,
+    )
 
 
 def main() -> None:
