@@ -28,7 +28,7 @@ def test_session_end_uses_minimal_detached_launcher():
     assert "event=session-end phase=$Phase" in source
     assert "Write-Lifecycle 'launch-start'" in source
     assert "Start-Process" in source
-    assert "pythonw.exe" in source
+    assert "venv\\Scripts\\python.exe" in source
     assert "vres_os.session_end_worker" in source
     assert "Write-Lifecycle 'detached-launched'" in source
     assert "Get-CimInstance" not in source
