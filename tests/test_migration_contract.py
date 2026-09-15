@@ -100,6 +100,23 @@ def test_model_experiment_migration_binds_host_runs_to_protected_validation():
     assert "idx_model_experiment_phase" in sql
 
 
+def test_validation_status_contract_removes_not_required_vocabulary():
+    sql = _migration("017_validation_status_contract.sql")
+    assert "validation_status='not_required'" in sql
+    assert "validation_status='pending'" in sql
+    assert "ALTER COLUMN validation_status SET DEFAULT 'pending'" in sql
+    assert "CHECK (validation_status IN ('pending','passed','failed'))" in sql
+
+
+def test_task_status_contract_removes_legacy_new_vocabulary():
+    sql = _migration("018_task_status_contract.sql")
+    assert "status='new'" in sql
+    assert "SET status='active'" in sql
+    assert "DROP CONSTRAINT IF EXISTS tasks_status_check" in sql
+    assert "CHECK (status IN ('active','waiting_user','blocked','completed','cancelled'))" in sql
+    assert "'new'" not in sql.split("CHECK (status IN", 1)[1]
+
+
 def test_initial_migration_does_not_make_pg_trgm_a_hard_requirement():
     sql = _migration("001_initial.sql")
     assert "pg_available_extensions" in sql

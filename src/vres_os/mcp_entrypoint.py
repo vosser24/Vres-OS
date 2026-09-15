@@ -65,10 +65,12 @@ def task_status_set(
     reason: str,
     session_id: str,
 ) -> dict[str, Any]:
-    """Park, block, resume, or cancel an unfinished task with durable provenance.
+    """Park, block, resume, or user-cancel an unfinished task with provenance.
 
     `completed` is intentionally unavailable here and remains protected by
-    task_complete + fresh validation. Cancellation preserves task state/checkpoints
+    task_complete + fresh validation. Every transition requires the current session
+    to be bound to the task. Cancellation additionally requires the staged current
+    user turn to explicitly request cancellation; it preserves task state/checkpoints
     while clearing active focus/session bindings.
     """
     pid, _ = _project()
