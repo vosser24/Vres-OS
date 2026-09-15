@@ -4,7 +4,11 @@ Vres task decisions are descriptive continuity state. They are not approvals, pu
 
 ## Storage
 
-Migration 020 adds an append-only `vres.task_decisions` ledger while retaining `task_state.decisions` as the ordered plain-text projection of currently active records. The projection is database-managed; callers cannot silently replace it to erase history.
+Migration 020 adds a history-preserving `vres.task_decisions` ledger while retaining `task_state.decisions` as the ordered plain-text projection of currently active records. The projection is database-managed; callers cannot silently replace it to erase history.
+
+Migration 021 hardens that ledger at the database layer. After insert, a decision's identity/provenance fields are immutable: key, task, text, rationale, source, source event/session, decision time, record time, and supersession link cannot be rewritten. The only normal row mutations are the explicit lifecycle transitions `active -> superseded` or `active -> retired`, with their required timestamps/reason. Terminal decision rows cannot be changed again. Direct deletion of decision rows and checkpoint-decision membership is denied by default.
+
+The disposable PostgreSQL integration fixture uses an explicit transaction-local `vres.allow_decision_ledger_delete=on` bypass only to remove synthetic test projects after each test. Normal application paths do not enable it.
 
 Each structured decision has:
 
@@ -28,7 +32,7 @@ Migration 016 decision strings are retained exactly and backfilled as `legacy_un
 
 Every checkpoint created after migration 020 snapshots the active immutable decision record IDs into `vres.checkpoint_decisions`. The checkpoint JSON context is also enriched with the active plain-text decisions and structured records. This is database-triggered, so automatic lifecycle checkpoints such as PreCompact receive the same decision snapshot even when the caller does not explicitly pass decisions.
 
-Historical checkpoints created before migration 020 are not backfilled with guessed as-of decision membership.
+Checkpoint-decision membership and ordering are immutable after insert. Historical checkpoints created before migration 020 are not backfilled with guessed as-of decision membership.
 
 ## History
 

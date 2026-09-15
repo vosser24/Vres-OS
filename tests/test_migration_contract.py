@@ -124,6 +124,26 @@ def test_dead_task_project_metadata_contract_is_removed():
     assert sql.count("DROP COLUMN IF EXISTS metadata") == 2
 
 
+def test_task_decision_provenance_adds_ledger_and_checkpoint_snapshots():
+    sql = _migration("020_task_decision_provenance.sql")
+    assert "CREATE TABLE IF NOT EXISTS vres.task_decisions" in sql
+    assert "CREATE TABLE IF NOT EXISTS vres.checkpoint_decisions" in sql
+    assert "legacy_unstructured" in sql
+    assert "capture_checkpoint_decisions" in sql
+    assert "enforce_task_decision_projection" in sql
+
+
+def test_decision_hardening_protects_history_and_releases_completed_sessions():
+    sql = _migration("021_decision_immutability_and_completion_sessions.sql")
+    assert "protect_task_decision_update" in sql
+    assert "protect_decision_ledger_delete" in sql
+    assert "protect_checkpoint_decision_history" in sql
+    assert "release_completed_task_sessions" in sql
+    assert "task_completed" in sql
+    assert "SESSION_UNBOUND" in sql
+    assert "vres.allow_decision_ledger_delete" in sql
+
+
 def test_initial_migration_does_not_make_pg_trgm_a_hard_requirement():
     sql = _migration("001_initial.sql")
     assert "pg_available_extensions" in sql

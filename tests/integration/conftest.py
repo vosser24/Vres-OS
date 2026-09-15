@@ -31,9 +31,10 @@ def pg_project(monkeypatch, tmp_path):
         yield pid
     finally:
         # Delete only records created inside this unique test project. Never DROP schema/database.
-        # Explicit observability writers can create rows whose project/task foreign keys are
-        # intentionally restrictive, so clear those before the synthetic task/project roots.
+        # Decision provenance is protected from deletion by default. The disposable integration
+        # database uses an explicit transaction-local bypass only for synthetic fixture cleanup.
         with connect() as conn, conn.transaction():
+            conn.execute("SELECT set_config('vres.allow_decision_ledger_delete','on',true)")
             conn.execute("DELETE FROM vres.validation_ingestion_attempts WHERE project_id=%s", (pid,))
             conn.execute("DELETE FROM vres.artifacts WHERE project_id=%s", (pid,))
             conn.execute(
