@@ -48,7 +48,8 @@
               "session_id": "${session_id}",
               "tool_name": "${tool_name}",
               "tool_use_id": "${tool_use_id}",
-              "event_name": "${hook_event_name}"
+              "event_name": "${hook_event_name}",
+              "agent_id": "${agent_id}"
             },
             "timeout": 10
           }
@@ -67,7 +68,8 @@
               "session_id": "${session_id}",
               "tool_name": "${tool_name}",
               "tool_use_id": "${tool_use_id}",
-              "event_name": "${hook_event_name}"
+              "event_name": "${hook_event_name}",
+              "agent_id": "${agent_id}"
             },
             "timeout": 10
           }
