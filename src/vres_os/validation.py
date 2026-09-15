@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .redaction import redact
-from .transcript import transcript_tail
+from .transcript import _text_from_content, transcript_tail
 
 STATE_FIELDS = (
     "objective",
@@ -106,6 +106,48 @@ def parse_validator_report(text: str) -> dict:
     return report
 
 
+def observed_validator_report(final_text: str, records: list[dict[str, Any]]) -> tuple[dict, str]:
+    """Return the newest canonical validator report from host-observed assistant output.
+
+    Prefer SubagentStop's final assistant message. If the validator emitted a valid
+    canonical report and then a harmless trailing assistant message, recover only
+    from assistant-authored transcript text. Tool results and other transcript data
+    are never eligible evidence for the verdict.
+    """
+    final = final_text.strip() if isinstance(final_text, str) else ""
+    if final:
+        try:
+            return parse_validator_report(final), "last_assistant_message"
+        except (ValueError, TypeError, RecursionError):
+            pass
+
+    for obj in reversed(records):
+        if not isinstance(obj, dict):
+            continue
+        message = obj.get("message")
+        role = message.get("role") if isinstance(message, dict) else obj.get("role")
+        if obj.get("type") != "assistant" and role != "assistant":
+            continue
+        texts = _text_from_content(message if message is not None else obj)
+        candidates = []
+        if texts:
+            candidates.append("\n".join(texts))
+            candidates.extend(reversed(texts))
+        seen: set[str] = set()
+        for candidate in candidates:
+            candidate = candidate.strip()
+            if not candidate or candidate == final or candidate in seen:
+                continue
+            seen.add(candidate)
+            try:
+                return parse_validator_report(candidate), "assistant_transcript"
+            except (ValueError, TypeError, RecursionError):
+                continue
+    raise ValueError(
+        "Validator report was not found in the final assistant message or observed assistant transcript"
+    )
+
+
 class ValidationService:
     def prepare(
         self,
@@ -196,7 +238,6 @@ class ValidationService:
             or not payload.get("session_id")
         ):
             raise ValueError("Only an observed namespaced validator completion is accepted")
-        report = parse_validator_report(payload.get("last_assistant_message", ""))
         transcript = payload.get("agent_transcript_path")
         if not transcript:
             raise ValueError("Missing validator transcript; model identity cannot be verified")
@@ -212,6 +253,9 @@ class ValidationService:
             m == "fable" or m.startswith("claude-fable-") for m in models
         ):
             raise ValueError("Observed validator model is missing or below the protected Fable family")
+        report, report_source = observed_validator_report(
+            payload.get("last_assistant_message", ""), records
+        )
         with _connect() as conn, conn.transaction():
             request = conn.execute(
                 "SELECT r.*,t.project_id,t.task_key,t.objective FROM vres.validation_requests r "
@@ -288,6 +332,7 @@ class ValidationService:
             "recorded": True,
             "request_key": report["request_key"],
             "outcome": report["outcome"],
+            "report_source": report_source,
         }
 
     def assert_current(
