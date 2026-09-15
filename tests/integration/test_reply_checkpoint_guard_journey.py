@@ -95,8 +95,16 @@ def test_unresolved_guard_is_bounded_and_auditable(pg_project):
         events = conn.execute(
             "SELECT event_type,payload FROM vres.task_events "
             "WHERE task_id=(SELECT id FROM vres.tasks WHERE task_key=%s) "
-            "AND event_type LIKE 'REPLY_GUARD_%' ORDER BY id",
-            (task,),
+            "AND event_type=ANY(%s) ORDER BY id",
+            (
+                task,
+                [
+                    "REPLY_GUARD_ARMED",
+                    "REPLY_GUARD_BLOCKED",
+                    "REPLY_GUARD_SATISFIED",
+                    "REPLY_GUARD_UNRESOLVED",
+                ],
+            ),
         ).fetchall()
     types = [row["event_type"] for row in events]
     assert types.count("REPLY_GUARD_BLOCKED") == 2
