@@ -105,15 +105,16 @@ def test_park_block_resume_preserve_authoritative_task_state(pg_project):
 def test_status_transition_requires_current_bound_session(pg_project):
     repo = Repository()
     task = repo.begin_task(pg_project, "Bound", "Require current session binding", "test", "chairman")
+    other = repo.begin_task(pg_project, "Other", "Keep this session bound elsewhere", "test", "chairman")
     sid = "wrong-bound-session"
-    repo.open_session(pg_project, sid)
+    _bound_session(repo, pg_project, other, sid)
 
     with pytest.raises(ValueError, match="bound to the current session"):
         transition_task_status(
             pg_project,
             task,
             "waiting_user",
-            "Cannot park through an unrelated session",
+            "Cannot park through a session bound to another task",
             provider_session_id=sid,
         )
 
