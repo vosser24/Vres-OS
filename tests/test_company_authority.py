@@ -198,8 +198,10 @@ def test_company_mcp_extension_is_the_installed_entrypoint():
         encoding="utf-8"
     )
     tools = (ROOT / "src" / "vres_os" / "company_mcp.py").read_text(encoding="utf-8")
+    entrypoint = (ROOT / "src" / "vres_os" / "mcp_entrypoint.py").read_text(encoding="utf-8")
     assert 'vres-mcp = "vres_os.company_mcp:main"' in pyproject
-    assert "-m vres_os.company_mcp" in wrapper
+    assert "-m vres_os.mcp_entrypoint" in wrapper
+    assert "from .company_mcp import mcp" in entrypoint
     for function in [
         "company_approval_record",
         "company_source_register",
