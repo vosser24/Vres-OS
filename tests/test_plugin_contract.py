@@ -66,6 +66,7 @@ def test_hook_commands_resolve_to_shipped_wrappers():
                         "tool_name": "${tool_name}",
                         "tool_use_id": "${tool_use_id}",
                         "event_name": "${hook_event_name}",
+                        "agent_id": "${agent_id}",
                     }
                     assert "task_checkpoint" in group["matcher"]
                     assert "task_reply_gate" in group["matcher"]
@@ -93,4 +94,7 @@ def test_mcp_wrapper_is_shipped():
     assert (PLUGIN / "bin" / "vres-mcp.ps1").exists()
     entrypoint = ROOT / "src" / "vres_os" / "mcp_entrypoint.py"
     assert entrypoint.exists()
-    assert "reply_activity_observe" in entrypoint.read_text(encoding="utf-8")
+    text = entrypoint.read_text(encoding="utf-8")
+    assert "reply_activity_observe" in text
+    assert "subagent_activity" in text
+    assert "agent_id" in text
