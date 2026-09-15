@@ -19,10 +19,14 @@ def test_reply_guard_is_wired_without_prose_inference():
     assert "def task_reply_gate" in mcp
     assert "advances_state" in mcp
     assert "def reply_activity_observe" in entrypoint
+    assert "def _observe_reply_hook_activity" in entrypoint
+    assert "subagent_activity" in entrypoint
+    assert "agent_id" in entrypoint
     assert "-m vres_os.mcp_entrypoint" in wrapper
     assert '"PostToolUse"' in plugin_hooks
     assert '"PostToolUseFailure"' in plugin_hooks
     assert '"type": "mcp_tool"' in plugin_hooks
+    assert '"agent_id": "${agent_id}"' in plugin_hooks
     assert "def observe_reply_activity" in guard
     assert "latest tool activity" in guard
     assert "tool_activity_after_reply_gate" in guard
