@@ -53,6 +53,7 @@ def test_user_prompt_is_staged_before_task_attribution(monkeypatch, capsys):
         "stage_user_instruction",
         lambda project_id, sid, prompt: staged.append((project_id, sid, prompt)),
     )
+    monkeypatch.setattr(hooks, "begin_reply_turn", lambda project_id, sid: "TURN-TEST")
 
     hooks.user_prompt()
 
@@ -68,6 +69,7 @@ def test_stop_commits_prompt_to_final_bound_task(monkeypatch):
     monkeypatch.setattr(hooks, "_project_id", lambda _repo, _payload: 9)
     monkeypatch.setattr(hooks, "last_assistant_snapshot", lambda _payload: None)
     monkeypatch.setattr(hooks, "_observe_session", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(hooks, "inspect_stop_guard", lambda *_args, **_kwargs: {"allowed": True})
 
     committed = []
     events = []
