@@ -11,6 +11,7 @@ from .db import DatabaseUnavailable
 from .paths import logs_dir
 from .project import discover_project
 from .redaction import redact_text
+from .reply_guard import arm_reply_checkpoint_guard, evaluate_reply_checkpoint_guard
 from .repository import Repository
 from .session_lifecycle import host_pid_from_env, reconcile_open_sessions, touch_session_host
 from .session_prompts import (
@@ -145,6 +146,7 @@ def user_prompt() -> None:
             # Do not attribute the prompt to the currently focused task yet. The model may
             # create/switch tasks during this turn; Stop commits it to the final binding.
             stage_user_instruction(project_id, sid, prompt)
+            arm_reply_checkpoint_guard(project_id, sid)
         task = repo.active_task(project_id, sid)
         if not task:
             sys.stdout.write(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": context}}))
@@ -260,6 +262,34 @@ def stop() -> None:
         task = repo.active_task(project_id, sid)
         if task:
             commit_staged_user_instruction(project_id, sid, task.task_key)
+            guard = evaluate_reply_checkpoint_guard(
+                project_id,
+                sid,
+                stop_hook_active=bool(payload.get("stop_hook_active")),
+            )
+            if guard.get("action") == "block":
+                next_action = str(guard.get("next_action") or "").strip()
+                pending = guard.get("pending_work") or []
+                reason = (
+                    f"Vres authoritative reply guard: task {guard.get('task_key')} still has persisted continuation state "
+                    "but this turn created no authoritative checkpoint. Before replying, call task_checkpoint. "
+                    "If this reply materially advances/completes/invalidates the persisted next_action or pending_work, "
+                    "update those fields to the new truth. If the reply is genuinely non-material, checkpoint the same "
+                    "authoritative state with reason='non_material_reply'. Do not use the assistant transcript as state."
+                )
+                if next_action:
+                    reason += f" Persisted next_action: {next_action[:600]}"
+                if pending:
+                    reason += " Persisted pending_work remains non-empty."
+                sys.stdout.write(json.dumps({"decision": "block", "reason": reason}))
+                return
+            if guard.get("action") == "allow_warning":
+                warning = (
+                    "Vres reply checkpoint guard remained unresolved after two Stop retries. "
+                    "The reply is being released to avoid a host loop, but authoritative task state may be stale. "
+                    "Run task_checkpoint before relying on next_action/pending_work from this turn."
+                )
+                sys.stdout.write(json.dumps({"systemMessage": warning}))
             snap = last_assistant_snapshot(payload)
             if snap:
                 repo.record_event(

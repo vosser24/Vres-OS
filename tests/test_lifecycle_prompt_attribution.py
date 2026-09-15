@@ -20,6 +20,7 @@ def test_user_prompt_is_staged_before_task_attribution(monkeypatch, capsys):
     staged = []
     focused = []
     observed = []
+    armed = []
 
     class Repo:
         def open_session(self, project_id, sid):
@@ -53,12 +54,18 @@ def test_user_prompt_is_staged_before_task_attribution(monkeypatch, capsys):
         "stage_user_instruction",
         lambda project_id, sid, prompt: staged.append((project_id, sid, prompt)),
     )
+    monkeypatch.setattr(
+        hooks,
+        "arm_reply_checkpoint_guard",
+        lambda project_id, sid: armed.append((project_id, sid)) or True,
+    )
 
     hooks.user_prompt()
 
     assert observed == [(7, "S-NEW", True)]
     assert focused == [(7, "S-NEW")]
     assert staged == [(7, "S-NEW", "Start LV-09")]
+    assert armed == [(7, "S-NEW")]
     assert "VRES_CURRENT_SESSION_ID=S-NEW" in capsys.readouterr().out
 
 
@@ -68,6 +75,11 @@ def test_stop_commits_prompt_to_final_bound_task(monkeypatch):
     monkeypatch.setattr(hooks, "_project_id", lambda _repo, _payload: 9)
     monkeypatch.setattr(hooks, "last_assistant_snapshot", lambda _payload: None)
     monkeypatch.setattr(hooks, "_observe_session", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        hooks,
+        "evaluate_reply_checkpoint_guard",
+        lambda *_args, **_kwargs: {"action": "allow", "reason": "guard_not_armed"},
+    )
 
     committed = []
     events = []
