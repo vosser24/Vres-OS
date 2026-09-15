@@ -17,13 +17,16 @@ def test_project_focus_binds_fresh_ambiguous_session(pg_project):
     focused_task = repo.begin_task(pg_project, "Focused", "Focused objective", "test", "chairman")
     sid = "fresh-focus-session"
 
+    # Project-level status should report the explicit focus even when multiple tasks are open.
+    assert repo.active_task(pg_project).task_key == focused_task
+
     repo.open_session(pg_project, sid)
     with connect() as conn:
         row = conn.execute(
             "SELECT task_id FROM vres.sessions WHERE provider_session_id=%s AND project_id=%s AND ended_at IS NULL",
             (sid, pg_project),
         ).fetchone()
-    assert row["task_id"] is None  # two unfinished tasks: Repository itself refuses to guess
+    assert row["task_id"] is None  # opening a session still refuses to guess; lifecycle binds focus explicitly
 
     assert bind_session_to_project_focus(pg_project, sid) == focused_task
     assert repo.active_task(pg_project, sid).task_key == focused_task
