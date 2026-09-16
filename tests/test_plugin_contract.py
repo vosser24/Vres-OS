@@ -53,7 +53,8 @@ def test_hook_commands_resolve_to_shipped_wrappers():
         "Stop",
         "SessionEnd",
     } <= set(data["hooks"])
-    shipped = {"vres-hook.ps1", "vres-session-end.ps1"}
+    shipped = {"vres-hook.ps1", "vres-session-end.ps1", "vres-user-answer.ps1"}
+    ask_user_wrapper_seen = False
     for event, groups in data["hooks"].items():
         for group in groups:
             for hook in group["hooks"]:
@@ -83,8 +84,12 @@ def test_hook_commands_resolve_to_shipped_wrappers():
                 assert (PLUGIN / "bin" / wrapper_name).exists()
                 if event == "SessionEnd":
                     assert wrapper_name == "vres-session-end.ps1"
+                elif event == "PostToolUse" and group.get("matcher") == "^AskUserQuestion$":
+                    assert wrapper_name == "vres-user-answer.ps1"
+                    ask_user_wrapper_seen = True
                 else:
                     assert wrapper_name == "vres-hook.ps1"
+    assert ask_user_wrapper_seen
 
 
 def test_mcp_wrapper_is_shipped():
@@ -98,3 +103,4 @@ def test_mcp_wrapper_is_shipped():
     assert "reply_activity_observe" in text
     assert "subagent_activity" in text
     assert "agent_id" in text
+    assert "task_user_instruction_commit" in text
