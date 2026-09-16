@@ -104,6 +104,17 @@ def _transfer_vres_ownership(conn, *, new_owner: str) -> None:
           JOIN pg_namespace n ON n.oid=c.relnamespace
          WHERE n.nspname='vres'
            AND c.relkind IN ('r','p','v','m','S','f')
+           AND (
+                c.relkind <> 'S'
+                OR NOT EXISTS (
+                    SELECT 1
+                      FROM pg_depend d
+                     WHERE d.classid='pg_class'::regclass
+                       AND d.objid=c.oid
+                       AND d.refclassid='pg_class'::regclass
+                       AND d.deptype IN ('a','i')
+                )
+           )
          ORDER BY c.relkind,c.relname
         """
     ).fetchall()
