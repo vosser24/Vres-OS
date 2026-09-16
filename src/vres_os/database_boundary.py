@@ -22,6 +22,7 @@ def boundary_credentials_present(
     cfg: VresConfig | None = None,
     *,
     require_secrets: bool = True,
+    secret_store: SecretStore | None = None,
 ) -> bool:
     cfg = cfg or ConfigStore().load()
     db = cfg.database
@@ -31,18 +32,27 @@ def boundary_credentials_present(
         return False
     if not require_secrets:
         return True
-    store = SecretStore()
+    store = secret_store or SecretStore()
     return bool(
         store.get(db.provenance_writer_password_key)
         and store.get(db.migration_password_key)
     )
 
 
-def boundary_ready(cfg: VresConfig | None = None, *, require_secrets: bool = True) -> bool:
+def boundary_ready(
+    cfg: VresConfig | None = None,
+    *,
+    require_secrets: bool = True,
+    secret_store: SecretStore | None = None,
+) -> bool:
     cfg = cfg or ConfigStore().load()
     return bool(
         cfg.database.provenance_boundary_version >= BOUNDARY_VERSION
-        and boundary_credentials_present(cfg, require_secrets=require_secrets)
+        and boundary_credentials_present(
+            cfg,
+            require_secrets=require_secrets,
+            secret_store=secret_store,
+        )
     )
 
 
@@ -226,29 +236,35 @@ def provision_boundary(
     )
 
 
-def persist_boundary_credentials(cfg: VresConfig, credentials: BoundaryCredentials) -> None:
+def persist_boundary_credentials(
+    cfg: VresConfig,
+    credentials: BoundaryCredentials,
+    *,
+    config_store: ConfigStore | None = None,
+    secret_store: SecretStore | None = None,
+) -> None:
     """Persist role identities/secrets without declaring the boundary ready yet."""
     db = cfg.database
     db.provenance_writer_user = credentials.writer_user
     db.migration_user = credentials.migration_user
     db.provenance_boundary_version = 0
     cfg.validate()
-    store = SecretStore()
-    store.set(db.provenance_writer_password_key, credentials.writer_password)
+    secrets_store = secret_store or SecretStore()
+    secrets_store.set(db.provenance_writer_password_key, credentials.writer_password)
     try:
-        store.set(db.migration_password_key, credentials.migration_password)
+        secrets_store.set(db.migration_password_key, credentials.migration_password)
     except Exception:
-        store.delete(db.provenance_writer_password_key)
+        secrets_store.delete(db.provenance_writer_password_key)
         raise
-    ConfigStore().save(cfg)
+    (config_store or ConfigStore()).save(cfg)
 
 
-def mark_boundary_ready(cfg: VresConfig) -> None:
-    if not boundary_credentials_present(cfg):
+def mark_boundary_ready(cfg: VresConfig, *, config_store: ConfigStore | None = None, secret_store: SecretStore | None = None) -> None:
+    if not boundary_credentials_present(cfg, secret_store=secret_store):
         raise RuntimeError("Cannot mark provenance boundary ready without both protected role credentials")
     cfg.database.provenance_boundary_version = BOUNDARY_VERSION
     cfg.validate()
-    ConfigStore().save(cfg)
+    (config_store or ConfigStore()).save(cfg)
 
 
 def activate_boundary(conn, cfg: VresConfig) -> None:
