@@ -69,8 +69,13 @@ def build_dsn(purpose: str = "runtime") -> str:
 
     password = SecretStore().get(password_key)
     if not password:
+        if purpose == "runtime":
+            raise DatabaseUnavailable(
+                "PostgreSQL runtime credential is not configured. Run secure Vres setup."
+            )
         raise DatabaseUnavailable(
-            f"PostgreSQL credential for {purpose} connection is not configured. Run secure Vres setup."
+            f"PostgreSQL {purpose} credential is unavailable to this process after provenance-boundary setup. "
+            "Vres is fail-closed; inspect `vres doctor` and the OS credential store instead of relaunching setup blindly."
         )
     from psycopg.conninfo import make_conninfo
 
@@ -116,8 +121,8 @@ def migrate(*, adopt_legacy_checksums: bool = False) -> list[str]:
     """Apply immutable SQL migrations and detect edits to already-applied files."""
     cfg = ConfigStore().load()
     test_single_role = _test_single_role_dsn() is not None
-    has_migrator = bool(cfg.database.migration_user) and SecretStore().get(cfg.database.migration_password_key)
-    purpose = "migrator" if has_migrator and not test_single_role else "runtime"
+    has_migrator_identity = bool(cfg.database.migration_user)
+    purpose = "migrator" if has_migrator_identity and not test_single_role else "runtime"
     applied: list[str] = []
     with connect(autocommit=True, purpose=purpose) as conn:
         conn.execute("SELECT pg_advisory_lock(8675309001)")
@@ -143,7 +148,7 @@ def migrate(*, adopt_legacy_checksums: bool = False) -> list[str]:
             raise MigrationDrift(f"Database contains migrations absent from this package: {sorted(unknown)}")
         if (
             any(name.startswith("023_") and name not in done for name in names)
-            and not has_migrator
+            and not has_migrator_identity
             and not test_single_role
         ):
             raise DatabaseBoundaryUpgradeRequired(
