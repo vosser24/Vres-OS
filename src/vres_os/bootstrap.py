@@ -180,9 +180,10 @@ def _provision_local_database(
         sslmode=sslmode,
     )
     from psycopg import sql
+    from psycopg.rows import dict_row
 
     runtime_password = secrets.token_urlsafe(32)
-    with _driver().connect(admin_dsn, autocommit=True) as conn:
+    with _driver().connect(admin_dsn, autocommit=True, row_factory=dict_row) as conn:
         role = conn.execute(
             "SELECT rolsuper,rolcanlogin FROM pg_roles WHERE rolname=%s", (runtime_user,)
         ).fetchone()
@@ -323,9 +324,6 @@ def _upgrade_existing_boundary(store: ConfigStore, cfg, *, secret_store: SecretS
         _write_setup_result("success")
         print("Provenance boundary upgrade and core self-test passed.")
     except Exception as exc:
-        # Preserve the pre-existing configured flag and any newly created role
-        # credentials. Readiness remains false until mark_boundary_ready succeeds,
-        # so the next secure setup resumes instead of exposing an insecure runtime.
         try:
             store.save(cfg)
         except Exception:
@@ -437,8 +435,6 @@ def _interactive_setup() -> None:
         cleanup_failed = False
         boundary_credentials = boundary_credentials_present(cfg, secret_store=secret_store)
         if boundary_credentials and provisioned is None:
-            # For an existing database, never guess an ownership rollback. Keep the
-            # protected credentials and fail closed so secure setup can resume.
             cfg.configured = False
             try:
                 store.save(cfg)
