@@ -316,14 +316,16 @@ def confirm_reply_gate(
                 provider_session_id,
             ),
         )
-    return {
+    result = {
         "allowed": True,
         "turn_id": guard["turn_id"],
         "mode": gate_mode,
-        "validation_request_key": gate["validation_request_key"],
         "checkpoint": gate["checkpoint_key"],
         "activity_seq": gate["activity_seq"],
     }
+    if gate["validation_request_key"] is not None:
+        result["validation_request_key"] = gate["validation_request_key"]
+    return result
 
 
 def inspect_stop_guard(project_id: int, provider_session_id: str | None) -> dict[str, Any]:
