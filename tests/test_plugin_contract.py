@@ -105,6 +105,7 @@ def test_mcp_wrapper_is_shipped():
     assert "reply_activity_observe" in text
     assert "subagent_activity" in text
     assert "agent_id" in text
-    assert "from .user_intent_mcp import mcp" in text
+    assert "from .company_mcp import mcp" in text
+    assert "user_intent_mcp" in text
     assert "task_user_instruction_commit" in intent_text
     assert "commit_staged_user_instruction_events" in intent_text
