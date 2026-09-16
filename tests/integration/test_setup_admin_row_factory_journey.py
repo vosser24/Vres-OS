@@ -89,6 +89,11 @@ def test_existing_schema_boundary_conversion_uses_named_admin_rows():
                 "FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
                 "WHERE n.nspname='vres' AND c.relname='existing_table'"
             ).fetchone()["owner"]
+            sequence_owner = admin.execute(
+                "SELECT pg_get_userbyid(c.relowner) AS owner "
+                "FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+                "WHERE n.nspname='vres' AND c.relname='existing_table_id_seq'"
+            ).fetchone()["owner"]
             function_owner = admin.execute(
                 "SELECT pg_get_userbyid(p.proowner) AS owner "
                 "FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
@@ -96,6 +101,7 @@ def test_existing_schema_boundary_conversion_uses_named_admin_rows():
             ).fetchone()["owner"]
         assert schema_owner == migrator_user
         assert table_owner == migrator_user
+        assert sequence_owner == migrator_user
         assert function_owner == migrator_user
 
         rollback_boundary_provision(cfg, credentials, admin_dsn=target_admin_dsn)
@@ -108,8 +114,14 @@ def test_existing_schema_boundary_conversion_uses_named_admin_rows():
                 "FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
                 "WHERE n.nspname='vres' AND c.relname='existing_table'"
             ).fetchone()["owner"]
+            sequence_owner = admin.execute(
+                "SELECT pg_get_userbyid(c.relowner) AS owner "
+                "FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+                "WHERE n.nspname='vres' AND c.relname='existing_table_id_seq'"
+            ).fetchone()["owner"]
         assert schema_owner == runtime_user
         assert table_owner == runtime_user
+        assert sequence_owner == runtime_user
 
         with psycopg.connect(admin_server_dsn, row_factory=dict_row) as admin:
             leftovers = admin.execute(
