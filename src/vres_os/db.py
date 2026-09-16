@@ -57,12 +57,12 @@ def build_dsn(purpose: str = "runtime") -> str:
         user = cfg.database.user
         password_key = cfg.database.password_key
     elif purpose == "writer":
-        if cfg.database.provenance_boundary_version < 1 or not cfg.database.provenance_writer_user:
+        if not cfg.database.provenance_writer_user:
             raise DatabaseBoundaryUpgradeRequired("Trusted provenance writer database role is not configured")
         user = cfg.database.provenance_writer_user
         password_key = cfg.database.provenance_writer_password_key
     else:
-        if cfg.database.provenance_boundary_version < 1 or not cfg.database.migration_user:
+        if not cfg.database.migration_user:
             raise DatabaseBoundaryUpgradeRequired("Dedicated migration database role is not configured")
         user = cfg.database.migration_user
         password_key = cfg.database.migration_password_key
@@ -116,7 +116,8 @@ def migrate(*, adopt_legacy_checksums: bool = False) -> list[str]:
     """Apply immutable SQL migrations and detect edits to already-applied files."""
     cfg = ConfigStore().load()
     test_single_role = _test_single_role_dsn() is not None
-    purpose = "migrator" if cfg.database.provenance_boundary_version >= 1 and not test_single_role else "runtime"
+    has_migrator = bool(cfg.database.migration_user) and SecretStore().get(cfg.database.migration_password_key)
+    purpose = "migrator" if has_migrator and not test_single_role else "runtime"
     applied: list[str] = []
     with connect(autocommit=True, purpose=purpose) as conn:
         conn.execute("SELECT pg_advisory_lock(8675309001)")
@@ -142,13 +143,12 @@ def migrate(*, adopt_legacy_checksums: bool = False) -> list[str]:
             raise MigrationDrift(f"Database contains migrations absent from this package: {sorted(unknown)}")
         if (
             any(name.startswith("023_") and name not in done for name in names)
-            and cfg.database.provenance_boundary_version < 1
+            and not has_migrator
             and not test_single_role
         ):
             raise DatabaseBoundaryUpgradeRequired(
                 "Migration 023 requires the secure provenance database-role upgrade before migration"
             )
-        # Verify the complete historical prefix before making any application-schema change.
         for name, recorded in done.items():
             expected = _digest(migration_root.joinpath(name).read_text(encoding="utf-8"))
             if recorded and recorded != expected:
@@ -182,7 +182,7 @@ def migrate(*, adopt_legacy_checksums: bool = False) -> list[str]:
                     (name, checksum),
                 )
             applied.append(name)
-        if cfg.database.provenance_boundary_version >= 1 and "023_user_event_writer_boundary.sql" in names:
+        if cfg.database.provenance_writer_user and "023_user_event_writer_boundary.sql" in names:
             from .database_boundary import activate_boundary
 
             with conn.transaction():
