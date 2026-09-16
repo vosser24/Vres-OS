@@ -66,9 +66,6 @@ def capability_acquire_project(
         description=description,
         domain=domain,
         owner_role=owner_role,
-        project_id=pid,
-        task_key=task_key,
-        session_id=sid,
         acquisition_evidence=acquisition_evidence,
     )
 
