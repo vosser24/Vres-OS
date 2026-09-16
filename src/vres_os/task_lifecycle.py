@@ -6,7 +6,7 @@ from typing import Any
 
 from .db import connect
 from .redaction import redact
-from .session_prompts import commit_pending_user_entries, pending_user_entries
+from .session_prompts import commit_staged_user_instruction_events, latest_staged_user_instruction
 
 _TRANSITIONS = {
     "active": {"waiting_user", "blocked", "cancelled"},
@@ -68,18 +68,25 @@ def _require_bound_session(conn, project_id: int, task_id: int, provider_session
     return session
 
 
-def _consume_cancel_instruction(conn, task_id: int, session, provider_session_id: str) -> None:
-    pending = pending_user_entries(session.get("metadata") or {})
-    substantive = [
-        entry for entry in pending
-        if entry.get("kind") != "control" and isinstance(entry.get("text"), str)
-    ]
-    text = substantive[-1]["text"] if substantive else None
+def _authorize_cancel_instruction(
+    project_id: int,
+    task_key: str,
+    provider_session_id: str | None,
+) -> None:
+    if not provider_session_id:
+        raise ValueError("Cancelling a task requires the current provider session")
+    text = latest_staged_user_instruction(project_id, provider_session_id)
     if not isinstance(text, str) or not _is_explicit_cancel_instruction(text):
         raise ValueError(
             "Cancelling a task requires an explicit current user instruction such as 'cancel this task'"
         )
-    commit_pending_user_entries(conn, session, task_id, provider_session_id)
+    events = commit_staged_user_instruction_events(project_id, provider_session_id, task_key)
+    if not any(
+        event.get("event_type") == "USER_INSTRUCTION"
+        and _is_explicit_cancel_instruction(str(event.get("text") or ""))
+        for event in events
+    ):
+        raise ValueError("Cancellation user instruction could not be durably committed")
 
 
 def transition_task_status(
@@ -94,8 +101,8 @@ def transition_task_status(
 
     Completion is deliberately excluded: only the protected task_complete path may
     establish `completed`. Park/block/resume require the current bound session.
-    Cancellation additionally requires an explicit current user cancellation prompt;
-    queued current-turn user intent is durably attributed before the task is unbound.
+    Cancellation additionally requires a protected current user cancellation prompt;
+    that prompt is durably committed through the provenance-writer boundary first.
     """
     target = str(target_status or "").strip().lower()
     safe_reason = redact(str(reason or "").strip())
@@ -105,6 +112,9 @@ def transition_task_status(
         )
     if not safe_reason:
         raise ValueError("Task status transition requires a durable reason")
+
+    if target == "cancelled":
+        _authorize_cancel_instruction(project_id, task_key, provider_session_id)
 
     with connect() as conn, conn.transaction():
         task = conn.execute(
@@ -133,9 +143,7 @@ def transition_task_status(
         if target not in allowed:
             raise ValueError(f"Task status transition {current} -> {target} is not allowed")
 
-        session = _require_bound_session(conn, project_id, task_id, provider_session_id)
-        if target == "cancelled":
-            _consume_cancel_instruction(conn, task_id, session, str(provider_session_id))
+        _require_bound_session(conn, project_id, task_id, provider_session_id)
 
         conn.execute(
             "UPDATE vres.validation_requests SET status='superseded',completed_at=COALESCE(completed_at,now()) "

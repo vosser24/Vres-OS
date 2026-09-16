@@ -9,9 +9,11 @@ from typing import Iterator, TYPE_CHECKING
 if TYPE_CHECKING:
     from psycopg import Connection
 
+
 def _driver():
     import psycopg
     return psycopg
+
 
 from .config import ConfigStore
 from .secrets import SecretStore
@@ -25,21 +27,58 @@ class MigrationDrift(RuntimeError):
     pass
 
 
-def build_dsn() -> str:
-    env_dsn = os.environ.get("VRES_DATABASE_URL")
+class DatabaseBoundaryUpgradeRequired(RuntimeError):
+    pass
+
+
+def _test_single_role_dsn() -> str | None:
+    if os.environ.get("VRES_ALLOW_TEST_DB") == "1":
+        return os.environ.get("VRES_DATABASE_URL") or os.environ.get("VRES_TEST_DATABASE_URL")
+    return None
+
+
+def build_dsn(purpose: str = "runtime") -> str:
+    if purpose not in {"runtime", "writer", "migrator"}:
+        raise ValueError(f"Unsupported database connection purpose {purpose!r}")
+    env_name = {
+        "runtime": "VRES_DATABASE_URL",
+        "writer": "VRES_PROVENANCE_WRITER_DATABASE_URL",
+        "migrator": "VRES_MIGRATION_DATABASE_URL",
+    }[purpose]
+    env_dsn = os.environ.get(env_name)
     if env_dsn:
         return env_dsn
+    test_dsn = _test_single_role_dsn()
+    if test_dsn:
+        return test_dsn
+
     cfg = ConfigStore().load()
-    password = SecretStore().get(cfg.database.password_key)
+    if purpose == "runtime":
+        user = cfg.database.user
+        password_key = cfg.database.password_key
+    elif purpose == "writer":
+        if not cfg.database.provenance_writer_user:
+            raise DatabaseBoundaryUpgradeRequired("Trusted provenance writer database role is not configured")
+        user = cfg.database.provenance_writer_user
+        password_key = cfg.database.provenance_writer_password_key
+    else:
+        if not cfg.database.migration_user:
+            raise DatabaseBoundaryUpgradeRequired("Dedicated migration database role is not configured")
+        user = cfg.database.migration_user
+        password_key = cfg.database.migration_password_key
+
+    password = SecretStore().get(password_key)
     if not password:
-        raise DatabaseUnavailable("PostgreSQL password is not configured. Run `vres setup`.")
+        raise DatabaseUnavailable(
+            f"PostgreSQL credential for {purpose} connection is not configured. Run secure Vres setup."
+        )
     from psycopg.conninfo import make_conninfo
 
     return make_conninfo(
         host=cfg.database.host,
         port=cfg.database.port,
         dbname=cfg.database.database,
-        user=cfg.database.user,
+        user=user,
         password=password,
         sslmode=cfg.database.sslmode,
         connect_timeout=8,
@@ -47,30 +86,24 @@ def build_dsn() -> str:
 
 
 @contextmanager
-def connect(*, autocommit: bool = False) -> Iterator[Connection]:
-    """Open a database connection without masking SQL/application defects as outages.
-
-    Vres intentionally uses psycopg's ClientCursor compatibility binding. Several
-    scoped retrieval queries contain nullable filter guards such as ``%s IS NULL``.
-    With psycopg 3 server-side binding, Python strings and None may be sent with OID
-    0 and PostgreSQL cannot infer the standalone guard parameter type. ClientCursor
-    keeps psycopg's value adaptation/escaping while sending a non-parametric query,
-    matching the value-binding semantics expected by this SQL corpus.
-    """
+def connect(*, autocommit: bool = False, purpose: str = "runtime") -> Iterator[Connection]:
+    """Open a purpose-scoped database connection without masking SQL/application defects."""
     psycopg = _driver()
     from psycopg.rows import dict_row
 
     try:
         conn = psycopg.connect(
-            build_dsn(),
+            build_dsn(purpose),
             row_factory=dict_row,
             cursor_factory=psycopg.ClientCursor,
             autocommit=autocommit,
         )
-    except DatabaseUnavailable:
+    except (DatabaseUnavailable, DatabaseBoundaryUpgradeRequired):
         raise
     except (psycopg.OperationalError, psycopg.InterfaceError) as exc:
-        raise DatabaseUnavailable("PostgreSQL connection failed; check service, account, TLS and secure setup.") from exc
+        raise DatabaseUnavailable(
+            f"PostgreSQL {purpose} connection failed; check service, account, TLS and secure setup."
+        ) from exc
     with conn:
         yield conn
 
@@ -81,8 +114,12 @@ def _digest(text: str) -> str:
 
 def migrate(*, adopt_legacy_checksums: bool = False) -> list[str]:
     """Apply immutable SQL migrations and detect edits to already-applied files."""
+    cfg = ConfigStore().load()
+    test_single_role = _test_single_role_dsn() is not None
+    has_migrator = bool(cfg.database.migration_user) and SecretStore().get(cfg.database.migration_password_key)
+    purpose = "migrator" if has_migrator and not test_single_role else "runtime"
     applied: list[str] = []
-    with connect(autocommit=True) as conn:
+    with connect(autocommit=True, purpose=purpose) as conn:
         conn.execute("SELECT pg_advisory_lock(8675309001)")
         conn.execute("CREATE SCHEMA IF NOT EXISTS vres")
         conn.execute(
@@ -104,7 +141,14 @@ def migrate(*, adopt_legacy_checksums: bool = False) -> list[str]:
         unknown = set(done) - set(names)
         if unknown:
             raise MigrationDrift(f"Database contains migrations absent from this package: {sorted(unknown)}")
-        # Verify the complete historical prefix before making any application-schema change.
+        if (
+            any(name.startswith("023_") and name not in done for name in names)
+            and not has_migrator
+            and not test_single_role
+        ):
+            raise DatabaseBoundaryUpgradeRequired(
+                "Migration 023 requires the secure provenance database-role upgrade before migration"
+            )
         for name, recorded in done.items():
             expected = _digest(migration_root.joinpath(name).read_text(encoding="utf-8"))
             if recorded and recorded != expected:
@@ -123,8 +167,9 @@ def migrate(*, adopt_legacy_checksums: bool = False) -> list[str]:
                     )
                 if not previous:
                     if not adopt_legacy_checksums:
-                        raise MigrationDrift(f"{name} has no recorded checksum. Back up and explicitly adopt legacy checksums after review.")
-                    # Adoption is an explicit operator decision, never an implicit startup action.
+                        raise MigrationDrift(
+                            f"{name} has no recorded checksum. Back up and explicitly adopt legacy checksums after review."
+                        )
                     conn.execute(
                         "UPDATE vres.schema_migrations SET checksum=%s WHERE version=%s AND checksum IS NULL",
                         (checksum, name),
@@ -137,4 +182,9 @@ def migrate(*, adopt_legacy_checksums: bool = False) -> list[str]:
                     (name, checksum),
                 )
             applied.append(name)
+        if cfg.database.provenance_writer_user and "023_user_event_writer_boundary.sql" in names:
+            from .database_boundary import activate_boundary
+
+            with conn.transaction():
+                activate_boundary(conn, cfg)
     return applied
