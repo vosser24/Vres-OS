@@ -291,7 +291,7 @@ BEGIN
          ORDER BY observed_at,id
          FOR UPDATE
     LOOP
-        INSERT INTO vres.task_events(task_id,event_type,actor,payload,session_id,created_at)
+        INSERT INTO vres.task_events AS inserted_event(task_id,event_type,actor,payload,session_id,created_at)
         VALUES (
             target.id,
             CASE WHEN obs.kind='control' THEN 'USER_CONTROL' ELSE 'USER_INSTRUCTION' END,
@@ -304,7 +304,7 @@ BEGIN
             )),
             p_provider_session_id,
             obs.observed_at
-        ) RETURNING id,created_at INTO ev;
+        ) RETURNING inserted_event.id,inserted_event.created_at INTO ev;
         UPDATE vres.user_input_observations
            SET committed_task_id=target.id,committed_event_id=ev.id,committed_at=now()
          WHERE id=obs.id;
