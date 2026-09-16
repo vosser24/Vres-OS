@@ -24,6 +24,9 @@ def test_all_agents_have_unique_names_and_valid_frontmatter():
     assert len(names) == len(set(names))
     assert "chairman" in names
     assert "validator" in names
+    assert "routing-arbiter" in names
+    assert "sonnet-expert" in names
+    assert "opus-expert" in names
     validator = _frontmatter(PLUGIN / "agents" / "validator.md")
     assert validator["model"] == "fable"
     assert validator["effort"] == "high"
@@ -52,9 +55,16 @@ def test_hook_commands_resolve_to_shipped_wrappers():
         "PostCompact",
         "Stop",
         "SessionEnd",
+        "SubagentStop",
     } <= set(data["hooks"])
-    shipped = {"vres-hook.ps1", "vres-session-end.ps1", "vres-user-answer.ps1"}
+    shipped = {
+        "vres-hook.ps1",
+        "vres-session-end.ps1",
+        "vres-user-answer.ps1",
+        "vres-subagent-hook.ps1",
+    }
     ask_user_wrapper_seen = False
+    governed_subagent_wrapper_seen = False
     for event, groups in data["hooks"].items():
         for group in groups:
             for hook in group["hooks"]:
@@ -87,9 +97,16 @@ def test_hook_commands_resolve_to_shipped_wrappers():
                 elif event == "PostToolUse" and group.get("matcher") == "^AskUserQuestion$":
                     assert wrapper_name == "vres-user-answer.ps1"
                     ask_user_wrapper_seen = True
+                elif event == "SubagentStop" and group.get("matcher") in {
+                    "^vres-os:routing-arbiter$",
+                    "^vres-os:(sonnet-expert|opus-expert)$",
+                }:
+                    assert wrapper_name == "vres-subagent-hook.ps1"
+                    governed_subagent_wrapper_seen = True
                 else:
                     assert wrapper_name == "vres-hook.ps1"
     assert ask_user_wrapper_seen
+    assert governed_subagent_wrapper_seen
 
 
 def test_mcp_wrapper_is_shipped():
