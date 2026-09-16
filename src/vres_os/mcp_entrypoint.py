@@ -5,6 +5,7 @@ from typing import Any
 from .company_mcp import mcp
 from .mcp_server import _current_session, _project, _require_node
 from .reply_guard import observe_reply_activity
+from .session_prompts import commit_staged_user_instruction_events
 from .task_decisions import TaskDecisionService
 from .task_lifecycle import transition_task_status
 
@@ -17,11 +18,7 @@ def _observe_reply_hook_activity(
     event_name: str = "PostToolUse",
     agent_id: str = "",
 ) -> dict[str, Any]:
-    """Observe only parent-thread tool activity for reply freshness.
-
-    Claude Code runs plugin tool hooks inside subagents too. Those events carry an
-    agent_id and must never mutate the parent Chairman turn's activity marker.
-    """
+    """Observe only parent-thread tool activity for reply freshness."""
     if str(agent_id or "").strip():
         return {"observed": False, "reason": "subagent_activity"}
     pid, _ = _project()
@@ -43,12 +40,7 @@ def reply_activity_observe(
     event_name: str = "PostToolUse",
     agent_id: str = "",
 ) -> str:
-    """Internal lifecycle hook: record bounded parent-thread tool activity.
-
-    The Chairman should never call this directly. Claude Code's PostToolUse and
-    PostToolUseFailure hooks invoke it automatically. Subagent events are ignored
-    using the host-provided agent_id. Tool inputs and outputs are never persisted.
-    """
+    """Internal lifecycle hook: record bounded parent-thread tool activity."""
     _observe_reply_hook_activity(
         session_id,
         tool_name,
@@ -57,6 +49,26 @@ def reply_activity_observe(
         agent_id=agent_id,
     )
     return ""
+
+
+@mcp.tool()
+def task_user_instruction_commit(task_key: str, session_id: str) -> dict[str, Any]:
+    """Commit already host-observed staged user intent to the bound task.
+
+    Use this only when a same-turn operation needs a real USER_INSTRUCTION event
+    before Stop (for example, event-backed decision provenance). This tool never
+    invents user text and never creates approval authority by itself.
+    """
+    pid, _ = _project()
+    sid = _current_session(pid, session_id)
+    _require_node("task", task_key, write=True)
+    events = commit_staged_user_instruction_events(pid, sid, task_key)
+    user_events = [x for x in events if x["event_type"] == "USER_INSTRUCTION"]
+    return {
+        "committed": bool(events),
+        "events": events,
+        "latest_user_event_id": user_events[-1]["event_id"] if user_events else None,
+    }
 
 
 @mcp.tool()
@@ -109,8 +121,9 @@ def task_decision_record(
     """Record a new descriptive decision with server-derived provenance.
 
     Without source_event_id the source is the bound Chairman session. To attribute a
-    decision to the user, source_event_id must identify a real persisted
-    USER_INSTRUCTION event on this task. This tool never creates an approval.
+    decision to the user, first commit already observed staged intent with
+    task_user_instruction_commit when necessary, then pass the returned real
+    USER_INSTRUCTION event id. This tool never creates an approval.
     """
     pid, _ = _project()
     sid = _current_session(pid, session_id)
