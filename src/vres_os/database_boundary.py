@@ -42,10 +42,21 @@ def boundary_credentials_present(
 def boundary_ready(
     cfg: VresConfig | None = None,
     *,
-    require_secrets: bool = True,
+    require_secrets: bool | None = None,
     secret_store: SecretStore | None = None,
 ) -> bool:
+    """Return whether the provenance boundary is certified for the requested check.
+
+    Callers deciding whether setup must run use structural certification only: once
+    the boundary version and distinct role identities are persisted, a transient
+    credential-store visibility failure must not relaunch setup. Callers that pass
+    an explicit secret store (secure setup/repair) still require both credentials.
+    Actual writer/migrator connections always re-read their credential and fail
+    closed if it is unavailable.
+    """
     cfg = cfg or ConfigStore().load()
+    if require_secrets is None:
+        require_secrets = secret_store is not None
     return bool(
         cfg.database.provenance_boundary_version >= BOUNDARY_VERSION
         and boundary_credentials_present(
