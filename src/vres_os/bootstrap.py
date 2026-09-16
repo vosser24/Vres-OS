@@ -23,6 +23,7 @@ from .database_boundary import (
     mark_boundary_ready,
     persist_boundary_credentials,
     provision_boundary,
+    rollback_boundary_provision,
 )
 from .db import migrate
 from .project import discover_project
@@ -274,12 +275,29 @@ def _configure_provenance_boundary(
     print("The PostgreSQL administrator credential is used only for this one-time role/ownership conversion.")
     target_admin_dsn = _target_admin_dsn(cfg, admin_dsn=admin_dsn)
     credentials = provision_boundary(cfg, admin_dsn=target_admin_dsn)
-    persist_boundary_credentials(
-        cfg,
-        credentials,
-        config_store=store,
-        secret_store=secret_store,
-    )
+    try:
+        persist_boundary_credentials(
+            cfg,
+            credentials,
+            config_store=store,
+            secret_store=secret_store,
+        )
+    except Exception:
+        try:
+            rollback_boundary_provision(cfg, credentials, admin_dsn=target_admin_dsn)
+        except Exception as rollback_exc:
+            raise RuntimeError(
+                "Provenance roles were created but OS credential persistence and pre-migration rollback both failed; "
+                "inspect Vres schema ownership and reserved roles before retrying."
+            ) from rollback_exc
+        cfg.database.provenance_writer_user = ""
+        cfg.database.migration_user = ""
+        cfg.database.provenance_boundary_version = 0
+        try:
+            store.save(cfg)
+        except Exception:
+            pass
+        raise
     print("Dedicated provenance-writer and migration role credentials are stored in the OS credential manager.")
 
 
