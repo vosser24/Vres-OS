@@ -60,7 +60,7 @@ def test_runtime_sql_cannot_forge_user_authority_but_writer_can(pg_project):
         admin.execute(sql.SQL("GRANT USAGE ON SCHEMA vres TO {}").format(sql.Identifier(runtime_user)))
         admin.execute(sql.SQL("GRANT USAGE ON SCHEMA vres TO {}").format(sql.Identifier(writer_user)))
         admin.execute(
-            sql.SQL("GRANT SELECT,INSERT,UPDATE ON vres.task_events,vres.sessions,vres.task_state,vres.tasks TO {}")
+            sql.SQL("GRANT SELECT,INSERT,UPDATE,DELETE ON vres.task_events,vres.sessions,vres.task_state,vres.tasks TO {}")
             .format(sql.Identifier(runtime_user))
         )
         # Let the attack reach the row trigger rather than failing earlier on the
@@ -146,6 +146,23 @@ def test_runtime_sql_cannot_forge_user_authority_but_writer_can(pg_project):
             ).fetchall()
             assert len(rows) == 1
             event_id = int(rows[0]["event_id"])
+
+        with psycopg.connect(runtime_dsn, autocommit=True, row_factory=dict_row) as runtime:
+            with pytest.raises(psycopg.Error) as rewritten:
+                runtime.execute(
+                    "UPDATE vres.task_events SET payload='{\"text\":\"rewritten\"}'::jsonb WHERE id=%s",
+                    (event_id,),
+                )
+            assert rewritten.value.sqlstate == "P0001"
+            with pytest.raises(psycopg.Error) as disguised:
+                runtime.execute(
+                    "UPDATE vres.task_events SET event_type='RUNTIME_DIAGNOSTIC',actor='test' WHERE id=%s",
+                    (event_id,),
+                )
+            assert disguised.value.sqlstate == "P0001"
+            with pytest.raises(psycopg.Error) as deleted:
+                runtime.execute("DELETE FROM vres.task_events WHERE id=%s", (event_id,))
+            assert deleted.value.sqlstate == "P0001"
 
         with connect() as conn:
             event = conn.execute(
