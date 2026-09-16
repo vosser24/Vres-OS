@@ -100,7 +100,7 @@ class CapabilityService:
                 "SELECT name,description,domain,project_id FROM vres.capabilities WHERE capability_key=%s",
                 (key,),
             ).fetchone()
-            if old and old["project_id"] is not None:
+            if old and old.get("project_id") is not None:
                 raise ValueError("A project-scoped capability cannot be promoted in place to company scope")
             if old and (old["name"], old["description"], old["domain"]) != (
                 name,
@@ -163,7 +163,7 @@ class CapabilityService:
                 "SELECT name,description,domain,project_id FROM vres.capabilities WHERE capability_key=%s",
                 (key,),
             ).fetchone()
-            if old and old["project_id"] != project_id:
+            if old and old.get("project_id") != project_id:
                 raise ValueError("Capability key already belongs to another scope; choose a new project key")
             if old and (old["name"], old["description"], old["domain"]) != (
                 name,
