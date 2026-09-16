@@ -96,7 +96,7 @@ class VresConfig:
 
 
 class ConfigStore:
-    def __init__(self, path: Path | None = None):
+    def __init__(self, path: Path | None = None) -> None:
         self.path = path or config_path()
 
     @staticmethod
