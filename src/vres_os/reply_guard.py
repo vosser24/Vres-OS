@@ -144,6 +144,44 @@ def observe_reply_activity(
     return {"observed": True, "turn_id": guard["turn_id"], "activity_seq": sequence}
 
 
+def _current_validation_in_flight(conn, task_id: int, started_at: datetime, checkpoint) -> dict[str, Any] | None:
+    """Return one mechanically current pending validation request for reply gating.
+
+    This is deliberately narrower than a generic non-material escape hatch. The task
+    must have been explicitly checkpointed by the Chairman in the current user turn,
+    the validation request must have been prepared after that checkpoint, and the
+    current review-relevant task state must still match the frozen request digest.
+    """
+    if not checkpoint or checkpoint["created_by"] != "chairman" or checkpoint["created_at"] < started_at:
+        return None
+    request = conn.execute(
+        """
+        SELECT id,request_key,state_digest,status,created_at
+          FROM vres.validation_requests
+         WHERE task_id=%s AND status='pending'
+         ORDER BY created_at DESC,id DESC LIMIT 1
+        """,
+        (task_id,),
+    ).fetchone()
+    if not request or request["created_at"] < checkpoint["created_at"]:
+        return None
+    state = conn.execute(
+        """
+        SELECT t.objective,s.*
+          FROM vres.tasks t JOIN vres.task_state s ON s.task_id=t.id
+         WHERE t.id=%s
+        """,
+        (task_id,),
+    ).fetchone()
+    if not state:
+        return None
+    from .validation import state_digest
+
+    if state_digest(dict(state)) != request["state_digest"]:
+        return None
+    return dict(request)
+
+
 def confirm_reply_gate(
     project_id: int,
     provider_session_id: str,
@@ -156,7 +194,10 @@ def confirm_reply_gate(
     A material declaration is accepted only when the latest explicit Chairman
     checkpoint is newer than both the user-turn boundary and the latest host-observed
     non-protocol tool activity. A non-material declaration does not require a new
-    checkpoint, but Stop still verifies that no later state/tool activity made it stale.
+    checkpoint. When the current turn checkpoint was frozen by a still-current pending
+    validation request, a non-material declaration is labeled validation_in_flight so
+    a background validator launch does not require a second checkpoint that would
+    stale its own frozen review state.
     """
     with connect() as conn, conn.transaction():
         session = conn.execute(
@@ -213,16 +254,29 @@ def confirm_reply_gate(
                 "Material reply gate requires an explicit Chairman task_checkpoint after the current user turn's latest tool activity"
             )
 
+        validation_request = None
+        if not advances_state:
+            validation_request = _current_validation_in_flight(conn, int(task_id), started_at, checkpoint)
+
         state = conn.execute(
             "SELECT updated_at FROM vres.task_state WHERE task_id=%s",
             (task_id,),
         ).fetchone()
         checked_at = conn.execute("SELECT clock_timestamp() AS ts").fetchone()["ts"]
+        gate_mode = (
+            "material_checkpointed"
+            if advances_state
+            else "validation_in_flight"
+            if validation_request
+            else "non_material"
+        )
         gate = {
             "turn_id": guard["turn_id"],
             "task_id": int(task_id),
             "task_key": task_key,
             "advances_state": bool(advances_state),
+            "mode": gate_mode,
+            "validation_request_key": validation_request["request_key"] if validation_request else None,
             "checkpoint_id": int(checkpoint["id"]) if checkpoint else None,
             "checkpoint_key": str(checkpoint["checkpoint_key"]) if checkpoint else None,
             "state_updated_at": state["updated_at"].isoformat() if state else None,
@@ -251,6 +305,8 @@ def confirm_reply_gate(
                     {
                         "turn_id": guard["turn_id"],
                         "advances_state": bool(advances_state),
+                        "mode": gate_mode,
+                        "validation_request_key": gate["validation_request_key"],
                         "checkpoint_key": gate["checkpoint_key"],
                         "activity_seq": gate["activity_seq"],
                         "last_activity_tool": gate["last_activity_tool"],
@@ -263,7 +319,8 @@ def confirm_reply_gate(
     return {
         "allowed": True,
         "turn_id": guard["turn_id"],
-        "mode": "material_checkpointed" if advances_state else "non_material",
+        "mode": gate_mode,
+        "validation_request_key": gate["validation_request_key"],
         "checkpoint": gate["checkpoint_key"],
         "activity_seq": gate["activity_seq"],
     }
@@ -341,6 +398,8 @@ def inspect_stop_guard(project_id: int, provider_session_id: str | None) -> dict
         "task_key": task_key,
         "turn_id": guard["turn_id"],
         "advances_state": bool(gate.get("advances_state")),
+        "mode": gate.get("mode") or ("material_checkpointed" if gate.get("advances_state") else "non_material"),
+        "validation_request_key": gate.get("validation_request_key"),
         "checkpoint": gate.get("checkpoint_key"),
         "activity_seq": gate.get("activity_seq"),
     }
