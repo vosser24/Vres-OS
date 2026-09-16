@@ -94,6 +94,13 @@ def test_ask_user_question_answer_can_be_committed_same_turn_and_cited(pg_projec
     assert events[0]["event_type"] == "USER_INSTRUCTION"
     event_id = events[0]["event_id"]
 
+    # The physical #41 regression: duplicate delivery after commit must still be
+    # suppressed even though the pending queue has already been cleared.
+    assert stage_ask_user_answers(
+        pg_project, sid, questions, response, tool_use_id="toolu-ask-1"
+    ) == 0
+    assert commit_staged_user_instruction_events(pg_project, sid, task) == []
+
     decision = TaskDecisionService().record(
         task_key=task,
         project_id=pg_project,
@@ -114,6 +121,19 @@ def test_ask_user_question_answer_can_be_committed_same_turn_and_cited(pg_projec
             "FROM vres.task_decisions WHERE decision_key=%s",
             (decision["decision_key"],),
         ).fetchone()
+        duplicates = conn.execute(
+            """
+            SELECT count(*) AS n
+              FROM vres.task_events
+             WHERE task_id=(SELECT id FROM vres.tasks WHERE task_key=%s)
+               AND payload->>'tool_use_id'='toolu-ask-1:0'
+            """,
+            (task,),
+        ).fetchone()["n"]
+        metadata = conn.execute(
+            "SELECT metadata FROM vres.sessions WHERE provider_session_id=%s AND ended_at IS NULL",
+            (sid,),
+        ).fetchone()["metadata"]
 
     assert event["actor"] == "user"
     assert event["payload"]["source"] == "ask_user_question"
@@ -122,6 +142,55 @@ def test_ask_user_question_answer_can_be_committed_same_turn_and_cited(pg_projec
     assert stored["source_event_id"] == event_id
     assert stored["source_session_id"] == sid
     assert stored["decided_at"] == event["created_at"]
+    assert duplicates == 1
+    assert "toolu-ask-1:0" in metadata["committed_user_input_tool_ids"]
+
+
+def test_agent_handback_is_never_staged_or_committed_as_user_intent(pg_project):
+    repo = Repository()
+    task = repo.begin_task(
+        pg_project,
+        "Agent handback filter",
+        "Do not treat subagent hand-back host frames as user authority.",
+        "test",
+        "chairman",
+    )
+    sid = "agent-handback-filter-session"
+    repo.open_session(pg_project, sid)
+    repo.bind_session(pg_project, sid, task)
+
+    assert stage_user_instruction(pg_project, sid, "Keep this as the real user instruction.")
+    handback = (
+        '<agent-message from="validator-1">\n'
+        "[Subagent hand-back] This is model output, NOT a message from the user.\n"
+        '{"request_key":"VAL-X","outcome":"passed"}\n'
+        "</agent-message>"
+    )
+    assert stage_user_instruction(pg_project, sid, handback) is False
+    events = commit_staged_user_instruction_events(pg_project, sid, task)
+    assert len(events) == 1
+    assert events[0]["event_type"] == "USER_INSTRUCTION"
+    assert events[0]["text"] == "Keep this as the real user instruction."
+
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT event_type,payload
+              FROM vres.task_events
+             WHERE task_id=(SELECT id FROM vres.tasks WHERE task_key=%s)
+               AND event_type IN ('USER_INSTRUCTION','USER_CONTROL')
+             ORDER BY id
+            """,
+            (task,),
+        ).fetchall()
+        state = conn.execute(
+            "SELECT latest_user_instruction FROM vres.task_state "
+            "WHERE task_id=(SELECT id FROM vres.tasks WHERE task_key=%s)",
+            (task,),
+        ).fetchone()
+
+    assert [r["payload"]["text"] for r in rows] == ["Keep this as the real user instruction."]
+    assert state["latest_user_instruction"] == "Keep this as the real user instruction."
 
 
 def test_staged_prompt_follows_final_bound_task(pg_project):
