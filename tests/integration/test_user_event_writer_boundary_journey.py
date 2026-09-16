@@ -63,6 +63,12 @@ def test_runtime_sql_cannot_forge_user_authority_but_writer_can(pg_project):
             sql.SQL("GRANT SELECT,INSERT,UPDATE ON vres.task_events,vres.sessions,vres.task_state,vres.tasks TO {}")
             .format(sql.Identifier(runtime_user))
         )
+        # Let the attack reach the row trigger rather than failing earlier on the
+        # serial sequence. Production runtime also has ordinary sequence usage.
+        admin.execute(
+            sql.SQL("GRANT USAGE,SELECT ON SEQUENCE vres.task_events_id_seq TO {}")
+            .format(sql.Identifier(runtime_user))
+        )
         for signature in (
             "vres.stage_user_input(bigint,text,text,text,text,text,text,timestamptz)",
             "vres.latest_pending_user_instruction(bigint,text)",
