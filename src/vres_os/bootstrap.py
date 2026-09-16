@@ -16,7 +16,14 @@ from datetime import datetime, timezone
 from .db import _driver
 
 from .config import ConfigStore
-from .database_boundary import boundary_ready, default_boundary_roles, persist_boundary_credentials, provision_boundary
+from .database_boundary import (
+    boundary_credentials_present,
+    boundary_ready,
+    default_boundary_roles,
+    mark_boundary_ready,
+    persist_boundary_credentials,
+    provision_boundary,
+)
 from .db import migrate
 from .project import discover_project
 from .repository import Repository
@@ -115,16 +122,29 @@ def _yes_no(prompt: str, default: bool = True) -> bool:
 
 def _runtime_dsn(*, host: str, port: int, database: str, user: str, password: str, sslmode: str) -> str:
     from psycopg.conninfo import make_conninfo
+
     return make_conninfo(
-        host=host, port=port, dbname=database, user=user, password=password,
-        sslmode=sslmode, connect_timeout=8,
+        host=host,
+        port=port,
+        dbname=database,
+        user=user,
+        password=password,
+        sslmode=sslmode,
+        connect_timeout=8,
     )
 
 
 def _test_database(*, host: str, port: int, database: str, user: str, password: str, sslmode: str) -> None:
-    with _driver().connect(_runtime_dsn(
-        host=host, port=port, database=database, user=user, password=password, sslmode=sslmode
-    )) as conn:
+    with _driver().connect(
+        _runtime_dsn(
+            host=host,
+            port=port,
+            database=database,
+            user=user,
+            password=password,
+            sslmode=sslmode,
+        )
+    ) as conn:
         conn.execute("SELECT 1")
 
 
@@ -151,9 +171,15 @@ def _provision_local_database(
     if not admin_password:
         raise RuntimeError("Administrator password is required for automatic local provisioning.")
     admin_dsn = _runtime_dsn(
-        host=host, port=port, database="postgres", user=admin_user, password=admin_password, sslmode=sslmode
+        host=host,
+        port=port,
+        database="postgres",
+        user=admin_user,
+        password=admin_password,
+        sslmode=sslmode,
     )
     from psycopg import sql
+
     runtime_password = secrets.token_urlsafe(32)
     with _driver().connect(admin_dsn, autocommit=True) as conn:
         role = conn.execute(
@@ -175,11 +201,15 @@ def _provision_local_database(
                 "Choose unused names, or use an existing account only if you know its current credentials. "
                 "Vres will not reset passwords, grant privileges, change ownership, or delete pre-existing objects."
             )
-        conn.execute(sql.SQL("CREATE ROLE {} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD {}")
-                     .format(sql.Identifier(runtime_user), sql.Literal(runtime_password)))
+        conn.execute(
+            sql.SQL("CREATE ROLE {} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD {}")
+            .format(sql.Identifier(runtime_user), sql.Literal(runtime_password))
+        )
         try:
-            conn.execute(sql.SQL("CREATE DATABASE {} OWNER {}")
-                         .format(sql.Identifier(database), sql.Identifier(runtime_user)))
+            conn.execute(
+                sql.SQL("CREATE DATABASE {} OWNER {}")
+                .format(sql.Identifier(database), sql.Identifier(runtime_user))
+            )
         except Exception:
             conn.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(runtime_user)))
             raise
@@ -191,8 +221,12 @@ def _provision_local_database(
     )
     try:
         _test_database(
-            host=host, port=port, database=database, user=runtime_user,
-            password=runtime_password, sslmode=sslmode,
+            host=host,
+            port=port,
+            database=database,
+            user=runtime_user,
+            password=runtime_password,
+            sslmode=sslmode,
         )
     except Exception as exc:
         try:
@@ -227,25 +261,36 @@ def _target_admin_dsn(cfg, *, admin_dsn: str | None = None) -> str:
     )
 
 
-def _configure_provenance_boundary(cfg, *, admin_dsn: str | None = None) -> None:
-    if boundary_ready(cfg):
+def _configure_provenance_boundary(
+    cfg,
+    *,
+    store: ConfigStore,
+    secret_store: SecretStore,
+    admin_dsn: str | None = None,
+) -> None:
+    if boundary_credentials_present(cfg, secret_store=secret_store):
         return
     print("\nVres is isolating user-authority provenance from the ordinary runtime database credential.")
     print("The PostgreSQL administrator credential is used only for this one-time role/ownership conversion.")
     target_admin_dsn = _target_admin_dsn(cfg, admin_dsn=admin_dsn)
     credentials = provision_boundary(cfg, admin_dsn=target_admin_dsn)
-    persist_boundary_credentials(cfg, credentials)
-    print("Dedicated provenance-writer and migration roles are configured in the OS credential manager.")
+    persist_boundary_credentials(
+        cfg,
+        credentials,
+        config_store=store,
+        secret_store=secret_store,
+    )
+    print("Dedicated provenance-writer and migration role credentials are stored in the OS credential manager.")
 
 
-def _upgrade_existing_boundary(store: ConfigStore, cfg) -> None:
+def _upgrade_existing_boundary(store: ConfigStore, cfg, *, secret_store: SecretStore) -> None:
     _write_setup_result("in_progress")
     print("\nVres-OS secure provenance-boundary upgrade")
     print("==========================================")
-    print("This existing installation needs a one-time PostgreSQL role split before user authority can continue.")
+    print("This installation needs a one-time PostgreSQL role split before user authority can continue.")
     print("No administrator credential is persisted or sent through Claude/MCP.")
     try:
-        _configure_provenance_boundary(cfg)
+        _configure_provenance_boundary(cfg, store=store, secret_store=secret_store)
         applied = migrate()
         print(f"Applied migrations: {applied or 'none (already current)'}")
         print("Running Vres core persistence self-test...")
@@ -254,15 +299,15 @@ def _upgrade_existing_boundary(store: ConfigStore, cfg) -> None:
         selftest = run_core_selftest()
         if not selftest.get("passed"):
             raise RuntimeError(f"Self-test failed: {selftest}")
+        mark_boundary_ready(cfg, config_store=store, secret_store=secret_store)
         cfg.configured = True
         store.save(cfg)
         _write_setup_result("success")
         print("Provenance boundary upgrade and core self-test passed.")
     except Exception as exc:
-        # Ownership/role conversion is intentionally not guessed back into its old
-        # insecure shape. Mark the app not-ready and preserve the new credentials
-        # if they were already established so a reviewed repair can continue.
-        cfg.configured = False
+        # Preserve the pre-existing configured flag and any newly created role
+        # credentials. Readiness remains false until mark_boundary_ready succeeds,
+        # so the next secure setup resumes instead of exposing an insecure runtime.
         try:
             store.save(cfg)
         except Exception:
@@ -278,13 +323,17 @@ def _upgrade_existing_boundary(store: ConfigStore, cfg) -> None:
 def _interactive_setup() -> None:
     store = ConfigStore()
     cfg = store.load()
-    if cfg.configured and not boundary_ready(cfg):
-        _upgrade_existing_boundary(store, cfg)
+    secret_store = SecretStore()
+    credentials_present = boundary_credentials_present(cfg, secret_store=secret_store)
+    if (cfg.configured and not boundary_ready(cfg, secret_store=secret_store)) or (
+        not cfg.configured and credentials_present
+    ):
+        _upgrade_existing_boundary(store, cfg, secret_store=secret_store)
         return
 
     from copy import deepcopy
+
     previous_cfg = deepcopy(cfg)
-    secret_store = SecretStore()
     previous_secret = secret_store.get(cfg.database.password_key)
     secret_changed = False
     provisioned: _ProvisionedLocalDatabase | None = None
@@ -305,7 +354,8 @@ def _interactive_setup() -> None:
     local_host = cfg.database.host.lower() in {"localhost", "127.0.0.1", "::1"}
     dedicated_defaults = cfg.database.database == "vres_os" and cfg.database.user == "vres_os"
     auto_provision = local_host and _yes_no(
-        "Create a NEW dedicated Vres database and runtime user (existing names are never changed)?", dedicated_defaults
+        "Create a NEW dedicated Vres database and runtime user (existing names are never changed)?",
+        dedicated_defaults,
     )
     runtime_password: str | None = None
     try:
@@ -313,8 +363,11 @@ def _interactive_setup() -> None:
             print("\nVres needs the PostgreSQL administrator password once to provision its isolated account.")
             print("That administrator password is never persisted.")
             provisioned = _provision_local_database(
-                host=cfg.database.host, port=cfg.database.port, database=cfg.database.database,
-                runtime_user=cfg.database.user, sslmode=cfg.database.sslmode,
+                host=cfg.database.host,
+                port=cfg.database.port,
+                database=cfg.database.database,
+                runtime_user=cfg.database.user,
+                sslmode=cfg.database.sslmode,
             )
             runtime_password = provisioned.runtime_password
         else:
@@ -323,8 +376,12 @@ def _interactive_setup() -> None:
             if not runtime_password:
                 raise RuntimeError("A PostgreSQL runtime password is required.")
             _test_database(
-                host=cfg.database.host, port=cfg.database.port, database=cfg.database.database,
-                user=cfg.database.user, password=runtime_password, sslmode=cfg.database.sslmode,
+                host=cfg.database.host,
+                port=cfg.database.port,
+                database=cfg.database.database,
+                user=cfg.database.user,
+                password=runtime_password,
+                sslmode=cfg.database.sslmode,
             )
         store.save(cfg)
         secret_store.set(cfg.database.password_key, runtime_password)
@@ -332,6 +389,8 @@ def _interactive_setup() -> None:
 
         _configure_provenance_boundary(
             cfg,
+            store=store,
+            secret_store=secret_store,
             admin_dsn=provisioned.admin_dsn if provisioned is not None else None,
         )
 
@@ -351,16 +410,17 @@ def _interactive_setup() -> None:
         selftest = run_core_selftest()
         if not selftest.get("passed"):
             raise RuntimeError(f"Self-test failed: {selftest}")
+        mark_boundary_ready(cfg, config_store=store, secret_store=secret_store)
         cfg.configured = True
         store.save(cfg)
         _write_setup_result("success")
         print("Core self-test passed. Vres-OS setup is active.")
     except Exception as exc:
         cleanup_failed = False
-        boundary_was_established = cfg.database.provenance_boundary_version >= 1
-        if boundary_was_established and provisioned is None:
-            # Existing databases keep the new role split fail-closed for repair;
-            # discarding its credential references would strand owned schema objects.
+        boundary_credentials = boundary_credentials_present(cfg, secret_store=secret_store)
+        if boundary_credentials and provisioned is None:
+            # For an existing database, never guess an ownership rollback. Keep the
+            # protected credentials and fail closed so secure setup can resume.
             cfg.configured = False
             try:
                 store.save(cfg)
@@ -372,6 +432,9 @@ def _interactive_setup() -> None:
                     secret_store.set(previous_cfg.database.password_key, previous_secret)
                 else:
                     secret_store.delete(cfg.database.password_key)
+            if provisioned is not None:
+                secret_store.delete(cfg.database.provenance_writer_password_key)
+                secret_store.delete(cfg.database.migration_password_key)
             store.save(previous_cfg)
         if provisioned is not None:
             try:
@@ -384,13 +447,14 @@ def _interactive_setup() -> None:
             else "created_resources_removed"
             if provisioned is not None
             else "boundary_upgrade_requires_review"
-            if boundary_was_established
+            if boundary_credentials
             else "no_resources_created"
         )
         _write_setup_result("failed", error=exc, cleanup=cleanup)
         from .redaction import redact_text
+
         print(f"\nVres setup failed: {redact_text(str(exc))}")
-        if boundary_was_established and provisioned is None:
+        if boundary_credentials and provisioned is None:
             print("The provenance role split is retained fail-closed for reviewed repair; run `vres doctor`.")
         else:
             print("Previous configuration restored.")
@@ -398,7 +462,7 @@ def _interactive_setup() -> None:
             print("The database and roles created by this failed setup attempt were removed; the same names can be retried.")
         elif provisioned is not None:
             print("Automatic cleanup of the newly created database/roles failed. Inspect them before retrying.")
-        elif not boundary_was_established:
+        elif not boundary_credentials:
             print("No existing database or role was deleted or reset.")
         raise SystemExit(2) from exc
     print("Close this window and return to Claude Code.")
@@ -414,6 +478,7 @@ def _pause_setup_console() -> None:
 
 def interactive_setup() -> None:
     from .locking import local_lock
+
     with local_lock("secure-setup") as acquired:
         if not acquired:
             print("Another secure Vres setup is already open. Use that window.")
@@ -441,6 +506,7 @@ def launch_secure_setup_and_wait(timeout_seconds: int = 2) -> dict:
             "last_setup": last_setup_result(),
         }
     from .locking import lock_is_held
+
     if lock_is_held("secure-setup"):
         return {
             "ready": False,
@@ -450,6 +516,7 @@ def launch_secure_setup_and_wait(timeout_seconds: int = 2) -> dict:
         }
     flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
     from .processes import worker_command
+
     env = os.environ.copy()
     env["VRES_SETUP_CONSOLE"] = "1"
     proc = subprocess.Popen(
@@ -485,8 +552,11 @@ def start_for_project(project_root: str = ".") -> dict:
     if not _ready_config(cfg):
         setup = launch_secure_setup_and_wait()
         if not setup.get("ready"):
-            return {"status": "SETUP_IN_PROGRESS" if setup.get("in_progress") else "SETUP_REQUIRED",
-                    "setup": setup, "prerequisites": prerequisite_status()}
+            return {
+                "status": "SETUP_IN_PROGRESS" if setup.get("in_progress") else "SETUP_REQUIRED",
+                "setup": setup,
+                "prerequisites": prerequisite_status(),
+            }
     applied = migrate()
     project = discover_project(project_root)
     project_id = Repository().ensure_project(project)
