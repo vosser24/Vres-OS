@@ -45,7 +45,13 @@ class CapabilityService:
             rows = conn.execute(
                 """
                 SELECT capability_key,name,description,domain,owner_role,proven_count,metadata,project_id,
-                       ts_rank(to_tsvector('simple',name || ' ' || description),plainto_tsquery('simple',%s)) AS score
+                       ts_rank(
+                         to_tsvector(
+                           'simple',
+                           name || ' ' || description || ' ' || COALESCE(metadata->>'aliases','')
+                         ),
+                         plainto_tsquery('simple',%s)
+                       ) AS score
                   FROM vres.capabilities
                  WHERE status='active'
                    AND (
@@ -53,8 +59,13 @@ class CapabilityService:
                      OR (%s IS NOT NULL AND (project_id=%s OR project_id IS NULL))
                    )
                    AND (
-                     name ILIKE '%%' || %s || '%%' OR description ILIKE '%%' || %s || '%%'
-                     OR to_tsvector('simple',name || ' ' || description) @@ plainto_tsquery('simple',%s)
+                     name ILIKE '%%' || %s || '%%'
+                     OR description ILIKE '%%' || %s || '%%'
+                     OR COALESCE(metadata->>'aliases','') ILIKE '%%' || %s || '%%'
+                     OR to_tsvector(
+                          'simple',
+                          name || ' ' || description || ' ' || COALESCE(metadata->>'aliases','')
+                        ) @@ plainto_tsquery('simple',%s)
                    )
                  ORDER BY (project_id=%s) DESC NULLS LAST,proven_count DESC,score DESC,name LIMIT %s
                 """,
@@ -63,6 +74,7 @@ class CapabilityService:
                     project_id,
                     project_id,
                     project_id,
+                    query,
                     query,
                     query,
                     query,
