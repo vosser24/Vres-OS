@@ -8,6 +8,10 @@ Migration 020 adds a history-preserving `vres.task_decisions` ledger while retai
 
 Migration 021 hardens that ledger at the database layer. After insert, a decision's identity/provenance fields are immutable: key, task, text, rationale, source, source event/session, decision time, record time, and supersession link cannot be rewritten. The only normal row mutations are the explicit lifecycle transitions `active -> superseded` or `active -> retired`, with their required timestamps/reason. Terminal decision rows cannot be changed again. Direct deletion of decision rows and checkpoint-decision membership is denied by default.
 
+Migration 022 closes the remaining direct-INSERT provenance gap. New rows must begin active on an unfinished task. `legacy_unstructured` is migration-only. A `user_instruction` row must reference a real `USER_INSTRUCTION` event on the same task and copy that event's session/time exactly. A Chairman row must name an open Claude session currently bound to that task and cannot claim a source event. Replacement rows may point only at an active decision on the same task.
+
+These constraints defend the application schema against accidental/ordinary direct writes through the runtime role. They do not claim that an arbitrarily privileged PostgreSQL administrator is cryptographically unable to forge application history; database-administrator compromise remains outside this provenance contract.
+
 The disposable PostgreSQL integration fixture uses an explicit transaction-local `vres.allow_decision_ledger_delete=on` bypass only to remove synthetic test projects after each test. Normal application paths do not enable it.
 
 Each structured decision has:
