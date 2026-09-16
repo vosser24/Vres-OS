@@ -12,6 +12,23 @@ from .project import ProjectIdentity
 from .repository import Repository
 
 
+def _procedure_accept_baseline_signature_guard() -> None:
+    """Static API-drift guard only; never execute this synthetic approval call."""
+    ProcedureService().accept_baseline(
+        procedure_key="SELFTEST-SIGNATURE-GUARD",
+        name="Selftest signature guard",
+        description="Static signature compatibility only",
+        task_family="selftest",
+        project_id=None,
+        input_contract={},
+        method=[],
+        invariants=[],
+        validation_contract=["static-only"],
+        output_contract={},
+        approval_key="STATIC-SIGNATURE-GUARD-NOT-A-REAL-APPROVAL",
+    )
+
+
 def run_core_selftest() -> dict:
     """Exercise core PostgreSQL persistence without fabricating user authority."""
     migrate()
