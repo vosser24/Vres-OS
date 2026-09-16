@@ -12,6 +12,14 @@ def test_task_notification_is_not_user_intent():
     assert not is_system_prompt_event("Please explain <task-notification> as text")
 
 
+def test_agent_handback_is_not_user_intent():
+    assert is_system_prompt_event(
+        '<agent-message from="validator-1">\n[Subagent hand-back] report\n</agent-message>'
+    )
+    assert is_system_prompt_event("  <agent-message>report</agent-message>")
+    assert not is_system_prompt_event("Please explain <agent-message> as text")
+
+
 def test_user_prompt_is_staged_before_task_attribution(monkeypatch, capsys):
     monkeypatch.setattr(hooks, "_input", lambda: {"session_id": "S-NEW", "prompt": "Start LV-09"})
     monkeypatch.setattr(hooks, "ConfigStore", lambda: SimpleNamespace(load=lambda: VresConfig(configured=True)))
