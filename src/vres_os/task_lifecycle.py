@@ -6,6 +6,7 @@ from typing import Any
 
 from .db import connect
 from .redaction import redact
+from .session_prompts import commit_pending_user_entries, pending_user_entries
 
 _TRANSITIONS = {
     "active": {"waiting_user", "blocked", "cancelled"},
@@ -13,7 +14,6 @@ _TRANSITIONS = {
     "blocked": {"active", "waiting_user", "cancelled"},
 }
 _TERMINAL = {"completed", "cancelled"}
-_PENDING_KEY = "pending_user_instruction"
 
 
 def _normalized_instruction(text: str) -> str:
@@ -69,27 +69,17 @@ def _require_bound_session(conn, project_id: int, task_id: int, provider_session
 
 
 def _consume_cancel_instruction(conn, task_id: int, session, provider_session_id: str) -> None:
-    metadata = session.get("metadata") or {}
-    pending = metadata.get(_PENDING_KEY) if isinstance(metadata, dict) else None
-    text = pending.get("text") if isinstance(pending, dict) else None
+    pending = pending_user_entries(session.get("metadata") or {})
+    substantive = [
+        entry for entry in pending
+        if entry.get("kind") != "control" and isinstance(entry.get("text"), str)
+    ]
+    text = substantive[-1]["text"] if substantive else None
     if not isinstance(text, str) or not _is_explicit_cancel_instruction(text):
         raise ValueError(
             "Cancelling a task requires an explicit current user instruction such as 'cancel this task'"
         )
-    safe_text = redact(text)
-    conn.execute(
-        "UPDATE vres.task_state SET latest_user_instruction=%s,updated_at=now() WHERE task_id=%s",
-        (safe_text, task_id),
-    )
-    conn.execute(
-        "INSERT INTO vres.task_events(task_id,event_type,actor,payload,session_id) "
-        "VALUES (%s,'USER_INSTRUCTION','user',%s::jsonb,%s)",
-        (task_id, json.dumps({"text": safe_text}), provider_session_id),
-    )
-    conn.execute(
-        "UPDATE vres.sessions SET metadata=metadata-%s WHERE id=%s",
-        (_PENDING_KEY, session["id"]),
-    )
+    commit_pending_user_entries(conn, session, task_id, provider_session_id)
 
 
 def transition_task_status(
@@ -105,7 +95,7 @@ def transition_task_status(
     Completion is deliberately excluded: only the protected task_complete path may
     establish `completed`. Park/block/resume require the current bound session.
     Cancellation additionally requires an explicit current user cancellation prompt;
-    that staged prompt is durably attributed before the task is unbound.
+    queued current-turn user intent is durably attributed before the task is unbound.
     """
     target = str(target_status or "").strip().lower()
     safe_reason = redact(str(reason or "").strip())
