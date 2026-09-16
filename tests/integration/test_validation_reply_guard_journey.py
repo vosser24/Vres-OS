@@ -171,7 +171,7 @@ def test_post_prepare_task_checkpoint_still_stales_review_and_disables_validatio
 
     gate = confirm_reply_gate(pg_project, sid, task, advances_state=False)
     assert gate["mode"] == "non_material"
-    assert gate["validation_request_key"] is None
+    assert "validation_request_key" not in gate
 
     report = _report(prepared["request_key"])
     payload = {
