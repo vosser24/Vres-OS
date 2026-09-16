@@ -236,6 +236,20 @@ def provision_boundary(
     )
 
 
+def rollback_boundary_provision(cfg: VresConfig, credentials: BoundaryCredentials, *, admin_dsn: str) -> None:
+    """Undo only a pre-migration role split whose local credential persistence failed."""
+    from psycopg import sql
+
+    with _driver().connect(admin_dsn, autocommit=True) as conn:
+        with conn.transaction():
+            _transfer_vres_ownership(conn, new_owner=cfg.database.user)
+            conn.execute(sql.SQL("GRANT CREATE,USAGE ON SCHEMA vres TO {}").format(sql.Identifier(cfg.database.user)))
+            for role in (credentials.writer_user, credentials.migration_user):
+                conn.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role)))
+        for role in (credentials.writer_user, credentials.migration_user):
+            conn.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(role)))
+
+
 def persist_boundary_credentials(
     cfg: VresConfig,
     credentials: BoundaryCredentials,
@@ -250,16 +264,23 @@ def persist_boundary_credentials(
     db.provenance_boundary_version = 0
     cfg.validate()
     secrets_store = secret_store or SecretStore()
+    config = config_store or ConfigStore()
     secrets_store.set(db.provenance_writer_password_key, credentials.writer_password)
     try:
         secrets_store.set(db.migration_password_key, credentials.migration_password)
+        config.save(cfg)
     except Exception:
         secrets_store.delete(db.provenance_writer_password_key)
+        secrets_store.delete(db.migration_password_key)
         raise
-    (config_store or ConfigStore()).save(cfg)
 
 
-def mark_boundary_ready(cfg: VresConfig, *, config_store: ConfigStore | None = None, secret_store: SecretStore | None = None) -> None:
+def mark_boundary_ready(
+    cfg: VresConfig,
+    *,
+    config_store: ConfigStore | None = None,
+    secret_store: SecretStore | None = None,
+) -> None:
     if not boundary_credentials_present(cfg, secret_store=secret_store):
         raise RuntimeError("Cannot mark provenance boundary ready without both protected role credentials")
     cfg.database.provenance_boundary_version = BOUNDARY_VERSION
