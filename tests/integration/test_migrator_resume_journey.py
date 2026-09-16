@@ -120,7 +120,7 @@ def test_migrator_resumes_023_without_database_create(monkeypatch):
 
         monkeypatch.delenv("VRES_ALLOW_TEST_DB", raising=False)
         monkeypatch.delenv("VRES_TEST_DATABASE_URL", raising=False)
-        monkeypatch.delenv("VRES_DATABASE_URL", raising=False)
+        monkeypatch.setenv("VRES_DATABASE_URL", runtime_dsn)
         monkeypatch.setenv("VRES_MIGRATION_DATABASE_URL", migrator_dsn)
         monkeypatch.setattr(db, "ConfigStore", lambda: SimpleNamespace(load=lambda: cfg))
 
@@ -143,10 +143,45 @@ def test_migrator_resumes_023_without_database_create(monkeypatch):
             authority = admin.execute(
                 "SELECT writer_role FROM vres.provenance_authority WHERE authority_key='user_event_writer'"
             ).fetchone()["writer_role"]
+            before = admin.execute(
+                """
+                SELECT
+                  (SELECT count(*) FROM vres.task_events
+                    WHERE actor='user' AND event_type IN ('USER_INSTRUCTION','USER_CONTROL')) AS authority_events,
+                  (SELECT count(*) FROM vres.approval_events) AS approvals
+                """
+            ).fetchone()
         assert "023_user_event_writer_boundary.sql" in versions
         assert "024_user_event_immutability.sql" in versions
         assert schema_owner == migrator_user
         assert authority == writer_user
+
+        from vres_os.selftest import run_core_selftest
+
+        result = run_core_selftest()
+        assert result["passed"] is True
+        assert result["task_resume"] is True
+        assert result["knowledge_retrieval"] is True
+        assert result["procedure_reuse"] is True
+        assert result["pareto_gate"] is True
+
+        with psycopg.connect(target_admin_dsn, row_factory=dict_row) as admin:
+            after = admin.execute(
+                """
+                SELECT
+                  (SELECT count(*) FROM vres.task_events
+                    WHERE actor='user' AND event_type IN ('USER_INSTRUCTION','USER_CONTROL')) AS authority_events,
+                  (SELECT count(*) FROM vres.approval_events) AS approvals,
+                  (SELECT count(*) FROM vres.projects WHERE project_key LIKE 'selftest:%%') AS selftest_projects,
+                  (SELECT count(*) FROM vres.procedures WHERE procedure_key LIKE 'SELFTEST-PROC-%%') AS selftest_procedures,
+                  (SELECT count(*) FROM vres.knowledge_items WHERE knowledge_key LIKE 'SELFTEST-KNOW-%%') AS selftest_knowledge
+                """
+            ).fetchone()
+        assert after["authority_events"] == before["authority_events"]
+        assert after["approvals"] == before["approvals"]
+        assert after["selftest_projects"] == 0
+        assert after["selftest_procedures"] == 0
+        assert after["selftest_knowledge"] == 0
     finally:
         _drop_database_and_roles(
             admin_server_dsn,
