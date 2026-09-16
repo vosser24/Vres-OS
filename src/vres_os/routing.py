@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import uuid
 from pathlib import Path
@@ -70,7 +69,10 @@ def _json_report(text: str) -> dict[str, Any]:
         raise ValueError("Routing report is missing or oversized")
     text = text.strip()
     if text.startswith("```json") and text.endswith("```"):
-        text = text[text.find("\n") + 1 : -3].strip()
+        newline = text.find("\n")
+        if newline < 0:
+            raise ValueError("Malformed fenced routing report")
+        text = text[newline + 1 : -3].strip()
     value = json.loads(text)
     if not isinstance(value, dict):
         raise ValueError("Routing report must be one JSON object")
@@ -199,8 +201,9 @@ class RoutingService:
             "Use execution_tier='sonnet' by default. Use 'opus' only when the actual worker needs materially deeper multi-step reasoning, "
             "hard debugging/architecture, high ambiguity, long-context synthesis, or difficult trade-off analysis. Complexity and consequence "
             "are separate: hard_protected may require protected validation even when Sonnet is sufficient to execute. Any Opus worker requires "
-            "assurance='protected'. If discovery contains a real unresolved capability gap, return outcome='blocked' and list only those gap needs; "
-            "do not route around them. Shape for a route: "
+            "assurance='protected'. Infer consequence from the objective as well as the supplied risk triggers; a missing flag is never permission "
+            "to downgrade obvious release/security/governance/high-stakes work. If discovery contains a real unresolved capability gap, return "
+            "outcome='blocked' and list only those gap needs; do not route around them. Shape for a route: "
             "{request_key,outcome:'routed',lead_role,experts:[{role,covers:[...],capability_keys:[...],execution_tier:'sonnet|opus',rationale}],"
             "assurance:'routine|protected',routing_rationale,required_gap_needs:[]}. Shape for a gap: "
             "{request_key,outcome:'blocked',lead_role:null,experts:[],assurance:null,routing_rationale,required_gap_needs:[...]}."
@@ -367,19 +370,31 @@ class RoutingService:
         with connect() as conn, conn.transaction():
             request = conn.execute(
                 """
-                SELECT r.*,t.project_id,t.task_key,t.objective,t.task_family,t.status,s.*
+                SELECT r.id AS routing_id,r.request_key,r.task_id,r.discovery_key,
+                       r.state_digest,r.risk_triggers,r.hard_protected,
+                       r.status AS routing_status,
+                       t.project_id,t.task_key,t.status AS task_status
                   FROM vres.routing_requests r
                   JOIN vres.tasks t ON t.id=r.task_id
-                  JOIN vres.task_state s ON s.task_id=t.id
                  WHERE r.request_key=%s FOR UPDATE OF r
                 """,
                 (request_key,),
             ).fetchone()
             if not request or int(request["project_id"] or 0) != int(project_id):
                 raise ValueError("Routing request is unknown or belongs to another project")
-            if request["status"] != "pending":
+            if request["routing_status"] != "pending":
                 return {"recorded": False, "reason": "request already consumed"}
-            if state_digest(dict(request)) != request["state_digest"]:
+            if request["task_status"] not in _ACTIVE_TASK_STATUSES:
+                raise ValueError("Routing request no longer targets an unfinished task")
+            state = conn.execute(
+                """
+                SELECT t.objective,s.* FROM vres.tasks t
+                JOIN vres.task_state s ON s.task_id=t.id
+                WHERE t.id=%s
+                """,
+                (request["task_id"],),
+            ).fetchone()
+            if not state or state_digest(dict(state)) != request["state_digest"]:
                 raise ValueError("Task changed during routing; fresh Fable route required")
             discovery = self._discovery(conn, int(request["task_id"]), request["discovery_key"])
             decision = self._validate_report(
@@ -392,7 +407,7 @@ class RoutingService:
                 """
                 SELECT 1 FROM vres.routing_requests
                  WHERE task_id=%s AND status='routed'
-                   AND decision->>'assurance'='protected'
+                   AND (hard_protected OR decision->>'assurance'='protected')
                  LIMIT 1
                 """,
                 (request["task_id"],),
@@ -411,9 +426,9 @@ class RoutingService:
                     status,
                     observed_model,
                     agent_id,
-                    session_id,
+                    session_id or None,
                     json.dumps(redact(decision)),
-                    request["id"],
+                    request["routing_id"],
                 ),
             )
             conn.execute(
@@ -432,7 +447,7 @@ class RoutingService:
                             }
                         )
                     ),
-                    session_id,
+                    session_id or None,
                 ),
             )
             if decision["outcome"] == "routed":
@@ -661,9 +676,6 @@ class RoutingService:
                 "routing_request_key": contract["request_key"],
             }
 
-        # Routine routes are allowed only after host-observed Fable routing, all-Sonnet
-        # execution, and decision-ready orchestration. The database trigger independently
-        # rechecks those invariants during this update.
         if any(
             item.get("execution_tier") != "sonnet"
             for item in contract["decision"].get("experts") or []
