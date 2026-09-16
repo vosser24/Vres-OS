@@ -36,7 +36,6 @@ def boundary_ready(cfg: VresConfig | None = None, *, require_secrets: bool = Tru
 
 def default_boundary_roles(runtime_user: str) -> tuple[str, str]:
     base = "".join(c if c.isalnum() or c == "_" else "_" for c in runtime_user).strip("_") or "vres_os"
-    # PostgreSQL identifiers are limited to 63 bytes. Keep room for stable suffixes.
     base = base[:42]
     return f"{base}_writer", f"{base}_migrator"
 
@@ -58,6 +57,13 @@ def _runtime_dsn(cfg: VresConfig, *, user: str, password: str, database: str | N
 def _transfer_vres_ownership(conn, *, new_owner: str) -> None:
     from psycopg import sql
 
+    schema = conn.execute("SELECT 1 FROM pg_namespace WHERE nspname='vres'").fetchone()
+    if not schema:
+        conn.execute(
+            sql.SQL("CREATE SCHEMA vres AUTHORIZATION {}").format(sql.Identifier(new_owner))
+        )
+        return
+
     rows = conn.execute(
         """
         SELECT c.relkind,n.nspname,c.relname
@@ -69,7 +75,6 @@ def _transfer_vres_ownership(conn, *, new_owner: str) -> None:
         """
     ).fetchall()
     for row in rows:
-        kind = row["relkind"]
         keyword = {
             "r": "TABLE",
             "p": "TABLE",
@@ -77,7 +82,7 @@ def _transfer_vres_ownership(conn, *, new_owner: str) -> None:
             "m": "MATERIALIZED VIEW",
             "S": "SEQUENCE",
             "f": "FOREIGN TABLE",
-        }[kind]
+        }[row["relkind"]]
         conn.execute(
             sql.SQL("ALTER {} {}.{} OWNER TO {}").format(
                 sql.SQL(keyword),
@@ -116,11 +121,7 @@ def provision_boundary(
     admin_password: str | None = None,
     admin_dsn: str | None = None,
 ) -> BoundaryCredentials:
-    """Create isolated writer/migration roles and transfer only Vres-owned objects.
-
-    The caller must provide PostgreSQL administrator authority. Existing unrelated
-    objects are never reassigned: only objects in schema ``vres`` are transferred.
-    """
+    """Create isolated writer/migration roles and transfer only Vres-owned objects."""
     from psycopg import sql
 
     if boundary_ready(cfg, require_secrets=False):
@@ -148,53 +149,61 @@ def provision_boundary(
             sql.SQL("CREATE ROLE {} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT PASSWORD {}")
             .format(sql.Identifier(writer_user), sql.Literal(writer_password))
         )
+        conn.execute(
+            sql.SQL("CREATE ROLE {} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT PASSWORD {}")
+            .format(sql.Identifier(migration_user), sql.Literal(migration_password))
+        )
         try:
-            conn.execute(
-                sql.SQL("CREATE ROLE {} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT PASSWORD {}")
-                .format(sql.Identifier(migration_user), sql.Literal(migration_password))
-            )
-            _transfer_vres_ownership(conn, new_owner=migration_user)
-            conn.execute(sql.SQL("REVOKE CREATE ON SCHEMA vres FROM PUBLIC"))
-            conn.execute(sql.SQL("REVOKE CREATE ON SCHEMA vres FROM {}").format(sql.Identifier(cfg.database.user)))
-            conn.execute(sql.SQL("GRANT USAGE ON SCHEMA vres TO {}").format(sql.Identifier(cfg.database.user)))
-            conn.execute(sql.SQL("GRANT USAGE ON SCHEMA vres TO {}").format(sql.Identifier(writer_user)))
-            conn.execute(
-                sql.SQL("GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA vres TO {}")
-                .format(sql.Identifier(cfg.database.user))
-            )
-            conn.execute(
-                sql.SQL("GRANT USAGE,SELECT,UPDATE ON ALL SEQUENCES IN SCHEMA vres TO {}")
-                .format(sql.Identifier(cfg.database.user))
-            )
-            conn.execute(
-                sql.SQL("GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA vres TO {}")
-                .format(sql.Identifier(cfg.database.user))
-            )
-            conn.execute(
-                sql.SQL(
-                    "ALTER DEFAULT PRIVILEGES FOR ROLE {} IN SCHEMA vres "
-                    "GRANT SELECT,INSERT,UPDATE,DELETE ON TABLES TO {}"
-                ).format(sql.Identifier(migration_user), sql.Identifier(cfg.database.user))
-            )
-            conn.execute(
-                sql.SQL(
-                    "ALTER DEFAULT PRIVILEGES FOR ROLE {} IN SCHEMA vres "
-                    "GRANT USAGE,SELECT,UPDATE ON SEQUENCES TO {}"
-                ).format(sql.Identifier(migration_user), sql.Identifier(cfg.database.user))
-            )
-            conn.execute(
-                sql.SQL(
-                    "ALTER DEFAULT PRIVILEGES FOR ROLE {} IN SCHEMA vres GRANT EXECUTE ON FUNCTIONS TO {}"
-                ).format(sql.Identifier(migration_user), sql.Identifier(cfg.database.user))
-            )
+            with conn.transaction():
+                _transfer_vres_ownership(conn, new_owner=migration_user)
+                conn.execute(sql.SQL("REVOKE CREATE ON SCHEMA vres FROM PUBLIC"))
+                conn.execute(
+                    sql.SQL("REVOKE CREATE ON SCHEMA vres FROM {}").format(sql.Identifier(cfg.database.user))
+                )
+                conn.execute(sql.SQL("GRANT USAGE ON SCHEMA vres TO {}").format(sql.Identifier(cfg.database.user)))
+                conn.execute(sql.SQL("GRANT USAGE ON SCHEMA vres TO {}").format(sql.Identifier(writer_user)))
+                conn.execute(
+                    sql.SQL("GRANT CONNECT ON DATABASE {} TO {},{}").format(
+                        sql.Identifier(cfg.database.database),
+                        sql.Identifier(writer_user),
+                        sql.Identifier(migration_user),
+                    )
+                )
+                conn.execute(
+                    sql.SQL("GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA vres TO {}")
+                    .format(sql.Identifier(cfg.database.user))
+                )
+                conn.execute(
+                    sql.SQL("GRANT USAGE,SELECT,UPDATE ON ALL SEQUENCES IN SCHEMA vres TO {}")
+                    .format(sql.Identifier(cfg.database.user))
+                )
+                conn.execute(
+                    sql.SQL("GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA vres TO {}")
+                    .format(sql.Identifier(cfg.database.user))
+                )
+                conn.execute(
+                    sql.SQL(
+                        "ALTER DEFAULT PRIVILEGES FOR ROLE {} IN SCHEMA vres "
+                        "GRANT SELECT,INSERT,UPDATE,DELETE ON TABLES TO {}"
+                    ).format(sql.Identifier(migration_user), sql.Identifier(cfg.database.user))
+                )
+                conn.execute(
+                    sql.SQL(
+                        "ALTER DEFAULT PRIVILEGES FOR ROLE {} IN SCHEMA vres "
+                        "GRANT USAGE,SELECT,UPDATE ON SEQUENCES TO {}"
+                    ).format(sql.Identifier(migration_user), sql.Identifier(cfg.database.user))
+                )
+                conn.execute(
+                    sql.SQL(
+                        "ALTER DEFAULT PRIVILEGES FOR ROLE {} IN SCHEMA vres GRANT EXECUTE ON FUNCTIONS TO {}"
+                    ).format(sql.Identifier(migration_user), sql.Identifier(cfg.database.user))
+                )
         except Exception:
-            # Best-effort cleanup is safe only before Vres object ownership has been
-            # transferred. If cleanup itself fails, keep the original exception and
-            # require operator inspection rather than guessing at destructive repair.
-            try:
-                conn.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(writer_user)))
-            except Exception:
-                pass
+            for role in (writer_user, migration_user):
+                try:
+                    conn.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(role)))
+                except Exception:
+                    pass
             raise
 
     return BoundaryCredentials(
@@ -240,8 +249,16 @@ def activate_boundary(conn, cfg: VresConfig) -> None:
     )
     for table in ("provenance_authority", "user_input_observations"):
         conn.execute(sql.SQL("REVOKE ALL ON TABLE vres.{} FROM PUBLIC").format(sql.Identifier(table)))
-        conn.execute(sql.SQL("REVOKE ALL ON TABLE vres.{} FROM {}").format(sql.Identifier(table), sql.Identifier(runtime)))
-        conn.execute(sql.SQL("REVOKE ALL ON TABLE vres.{} FROM {}").format(sql.Identifier(table), sql.Identifier(writer)))
+        conn.execute(
+            sql.SQL("REVOKE ALL ON TABLE vres.{} FROM {}").format(
+                sql.Identifier(table), sql.Identifier(runtime)
+            )
+        )
+        conn.execute(
+            sql.SQL("REVOKE ALL ON TABLE vres.{} FROM {}").format(
+                sql.Identifier(table), sql.Identifier(writer)
+            )
+        )
     protected_functions = [
         "vres.user_event_writer_role()",
         "vres.stage_user_input(bigint,text,text,text,text,text,text,timestamptz)",
@@ -250,6 +267,10 @@ def activate_boundary(conn, cfg: VresConfig) -> None:
     ]
     for signature in protected_functions:
         conn.execute(sql.SQL("REVOKE ALL ON FUNCTION {} FROM PUBLIC").format(sql.SQL(signature)))
-        conn.execute(sql.SQL("REVOKE ALL ON FUNCTION {} FROM {}").format(sql.SQL(signature), sql.Identifier(runtime)))
-        conn.execute(sql.SQL("GRANT EXECUTE ON FUNCTION {} TO {}").format(sql.SQL(signature), sql.Identifier(writer)))
+        conn.execute(
+            sql.SQL("REVOKE ALL ON FUNCTION {} FROM {}").format(sql.SQL(signature), sql.Identifier(runtime))
+        )
+        conn.execute(
+            sql.SQL("GRANT EXECUTE ON FUNCTION {} TO {}").format(sql.SQL(signature), sql.Identifier(writer))
+        )
     conn.execute(sql.SQL("GRANT USAGE ON SCHEMA vres TO {}").format(sql.Identifier(writer)))
