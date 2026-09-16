@@ -9,6 +9,7 @@ from .redaction import redact
 
 _PENDING_KEY = "pending_user_instructions"
 _LEGACY_PENDING_KEY = "pending_user_instruction"
+_COMMITTED_TOOL_IDS_KEY = "committed_user_input_tool_ids"
 _ACTIVE = {"active", "waiting_user", "blocked"}
 _CONTROL_COMMANDS = {
     "/clear",
@@ -30,14 +31,20 @@ _CONTROL_COMMANDS = {
     "/vim",
 }
 _MAX_PENDING = 20
+_MAX_COMMITTED_TOOL_IDS = 100
 
 
 def is_system_prompt_event(prompt: str) -> bool:
-    """Recognize Claude-generated prompt notifications that are not user instructions."""
+    """Recognize Claude-generated host notifications/hand-backs that are not user instructions."""
     if not isinstance(prompt, str):
         return False
     stripped = prompt.lstrip()
-    return stripped.startswith("<task-notification>") or stripped.startswith("<task-notification ")
+    return (
+        stripped.startswith("<task-notification>")
+        or stripped.startswith("<task-notification ")
+        or stripped.startswith("<agent-message>")
+        or stripped.startswith("<agent-message ")
+    )
 
 
 def _entry_kind(text: str) -> str:
@@ -63,6 +70,16 @@ def pending_user_entries(metadata: Any) -> list[dict[str, Any]]:
             }
         ]
     return []
+
+
+def committed_user_input_tool_ids(metadata: Any) -> list[str]:
+    """Return the bounded ledger of host tool-use ids already committed in this session."""
+    if not isinstance(metadata, dict):
+        return []
+    raw = metadata.get(_COMMITTED_TOOL_IDS_KEY)
+    if not isinstance(raw, list):
+        return []
+    return [str(x) for x in raw if isinstance(x, str) and x]
 
 
 def _stage_entry(
@@ -101,7 +118,11 @@ def _stage_entry(
             raise ValueError("Cannot stage a user instruction for an unregistered or closed session")
         metadata = dict(session.get("metadata") or {})
         pending = pending_user_entries(metadata)
-        if tool_use_id and any(x.get("tool_use_id") == entry["tool_use_id"] for x in pending):
+        committed_ids = committed_user_input_tool_ids(metadata)
+        if tool_use_id and (
+            any(x.get("tool_use_id") == entry["tool_use_id"] for x in pending)
+            or entry["tool_use_id"] in committed_ids
+        ):
             return False
         pending.append(entry)
         metadata[_PENDING_KEY] = pending[-_MAX_PENDING:]
@@ -237,6 +258,7 @@ def commit_pending_user_entries(
     if not pending:
         return []
 
+    committed_ids = committed_user_input_tool_ids(metadata)
     committed: list[dict[str, Any]] = []
     latest_instruction: str | None = None
     for entry in pending:
@@ -266,6 +288,9 @@ def commit_pending_user_entries(
                 "created_at": row["created_at"],
             }
         )
+        tool_id = entry.get("tool_use_id")
+        if isinstance(tool_id, str) and tool_id and tool_id not in committed_ids:
+            committed_ids.append(tool_id)
         if event_type == "USER_INSTRUCTION":
             latest_instruction = text
 
@@ -277,6 +302,8 @@ def commit_pending_user_entries(
     conn.execute("UPDATE vres.tasks SET updated_at=now() WHERE id=%s", (task_id,))
     metadata.pop(_PENDING_KEY, None)
     metadata.pop(_LEGACY_PENDING_KEY, None)
+    if committed_ids:
+        metadata[_COMMITTED_TOOL_IDS_KEY] = committed_ids[-_MAX_COMMITTED_TOOL_IDS:]
     conn.execute(
         "UPDATE vres.sessions SET metadata=%s::jsonb WHERE id=%s",
         (json.dumps(metadata), session["id"]),
