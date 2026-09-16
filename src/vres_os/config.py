@@ -20,13 +20,30 @@ class DatabaseConfig:
     user: str = "vres_os"
     sslmode: str = "prefer"
     password_key: str = "postgres.default"
+    provenance_writer_user: str = ""
+    provenance_writer_password_key: str = "postgres.provenance_writer"
+    migration_user: str = ""
+    migration_password_key: str = "postgres.migration"
+    provenance_boundary_version: int = 0
 
     def validate(self) -> None:
-        for name in ("host", "database", "user", "sslmode", "password_key"):
+        for name in (
+            "host",
+            "database",
+            "user",
+            "sslmode",
+            "password_key",
+            "provenance_writer_user",
+            "provenance_writer_password_key",
+            "migration_user",
+            "migration_password_key",
+        ):
             if not isinstance(getattr(self, name), str):
                 raise ValueError(f"database.{name} must be text")
         if type(self.port) is not int:
             raise ValueError("database.port must be an integer")
+        if type(self.provenance_boundary_version) is not int or self.provenance_boundary_version < 0:
+            raise ValueError("database.provenance_boundary_version must be a non-negative integer")
         if not self.host.strip():
             raise ValueError("database.host cannot be empty")
         if not (1 <= int(self.port) <= 65535):
@@ -37,6 +54,14 @@ class DatabaseConfig:
             raise ValueError(f"Unsupported database.sslmode {self.sslmode!r}")
         if not self.password_key.strip():
             raise ValueError("database.password_key cannot be empty")
+        if self.provenance_boundary_version:
+            if not self.provenance_writer_user.strip() or not self.migration_user.strip():
+                raise ValueError("Configured provenance boundary requires writer and migration database users")
+            if not self.provenance_writer_password_key.strip() or not self.migration_password_key.strip():
+                raise ValueError("Configured provenance boundary requires writer and migration credential keys")
+            roles = {self.user, self.provenance_writer_user, self.migration_user}
+            if len(roles) != 3:
+                raise ValueError("Runtime, provenance-writer, and migration database users must be distinct")
 
 
 @dataclass(slots=True)
@@ -71,7 +96,7 @@ class VresConfig:
 
 
 class ConfigStore:
-    def __init__(self, path: Path | None = None) -> None:
+    def __init__(self, path: Path | None = None):
         self.path = path or config_path()
 
     @staticmethod
