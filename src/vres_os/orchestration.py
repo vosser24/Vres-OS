@@ -31,6 +31,7 @@ _MAX_NEEDS = 20
 _MAX_QUERIES = 10
 _MAX_EXPERTS = 20
 _MAX_EVIDENCE = 20
+_SPECIALIST_PREFIXES = ("specialist-", "specialist:")
 
 
 def _key(prefix: str) -> str:
@@ -165,13 +166,14 @@ class OrchestrationService:
         if len(procedure_intent) > 1000:
             raise ValueError("procedure_intent must be <= 1000 characters")
 
-        capabilities: dict[str, list[dict[str, Any]]] = {}
         capability_service = CapabilityService()
-        for need in needs:
-            capabilities[need] = [
+        capabilities = {
+            need: [
                 _summary_capability(row)
                 for row in capability_service.resolve(need, limit=5, project_id=project_id)
             ]
+            for need in needs
+        }
         missing = [need for need in needs if not capabilities[need]]
 
         procedures: list[dict[str, Any]] = []
@@ -186,13 +188,14 @@ class OrchestrationService:
                 )
             ]
 
-        knowledge: dict[str, list[dict[str, Any]]] = {}
         knowledge_service = KnowledgeService()
-        for query in queries:
-            knowledge[query] = [
+        knowledge = {
+            query: [
                 _summary_knowledge(row)
                 for row in knowledge_service.hybrid_search(query, limit=8, project_id=project_id)
             ]
+            for query in queries
+        }
 
         discovery_key = _key("ORCHDISC")
         payload = {
@@ -208,7 +211,12 @@ class OrchestrationService:
         with connect() as conn, conn.transaction():
             task = self._bound_task(conn, project_id, task_key, session_id)
             event_id = self._insert_event(
-                conn, int(task["id"]), "ORCHESTRATION_DISCOVERY", "chairman", payload, session_id
+                conn,
+                int(task["id"]),
+                "ORCHESTRATION_DISCOVERY",
+                "chairman",
+                payload,
+                session_id,
             )
         return {**payload, "event_id": event_id}
 
@@ -230,6 +238,10 @@ class OrchestrationService:
         owner_role = owner_role.strip()
         if not owner_role or len(owner_role) > 200:
             raise ValueError("owner_role is required and must be <= 200 characters")
+        if owner_role in ROUTABLE_ROLES or not owner_role.startswith(_SPECIALIST_PREFIXES):
+            raise ValueError(
+                "Newly acquired project expertise must use an explicit specialist owner role, not relabel a stable executive role"
+            )
         with connect() as conn:
             self._bound_task(conn, project_id, task_key, session_id)
         key = CapabilityService().register_project(
@@ -252,7 +264,12 @@ class OrchestrationService:
         with connect() as conn, conn.transaction():
             task = self._bound_task(conn, project_id, task_key, session_id)
             event_id = self._insert_event(
-                conn, int(task["id"]), "ORCHESTRATION_CAPABILITY_ACQUIRED", "chairman", payload, session_id
+                conn,
+                int(task["id"]),
+                "ORCHESTRATION_CAPABILITY_ACQUIRED",
+                "chairman",
+                payload,
+                session_id,
             )
         return {**payload, "event_id": event_id}
 
@@ -275,23 +292,28 @@ class OrchestrationService:
         with connect() as conn, conn.transaction():
             task = self._bound_task(conn, project_id, task_key, session_id)
             discovery = self._event_by_key(
-                conn, int(task["id"]), "ORCHESTRATION_DISCOVERY", "discovery_key", discovery_key
+                conn,
+                int(task["id"]),
+                "ORCHESTRATION_DISCOVERY",
+                "discovery_key",
+                discovery_key,
             )["payload"]
 
             needs = set(discovery.get("capability_needs") or [])
             matches = discovery.get("capability_matches") or {}
-            known_capabilities: dict[str, set[str]] = {}
+            known_capabilities: dict[str, dict[str, str]] = {}
+            all_discovered: dict[str, str] = {}
             dynamic_roles: set[str] = set()
             for need, rows in matches.items():
-                keys: set[str] = set()
+                owned: dict[str, str] = {}
                 for row in rows or []:
-                    key = str(row.get("capability_key") or "")
-                    if key:
-                        keys.add(key)
-                    role = str(row.get("owner_role") or "").strip()
-                    if role:
-                        dynamic_roles.add(role)
-                known_capabilities[str(need)] = keys
+                    capability_key = str(row.get("capability_key") or "").strip()
+                    owner = str(row.get("owner_role") or "").strip()
+                    if capability_key and owner:
+                        owned[capability_key] = owner
+                        all_discovered[capability_key] = owner
+                        dynamic_roles.add(owner)
+                known_capabilities[str(need)] = owned
 
             selected: list[dict[str, Any]] = []
             selected_roles: set[str] = set()
@@ -299,29 +321,55 @@ class OrchestrationService:
             for raw in selected_experts:
                 role = str(raw.get("role") or "").strip()
                 rationale = str(raw.get("rationale") or "").strip()
-                covers = _strings(raw.get("covers") or [], limit=_MAX_NEEDS, field="selected_experts.covers")
+                covers = _strings(
+                    raw.get("covers") or [],
+                    limit=_MAX_NEEDS,
+                    field="selected_experts.covers",
+                )
                 capability_keys = _strings(
-                    raw.get("capability_keys") or [], limit=_MAX_NEEDS, field="selected_experts.capability_keys"
+                    raw.get("capability_keys") or [],
+                    limit=_MAX_NEEDS,
+                    field="selected_experts.capability_keys",
                 )
                 if not role or role in selected_roles:
                     raise ValueError("selected expert roles must be non-empty and unique")
                 if role not in ROUTABLE_ROLES and role not in dynamic_roles:
-                    raise ValueError(f"Selected role {role!r} is neither a supported agent nor a discovered capability owner")
+                    raise ValueError(
+                        f"Selected role {role!r} is neither a supported agent nor a discovered capability owner"
+                    )
                 if not rationale:
                     raise ValueError(f"Selected role {role!r} requires a routing rationale")
                 if role not in {"challenger", "knowledge-steward"} and not covers:
-                    raise ValueError(f"Selected role {role!r} must cover at least one discovered capability need")
+                    raise ValueError(
+                        f"Selected role {role!r} must cover at least one discovered capability need"
+                    )
                 if any(need not in needs for need in covers):
-                    raise ValueError(f"Selected role {role!r} claims a capability need that was not discovered")
+                    raise ValueError(
+                        f"Selected role {role!r} claims a capability need that was not discovered"
+                    )
+                for capability_key in capability_keys:
+                    if capability_key not in all_discovered:
+                        raise ValueError(
+                            f"Selected role {role!r} cites capability {capability_key!r} that was not in discovery"
+                        )
+                    if all_discovered[capability_key] != role:
+                        raise ValueError(
+                            f"Selected role {role!r} cannot claim capability {capability_key!r} owned by {all_discovered[capability_key]!r}"
+                        )
                 for need in covers:
-                    allowed_keys = known_capabilities.get(need, set())
-                    if not allowed_keys:
+                    owned = known_capabilities.get(need, {})
+                    if not owned:
                         raise ValueError(
                             f"Capability need {need!r} is still unresolved; acquire expertise and rediscover before planning"
                         )
-                    if not (set(capability_keys) & allowed_keys):
+                    owned_keys = {
+                        capability_key
+                        for capability_key, owner in owned.items()
+                        if owner == role
+                    }
+                    if not (set(capability_keys) & owned_keys):
                         raise ValueError(
-                            f"Selected role {role!r} must cite a real discovery capability match for {need!r}"
+                            f"Selected role {role!r} must cite a real discovery capability match owned by that role for {need!r}"
                         )
                     covered.add(need)
                 selected_roles.add(role)
@@ -336,7 +384,9 @@ class OrchestrationService:
 
             if covered != needs:
                 missing_coverage = sorted(needs - covered)
-                raise ValueError(f"Orchestration plan leaves capability needs uncovered: {missing_coverage}")
+                raise ValueError(
+                    f"Orchestration plan leaves capability needs uncovered: {missing_coverage}"
+                )
 
             excluded: list[dict[str, str]] = []
             excluded_roles: set[str] = set()
@@ -344,7 +394,9 @@ class OrchestrationService:
                 role = str(raw.get("role") or "").strip()
                 rationale = str(raw.get("rationale") or "").strip()
                 if role not in ROUTABLE_ROLES:
-                    raise ValueError(f"Only stable routable roles may be explicitly excluded: {role!r}")
+                    raise ValueError(
+                        f"Only stable routable roles may be explicitly excluded: {role!r}"
+                    )
                 if role in selected_roles or role in excluded_roles:
                     raise ValueError("selected and excluded roles must be disjoint and unique")
                 if not rationale:
@@ -373,7 +425,12 @@ class OrchestrationService:
                 "smallest_team_claim": True,
             }
             event_id = self._insert_event(
-                conn, int(task["id"]), "ORCHESTRATION_PLAN", "chairman", payload, session_id
+                conn,
+                int(task["id"]),
+                "ORCHESTRATION_PLAN",
+                "chairman",
+                payload,
+                session_id,
             )
         return {**payload, "event_id": event_id}
 
@@ -397,6 +454,8 @@ class OrchestrationService:
             raise ValueError("report_type must be expert or challenge")
         if report_type == "challenge" and role != "challenger":
             raise ValueError("Only the Challenger can record a challenge report")
+        if role == "challenger" and report_type != "challenge":
+            raise ValueError("The Challenger must record report_type='challenge'")
         if not recommendation:
             raise ValueError("Expert report recommendation is required")
         if not evidence or len(evidence) > _MAX_EVIDENCE:
@@ -404,11 +463,19 @@ class OrchestrationService:
         with connect() as conn, conn.transaction():
             task = self._bound_task(conn, project_id, task_key, session_id)
             plan = self._event_by_key(
-                conn, int(task["id"]), "ORCHESTRATION_PLAN", "plan_key", plan_key
+                conn,
+                int(task["id"]),
+                "ORCHESTRATION_PLAN",
+                "plan_key",
+                plan_key,
             )["payload"]
-            selected_roles = {x.get("role") for x in plan.get("selected_experts") or []}
+            selected_roles = {
+                str(item.get("role") or "") for item in plan.get("selected_experts") or []
+            }
             if role not in selected_roles:
-                raise ValueError("Only an expert selected in the durable orchestration plan may report")
+                raise ValueError(
+                    "Only an expert selected in the durable orchestration plan may report"
+                )
             report_key = _key("ORCHREP")
             payload = {
                 "report_key": report_key,
@@ -417,11 +484,24 @@ class OrchestrationService:
                 "report_type": report_type,
                 "recommendation": redact_text(recommendation),
                 "evidence": redact(evidence),
-                "assumptions": _strings(assumptions, limit=_MAX_EVIDENCE, field="assumptions"),
-                "unknowns": _strings(unknowns, limit=_MAX_EVIDENCE, field="unknowns"),
+                "assumptions": _strings(
+                    assumptions,
+                    limit=_MAX_EVIDENCE,
+                    field="assumptions",
+                ),
+                "unknowns": _strings(
+                    unknowns,
+                    limit=_MAX_EVIDENCE,
+                    field="unknowns",
+                ),
             }
             event_id = self._insert_event(
-                conn, int(task["id"]), "ORCHESTRATION_EXPERT_REPORT", role, payload, session_id
+                conn,
+                int(task["id"]),
+                "ORCHESTRATION_EXPERT_REPORT",
+                role,
+                payload,
+                session_id,
             )
         return {**payload, "event_id": event_id}
 
@@ -441,12 +521,20 @@ class OrchestrationService:
     ) -> dict[str, Any]:
         keys = _strings(report_keys, limit=_MAX_EXPERTS, field="report_keys")
         if len(keys) < 2:
-            raise ValueError("Disagreement arbitration requires at least two distinct expert reports")
+            raise ValueError(
+                "Disagreement arbitration requires at least two distinct expert reports"
+            )
         if not topic.strip() or not resolution.strip() or not rationale.strip():
             raise ValueError("Arbitration requires topic, resolution and rationale")
         with connect() as conn, conn.transaction():
             task = self._bound_task(conn, project_id, task_key, session_id)
-            self._event_by_key(conn, int(task["id"]), "ORCHESTRATION_PLAN", "plan_key", plan_key)
+            self._event_by_key(
+                conn,
+                int(task["id"]),
+                "ORCHESTRATION_PLAN",
+                "plan_key",
+                plan_key,
+            )
             roles: set[str] = set()
             for report_key in keys:
                 report = self._event_by_key(
@@ -457,10 +545,14 @@ class OrchestrationService:
                     report_key,
                 )["payload"]
                 if report.get("plan_key") != plan_key:
-                    raise ValueError("Arbitration report belongs to a different orchestration plan")
+                    raise ValueError(
+                        "Arbitration report belongs to a different orchestration plan"
+                    )
                 roles.add(str(report.get("role") or ""))
             if len(roles) < 2:
-                raise ValueError("Disagreement arbitration requires reports from at least two distinct roles")
+                raise ValueError(
+                    "Disagreement arbitration requires reports from at least two distinct roles"
+                )
             if challenger_report_key:
                 challenge = self._event_by_key(
                     conn,
@@ -469,8 +561,14 @@ class OrchestrationService:
                     "report_key",
                     challenger_report_key,
                 )["payload"]
-                if challenge.get("plan_key") != plan_key or challenge.get("role") != "challenger":
-                    raise ValueError("challenger_report_key must reference this plan's Challenger report")
+                if (
+                    challenge.get("plan_key") != plan_key
+                    or challenge.get("role") != "challenger"
+                    or challenge.get("report_type") != "challenge"
+                ):
+                    raise ValueError(
+                        "challenger_report_key must reference this plan's Challenger report"
+                    )
             arbitration_key = _key("ORCHARB")
             payload = {
                 "arbitration_key": arbitration_key,
@@ -483,7 +581,12 @@ class OrchestrationService:
                 "decision_key": decision_key,
             }
             event_id = self._insert_event(
-                conn, int(task["id"]), "ORCHESTRATION_ARBITRATION", "chairman", payload, session_id
+                conn,
+                int(task["id"]),
+                "ORCHESTRATION_ARBITRATION",
+                "chairman",
+                payload,
+                session_id,
             )
         return {**payload, "event_id": event_id}
 
@@ -501,16 +604,32 @@ class OrchestrationService:
         reused_procedure_keys: list[str] | None = None,
         unresolved_unknowns: list[str] | None = None,
     ) -> dict[str, Any]:
-        report_keys = _strings(accepted_report_keys, limit=_MAX_EXPERTS, field="accepted_report_keys")
+        report_keys = _strings(
+            accepted_report_keys,
+            limit=_MAX_EXPERTS,
+            field="accepted_report_keys",
+        )
         if not synthesis.strip() or not report_keys:
-            raise ValueError("Final orchestration requires a synthesis and accepted expert reports")
-        unknowns = _strings(unresolved_unknowns, limit=_MAX_EVIDENCE, field="unresolved_unknowns")
+            raise ValueError(
+                "Final orchestration requires a synthesis and accepted expert reports"
+            )
+        unknowns = _strings(
+            unresolved_unknowns,
+            limit=_MAX_EVIDENCE,
+            field="unresolved_unknowns",
+        )
         with connect() as conn, conn.transaction():
             task = self._bound_task(conn, project_id, task_key, session_id)
             plan = self._event_by_key(
-                conn, int(task["id"]), "ORCHESTRATION_PLAN", "plan_key", plan_key
+                conn,
+                int(task["id"]),
+                "ORCHESTRATION_PLAN",
+                "plan_key",
+                plan_key,
             )["payload"]
-            selected_roles = {str(x.get("role") or "") for x in plan.get("selected_experts") or []}
+            selected_roles = {
+                str(item.get("role") or "") for item in plan.get("selected_experts") or []
+            }
             reported_roles: set[str] = set()
             for report_key in report_keys:
                 report = self._event_by_key(
@@ -521,16 +640,28 @@ class OrchestrationService:
                     report_key,
                 )["payload"]
                 if report.get("plan_key") != plan_key:
-                    raise ValueError("Accepted report belongs to a different orchestration plan")
-                reported_roles.add(str(report.get("role") or ""))
+                    raise ValueError(
+                        "Accepted report belongs to a different orchestration plan"
+                    )
+                report_role = str(report.get("role") or "")
+                if report_role in reported_roles:
+                    raise ValueError(
+                        "Final orchestration may accept only one report per selected role"
+                    )
+                reported_roles.add(report_role)
             if reported_roles != selected_roles:
                 missing = sorted(selected_roles - reported_roles)
                 extra = sorted(reported_roles - selected_roles)
                 raise ValueError(
-                    f"Final orchestration must account for every selected expert exactly by role; missing={missing}, extra={extra}"
+                    "Final orchestration must account for every selected expert exactly by role; "
+                    f"missing={missing}, extra={extra}"
                 )
 
-            arbitration_list = _strings(arbitration_keys, limit=_MAX_EXPERTS, field="arbitration_keys")
+            arbitration_list = _strings(
+                arbitration_keys,
+                limit=_MAX_EXPERTS,
+                field="arbitration_keys",
+            )
             for arbitration_key in arbitration_list:
                 arbitration = self._event_by_key(
                     conn,
@@ -540,7 +671,9 @@ class OrchestrationService:
                     arbitration_key,
                 )["payload"]
                 if arbitration.get("plan_key") != plan_key:
-                    raise ValueError("Arbitration belongs to a different orchestration plan")
+                    raise ValueError(
+                        "Arbitration belongs to a different orchestration plan"
+                    )
 
             discovery = self._event_by_key(
                 conn,
@@ -556,20 +689,28 @@ class OrchestrationService:
                 if row.get("capability_key")
             }
             capability_reuse = _strings(
-                reused_capability_keys, limit=_MAX_NEEDS, field="reused_capability_keys"
+                reused_capability_keys,
+                limit=_MAX_NEEDS,
+                field="reused_capability_keys",
             )
             if any(key not in discovered_capability_keys for key in capability_reuse):
-                raise ValueError("Reused capability keys must come from the recorded discovery results")
+                raise ValueError(
+                    "Reused capability keys must come from the recorded discovery results"
+                )
             discovered_procedure_keys = {
                 str(row.get("procedure_key"))
                 for row in discovery.get("procedure_matches") or []
                 if row.get("procedure_key")
             }
             procedure_reuse = _strings(
-                reused_procedure_keys, limit=_MAX_NEEDS, field="reused_procedure_keys"
+                reused_procedure_keys,
+                limit=_MAX_NEEDS,
+                field="reused_procedure_keys",
             )
             if any(key not in discovered_procedure_keys for key in procedure_reuse):
-                raise ValueError("Reused procedure keys must come from the recorded discovery results")
+                raise ValueError(
+                    "Reused procedure keys must come from the recorded discovery results"
+                )
 
             final_key = _key("ORCHFINAL")
             payload = {
@@ -584,7 +725,12 @@ class OrchestrationService:
                 "decision_ready": not unknowns,
             }
             event_id = self._insert_event(
-                conn, int(task["id"]), "ORCHESTRATION_FINAL", "chairman", payload, session_id
+                conn,
+                int(task["id"]),
+                "ORCHESTRATION_FINAL",
+                "chairman",
+                payload,
+                session_id,
             )
         return {**payload, "event_id": event_id}
 
@@ -600,9 +746,9 @@ class OrchestrationService:
                 """
                 SELECT id,event_type,actor,payload,session_id,created_at
                   FROM vres.task_events
-                 WHERE task_id=%s AND event_type LIKE 'ORCHESTRATION_%'
+                 WHERE task_id=%s AND event_type LIKE %s
                  ORDER BY id
                 """,
-                (task["id"],),
+                (task["id"], "ORCHESTRATION_%"),
             ).fetchall()
         return [dict(row) for row in rows]
