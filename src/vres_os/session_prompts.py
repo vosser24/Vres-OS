@@ -45,7 +45,8 @@ def _entry_kind(text: str) -> str:
     return "control" if first in _CONTROL_COMMANDS else "instruction"
 
 
-def _pending_entries(metadata: Any) -> list[dict[str, Any]]:
+def pending_user_entries(metadata: Any) -> list[dict[str, Any]]:
+    """Return the normalized queued user-input entries, including legacy metadata."""
     if not isinstance(metadata, dict):
         return []
     queued = metadata.get(_PENDING_KEY)
@@ -53,12 +54,14 @@ def _pending_entries(metadata: Any) -> list[dict[str, Any]]:
         return [dict(x) for x in queued if isinstance(x, dict) and isinstance(x.get("text"), str)]
     legacy = metadata.get(_LEGACY_PENDING_KEY)
     if isinstance(legacy, dict) and isinstance(legacy.get("text"), str):
-        return [{
-            "text": legacy["text"],
-            "observed_at": legacy.get("recorded_at"),
-            "source": "user_prompt",
-            "kind": _entry_kind(legacy["text"]),
-        }]
+        return [
+            {
+                "text": legacy["text"],
+                "observed_at": legacy.get("recorded_at"),
+                "source": "user_prompt",
+                "kind": _entry_kind(legacy["text"]),
+            }
+        ]
     return []
 
 
@@ -97,7 +100,7 @@ def _stage_entry(
         if not session:
             raise ValueError("Cannot stage a user instruction for an unregistered or closed session")
         metadata = dict(session.get("metadata") or {})
-        pending = _pending_entries(metadata)
+        pending = pending_user_entries(metadata)
         if tool_use_id and any(x.get("tool_use_id") == entry["tool_use_id"] for x in pending):
             return False
         pending.append(entry)
@@ -184,6 +187,7 @@ def stage_ask_user_answers(
     questions = tool_input.get("questions")
     question_rows = questions if isinstance(questions, list) else []
     staged = 0
+    handled = False
     for index, row in enumerate(question_rows):
         if not isinstance(row, dict):
             continue
@@ -194,10 +198,8 @@ def stage_ask_user_answers(
             value = answers.get(header)
         if value is None:
             continue
-        if isinstance(value, list):
-            text = ", ".join(str(x) for x in value)
-        else:
-            text = str(value)
+        handled = True
+        text = ", ".join(str(x) for x in value) if isinstance(value, list) else str(value)
         if _stage_entry(
             project_id,
             provider_session_id,
@@ -207,7 +209,7 @@ def stage_ask_user_answers(
             question=question or header or None,
         ):
             staged += 1
-    if staged:
+    if handled:
         return staged
     for index, (question, value) in enumerate(answers.items()):
         text = ", ".join(str(x) for x in value) if isinstance(value, list) else str(value)
@@ -221,6 +223,65 @@ def stage_ask_user_answers(
         ):
             staged += 1
     return staged
+
+
+def commit_pending_user_entries(
+    conn,
+    session: dict[str, Any],
+    task_id: int,
+    provider_session_id: str,
+) -> list[dict[str, Any]]:
+    """Commit one locked session's queued user input inside the caller's transaction."""
+    metadata = dict(session.get("metadata") or {})
+    pending = pending_user_entries(metadata)
+    if not pending:
+        return []
+
+    committed: list[dict[str, Any]] = []
+    latest_instruction: str | None = None
+    for entry in pending:
+        text = str(entry["text"])
+        kind = entry.get("kind") if entry.get("kind") in {"instruction", "control"} else _entry_kind(text)
+        event_type = "USER_CONTROL" if kind == "control" else "USER_INSTRUCTION"
+        payload = {"text": text, "source": entry.get("source") or "user_prompt"}
+        if entry.get("question"):
+            payload["question"] = entry["question"]
+        if entry.get("tool_use_id"):
+            payload["tool_use_id"] = entry["tool_use_id"]
+        observed_at = entry.get("observed_at")
+        row = conn.execute(
+            """
+            INSERT INTO vres.task_events(task_id,event_type,actor,payload,session_id,created_at)
+            VALUES (%s,%s,'user',%s::jsonb,%s,COALESCE(%s::timestamptz,now()))
+            RETURNING id,created_at
+            """,
+            (task_id, event_type, json.dumps(payload), provider_session_id, observed_at),
+        ).fetchone()
+        committed.append(
+            {
+                "event_id": int(row["id"]),
+                "event_type": event_type,
+                "text": text,
+                "source": payload["source"],
+                "created_at": row["created_at"],
+            }
+        )
+        if event_type == "USER_INSTRUCTION":
+            latest_instruction = text
+
+    if latest_instruction is not None:
+        conn.execute(
+            "UPDATE vres.task_state SET latest_user_instruction=%s,updated_at=now() WHERE task_id=%s",
+            (latest_instruction, task_id),
+        )
+    conn.execute("UPDATE vres.tasks SET updated_at=now() WHERE id=%s", (task_id,))
+    metadata.pop(_PENDING_KEY, None)
+    metadata.pop(_LEGACY_PENDING_KEY, None)
+    conn.execute(
+        "UPDATE vres.sessions SET metadata=%s::jsonb WHERE id=%s",
+        (json.dumps(metadata), session["id"]),
+    )
+    return committed
 
 
 def commit_staged_user_instruction_events(
@@ -244,8 +305,7 @@ def commit_staged_user_instruction_events(
         ).fetchone()
         if not session:
             return []
-        metadata = dict(session.get("metadata") or {})
-        pending = _pending_entries(metadata)
+        pending = pending_user_entries(session.get("metadata") or {})
         if not pending:
             return []
         task_id = session.get("task_id")
@@ -273,52 +333,7 @@ def commit_staged_user_instruction_events(
                 or keyed["status"] not in _ACTIVE
             ):
                 raise ValueError("Staged user instruction target does not match the bound unfinished task")
-
-        committed: list[dict[str, Any]] = []
-        latest_instruction: str | None = None
-        for entry in pending:
-            text = str(entry["text"])
-            kind = entry.get("kind") if entry.get("kind") in {"instruction", "control"} else _entry_kind(text)
-            event_type = "USER_CONTROL" if kind == "control" else "USER_INSTRUCTION"
-            payload = {"text": text, "source": entry.get("source") or "user_prompt"}
-            if entry.get("question"):
-                payload["question"] = entry["question"]
-            if entry.get("tool_use_id"):
-                payload["tool_use_id"] = entry["tool_use_id"]
-            observed_at = entry.get("observed_at")
-            row = conn.execute(
-                """
-                INSERT INTO vres.task_events(task_id,event_type,actor,payload,session_id,created_at)
-                VALUES (%s,%s,'user',%s::jsonb,%s,COALESCE(%s::timestamptz,now()))
-                RETURNING id,created_at
-                """,
-                (task_id, event_type, json.dumps(payload), provider_session_id, observed_at),
-            ).fetchone()
-            committed.append(
-                {
-                    "event_id": int(row["id"]),
-                    "event_type": event_type,
-                    "text": text,
-                    "source": payload["source"],
-                    "created_at": row["created_at"],
-                }
-            )
-            if event_type == "USER_INSTRUCTION":
-                latest_instruction = text
-
-        if latest_instruction is not None:
-            conn.execute(
-                "UPDATE vres.task_state SET latest_user_instruction=%s,updated_at=now() WHERE task_id=%s",
-                (latest_instruction, task_id),
-            )
-        conn.execute("UPDATE vres.tasks SET updated_at=now() WHERE id=%s", (task_id,))
-        metadata.pop(_PENDING_KEY, None)
-        metadata.pop(_LEGACY_PENDING_KEY, None)
-        conn.execute(
-            "UPDATE vres.sessions SET metadata=%s::jsonb WHERE id=%s",
-            (json.dumps(metadata), session["id"]),
-        )
-    return committed
+        return commit_pending_user_entries(conn, session, int(task_id), provider_session_id)
 
 
 def commit_staged_user_instruction(
