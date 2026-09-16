@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import user_intent_mcp as _user_intent_mcp  # noqa: F401 - registers same-turn intent tool
 from .company_mcp import mcp
 from .mcp_server import _current_session, _project, _require_node
 from .reply_guard import observe_reply_activity
@@ -17,11 +18,7 @@ def _observe_reply_hook_activity(
     event_name: str = "PostToolUse",
     agent_id: str = "",
 ) -> dict[str, Any]:
-    """Observe only parent-thread tool activity for reply freshness.
-
-    Claude Code runs plugin tool hooks inside subagents too. Those events carry an
-    agent_id and must never mutate the parent Chairman turn's activity marker.
-    """
+    """Observe only parent-thread tool activity for reply freshness."""
     if str(agent_id or "").strip():
         return {"observed": False, "reason": "subagent_activity"}
     pid, _ = _project()
@@ -43,12 +40,7 @@ def reply_activity_observe(
     event_name: str = "PostToolUse",
     agent_id: str = "",
 ) -> str:
-    """Internal lifecycle hook: record bounded parent-thread tool activity.
-
-    The Chairman should never call this directly. Claude Code's PostToolUse and
-    PostToolUseFailure hooks invoke it automatically. Subagent events are ignored
-    using the host-provided agent_id. Tool inputs and outputs are never persisted.
-    """
+    """Internal lifecycle hook: record bounded parent-thread tool activity."""
     _observe_reply_hook_activity(
         session_id,
         tool_name,
@@ -109,8 +101,9 @@ def task_decision_record(
     """Record a new descriptive decision with server-derived provenance.
 
     Without source_event_id the source is the bound Chairman session. To attribute a
-    decision to the user, source_event_id must identify a real persisted
-    USER_INSTRUCTION event on this task. This tool never creates an approval.
+    decision to the user, first commit already observed staged intent with
+    task_user_instruction_commit when necessary, then pass the returned real
+    USER_INSTRUCTION event id. This tool never creates an approval.
     """
     pid, _ = _project()
     sid = _current_session(pid, session_id)
