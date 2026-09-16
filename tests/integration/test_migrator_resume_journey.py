@@ -1,0 +1,155 @@
+from __future__ import annotations
+
+import os
+import uuid
+from importlib import resources
+from types import SimpleNamespace
+
+import pytest
+
+pytest.importorskip("psycopg")
+
+import psycopg
+from psycopg import sql
+from psycopg.conninfo import conninfo_to_dict, make_conninfo
+from psycopg.rows import dict_row
+
+from vres_os import db
+from vres_os.config import VresConfig
+from vres_os.database_boundary import default_boundary_roles, provision_boundary
+
+
+def _dsn_for_database(base: str, database: str) -> str:
+    parts = conninfo_to_dict(base)
+    parts["dbname"] = database
+    return make_conninfo(**parts)
+
+
+def _dsn_as(base: str, user: str, password: str) -> str:
+    parts = conninfo_to_dict(base)
+    parts["user"] = user
+    parts["password"] = password
+    return make_conninfo(**parts)
+
+
+def _drop_database_and_roles(admin_server_dsn: str, database: str, roles: list[str]) -> None:
+    with psycopg.connect(admin_server_dsn, autocommit=True, row_factory=dict_row) as admin:
+        admin.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(database)))
+        for role in roles:
+            admin.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(role)))
+
+
+def test_migrator_resumes_023_without_database_create(monkeypatch):
+    base = os.environ.get("VRES_TEST_DATABASE_URL")
+    if not base:
+        pytest.skip("PostgreSQL integration DSN is required")
+
+    suffix = uuid.uuid4().hex[:10]
+    database = f"vres_resume_{suffix}"
+    runtime_user = f"vres_rt_{suffix}"
+    runtime_password = uuid.uuid4().hex
+    writer_user, migrator_user = default_boundary_roles(runtime_user)
+    admin_server_dsn = _dsn_for_database(base, "postgres")
+    target_admin_dsn = _dsn_for_database(base, database)
+
+    _drop_database_and_roles(
+        admin_server_dsn,
+        database,
+        [writer_user, migrator_user, runtime_user],
+    )
+    try:
+        with psycopg.connect(admin_server_dsn, autocommit=True, row_factory=dict_row) as admin:
+            admin.execute(
+                sql.SQL("CREATE ROLE {} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD {}")
+                .format(sql.Identifier(runtime_user), sql.Literal(runtime_password))
+            )
+            admin.execute(
+                sql.SQL("CREATE DATABASE {} OWNER {}").format(
+                    sql.Identifier(database), sql.Identifier(runtime_user)
+                )
+            )
+
+        runtime_dsn = _dsn_as(target_admin_dsn, runtime_user, runtime_password)
+        migration_root = resources.files("vres_os").joinpath("migrations")
+        pre_boundary = sorted(
+            p for p in migration_root.iterdir()
+            if p.name.endswith(".sql") and int(p.name[:3]) < 23
+        )
+        with psycopg.connect(runtime_dsn, autocommit=True, row_factory=dict_row) as runtime:
+            runtime.execute("CREATE SCHEMA vres AUTHORIZATION CURRENT_USER")
+            runtime.execute(
+                """
+                CREATE TABLE vres.schema_migrations(
+                  version text PRIMARY KEY,
+                  checksum text,
+                  applied_at timestamptz NOT NULL DEFAULT now()
+                )
+                """
+            )
+            for migration in pre_boundary:
+                text = migration.read_text(encoding="utf-8")
+                with runtime.transaction():
+                    runtime.execute(text)
+                    runtime.execute(
+                        "INSERT INTO vres.schema_migrations(version,checksum) VALUES (%s,%s)",
+                        (migration.name, db._digest(text)),
+                    )
+
+        cfg = VresConfig(configured=True)
+        cfg.database.database = database
+        cfg.database.user = runtime_user
+        credentials = provision_boundary(cfg, admin_dsn=target_admin_dsn)
+        assert credentials.writer_user == writer_user
+        assert credentials.migration_user == migrator_user
+
+        cfg.database.provenance_writer_user = credentials.writer_user
+        cfg.database.migration_user = credentials.migration_user
+        cfg.database.provenance_boundary_version = 0
+
+        migrator_dsn = _dsn_as(target_admin_dsn, credentials.migration_user, credentials.migration_password)
+        with psycopg.connect(target_admin_dsn, row_factory=dict_row) as admin:
+            privileges = admin.execute(
+                "SELECT has_database_privilege(%s,%s,'CREATE') AS can_create",
+                (migrator_user, database),
+            ).fetchone()
+            schema_owner = admin.execute(
+                "SELECT pg_get_userbyid(nspowner) AS owner FROM pg_namespace WHERE nspname='vres'"
+            ).fetchone()["owner"]
+        assert privileges["can_create"] is False
+        assert schema_owner == migrator_user
+
+        monkeypatch.delenv("VRES_ALLOW_TEST_DB", raising=False)
+        monkeypatch.delenv("VRES_TEST_DATABASE_URL", raising=False)
+        monkeypatch.delenv("VRES_DATABASE_URL", raising=False)
+        monkeypatch.setenv("VRES_MIGRATION_DATABASE_URL", migrator_dsn)
+        monkeypatch.setattr(db, "ConfigStore", lambda: SimpleNamespace(load=lambda: cfg))
+
+        applied = db.migrate()
+        assert applied == [
+            "023_user_event_writer_boundary.sql",
+            "024_user_event_immutability.sql",
+        ]
+
+        with psycopg.connect(target_admin_dsn, row_factory=dict_row) as admin:
+            versions = {
+                row["version"]
+                for row in admin.execute(
+                    "SELECT version FROM vres.schema_migrations WHERE version LIKE '02%'"
+                ).fetchall()
+            }
+            schema_owner = admin.execute(
+                "SELECT pg_get_userbyid(nspowner) AS owner FROM pg_namespace WHERE nspname='vres'"
+            ).fetchone()["owner"]
+            authority = admin.execute(
+                "SELECT writer_role FROM vres.provenance_authority WHERE authority_key='user_event_writer'"
+            ).fetchone()["writer_role"]
+        assert "023_user_event_writer_boundary.sql" in versions
+        assert "024_user_event_immutability.sql" in versions
+        assert schema_owner == migrator_user
+        assert authority == writer_user
+    finally:
+        _drop_database_and_roles(
+            admin_server_dsn,
+            database,
+            [writer_user, migrator_user, runtime_user],
+        )
