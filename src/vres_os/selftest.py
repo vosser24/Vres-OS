@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import json
 import uuid
 from pathlib import Path
 
 from .db import connect, migrate
-from .approvals import ApprovalService
 from .knowledge import KnowledgeService
 from .optimization import pareto_gate
 from .procedures import ProcedureService
@@ -12,8 +12,25 @@ from .project import ProjectIdentity
 from .repository import Repository
 
 
+def _procedure_accept_baseline_signature_guard() -> None:
+    """Static API-drift guard only; never execute this synthetic approval call."""
+    ProcedureService().accept_baseline(
+        procedure_key="SELFTEST-SIGNATURE-GUARD",
+        name="Selftest signature guard",
+        description="Static signature compatibility only",
+        task_family="selftest",
+        project_id=None,
+        input_contract={},
+        method=[],
+        invariants=[],
+        validation_contract=["static-only"],
+        output_contract={},
+        approval_key="STATIC-SIGNATURE-GUARD-NOT-A-REAL-APPROVAL",
+    )
+
+
 def run_core_selftest() -> dict:
-    """Exercise the real PostgreSQL persistence contracts without model calls."""
+    """Exercise core PostgreSQL persistence without fabricating user authority."""
     migrate()
     marker = uuid.uuid4().hex[:12]
     p = ProjectIdentity(
@@ -40,18 +57,41 @@ def run_core_selftest() -> dict:
         hits = KnowledgeService().search(marker, project_id=pid)
         results["knowledge_retrieval"] = any(x.get("knowledge_key") == knowledge_key for x in hits)
 
-        repo.record_event(task, "USER_INSTRUCTION", "user", {"text": "OK", "origin": "isolated-selftest"})
-        approval = ApprovalService().record_latest_user_approval(
-            task_key=task, approval_type="procedure_accept", statement=f"Accept {procedure_key}",
-            subject_key=procedure_key,
-        )
-        ProcedureService().accept_baseline(
-            procedure_key=procedure_key, name=f"Selftest procedure {marker}", description="Selftest procedure",
-            task_family="selftest", project_id=pid, input_contract={"marker": marker}, method=["return marker"],
-            invariants=["marker preserved"], validation_contract=["exact marker"],
-            output_contract={"marker": marker}, approval_key=approval,
-            initial_metrics={"quality_score": 1.0, "runtime_ms": 10, "input_tokens": 10, "output_tokens": 10},
-        )
+        # Bootstrap health checks must never manufacture USER_INSTRUCTION/USER_CONTROL
+        # or approval provenance. The dedicated trusted-writer journeys cover those
+        # authority semantics. This disposable fixture exercises ordinary procedure
+        # persistence and retrieval only, then is deleted below.
+        with connect() as conn, conn.transaction():
+            proc = conn.execute(
+                """
+                INSERT INTO vres.procedures(
+                  procedure_key,name,description,task_family,project_id,status,preferred_version
+                ) VALUES (%s,%s,%s,'selftest',%s,'active',1)
+                RETURNING id
+                """,
+                (
+                    procedure_key,
+                    f"Selftest procedure {marker}",
+                    f"Selftest procedure marker {marker}",
+                    pid,
+                ),
+            ).fetchone()
+            conn.execute(
+                """
+                INSERT INTO vres.procedure_versions(
+                  procedure_id,version_no,status,input_contract,method,invariants,
+                  validation_contract,output_contract
+                ) VALUES (%s,1,'preferred',%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb)
+                """,
+                (
+                    proc["id"],
+                    json.dumps({"marker": marker}),
+                    json.dumps(["return marker"]),
+                    json.dumps(["marker preserved"]),
+                    json.dumps(["exact marker"]),
+                    json.dumps({"marker": marker}),
+                ),
+            )
         matches = ProcedureService().find_matches(marker, "selftest", project_id=pid)
         results["procedure_reuse"] = any(x["procedure_key"] == procedure_key for x in matches)
 
@@ -66,7 +106,6 @@ def run_core_selftest() -> dict:
             conn.execute("DELETE FROM vres.knowledge_items WHERE knowledge_key=%s", (knowledge_key,))
             conn.execute("DELETE FROM vres.procedures WHERE procedure_key=%s", (procedure_key,))
             if task:
-                conn.execute("DELETE FROM vres.approval_events WHERE task_id=(SELECT id FROM vres.tasks WHERE task_key=%s)", (task,))
                 conn.execute("DELETE FROM vres.tasks WHERE task_key=%s", (task,))
             conn.execute("DELETE FROM vres.projects WHERE project_key=%s", (p.key,))
     results["passed"] = all(results.values())
