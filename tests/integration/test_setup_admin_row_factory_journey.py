@@ -21,6 +21,13 @@ from vres_os.database_boundary import (
 )
 
 
+def _database_url() -> str:
+    value = os.environ.get("VRES_TEST_DATABASE_URL")
+    if not value:
+        pytest.skip("PostgreSQL setup journey requires VRES_TEST_DATABASE_URL")
+    return value
+
+
 def _dsn_for_database(base: str, database: str) -> str:
     parts = conninfo_to_dict(base)
     parts["dbname"] = database
@@ -35,7 +42,7 @@ def _drop_database_and_roles(admin_server_dsn: str, database: str, roles: list[s
 
 
 def test_existing_schema_boundary_conversion_uses_named_admin_rows():
-    base = os.environ["VRES_TEST_DATABASE_URL"]
+    base = _database_url()
     suffix = uuid.uuid4().hex[:10]
     database = f"vres_setup_{suffix}"
     runtime_user = f"vres_rt_{suffix}"
@@ -138,7 +145,7 @@ def test_existing_schema_boundary_conversion_uses_named_admin_rows():
 
 
 def test_existing_database_and_role_conflict_reports_named_fields(monkeypatch):
-    base = os.environ["VRES_TEST_DATABASE_URL"]
+    base = _database_url()
     suffix = uuid.uuid4().hex[:10]
     database = f"vres_conflict_{suffix}"
     runtime_user = f"vres_conflict_{suffix}"
