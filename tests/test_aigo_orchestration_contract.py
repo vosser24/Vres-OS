@@ -68,14 +68,15 @@ def test_mcp_entrypoint_registers_orchestration_and_routing_from_dedicated_modul
 
 def test_chairman_requires_fable_governed_routing_and_tiered_workers():
     text = (ROOT / "plugins/vres-os/agents/chairman.md").read_text(encoding="utf-8")
+    lowered = text.lower()
     assert "domain-level competencies" in text
     assert "Do not split an existing domain capability into arbitrary micro-techniques" in text
     assert "call `routing_prepare`" in text
     assert "`vres-os:routing-arbiter`" in text
     assert "`vres-os:sonnet-expert`" in text
     assert "`vres-os:opus-expert`" in text
-    assert "Any Opus worker automatically requires" in text
-    assert "hard protected" in text.lower()
+    assert "any opus worker automatically requires" in lowered
+    assert "hard protected" in lowered
     assert "task_complete_routed" in text
     assert "Host-observed worker model evidence is authoritative" in text
 
