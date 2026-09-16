@@ -129,6 +129,8 @@ def test_migrator_resumes_023_without_database_create(monkeypatch):
             "023_user_event_writer_boundary.sql",
             "024_user_event_immutability.sql",
             "025_aigo_orchestration.sql",
+            "026_capability_retrieval_aliases.sql",
+            "027_routing_governor.sql",
         ]
 
         with psycopg.connect(target_admin_dsn, row_factory=dict_row) as admin:
@@ -155,6 +157,8 @@ def test_migrator_resumes_023_without_database_create(monkeypatch):
         assert "023_user_event_writer_boundary.sql" in versions
         assert "024_user_event_immutability.sql" in versions
         assert "025_aigo_orchestration.sql" in versions
+        assert "026_capability_retrieval_aliases.sql" in versions
+        assert "027_routing_governor.sql" in versions
         assert schema_owner == migrator_user
         assert authority == writer_user
 
