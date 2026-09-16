@@ -5,6 +5,7 @@ from typing import Any
 from .company_mcp import mcp
 from .mcp_server import _current_session, _project, _require_node
 from .routing import RoutingService
+from .routing_completion import complete_routed_task
 
 
 @mcp.tool()
@@ -61,14 +62,16 @@ def task_complete_routed(
     """Complete Fable-routed work under its persisted assurance contract.
 
     Routine completion is available only for an all-Sonnet, non-hard-risk route with
-    decision-ready orchestration and host-observed worker model evidence. Any Opus tier
-    or hard-risk route requires the existing fresh protected Fable validation. The
-    database independently rechecks the routing/model/assurance invariants on completion.
+    decision-ready orchestration and host-observed worker model evidence. Its
+    `not_required` validation state is granted only at this final governed boundary,
+    after ordinary final checkpoints have finished. Any Opus tier or hard-risk route
+    requires the existing fresh protected Fable validation. The database independently
+    rechecks the routing/model/assurance invariants on completion.
     """
     pid, project = _project()
     sid = _current_session(pid, session_id)
     _require_node("task", task_key, write=True)
-    return RoutingService().complete(
+    return complete_routed_task(
         project_id=pid,
         task_key=task_key,
         root=project.root,
