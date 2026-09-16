@@ -39,6 +39,54 @@ CREATE TABLE IF NOT EXISTS vres.worker_runs (
 CREATE INDEX IF NOT EXISTS idx_worker_runs_task_plan
     ON vres.worker_runs(task_id,plan_key,role,execution_tier,status);
 
+-- `not_required` was deliberately removed from the ordinary task lifecycle because
+-- meaningful work could otherwise self-waive independent review. Re-introduce it only
+-- as a governed state: the trigger below permits it solely after a host-observed Fable
+-- route has selected routine assurance with no hard-protected trigger and no Opus worker.
+ALTER TABLE vres.task_state
+    DROP CONSTRAINT IF EXISTS task_state_validation_status_check;
+ALTER TABLE vres.task_state
+    ADD CONSTRAINT task_state_validation_status_check
+    CHECK (validation_status IN ('pending','passed','failed','not_required'));
+
+CREATE OR REPLACE FUNCTION vres.protect_routine_validation_status()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    route record;
+BEGIN
+    IF NEW.validation_status IS NOT DISTINCT FROM OLD.validation_status
+       OR NEW.validation_status <> 'not_required' THEN
+        RETURN NEW;
+    END IF;
+
+    SELECT r.* INTO route
+      FROM vres.routing_requests r
+     WHERE r.task_id=NEW.task_id AND r.status='routed'
+     ORDER BY r.id DESC
+     LIMIT 1;
+
+    IF route.id IS NULL
+       OR route.hard_protected
+       OR route.decision->>'assurance' IS DISTINCT FROM 'routine'
+       OR EXISTS (
+           SELECT 1
+             FROM jsonb_array_elements(COALESCE(route.decision->'experts','[]'::jsonb)) x
+            WHERE x->>'execution_tier' <> 'sonnet'
+       ) THEN
+        RAISE EXCEPTION 'not_required validation is reserved for a governed all-Sonnet routine route';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_protect_routine_validation_status ON vres.task_state;
+CREATE TRIGGER trg_protect_routine_validation_status
+BEFORE UPDATE OF validation_status ON vres.task_state
+FOR EACH ROW
+EXECUTE FUNCTION vres.protect_routine_validation_status();
+
 CREATE OR REPLACE FUNCTION vres.enforce_routed_task_completion()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -135,7 +183,7 @@ BEGIN
         END IF;
     ELSE
         IF validation IS DISTINCT FROM 'not_required' THEN
-            RAISE EXCEPTION 'Routine Sonnet route must use not_required validation status';
+            RAISE EXCEPTION 'Routine Sonnet route must use governed not_required validation status';
         END IF;
     END IF;
 
