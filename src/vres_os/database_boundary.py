@@ -156,6 +156,7 @@ def provision_boundary(
 ) -> BoundaryCredentials:
     """Create isolated writer/migration roles and transfer only Vres-owned objects."""
     from psycopg import sql
+    from psycopg.rows import dict_row
 
     if boundary_credentials_present(cfg, require_secrets=False):
         raise RuntimeError("Provenance database-role credentials are already configured")
@@ -168,7 +169,7 @@ def provision_boundary(
             raise RuntimeError("PostgreSQL administrator credentials are required for provenance boundary setup")
         admin_dsn = _runtime_dsn(cfg, user=admin_user, password=admin_password)
 
-    with _driver().connect(admin_dsn, autocommit=True) as conn:
+    with _driver().connect(admin_dsn, autocommit=True, row_factory=dict_row) as conn:
         existing = conn.execute(
             "SELECT rolname FROM pg_roles WHERE rolname=ANY(%s)",
             ([writer_user, migration_user],),
@@ -250,8 +251,9 @@ def provision_boundary(
 def rollback_boundary_provision(cfg: VresConfig, credentials: BoundaryCredentials, *, admin_dsn: str) -> None:
     """Undo only a pre-migration role split whose local credential persistence failed."""
     from psycopg import sql
+    from psycopg.rows import dict_row
 
-    with _driver().connect(admin_dsn, autocommit=True) as conn:
+    with _driver().connect(admin_dsn, autocommit=True, row_factory=dict_row) as conn:
         with conn.transaction():
             _transfer_vres_ownership(conn, new_owner=cfg.database.user)
             conn.execute(sql.SQL("GRANT CREATE,USAGE ON SCHEMA vres TO {}").format(sql.Identifier(cfg.database.user)))
