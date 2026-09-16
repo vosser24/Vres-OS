@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import user_intent_mcp as _user_intent_mcp  # noqa: F401 - registers same-turn intent tool
+from .company_mcp import mcp
 from .mcp_server import _current_session, _project, _require_node
 from .reply_guard import observe_reply_activity
 from .task_decisions import TaskDecisionService
 from .task_lifecycle import transition_task_status
-from .user_intent_mcp import mcp
 
 
 def _observe_reply_hook_activity(
