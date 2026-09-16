@@ -18,12 +18,16 @@ class BoundaryCredentials:
     migration_password: str
 
 
-def boundary_ready(cfg: VresConfig | None = None, *, require_secrets: bool = True) -> bool:
+def boundary_credentials_present(
+    cfg: VresConfig | None = None,
+    *,
+    require_secrets: bool = True,
+) -> bool:
     cfg = cfg or ConfigStore().load()
     db = cfg.database
-    if db.provenance_boundary_version < BOUNDARY_VERSION:
-        return False
     if not db.provenance_writer_user or not db.migration_user:
+        return False
+    if len({db.user, db.provenance_writer_user, db.migration_user}) != 3:
         return False
     if not require_secrets:
         return True
@@ -31,6 +35,14 @@ def boundary_ready(cfg: VresConfig | None = None, *, require_secrets: bool = Tru
     return bool(
         store.get(db.provenance_writer_password_key)
         and store.get(db.migration_password_key)
+    )
+
+
+def boundary_ready(cfg: VresConfig | None = None, *, require_secrets: bool = True) -> bool:
+    cfg = cfg or ConfigStore().load()
+    return bool(
+        cfg.database.provenance_boundary_version >= BOUNDARY_VERSION
+        and boundary_credentials_present(cfg, require_secrets=require_secrets)
     )
 
 
@@ -124,8 +136,8 @@ def provision_boundary(
     """Create isolated writer/migration roles and transfer only Vres-owned objects."""
     from psycopg import sql
 
-    if boundary_ready(cfg, require_secrets=False):
-        raise RuntimeError("Provenance database boundary is already configured")
+    if boundary_credentials_present(cfg, require_secrets=False):
+        raise RuntimeError("Provenance database-role credentials are already configured")
     writer_user, migration_user = default_boundary_roles(cfg.database.user)
     writer_password = secrets.token_urlsafe(32)
     migration_password = secrets.token_urlsafe(32)
@@ -215,10 +227,11 @@ def provision_boundary(
 
 
 def persist_boundary_credentials(cfg: VresConfig, credentials: BoundaryCredentials) -> None:
+    """Persist role identities/secrets without declaring the boundary ready yet."""
     db = cfg.database
     db.provenance_writer_user = credentials.writer_user
     db.migration_user = credentials.migration_user
-    db.provenance_boundary_version = BOUNDARY_VERSION
+    db.provenance_boundary_version = 0
     cfg.validate()
     store = SecretStore()
     store.set(db.provenance_writer_password_key, credentials.writer_password)
@@ -230,11 +243,19 @@ def persist_boundary_credentials(cfg: VresConfig, credentials: BoundaryCredentia
     ConfigStore().save(cfg)
 
 
+def mark_boundary_ready(cfg: VresConfig) -> None:
+    if not boundary_credentials_present(cfg):
+        raise RuntimeError("Cannot mark provenance boundary ready without both protected role credentials")
+    cfg.database.provenance_boundary_version = BOUNDARY_VERSION
+    cfg.validate()
+    ConfigStore().save(cfg)
+
+
 def activate_boundary(conn, cfg: VresConfig) -> None:
     """Bind migration-023 protected surfaces to the configured writer role."""
     from psycopg import sql
 
-    if cfg.database.provenance_boundary_version < BOUNDARY_VERSION:
+    if not cfg.database.provenance_writer_user:
         return
     runtime = cfg.database.user
     writer = cfg.database.provenance_writer_user
