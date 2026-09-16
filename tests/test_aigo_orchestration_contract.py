@@ -59,4 +59,4 @@ def test_chairman_requires_real_discovery_and_durable_team_evidence():
     assert "call `orchestration_arbitrate`" in text
     assert "call `orchestration_finalize`" in text
     assert "does not replace `task_decision_record`" in text
-    assert "does not replace protected validation" in text
+    assert "or protected validation" in text
