@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import aigo_mcp as _aigo_mcp  # noqa: F401 - registers durable AIGO orchestration tools
 from . import user_intent_mcp as _user_intent_mcp  # noqa: F401 - registers same-turn intent tool
 from .company_mcp import mcp
 from .mcp_server import _current_session, _project, _require_node
