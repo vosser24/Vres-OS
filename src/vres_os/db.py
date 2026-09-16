@@ -117,6 +117,37 @@ def _digest(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _ensure_vres_schema_for_migration(conn, cfg, *, purpose: str) -> None:
+    """Prepare the migration schema without broadening the post-split migrator.
+
+    Before the provenance role split, the runtime/test identity may legitimately
+    bootstrap the schema. After the split, secure setup has already created or
+    transferred `vres` to the dedicated migrator. Reissuing CREATE SCHEMA would
+    require CREATE privilege on the whole database, which the migrator should not
+    receive. Instead, verify the expected schema ownership and fail closed if the
+    boundary is inconsistent.
+    """
+    if purpose != "migrator":
+        conn.execute("CREATE SCHEMA IF NOT EXISTS vres")
+        return
+
+    row = conn.execute(
+        "SELECT pg_get_userbyid(nspowner) AS owner FROM pg_namespace WHERE nspname='vres'"
+    ).fetchone()
+    expected = cfg.database.migration_user
+    if row is None:
+        raise DatabaseBoundaryUpgradeRequired(
+            "Dedicated migration role is configured but the vres schema is missing; "
+            "run secure Vres setup repair instead of granting database-wide CREATE"
+        )
+    owner = str(row["owner"])
+    if owner != expected:
+        raise DatabaseBoundaryUpgradeRequired(
+            f"Dedicated migration role {expected!r} does not own the vres schema (owner={owner!r}); "
+            "run secure Vres setup repair before migrating"
+        )
+
+
 def migrate(*, adopt_legacy_checksums: bool = False) -> list[str]:
     """Apply immutable SQL migrations and detect edits to already-applied files."""
     cfg = ConfigStore().load()
@@ -126,7 +157,7 @@ def migrate(*, adopt_legacy_checksums: bool = False) -> list[str]:
     applied: list[str] = []
     with connect(autocommit=True, purpose=purpose) as conn:
         conn.execute("SELECT pg_advisory_lock(8675309001)")
-        conn.execute("CREATE SCHEMA IF NOT EXISTS vres")
+        _ensure_vres_schema_for_migration(conn, cfg, purpose=purpose)
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS vres.schema_migrations(
