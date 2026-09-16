@@ -166,6 +166,42 @@
     ],
     "SubagentStop": [
       {
+        "matcher": "^vres-os:routing-arbiter$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe",
+            "args": [
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              "${CLAUDE_PLUGIN_ROOT}/bin/vres-subagent-hook.ps1",
+              "routing-stop"
+            ],
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "^vres-os:(sonnet-expert|opus-expert)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe",
+            "args": [
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              "${CLAUDE_PLUGIN_ROOT}/bin/vres-subagent-hook.ps1",
+              "worker-stop"
+            ],
+            "timeout": 30
+          }
+        ]
+      },
+      {
         "matcher": "^vres-os:validator$",
         "hooks": [
           {

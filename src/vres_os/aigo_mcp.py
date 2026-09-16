@@ -18,8 +18,10 @@ def orchestration_discover(
 ) -> dict[str, Any]:
     """Run and durably record real capability/procedure/knowledge discovery before staffing.
 
-    Empty capability results are authoritative gaps for this discovery. Do not invent
-    expertise; acquire project-scoped expertise and rediscover before selecting it.
+    Capability needs should describe domain-level competencies, not arbitrary micro-steps.
+    An empty capability result is a candidate gap: do not invent expertise or acquire a
+    specialist yet. Prepare a Fable routing decision so the governor confirms the real gap;
+    only then acquire project-scoped expertise and rediscover.
     """
     pid, _ = _project()
     sid = _current_session(pid, session_id)
@@ -48,7 +50,8 @@ def capability_acquire_project(
 ) -> dict[str, Any]:
     """Register newly acquired expertise only in the current project with provenance.
 
-    This does not publish company-wide capability authority and does not mark the
+    Use only after the Fable routing governor has confirmed a real discovery gap. This
+    does not publish company-wide capability authority and does not mark the
     capability proven. Proof still requires a completed task with protected validation.
     """
     pid, _ = _project()
@@ -79,9 +82,10 @@ def orchestration_plan_record(
 ) -> dict[str, Any]:
     """Persist the smallest-team staffing decision against one real discovery result.
 
-    Every stable routable role must be selected or explicitly excluded. Selected
-    experts must cover discovered needs with actual capability keys; unresolved gaps
-    fail closed and require acquisition + rediscovery.
+    For governed work, selected roles/lead/capability coverage must match the recorded
+    Fable routing decision; task completion independently rejects mismatches. Every stable
+    routable role must be selected or explicitly excluded. Selected experts must cover
+    discovered needs with actual capability keys; unresolved gaps fail closed.
     """
     pid, _ = _project()
     sid = _current_session(pid, session_id)
@@ -113,7 +117,8 @@ def orchestration_expert_report(
     """Persist one selected expert's evidence, recommendation, assumptions and unknowns.
 
     A role not selected in the durable plan cannot report. Challenger reports must use
-    report_type='challenge'. The worker should call this itself before returning.
+    report_type='challenge'. The governed worker should call this itself before returning;
+    its SubagentStop hook separately records host-observed Sonnet/Opus model evidence.
     """
     pid, _ = _project()
     sid = _current_session(pid, session_id)
@@ -174,7 +179,7 @@ def orchestration_finalize(
     reused_procedure_keys: list[str] | None = None,
     unresolved_unknowns: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Finalize bounded expert synthesis without bypassing task decisions or validation.
+    """Finalize bounded expert synthesis without bypassing task decisions or assurance.
 
     Every selected expert must be represented by an accepted report. Reuse references
     must come from the recorded discovery. Material unresolved unknowns remain fail-closed
