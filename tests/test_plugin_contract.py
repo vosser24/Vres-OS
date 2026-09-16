@@ -98,9 +98,13 @@ def test_mcp_wrapper_is_shipped():
     assert any("vres-mcp.ps1" in x for x in args)
     assert (PLUGIN / "bin" / "vres-mcp.ps1").exists()
     entrypoint = ROOT / "src" / "vres_os" / "mcp_entrypoint.py"
-    assert entrypoint.exists()
+    intent_module = ROOT / "src" / "vres_os" / "user_intent_mcp.py"
+    assert entrypoint.exists() and intent_module.exists()
     text = entrypoint.read_text(encoding="utf-8")
+    intent_text = intent_module.read_text(encoding="utf-8")
     assert "reply_activity_observe" in text
     assert "subagent_activity" in text
     assert "agent_id" in text
-    assert "task_user_instruction_commit" in text
+    assert "from .user_intent_mcp import mcp" in text
+    assert "task_user_instruction_commit" in intent_text
+    assert "commit_staged_user_instruction_events" in intent_text
