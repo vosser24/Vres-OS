@@ -34,8 +34,10 @@ def test_routable_roster_matches_supported_executive_agents_without_validator():
     assert "chairman" not in ROUTABLE_ROLES
 
 
-def test_mcp_entrypoint_exposes_durable_orchestration_protocol():
-    text = (ROOT / "src/vres_os/mcp_entrypoint.py").read_text(encoding="utf-8")
+def test_mcp_entrypoint_registers_durable_orchestration_protocol_from_dedicated_module():
+    aigo_text = (ROOT / "src/vres_os/aigo_mcp.py").read_text(encoding="utf-8")
+    entrypoint_text = (ROOT / "src/vres_os/mcp_entrypoint.py").read_text(encoding="utf-8")
+    assert "from . import aigo_mcp as _aigo_mcp" in entrypoint_text
     for tool in [
         "orchestration_discover",
         "capability_acquire_project",
@@ -45,9 +47,10 @@ def test_mcp_entrypoint_exposes_durable_orchestration_protocol():
         "orchestration_finalize",
         "orchestration_evidence",
     ]:
-        assert f"def {tool}(" in text
-    assert "does not mark the\n    capability proven" in text
-    assert "unresolved gaps\n    fail closed" in text
+        assert f"def {tool}(" in aigo_text
+        assert f"def {tool}(" not in entrypoint_text
+    assert "does not mark the\n    capability proven" in aigo_text
+    assert "unresolved gaps\n    fail closed" in aigo_text
 
 
 def test_chairman_requires_real_discovery_and_durable_team_evidence():
