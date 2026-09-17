@@ -60,6 +60,18 @@ def test_launchers_isolate_python_and_preserve_unicode():
     assert '1048576' in hook and '.Exception.Message' not in hook
 
 
+def test_windows_cli_launcher_preserves_unbound_multi_token_argv():
+    launcher = (ROOT / 'scripts/windows/vres-launch.ps1').read_text()
+    installer = (ROOT / 'install.ps1').read_text()
+    assert 'ValueFromRemainingArguments' not in launcher
+    assert 'param(' not in launcher.lower()
+    assert '@args' in launcher
+    assert '& $python -I -X utf8 -m vres_os.cli @args' in launcher
+    # The cmd shim owns only runtime dispatch; the PowerShell wrapper must receive
+    # the complete original tail so `secret run --env ... -- <child...>` survives.
+    assert 'vres-launch.ps1`" %*' in installer
+
+
 def test_static_windows_release_path_cannot_be_parent_traversal():
     root = Path(__file__).parents[1]
     resolver = (root / "scripts/windows/resolve-runtime.ps1").read_text()
