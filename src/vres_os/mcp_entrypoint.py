@@ -5,6 +5,7 @@ from typing import Any
 from . import aigo_mcp as _aigo_mcp  # noqa: F401 - registers durable AIGO orchestration tools
 from . import routing_mcp as _routing_mcp  # noqa: F401 - registers governed routing/completion tools
 from . import user_intent_mcp as _user_intent_mcp  # noqa: F401 - registers same-turn intent tool
+from . import validation_evidence_mcp as _validation_evidence_mcp  # noqa: F401 - registers read-only validation evidence
 from .company_mcp import mcp
 from .mcp_server import _current_session, _project, _require_node
 from .reply_guard import observe_reply_activity
