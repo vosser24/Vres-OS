@@ -81,13 +81,30 @@ def test_secret_value_lives_only_in_store_not_metadata(monkeypatch, tmp_path):
     assert manager.get("github_token") == value
 
 
+def test_store_error_is_wrapped_without_secret_value(monkeypatch, tmp_path):
+    class FailingStore(FakeSecretStore):
+        def set(self, key: str, value: str) -> None:
+            raise RuntimeError(f"backend failed while handling {value}")
+
+    data = tmp_path / "user-data"
+    monkeypatch.setattr("vres_os.local_secrets.data_dir", lambda: data)
+    manager = LocalSecretManager(_project(tmp_path), store=FailingStore())
+    secret = "must-not-appear-in-error"
+
+    with pytest.raises(LocalSecretError) as exc_info:
+        manager.set("api_key", secret)
+
+    assert secret not in str(exc_info.value)
+    assert "OS credential store" in str(exc_info.value)
+
+
 def test_overwrite_restores_old_vault_value_if_metadata_write_fails(monkeypatch, tmp_path):
     manager, store, _data = _manager(monkeypatch, tmp_path)
     manager.set("api_key", "old-value")
 
     monkeypatch.setattr("vres_os.local_secrets._write_registry", lambda _registry: (_ for _ in ()).throw(OSError("disk")))
 
-    with pytest.raises(OSError):
+    with pytest.raises(LocalSecretError, match="restored"):
         manager.set("api_key", "new-value")
     assert manager.get("api_key") == "old-value"
     assert list(store.values.values()) == ["old-value"]
@@ -185,14 +202,35 @@ def test_relative_materialization_is_rooted_under_local_secret_directory(monkeyp
     assert target.read_text(encoding="utf-8") == "materialized-secret"
 
 
-def test_materialization_cannot_escape_secret_directory(monkeypatch, tmp_path):
+def test_absolute_and_escaping_materialization_paths_are_refused(monkeypatch, tmp_path):
     manager, _store, _data = _manager(monkeypatch, tmp_path)
     manager.set("service_token", "secret")
 
     with pytest.raises(LocalSecretError):
         manager.materialize("service_token", Path("../outside.txt"))
     with pytest.raises(LocalSecretError):
-        manager.materialize("service_token", tmp_path / "ordinary.txt")
+        manager.materialize("service_token", tmp_path / ".vres" / "local-secrets" / "absolute.txt")
+
+
+def test_symlinked_secret_root_is_refused_for_materialize_and_cleanup(monkeypatch, tmp_path):
+    if os.name == "nt":
+        pytest.skip("Windows symlink creation may require elevated developer-mode privileges")
+    manager, _store, _data = _manager(monkeypatch, tmp_path)
+    manager.set("service_token", "secret")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    marker = outside / "keep.txt"
+    marker.write_text("keep", encoding="utf-8")
+    vres_dir = tmp_path / ".vres"
+    vres_dir.mkdir()
+    (vres_dir / "local-secrets").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(LocalSecretError, match="symbolic links"):
+        manager.materialize("service_token")
+    with pytest.raises(LocalSecretError, match="symbolic links"):
+        manager.cleanup_materialized()
+
+    assert marker.read_text(encoding="utf-8") == "keep"
 
 
 def test_delete_removes_store_and_registry(monkeypatch, tmp_path):
@@ -212,7 +250,7 @@ def test_delete_restores_vault_if_metadata_write_fails(monkeypatch, tmp_path):
     manager.set("token", "old-value")
     monkeypatch.setattr("vres_os.local_secrets._write_registry", lambda _registry: (_ for _ in ()).throw(OSError("disk")))
 
-    with pytest.raises(OSError):
+    with pytest.raises(LocalSecretError, match="restored"):
         manager.delete("token")
 
     assert manager.get("token") == "old-value"
