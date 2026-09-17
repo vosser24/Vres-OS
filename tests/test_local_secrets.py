@@ -159,3 +159,15 @@ def test_delete_removes_store_and_registry(monkeypatch, tmp_path):
     assert "\"token\"" not in raw
     with pytest.raises(LocalSecretError):
         manager.get("token")
+
+
+def test_delete_restores_vault_if_metadata_write_fails(monkeypatch, tmp_path):
+    manager, store, _data = _manager(monkeypatch, tmp_path)
+    manager.set("token", "old-value")
+    monkeypatch.setattr("vres_os.local_secrets._write_registry", lambda _registry: (_ for _ in ()).throw(OSError("disk")))
+
+    with pytest.raises(OSError):
+        manager.delete("token")
+
+    assert manager.get("token") == "old-value"
+    assert list(store.values.values()) == ["old-value"]
