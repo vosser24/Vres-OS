@@ -46,9 +46,12 @@ def test_routable_roster_matches_supported_executive_roles_without_validator_or_
 def test_mcp_entrypoint_registers_orchestration_and_routing_from_dedicated_modules():
     aigo_text = (ROOT / "src/vres_os/aigo_mcp.py").read_text(encoding="utf-8")
     routing_text = (ROOT / "src/vres_os/routing_mcp.py").read_text(encoding="utf-8")
+    deterministic_text = (ROOT / "src/vres_os/deterministic_routing.py").read_text(encoding="utf-8")
     entrypoint_text = (ROOT / "src/vres_os/mcp_entrypoint.py").read_text(encoding="utf-8")
     assert "from . import aigo_mcp as _aigo_mcp" in entrypoint_text
     assert "from . import routing_mcp as _routing_mcp" in entrypoint_text
+    assert "try_deterministic_route" in routing_text
+    assert "routing_source" in deterministic_text
     for tool in [
         "orchestration_discover",
         "capability_acquire_project",
@@ -66,25 +69,31 @@ def test_mcp_entrypoint_registers_orchestration_and_routing_from_dedicated_modul
     assert "does not mark the\n    capability proven" in aigo_text
 
 
-def test_chairman_requires_fable_governed_routing_and_tiered_workers():
+def test_chairman_requires_deterministic_first_routing_and_tiered_workers():
     text = (ROOT / "plugins/vres-os/agents/chairman.md").read_text(encoding="utf-8")
     lowered = text.lower()
+    assert "model: sonnet" in text
+    assert "model: inherit" not in text
     assert "domain-level competencies" in text
     assert "Do not split an existing domain capability into arbitrary micro-techniques" in text
-    assert "call `routing_prepare`" in text
+    assert "`routing_prepare`" in text
+    assert "routing_mode" in text
+    assert "deterministic" in lowered
     assert "`vres-os:routing-arbiter`" in text
     assert "`vres-os:sonnet-expert`" in text
     assert "`vres-os:opus-expert`" in text
     assert "any opus worker automatically requires" in lowered
-    assert "hard protected" in lowered
+    assert "protected" in lowered
     assert "task_complete_routed" in text
     assert "Host-observed worker model evidence is authoritative" in text
 
 
 def test_governed_agents_pin_router_and_execution_model_families():
+    chairman = (ROOT / "plugins/vres-os/agents/chairman.md").read_text(encoding="utf-8")
     router = (ROOT / "plugins/vres-os/agents/routing-arbiter.md").read_text(encoding="utf-8")
     sonnet = (ROOT / "plugins/vres-os/agents/sonnet-expert.md").read_text(encoding="utf-8")
     opus = (ROOT / "plugins/vres-os/agents/opus-expert.md").read_text(encoding="utf-8")
+    assert "model: sonnet" in chairman
     assert "model: fable" in router and "effort: high" in router
     assert "model: sonnet" in sonnet
     assert "model: opus" in opus and "effort: high" in opus
