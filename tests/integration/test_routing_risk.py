@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import uuid
 
+from vres_os.deterministic_routing import try_deterministic_route
+from vres_os.orchestration import OrchestrationService
 from vres_os.repository import Repository
 from vres_os.routing_risk import effective_risk_triggers
 from vres_os.session_prompts import commit_staged_user_instruction_events, stage_user_instruction
@@ -38,6 +40,43 @@ def test_staged_lv_acceptance_prompt_derives_protected_trigger_when_caller_omits
         supplied=[],
     )
     assert triggers == ["acceptance_test"]
+
+
+def test_derived_acceptance_trigger_keeps_deterministic_pricing_route_protected(pg_project):
+    pid = pg_project
+    task_key, session_id = _task_and_session(pid)
+    assert stage_user_instruction(
+        pid,
+        session_id,
+        "LV38 physical acceptance task. Design a three-tier pricing architecture.",
+    )
+    discovery = OrchestrationService().discover(
+        project_id=pid,
+        task_key=task_key,
+        session_id=session_id,
+        capability_needs=["pricing"],
+    )
+    triggers = effective_risk_triggers(
+        project_id=pid,
+        task_key=task_key,
+        session_id=session_id,
+        supplied=[],
+    )
+    result = try_deterministic_route(
+        project_id=pid,
+        task_key=task_key,
+        session_id=session_id,
+        discovery_key=discovery["discovery_key"],
+        risk_triggers=triggers,
+    )
+
+    assert result is not None
+    assert result["routing_mode"] == "deterministic"
+    assert result["risk_triggers"] == ["acceptance_test"]
+    assert result["hard_protected"] is True
+    assert result["decision"]["assurance"] == "protected"
+    assert result["decision"]["experts"][0]["role"] == "commercial-director"
+    assert result["decision"]["experts"][0]["execution_tier"] == "sonnet"
 
 
 def test_committed_acceptance_instruction_still_derives_trigger(pg_project):
