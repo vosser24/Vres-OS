@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from typing import Callable
 
 from .db import connect
+from .local_secrets import LocalSecretManager
+from .project import ProjectIdentity
 
 _ACTIVE = {"active", "waiting_user", "blocked"}
 
@@ -86,6 +88,28 @@ def touch_session_host(project_id: int, provider_session_id: str | None, host_pi
             (json.dumps(metadata), provider_session_id, project_id),
         ).fetchone()
     return bool(row)
+
+
+def cleanup_materialized_secrets_if_last_session(project_id: int, project: ProjectIdentity) -> int | None:
+    """Remove project-local plaintext secrets only after the last Claude session closes.
+
+    Returns the number of removed files when cleanup ran, otherwise ``None`` when
+    another open Claude session still exists. The caller decides whether cleanup
+    failure is fatal; SessionEnd callers treat it as best-effort so lifecycle
+    authority is never rewritten by a filesystem cleanup problem.
+    """
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT count(*) AS n
+              FROM vres.sessions
+             WHERE provider='claude' AND project_id=%s AND ended_at IS NULL
+            """,
+            (project_id,),
+        ).fetchone()
+    if not row or int(row["n"]) != 0:
+        return None
+    return LocalSecretManager(project).cleanup_materialized()
 
 
 def _metadata_host_pid(metadata) -> int | None:
