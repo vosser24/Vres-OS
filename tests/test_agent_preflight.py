@@ -9,6 +9,21 @@ from vres_os.agent_preflight import evaluate_agent_preflight
 
 ROOT = Path(__file__).resolve().parents[1]
 
+LEGACY_ROLE_AGENTS = [
+    "vres-os:challenger",
+    "vres-os:commercial-director",
+    "vres-os:cto",
+    "vres-os:data-director",
+    "vres-os:digital-director",
+    "vres-os:finance-director",
+    "vres-os:knowledge-steward",
+    "vres-os:legal-risk-director",
+    "vres-os:marketing-director",
+    "vres-os:people-director",
+    "vres-os:sales-director",
+    "vres-os:supply-chain-director",
+]
+
 
 def _payload(agent_type: str, model: str | None = None) -> dict:
     tool_input = {
@@ -67,14 +82,18 @@ def test_physical_lv38_validator_opus_override_is_denied():
     assert decision["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
-def test_direct_challenger_surface_is_denied_in_favor_of_governed_sonnet_worker():
-    decision = evaluate_agent_preflight(_payload("vres-os:challenger"))
+@pytest.mark.parametrize("agent_type", LEGACY_ROLE_AGENTS)
+def test_direct_role_specific_surfaces_are_denied_in_favor_of_canonical_workers(agent_type: str):
+    decision = evaluate_agent_preflight(_payload(agent_type))
     assert decision is not None
     output = decision["hookSpecificOutput"]
+    reason = output["permissionDecisionReason"]
     assert output["permissionDecision"] == "deny"
-    assert "vres-os:sonnet-expert" in output["permissionDecisionReason"]
-    assert "role='challenger'" in output["permissionDecisionReason"]
-    assert "did not execute" in output["permissionDecisionReason"]
+    assert agent_type in reason
+    assert "vres-os:sonnet-expert" in reason
+    assert "vres-os:opus-expert" in reason
+    assert "did not execute" in reason
+    assert "without regenerating routing" in reason
 
 
 def test_unrelated_agents_are_not_governed_by_this_hook():

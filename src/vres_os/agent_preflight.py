@@ -11,6 +11,24 @@ _GOVERNED_MODEL_FAMILIES = {
     "vres-os:opus-expert": "opus",
 }
 
+# Stable AIGO roles remain useful as prompt/reference assets, but governed routed
+# execution must use one canonical worker surface so host-observed tier/model
+# evidence is recorded uniformly for every role.
+_LEGACY_ROLE_AGENT_TYPES = {
+    "vres-os:challenger",
+    "vres-os:commercial-director",
+    "vres-os:cto",
+    "vres-os:data-director",
+    "vres-os:digital-director",
+    "vres-os:finance-director",
+    "vres-os:knowledge-steward",
+    "vres-os:legal-risk-director",
+    "vres-os:marketing-director",
+    "vres-os:people-director",
+    "vres-os:sales-director",
+    "vres-os:supply-chain-director",
+}
+
 
 def _matches_family(model: str, family: str) -> bool:
     normalized = model.strip().lower()
@@ -18,13 +36,13 @@ def _matches_family(model: str, family: str) -> bool:
 
 
 def evaluate_agent_preflight(payload: dict[str, Any]) -> dict[str, Any] | None:
-    """Deny incompatible governed launches before Agent executes.
+    """Deny incompatible or non-canonical governed launches before Agent executes.
 
     An absent override is allowed so governed agent frontmatter remains authoritative.
     SubagentStop host observation remains the independent post-run evidence layer.
-    The legacy dedicated Challenger surface is deliberately denied: routed Challenger
-    work must use the normal Sonnet worker with role='challenger' so it receives the
-    same host-observed model evidence and completion enforcement as every other role.
+    Routed expert roles execute only through vres-os:sonnet-expert or
+    vres-os:opus-expert according to the persisted execution tier. The old role-
+    specific agent surfaces are reference assets, not governed execution surfaces.
     """
     if payload.get("hook_event_name") != "PreToolUse" or payload.get("tool_name") != "Agent":
         return None
@@ -32,16 +50,18 @@ def evaluate_agent_preflight(payload: dict[str, Any]) -> dict[str, Any] | None:
     if not isinstance(tool_input, dict):
         return None
     agent_type = str(tool_input.get("subagent_type") or "").strip()
-    if agent_type == "vres-os:challenger":
+    if agent_type in _LEGACY_ROLE_AGENT_TYPES:
+        role = agent_type.removeprefix("vres-os:")
         return {
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "deny",
                 "permissionDecisionReason": (
-                    "Governed Challenger execution uses vres-os:sonnet-expert with role='challenger'. "
-                    "The dedicated vres-os:challenger launch is non-canonical and did not execute. "
-                    "Retry the same bounded challenge through vres-os:sonnet-expert without regenerating routing, "
-                    "the plan, or upstream expert reports."
+                    f"Governed routed role '{role}' must execute through the canonical worker surface: "
+                    "use vres-os:sonnet-expert for execution_tier='sonnet' or vres-os:opus-expert for "
+                    f"execution_tier='opus'. Pass role='{role}' in the bounded assignment. "
+                    f"The direct {agent_type} launch is non-canonical and did not execute. Retry the same "
+                    "assignment without regenerating routing, the plan, or upstream reports."
                 ),
             }
         }
