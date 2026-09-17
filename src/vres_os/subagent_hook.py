@@ -10,6 +10,7 @@ from .project import discover_project
 from .redaction import redact_text
 from .repository import Repository
 from .routing import RoutingService, _json_report
+from .routing_rejection import record_stale_routing_rejection
 from .transcript import _text_from_content, transcript_tail
 
 
@@ -79,8 +80,6 @@ def _routing_payload_with_handback(payload: dict[str, Any]) -> dict[str, Any]:
         return payload
     records = transcript_tail(Path(str(transcript)).expanduser())
 
-    # If ordinary assistant text already contains valid routing JSON, leave the
-    # payload untouched so RoutingService._observed_report() recovers it itself.
     for obj in reversed(records):
         if not isinstance(obj, dict):
             continue
@@ -101,8 +100,6 @@ def _routing_payload_with_handback(payload: dict[str, Any]) -> dict[str, Any]:
             except (ValueError, TypeError, json.JSONDecodeError):
                 continue
 
-    # Only after ordinary assistant text fails do we consider assistant-authored
-    # hand-backs. Never inspect arbitrary tool_result content.
     seen: set[str] = set()
     for obj in reversed(records):
         if not isinstance(obj, dict):
@@ -134,7 +131,13 @@ def main() -> None:
         pid = _project_id(payload)
         service = RoutingService()
         if mode == "routing-stop":
-            service.record_routing_from_hook(_routing_payload_with_handback(payload), pid)
+            observed_payload = _routing_payload_with_handback(payload)
+            try:
+                service.record_routing_from_hook(observed_payload, pid)
+            except ValueError as exc:
+                if str(exc) != "Task changed during routing; fresh Fable route required":
+                    raise
+                record_stale_routing_rejection(observed_payload, pid)
         elif mode == "worker-stop":
             service.record_worker_from_hook(payload, pid)
         else:
