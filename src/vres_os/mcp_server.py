@@ -546,8 +546,9 @@ def model_record_run(
 
 @mcp.tool()
 def capability_resolve(need: str, limit: int = 5) -> list[dict]:
-    """Find proven internal capabilities before fabricating an expert role or silently assuming expertise."""
-    return CapabilityService().resolve(need, limit)
+    """Find current-project plus shared capabilities before fabricating expertise."""
+    pid, _ = _project()
+    return CapabilityService().resolve(need, limit, project_id=pid)
 
 
 @mcp.tool()
