@@ -55,12 +55,14 @@ def run_bounded(
     max_result_chars: int = MAX_RESULT_CHARS,
     redact_output: bool = True,
     stdin_devnull: bool = False,
+    env: dict[str, str] | None = None,
 ) -> ProcessResult:
     """No shell, explicit stdin, finite retained output, and bounded process lifetime.
 
     ``stdin_devnull`` is for tools that must never observe or inherit the caller's
     transport/console input. Prompt-driven workers instead receive a finite private
-    temporary file. Both modes are independent of parent stdin.
+    temporary file. Both modes are independent of parent stdin. ``env`` is passed
+    only to the child and never changes the parent process environment.
     """
     if not 0 < timeout <= 3600:
         raise ValueError("Subprocess timeout must be in (0, 3600] seconds")
@@ -89,6 +91,7 @@ def run_bounded(
             stdin=subprocess.DEVNULL if stdin_devnull else source,
             stdout=output,
             stderr=subprocess.STDOUT,
+            env=env,
             **options,
         )
         started, forced, reason = time.monotonic(), None, ""
