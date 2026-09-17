@@ -128,7 +128,7 @@ def test_legacy_role_launch_does_not_create_worker_and_canonical_retry_creates_o
     with connect() as conn:
         workers = conn.execute(
             """
-            SELECT role,execution_tier,agent_type,observed_model,status
+            SELECT w.role,w.execution_tier,w.agent_type,w.observed_model,w.status
               FROM vres.worker_runs w JOIN vres.tasks t ON t.id=w.task_id
              WHERE t.task_key=%s ORDER BY w.id
             """,
