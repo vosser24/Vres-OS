@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from contextlib import contextmanager
 
 from vres_os.control_preflight import evaluate_control_preflight, is_read_only_tool
@@ -90,8 +89,12 @@ def test_mutation_resumes_after_later_prompt_clears_hold():
     assert evaluate_control_preflight(_payload("Write"), None) is None
 
 
-def test_staged_user_prompt_sets_and_clears_hold_with_same_trusted_writer_transaction(monkeypatch):
-    holds: list[dict] = []
+def test_stage_user_instruction_uses_only_trusted_stage_function(monkeypatch):
+    calls = []
+
+    class _Result:
+        def fetchone(self):
+            return {"staged": True}
 
     class FakeConn:
         @contextmanager
@@ -99,24 +102,9 @@ def test_staged_user_prompt_sets_and_clears_hold_with_same_trusted_writer_transa
             yield
 
         def execute(self, sql, params=None):
-            text = str(sql)
-            if "stage_user_input" in text:
-                return _Result({"staged": True})
-            if "UPDATE vres.sessions" in text:
-                assert params is not None
-                path, raw_hold, project_id, session_id = params
-                assert path == ["vres_read_only_hold"]
-                assert (project_id, session_id) == (7, "S-LV38")
-                holds.append(json.loads(raw_hold))
-                return _Result({"id": 1})
-            raise AssertionError(text)
-
-    class _Result:
-        def __init__(self, row):
-            self.row = row
-
-        def fetchone(self):
-            return self.row
+            calls.append((str(sql), params))
+            assert "stage_user_input" in str(sql)
+            return _Result()
 
     @contextmanager
     def fake_connect(*, purpose="runtime", **_kwargs):
@@ -127,9 +115,5 @@ def test_staged_user_prompt_sets_and_clears_hold_with_same_trusted_writer_transa
     monkeypatch.setattr("vres_os.session_prompts.connect", fake_connect)
 
     assert stage_user_instruction(7, "S-LV38", "Inspection only.\nDo not resume or add evidence.") is True
-    assert holds[-1]["active"] is True
-    assert holds[-1]["reason"] == "explicit_read_only_user_instruction"
-
-    assert stage_user_instruction(7, "S-LV38", "Continue the remediation now.") is True
-    assert holds[-1]["active"] is False
-    assert holds[-1]["reason"] == "later_user_prompt"
+    assert len(calls) == 1
+    assert calls[0][1][0:4] == (7, "S-LV38", "Inspection only.\nDo not resume or add evidence.", "user_prompt")
