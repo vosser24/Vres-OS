@@ -41,7 +41,9 @@ def evaluate_agent_preflight(payload: dict[str, Any]) -> dict[str, Any] | None:
             "permissionDecision": "deny",
             "permissionDecisionReason": (
                 f"Governed agent {agent_type} requires the {expected} model family. "
-                f"Remove the incompatible model override '{model}' or use {expected}."
+                f"Remove the incompatible model override '{model}' or use {expected}. "
+                "This Agent call did not execute: retry the same governed launch/request with the correct or no "
+                "override; do not regenerate upstream routing or validation state solely because of this denial."
             ),
         }
     }
