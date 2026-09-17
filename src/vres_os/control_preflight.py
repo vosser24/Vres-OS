@@ -6,14 +6,13 @@ from typing import Any
 
 from .config import ConfigStore
 from .db import connect
-from .session_prompts import READ_ONLY_HOLD_KEY, read_only_hold_from_metadata
+from .session_prompts import read_only_hold_from_metadata
 
 _SAFE_HOST_TOOLS = {
     "Read",
     "Glob",
     "Grep",
     "TaskOutput",
-    "AskUserQuestion",
 }
 _SAFE_VRES_TOOLS = {
     "routing_evidence",
@@ -86,8 +85,9 @@ def evaluate_control_preflight(
     return _deny(
         "Vres inspection-only hold is active from the latest authoritative user prompt. "
         f"Tool '{tool_name}' is mutation-capable and did not execute. Read/evidence inspection may continue, "
-        "but do not resume agents, write/edit files, run shell commands, checkpoint/finalize/revalidate/complete, "
-        "or call other mutating Vres tools until a later real user prompt clears or replaces the hold."
+        "but do not resume agents, ask new questions, write/edit files, run shell commands, "
+        "checkpoint/finalize/revalidate/complete, or call other mutating Vres tools until a later real user prompt "
+        "clears or replaces the hold."
     )
 
 
