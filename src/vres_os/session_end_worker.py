@@ -7,6 +7,7 @@ from .config import ConfigStore
 from .paths import logs_dir
 from .project import discover_project
 from .repository import Repository
+from .session_lifecycle import cleanup_materialized_secrets_if_last_session
 from .session_prompts import commit_staged_user_instruction
 
 _MAX_SESSION_ID = 200
@@ -58,7 +59,18 @@ def run() -> int:
             sid,
         )
     repo.close_session(project_id, sid, reason)
-    _log("worker-finish", result="success")
+
+    # Production SessionEnd runs here, not through hooks.session_end(). Cleanup is
+    # deliberately after authoritative session closure and remains best-effort: a
+    # filesystem/ACL problem must never turn a valid session close into failure.
+    try:
+        removed = cleanup_materialized_secrets_if_last_session(project_id, project)
+        cleanup = "deferred" if removed is None else f"removed:{removed}"
+    except Exception as exc:
+        cleanup = "failed"
+        _log("secret-cleanup-failed", error_type=type(exc).__name__)
+
+    _log("worker-finish", result="success", secret_cleanup=cleanup)
     return 0
 
 
