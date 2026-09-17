@@ -75,7 +75,8 @@ DECLARE
     sess record;
     entry jsonb;
     queue jsonb;
-    read_only_hold boolean;
+    read_only_hold boolean := false;
+    effective_kind text;
     hold jsonb;
 BEGIN
     SELECT writer_role INTO allowed
@@ -91,6 +92,21 @@ BEGIN
     IF p_source NOT IN ('user_prompt','ask_user_question') OR p_kind NOT IN ('instruction','control') THEN
         RAISE EXCEPTION 'unsupported user-input source or kind' USING ERRCODE='P0001';
     END IF;
+
+    -- This classifier is intentionally narrow and authority-bearing. It recognizes
+    -- a direct line-start directive such as "Inspection only. Do not ..." or an
+    -- explicit "Treat this as read-only" phrase, but not prose merely discussing
+    -- inspection/read-only behavior.
+    IF p_source = 'user_prompt' THEN
+        read_only_hold :=
+            p_text ~* E'(^|\\n)[[:space:]]*(inspection[[:space:]]+only|read[- ]only([[:space:]]+(inspection|mode))?)([[:space:]]*[.!:;\\-]|[[:space:]]*(\\n|$))'
+            OR p_text ~* '(this[[:space:]]+is|treat[[:space:]]+this[[:space:]]+as|for[[:space:]]+this[[:space:]]+turn[, ]*)[[:space:]]+(an?[[:space:]]+)?(inspection[- ]only|read[- ]only)';
+    END IF;
+    effective_kind := CASE
+        WHEN p_source='user_prompt' AND read_only_hold THEN 'control'
+        ELSE p_kind
+    END;
+
     SELECT id,metadata INTO sess
       FROM vres.sessions
      WHERE provider='claude'
@@ -113,14 +129,14 @@ BEGIN
     INSERT INTO vres.user_input_observations(
         project_id,provider_session_id,text,source,kind,tool_use_id,question,observed_at
     ) VALUES (
-        p_project_id,p_provider_session_id,p_text,p_source,p_kind,p_tool_use_id,p_question,
+        p_project_id,p_provider_session_id,p_text,p_source,effective_kind,p_tool_use_id,p_question,
         COALESCE(p_observed_at,now())
     );
     entry := jsonb_build_object(
         'text',p_text,
         'observed_at',COALESCE(p_observed_at,now()),
         'source',p_source,
-        'kind',p_kind
+        'kind',effective_kind
     );
     IF p_tool_use_id IS NOT NULL THEN
         entry := entry || jsonb_build_object('tool_use_id',p_tool_use_id);
@@ -139,9 +155,6 @@ BEGIN
     -- are authoritative user input too, but they do not implicitly resume a task that
     -- the user's latest direct prompt explicitly placed in inspection-only mode.
     IF p_source = 'user_prompt' THEN
-        read_only_hold :=
-            p_text ~* E'(^|\\n)[[:space:]]*(inspection[[:space:]]+only|read[- ]only([[:space:]]+(inspection|mode))?)[[:space:]]*[.!:;\\-]*[[:space:]]*(\\n|$)'
-            OR p_text ~* '(this[[:space:]]+is|treat[[:space:]]+this[[:space:]]+as|for[[:space:]]+this[[:space:]]+turn[, ]*)[[:space:]]+(an?[[:space:]]+)?(inspection[- ]only|read[- ]only)';
         hold := jsonb_build_object(
             'active',read_only_hold,
             'observed_at',COALESCE(p_observed_at,now()),
