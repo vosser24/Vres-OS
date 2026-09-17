@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -13,6 +14,7 @@ from pathlib import Path
 from typing import Iterable
 
 from .paths import data_dir
+from .processes import run_bounded
 from .project import ProjectIdentity, discover_project
 from .secrets import SecretStore
 
@@ -77,21 +79,35 @@ def _read_registry() -> dict:
     return value
 
 
-def _restrict_file(path: Path) -> None:
-    if os.name == "nt":
-        user = getpass.getuser()
+def _windows_acl(path: Path, grant: str, *, label: str) -> None:
+    user = getpass.getuser()
+    try:
         result = subprocess.run(
-            ["icacls.exe", str(path), "/inheritance:r", "/grant:r", f"{user}:(R,W)"],
+            ["icacls.exe", str(path), "/inheritance:r", "/grant:r", f"{user}:{grant}"],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             check=False,
             timeout=10,
         )
-        if result.returncode != 0:
-            raise LocalSecretError("Could not apply an owner-only Windows ACL to the local secret file")
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise LocalSecretError(f"Could not apply an owner-only Windows ACL to the {label}") from exc
+    if result.returncode != 0:
+        raise LocalSecretError(f"Could not apply an owner-only Windows ACL to the {label}")
+
+
+def _restrict_file(path: Path) -> None:
+    if os.name == "nt":
+        _windows_acl(path, "(F)", label="local secret file")
     else:
         path.chmod(0o600)
+
+
+def _restrict_directory(path: Path) -> None:
+    if os.name == "nt":
+        _windows_acl(path, "(OI)(CI)(F)", label="local secret directory")
+    else:
+        path.chmod(0o700)
 
 
 def _write_registry(value: dict) -> None:
@@ -124,6 +140,15 @@ def _project_row(registry: dict, project: ProjectIdentity, *, create: bool) -> d
     return row
 
 
+def _redact_known_values(text: str, values: Iterable[str]) -> str:
+    safe = text
+    # Longer values first so one credential that is a prefix of another cannot
+    # leave a suffix behind after replacement.
+    for value in sorted({x for x in values if x}, key=len, reverse=True):
+        safe = safe.replace(value, "[REDACTED_SECRET]")
+    return safe
+
+
 class LocalSecretManager:
     """Project-scoped handles whose values live only in the OS credential store."""
 
@@ -143,17 +168,23 @@ class LocalSecretManager:
         registry = _read_registry()
         row = _project_row(registry, self.project, create=True)
         assert row is not None
-        old = row["aliases"].get(alias)
+        old_meta = row["aliases"].get(alias)
+        key = _secret_key(self.project, alias)
+        old_value = self.store.get(key) if old_meta is not None else None
         now = _now()
-        created_at = old.get("created_at") if isinstance(old, dict) else now
-        self.store.set(_secret_key(self.project, alias), value)
+        created_at = old_meta.get("created_at") if isinstance(old_meta, dict) else now
+        self.store.set(key, value)
         row["aliases"][alias] = {"created_at": created_at, "updated_at": now}
         try:
             _write_registry(registry)
         except Exception:
-            # Do not leave a newly written value without a discoverable handle.
-            if old is None:
-                self.store.delete(_secret_key(self.project, alias))
+            # Keep the vault and discoverable metadata atomic from the caller's
+            # perspective. Restore an overwritten value rather than silently
+            # leaving the new value behind under stale metadata.
+            if old_value is not None:
+                self.store.set(key, old_value)
+            else:
+                self.store.delete(key)
             raise
         return SecretMetadata(alias, str(created_at), now, True)
 
@@ -208,35 +239,37 @@ class LocalSecretManager:
             values.append(value)
         return env, values
 
-    def run(self, command: list[str], mappings: Iterable[str]) -> int:
+    def run(self, command: list[str], mappings: Iterable[str], *, timeout: float = 3600) -> int:
+        """Run one bounded child process with selected handles only in child env.
+
+        Output is captured by the bounded runner before being emitted, which lets
+        Vres remove the exact injected values even when they do not match a known
+        token pattern. Secret values are never placed in command-line arguments.
+        """
         if not command:
             raise ValueError("A child command is required")
         injected, secret_values = self.environment(mappings)
         child_env = os.environ.copy()
         child_env.update(injected)
         try:
-            result = subprocess.run(
+            result = run_bounded(
                 command,
+                cwd=self.project.root,
+                timeout=timeout,
+                max_output_bytes=8 * 1024 * 1024,
+                max_result_chars=8 * 1024 * 1024,
+                redact_output=False,
+                stdin_devnull=True,
                 env=child_env,
-                stdin=None,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                check=False,
             )
         except OSError as exc:
             raise LocalSecretError(f"Could not launch child command: {command[0]}") from exc
-        for stream, target in ((result.stdout, "stdout"), (result.stderr, "stderr")):
-            safe = stream
-            for value in secret_values:
-                if value:
-                    safe = safe.replace(value, "[REDACTED_SECRET]")
-            if safe:
-                handle = __import__("sys").stdout if target == "stdout" else __import__("sys").stderr
-                handle.write(safe)
-                handle.flush()
+        safe = _redact_known_values(result.output, secret_values)
+        if safe:
+            sys.stdout.write(safe)
+            if not safe.endswith("\n"):
+                sys.stdout.write("\n")
+            sys.stdout.flush()
         return int(result.returncode)
 
     def _ensure_local_exclude(self) -> None:
@@ -254,21 +287,30 @@ class LocalSecretManager:
                 handle.write(_EXCLUDE_LINE + "\n")
 
     def materialize(self, alias: str, path: Path | None = None) -> Path:
+        """Materialize a plaintext credential only under the git-excluded secret root."""
         alias = validate_alias(alias)
-        root = self.project.root.resolve()
-        target = path or (_LOCAL_SECRET_DIR / alias)
-        target = (root / target).resolve() if not target.is_absolute() else target.resolve()
-        try:
-            target.relative_to(root)
-        except ValueError as exc:
-            raise LocalSecretError("Materialized secret files must remain inside the project root") from exc
-        local_root = (root / _LOCAL_SECRET_DIR).resolve()
+        project_root = self.project.root.resolve()
+        local_root = (project_root / _LOCAL_SECRET_DIR).resolve()
+        requested = path or Path(alias)
+        target = requested.resolve() if requested.is_absolute() else (local_root / requested).resolve()
         try:
             target.relative_to(local_root)
         except ValueError as exc:
             raise LocalSecretError("Materialized secret files must live under .vres/local-secrets") from exc
+
         self._ensure_local_exclude()
+        local_root.mkdir(parents=True, exist_ok=True)
+        _restrict_directory(local_root)
         target.parent.mkdir(parents=True, exist_ok=True)
+        # Nested folders inherit the protected Windows ACL. On POSIX explicitly
+        # restrict any newly created nested directory too.
+        if os.name != "nt":
+            current = target.parent
+            while current != local_root.parent and current.is_relative_to(local_root):
+                _restrict_directory(current)
+                if current == local_root:
+                    break
+                current = current.parent
         value = self.get(alias)
         try:
             target.write_text(value, encoding="utf-8", newline="")
