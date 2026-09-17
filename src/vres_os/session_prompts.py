@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import re
 from datetime import datetime, timezone
@@ -58,8 +57,9 @@ def is_system_prompt_event(prompt: str) -> bool:
 def is_explicit_read_only_instruction(text: str) -> bool:
     """Recognize an explicit user directive that the current turn is inspection/read-only.
 
-    Keep this deliberately narrow. It is an authority control, so ordinary prose that merely
-    discusses read-only behavior must not suspend task execution accidentally.
+    Keep this deliberately narrow. It is a UX mirror of the database-authoritative
+    classifier in migration 029; ordinary prose that merely discusses read-only
+    behavior must not suspend task execution accidentally.
     """
     if not isinstance(text, str) or not text.strip():
         return False
@@ -158,34 +158,7 @@ def _stage_entry(
                 observed_at,
             ),
         ).fetchone()
-        staged = bool(row and row["staged"])
-        if staged and source == "user_prompt":
-            active = is_explicit_read_only_instruction(text)
-            hold = {
-                "active": active,
-                "observed_at": observed_at.isoformat(),
-                "reason": "explicit_read_only_user_instruction" if active else "later_user_prompt",
-            }
-            updated = conn.execute(
-                """
-                UPDATE vres.sessions
-                   SET metadata=jsonb_set(
-                         COALESCE(metadata,'{}'::jsonb),
-                         %s,
-                         %s::jsonb,
-                         true
-                       )
-                 WHERE project_id=%s
-                   AND provider='claude'
-                   AND provider_session_id=%s
-                   AND ended_at IS NULL
-                RETURNING id
-                """,
-                ([READ_ONLY_HOLD_KEY], json.dumps(hold, separators=(",", ":")), project_id, provider_session_id),
-            ).fetchone()
-            if not updated:
-                raise RuntimeError("Could not persist user-control hold on the active Claude session")
-    return staged
+    return bool(row and row["staged"])
 
 
 def bind_session_to_project_focus(project_id: int, provider_session_id: str | None) -> str | None:
