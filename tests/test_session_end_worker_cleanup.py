@@ -2,13 +2,55 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from vres_os import session_end_worker
+import pytest
+
+from vres_os import session_end_worker, session_lifecycle
+
+
+class _Conn:
+    def __init__(self, open_sessions: int):
+        self.open_sessions = open_sessions
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def execute(self, _sql, _params):
+        return SimpleNamespace(fetchone=lambda: {"n": self.open_sessions})
 
 
 def _set_env(monkeypatch, tmp_path):
     monkeypatch.setenv("VRES_SESSION_END_ID", "session-under-test")
     monkeypatch.setenv("VRES_SESSION_END_CWD", str(tmp_path))
     monkeypatch.setenv("VRES_SESSION_END_REASON", "user_exit")
+
+
+@pytest.mark.parametrize(("open_sessions", "expected"), [(0, 2), (1, None)])
+def test_shared_cleanup_runs_only_after_last_open_session(monkeypatch, tmp_path, open_sessions, expected):
+    project = SimpleNamespace(
+        root=tmp_path,
+        key="project:test",
+        name="test",
+        remote_url=None,
+        branch=None,
+    )
+    cleaned: list[object] = []
+
+    class Manager:
+        def __init__(self, value):
+            assert value is project
+
+        def cleanup_materialized(self):
+            cleaned.append(project)
+            return 2
+
+    monkeypatch.setattr(session_lifecycle, "connect", lambda: _Conn(open_sessions))
+    monkeypatch.setattr(session_lifecycle, "LocalSecretManager", Manager)
+
+    assert session_lifecycle.cleanup_materialized_secrets_if_last_session(7, project) == expected
+    assert bool(cleaned) is (open_sessions == 0)
 
 
 def test_detached_session_end_worker_cleans_after_authoritative_close(monkeypatch, tmp_path):
