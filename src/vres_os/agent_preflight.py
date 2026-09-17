@@ -18,10 +18,13 @@ def _matches_family(model: str, family: str) -> bool:
 
 
 def evaluate_agent_preflight(payload: dict[str, Any]) -> dict[str, Any] | None:
-    """Deny incompatible explicit model overrides before governed agents launch.
+    """Deny incompatible governed launches before Agent executes.
 
-    An absent override is allowed so the agent frontmatter remains authoritative.
+    An absent override is allowed so governed agent frontmatter remains authoritative.
     SubagentStop host observation remains the independent post-run evidence layer.
+    The legacy dedicated Challenger surface is deliberately denied: routed Challenger
+    work must use the normal Sonnet worker with role='challenger' so it receives the
+    same host-observed model evidence and completion enforcement as every other role.
     """
     if payload.get("hook_event_name") != "PreToolUse" or payload.get("tool_name") != "Agent":
         return None
@@ -29,6 +32,19 @@ def evaluate_agent_preflight(payload: dict[str, Any]) -> dict[str, Any] | None:
     if not isinstance(tool_input, dict):
         return None
     agent_type = str(tool_input.get("subagent_type") or "").strip()
+    if agent_type == "vres-os:challenger":
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": (
+                    "Governed Challenger execution uses vres-os:sonnet-expert with role='challenger'. "
+                    "The dedicated vres-os:challenger launch is non-canonical and did not execute. "
+                    "Retry the same bounded challenge through vres-os:sonnet-expert without regenerating routing, "
+                    "the plan, or upstream expert reports."
+                ),
+            }
+        }
     expected = _GOVERNED_MODEL_FAMILIES.get(agent_type)
     if expected is None:
         return None

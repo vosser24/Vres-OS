@@ -29,15 +29,34 @@ def _normalized_supplied(values: list[str] | None) -> list[str]:
     return out
 
 
-def _explicit_acceptance(text: Any) -> bool:
+def _normalized_text(text: Any) -> str:
     if not isinstance(text, str):
-        return False
-    value = " ".join(text.casefold().split())
+        return ""
+    return " ".join(text.casefold().split())
+
+
+def _explicit_acceptance(text: Any) -> bool:
+    value = _normalized_text(text)
     if not value:
         return False
     if "acceptance test" in value or "acceptance task" in value or "physical acceptance" in value:
         return True
     return bool(_LV_MARKER.search(value) and "acceptance" in value)
+
+
+def _explicit_durable_disagreement(text: Any) -> bool:
+    """Recognize only explicit user intent for the governed disagreement/Challenger path.
+
+    This deliberately does not infer disagreement from ordinary business language. The
+    signal requires the user to name Challenger plus arbitration/disagreement semantics,
+    which lets the routing governor staff the governance seat without manufacturing one.
+    """
+    value = _normalized_text(text)
+    if not value or "challenger" not in value:
+        return False
+    if "challenger acceptance test" in value:
+        return True
+    return "arbitration" in value and "disagreement" in value
 
 
 def effective_risk_triggers(
@@ -50,8 +69,9 @@ def effective_risk_triggers(
     """Merge supplied risk with mechanically explicit protected user intent.
 
     This is intentionally narrow. It does not guess broad legal/security/financial risk
-    from keywords. It only prevents an explicit acceptance-test instruction from being
-    downgraded because the caller omitted the corresponding trigger.
+    from keywords. It prevents explicit acceptance-test and explicit durable-disagreement
+    instructions from being downgraded because the caller omitted their corresponding
+    triggers.
     """
     triggers = _normalized_supplied(supplied)
     texts: list[str] = []
@@ -83,4 +103,9 @@ def effective_risk_triggers(
 
     if any(_explicit_acceptance(text) for text in texts) and "acceptance_test" not in triggers:
         triggers.append("acceptance_test")
+    if (
+        any(_explicit_durable_disagreement(text) for text in texts)
+        and "material_durable_disagreement" not in triggers
+    ):
+        triggers.append("material_durable_disagreement")
     return triggers

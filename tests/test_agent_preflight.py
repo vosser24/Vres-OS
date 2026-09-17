@@ -67,6 +67,16 @@ def test_physical_lv38_validator_opus_override_is_denied():
     assert decision["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
+def test_direct_challenger_surface_is_denied_in_favor_of_governed_sonnet_worker():
+    decision = evaluate_agent_preflight(_payload("vres-os:challenger"))
+    assert decision is not None
+    output = decision["hookSpecificOutput"]
+    assert output["permissionDecision"] == "deny"
+    assert "vres-os:sonnet-expert" in output["permissionDecisionReason"]
+    assert "role='challenger'" in output["permissionDecisionReason"]
+    assert "did not execute" in output["permissionDecisionReason"]
+
+
 def test_unrelated_agents_are_not_governed_by_this_hook():
     assert evaluate_agent_preflight(_payload("Explore", "opus")) is None
 
