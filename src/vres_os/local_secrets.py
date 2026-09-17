@@ -195,8 +195,6 @@ class LocalSecretManager:
         registry = _read_registry()
         row = _project_row(registry, self.project, create=False)
         if not row or alias not in row["aliases"]:
-            # Clean up an orphaned vault value if one somehow exists without
-            # metadata, but do not claim a registered handle was deleted.
             self.store.delete(_secret_key(self.project, alias))
             return False
         key = _secret_key(self.project, alias)
@@ -288,6 +286,28 @@ class LocalSecretManager:
                     handle.write("\n")
                 handle.write(_EXCLUDE_LINE + "\n")
 
+    def _assert_not_tracked(self, target: Path) -> None:
+        if not (self.project.root / ".git").is_dir():
+            return
+        relative = target.relative_to(self.project.root.resolve()).as_posix()
+        try:
+            result = run_bounded(
+                ["git", "-C", str(self.project.root), "ls-files", "--error-unmatch", "--", relative],
+                timeout=5,
+                max_output_bytes=64 * 1024,
+                max_result_chars=64 * 1024,
+                redact_output=False,
+                stdin_devnull=True,
+            )
+        except OSError as exc:
+            raise LocalSecretError("Could not verify that the materialized secret path is untracked") from exc
+        if result.returncode == 0:
+            raise LocalSecretError(
+                f"Refusing to materialize a credential onto tracked Git path '{relative}'"
+            )
+        if result.returncode != 1:
+            raise LocalSecretError("Could not verify that the materialized secret path is untracked")
+
     def materialize(self, alias: str, path: Path | None = None) -> Path:
         """Materialize a plaintext credential only under the git-excluded secret root."""
         alias = validate_alias(alias)
@@ -300,6 +320,7 @@ class LocalSecretManager:
         except ValueError as exc:
             raise LocalSecretError("Materialized secret files must live under .vres/local-secrets") from exc
 
+        self._assert_not_tracked(target)
         self._ensure_local_exclude()
         local_root.mkdir(parents=True, exist_ok=True)
         _restrict_directory(local_root)
