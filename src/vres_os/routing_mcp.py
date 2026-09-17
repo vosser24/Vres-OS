@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .company_mcp import mcp
+from .deterministic_routing import try_deterministic_route
 from .mcp_server import _current_session, _project, _require_node
 from .routing import RoutingService
 from .routing_completion import complete_routed_task
@@ -15,27 +16,39 @@ def routing_prepare(
     discovery_key: str,
     risk_triggers: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Freeze discovery/task state and prepare an independent Fable routing decision.
+    """Persist the cheapest safe route after discovery, escalating to Fable only when needed.
 
-    Use for meaningful persistent work after orchestration_discover and before recording
-    the staffing plan. The returned agent/model/effort are mandatory; do not substitute
-    a cheaper router. Trivial ephemeral questions should not create a task and never call this.
+    Obvious single-owner work is routed deterministically to Sonnet with no premium
+    routing-model call. Ambiguous ownership, genuine discovery gaps, multi-owner staffing,
+    or other non-mechanical route choices fall back to the independent Fable/high governor.
+    Hard-risk triggers affect assurance/validation, not whether an obvious route needs Fable.
+    Trivial ephemeral questions should not create a task and never call this.
     """
     pid, _ = _project()
     sid = _current_session(pid, session_id)
     _require_node("task", task_key, write=True)
-    return RoutingService().prepare(
+    deterministic = try_deterministic_route(
         project_id=pid,
         task_key=task_key,
         session_id=sid,
         discovery_key=discovery_key,
         risk_triggers=risk_triggers,
     )
+    if deterministic is not None:
+        return deterministic
+    prepared = RoutingService().prepare(
+        project_id=pid,
+        task_key=task_key,
+        session_id=sid,
+        discovery_key=discovery_key,
+        risk_triggers=risk_triggers,
+    )
+    return {"routing_mode": "fable", **prepared}
 
 
 @mcp.tool()
 def routing_result(task_key: str, request_key: str) -> dict[str, Any]:
-    """Read the host-observed Fable routing verdict for one pending/prepared route."""
+    """Read one authoritative persisted routing result, deterministic or Fable-adjudicated."""
     pid, _ = _project()
     _require_node("task", task_key)
     return RoutingService().result(
@@ -59,14 +72,12 @@ def task_complete_routed(
     summary: str,
     session_id: str,
 ) -> dict[str, Any]:
-    """Complete Fable-routed work under its persisted assurance contract.
+    """Complete governed routed work under its persisted assurance contract.
 
     Routine completion is available only for an all-Sonnet, non-hard-risk route with
-    decision-ready orchestration and host-observed worker model evidence. Its
-    `not_required` validation state is granted only at this final governed boundary,
-    after ordinary final checkpoints have finished. Any Opus tier or hard-risk route
-    requires the existing fresh protected Fable validation. The database independently
-    rechecks the routing/model/assurance invariants on completion.
+    decision-ready orchestration and host-observed worker model evidence. Any Opus tier
+    or hard-risk route requires the existing fresh protected Fable validation. The
+    database independently rechecks routing/team/model/assurance invariants on completion.
     """
     pid, project = _project()
     sid = _current_session(pid, session_id)
