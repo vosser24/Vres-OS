@@ -10,6 +10,13 @@ from .routing import HARD_PROTECTED_TRIGGERS, KNOWN_RISK_TRIGGERS, RoutingServic
 from .validation import state_digest
 
 _DETERMINISTIC_ROUTER = "vres-deterministic-router"
+_ROUTE_ADJUDICATION_TRIGGERS = {
+    "cross_domain",
+    "new_capability_gap",
+    "large_change_surface",
+    "material_unknowns",
+    "material_durable_disagreement",
+}
 
 
 def _key() -> str:
@@ -103,6 +110,8 @@ def try_deterministic_route(
 ) -> dict[str, Any] | None:
     """Persist an obvious single-owner Sonnet route; return None when Fable is required."""
     triggers = _bounded_triggers(risk_triggers)
+    if set(triggers) & _ROUTE_ADJUDICATION_TRIGGERS:
+        return None
     hard_protected = bool(set(triggers) & HARD_PROTECTED_TRIGGERS)
     with connect() as conn, conn.transaction():
         routing = RoutingService()
