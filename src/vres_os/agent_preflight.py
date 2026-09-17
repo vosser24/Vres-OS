@@ -59,7 +59,7 @@ def evaluate_agent_preflight(payload: dict[str, Any]) -> dict[str, Any] | None:
                 "permissionDecisionReason": (
                     f"Governed routed role '{role}' must execute through the canonical worker surface: "
                     "use vres-os:sonnet-expert for execution_tier='sonnet' or vres-os:opus-expert for "
-                    "execution_tier='opus', and pass the persisted role in the bounded assignment. "
+                    f"execution_tier='opus'. Pass role='{role}' in the bounded assignment. "
                     f"The direct {agent_type} launch is non-canonical and did not execute. Retry the same "
                     "assignment without regenerating routing, the plan, or upstream reports."
                 ),
