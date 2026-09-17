@@ -47,10 +47,16 @@ def test_mcp_entrypoint_registers_orchestration_and_routing_from_dedicated_modul
     aigo_text = (ROOT / "src/vres_os/aigo_mcp.py").read_text(encoding="utf-8")
     routing_text = (ROOT / "src/vres_os/routing_mcp.py").read_text(encoding="utf-8")
     deterministic_text = (ROOT / "src/vres_os/deterministic_routing.py").read_text(encoding="utf-8")
+    risk_text = (ROOT / "src/vres_os/routing_risk.py").read_text(encoding="utf-8")
     entrypoint_text = (ROOT / "src/vres_os/mcp_entrypoint.py").read_text(encoding="utf-8")
     assert "from . import aigo_mcp as _aigo_mcp" in entrypoint_text
     assert "from . import routing_mcp as _routing_mcp" in entrypoint_text
     assert "try_deterministic_route" in routing_text
+    assert "effective_risk_triggers" in routing_text
+    assert "risk_triggers=effective" in routing_text
+    assert "latest_staged_user_instruction" in risk_text
+    assert "USER_INSTRUCTION" in risk_text
+    assert "acceptance_test" in risk_text
     assert "routing_source" in deterministic_text
     for tool in [
         "orchestration_discover",
