@@ -144,6 +144,17 @@ def test_decision_hardening_protects_history_and_releases_completed_sessions():
     assert "vres.allow_decision_ledger_delete" in sql
 
 
+def test_user_read_only_hold_is_protected_by_trusted_writer_boundary():
+    sql = _migration("029_user_read_only_hold.sql")
+    assert "vres_read_only_hold" in sql
+    assert "protect_user_input_metadata" in sql
+    assert "stage_user_input" in sql
+    assert "p_source = 'user_prompt'" in sql
+    assert "explicit_read_only_user_instruction" in sql
+    assert "later_user_prompt" in sql
+    assert "session_user <> allowed::text" in sql
+
+
 def test_initial_migration_does_not_make_pg_trgm_a_hard_requirement():
     sql = _migration("001_initial.sql")
     assert "pg_available_extensions" in sql

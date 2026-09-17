@@ -122,6 +122,7 @@ def test_migrator_resumes_023_without_database_create(monkeypatch):
             "026_capability_retrieval_aliases.sql",
             "027_routing_governor.sql",
             "028_validation_pass_checkpoint_guard.sql",
+            "029_user_read_only_hold.sql",
         ]
         assert db.migrate() == expected
 

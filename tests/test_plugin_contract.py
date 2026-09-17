@@ -64,10 +64,12 @@ def test_hook_commands_resolve_to_shipped_wrappers():
         "vres-user-answer.ps1",
         "vres-subagent-hook.ps1",
         "vres-agent-preflight.ps1",
+        "vres-control-preflight.ps1",
     }
     ask_user_wrapper_seen = False
     governed_subagent_wrapper_seen = False
     agent_preflight_wrapper_seen = False
+    control_preflight_wrapper_seen = False
     for event, groups in data["hooks"].items():
         for group in groups:
             for hook in group["hooks"]:
@@ -97,6 +99,13 @@ def test_hook_commands_resolve_to_shipped_wrappers():
                 assert (PLUGIN / "bin" / wrapper_name).exists()
                 if event == "SessionEnd":
                     assert wrapper_name == "vres-session-end.ps1"
+                elif event == "PreToolUse" and wrapper_name == "vres-control-preflight.ps1":
+                    matcher = group.get("matcher") or ""
+                    assert "routing_evidence" in matcher
+                    assert "validation_evidence" in matcher
+                    assert "task_reply_gate" in matcher
+                    assert "Read$" in matcher
+                    control_preflight_wrapper_seen = True
                 elif event == "PreToolUse" and group.get("matcher") == "Agent":
                     assert wrapper_name == "vres-agent-preflight.ps1"
                     agent_preflight_wrapper_seen = True
@@ -114,6 +123,7 @@ def test_hook_commands_resolve_to_shipped_wrappers():
     assert ask_user_wrapper_seen
     assert governed_subagent_wrapper_seen
     assert agent_preflight_wrapper_seen
+    assert control_preflight_wrapper_seen
 
 
 def test_mcp_wrapper_is_shipped():

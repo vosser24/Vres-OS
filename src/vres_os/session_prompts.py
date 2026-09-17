@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -11,6 +12,7 @@ from .redaction import redact
 _PENDING_KEY = "pending_user_instructions"
 _LEGACY_PENDING_KEY = "pending_user_instruction"
 _COMMITTED_TOOL_IDS_KEY = "committed_user_input_tool_ids"
+READ_ONLY_HOLD_KEY = "vres_read_only_hold"
 _ACTIVE = {"active", "waiting_user", "blocked"}
 _CONTROL_COMMANDS = {
     "/clear",
@@ -31,6 +33,12 @@ _CONTROL_COMMANDS = {
     "/terminal-setup",
     "/vim",
 }
+_READ_ONLY_LINE = re.compile(
+    r"(?im)^\s*(?:inspection\s+only|read[- ]only(?:\s+(?:inspection|mode))?)\b(?:\s*[.!:;-]|\s*$)"
+)
+_READ_ONLY_PHRASE = re.compile(
+    r"(?i)\b(?:this\s+is|treat\s+this\s+as|for\s+this\s+turn[, ]*)\s+(?:an?\s+)?(?:inspection[- ]only|read[- ]only)\b"
+)
 
 
 def is_system_prompt_event(prompt: str) -> bool:
@@ -46,7 +54,21 @@ def is_system_prompt_event(prompt: str) -> bool:
     )
 
 
+def is_explicit_read_only_instruction(text: str) -> bool:
+    """Recognize an explicit user directive that the current turn is inspection/read-only.
+
+    Keep this deliberately narrow. It is a UX mirror of the database-authoritative
+    classifier in migration 029; ordinary prose that merely discusses read-only
+    behavior must not suspend task execution accidentally.
+    """
+    if not isinstance(text, str) or not text.strip():
+        return False
+    return bool(_READ_ONLY_LINE.search(text) or _READ_ONLY_PHRASE.search(text))
+
+
 def _entry_kind(text: str) -> str:
+    if is_explicit_read_only_instruction(text):
+        return "control"
     first = text.strip().split(maxsplit=1)[0].casefold() if text.strip() else ""
     return "control" if first in _CONTROL_COMMANDS else "instruction"
 
@@ -79,6 +101,20 @@ def committed_user_input_tool_ids(metadata: Any) -> list[str]:
     if not isinstance(raw, list):
         return []
     return [str(x) for x in raw if isinstance(x, str) and x]
+
+
+def read_only_hold_from_metadata(metadata: Any) -> dict[str, Any] | None:
+    """Return the normalized trusted read-only hold stored on a Claude session."""
+    if not isinstance(metadata, dict):
+        return None
+    value = metadata.get(READ_ONLY_HOLD_KEY)
+    if not isinstance(value, dict):
+        return None
+    return {
+        "active": bool(value.get("active")),
+        "observed_at": value.get("observed_at"),
+        "reason": value.get("reason"),
+    }
 
 
 def _writer_available() -> bool:
