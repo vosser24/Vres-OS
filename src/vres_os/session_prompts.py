@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -11,6 +13,7 @@ from .redaction import redact
 _PENDING_KEY = "pending_user_instructions"
 _LEGACY_PENDING_KEY = "pending_user_instruction"
 _COMMITTED_TOOL_IDS_KEY = "committed_user_input_tool_ids"
+READ_ONLY_HOLD_KEY = "vres_read_only_hold"
 _ACTIVE = {"active", "waiting_user", "blocked"}
 _CONTROL_COMMANDS = {
     "/clear",
@@ -31,6 +34,12 @@ _CONTROL_COMMANDS = {
     "/terminal-setup",
     "/vim",
 }
+_READ_ONLY_LINE = re.compile(
+    r"(?im)^\s*(?:inspection\s+only|read[- ]only(?:\s+(?:inspection|mode))?)\s*[.!:;-]*\s*$"
+)
+_READ_ONLY_PHRASE = re.compile(
+    r"(?i)\b(?:this\s+is|treat\s+this\s+as|for\s+this\s+turn[, ]*)\s+(?:an?\s+)?(?:inspection[- ]only|read[- ]only)\b"
+)
 
 
 def is_system_prompt_event(prompt: str) -> bool:
@@ -44,6 +53,17 @@ def is_system_prompt_event(prompt: str) -> bool:
         or stripped.startswith("<agent-message>")
         or stripped.startswith("<agent-message ")
     )
+
+
+def is_explicit_read_only_instruction(text: str) -> bool:
+    """Recognize an explicit user directive that the current turn is inspection/read-only.
+
+    Keep this deliberately narrow. It is an authority control, so ordinary prose that merely
+    discusses read-only behavior must not suspend task execution accidentally.
+    """
+    if not isinstance(text, str) or not text.strip():
+        return False
+    return bool(_READ_ONLY_LINE.search(text) or _READ_ONLY_PHRASE.search(text))
 
 
 def _entry_kind(text: str) -> str:
@@ -79,6 +99,20 @@ def committed_user_input_tool_ids(metadata: Any) -> list[str]:
     if not isinstance(raw, list):
         return []
     return [str(x) for x in raw if isinstance(x, str) and x]
+
+
+def read_only_hold_from_metadata(metadata: Any) -> dict[str, Any] | None:
+    """Return the normalized trusted read-only hold stored on a Claude session."""
+    if not isinstance(metadata, dict):
+        return None
+    value = metadata.get(READ_ONLY_HOLD_KEY)
+    if not isinstance(value, dict):
+        return None
+    return {
+        "active": bool(value.get("active")),
+        "observed_at": value.get("observed_at"),
+        "reason": value.get("reason"),
+    }
 
 
 def _writer_available() -> bool:
@@ -124,7 +158,34 @@ def _stage_entry(
                 observed_at,
             ),
         ).fetchone()
-    return bool(row and row["staged"])
+        staged = bool(row and row["staged"])
+        if staged and source == "user_prompt":
+            active = is_explicit_read_only_instruction(text)
+            hold = {
+                "active": active,
+                "observed_at": observed_at.isoformat(),
+                "reason": "explicit_read_only_user_instruction" if active else "later_user_prompt",
+            }
+            updated = conn.execute(
+                """
+                UPDATE vres.sessions
+                   SET metadata=jsonb_set(
+                         COALESCE(metadata,'{}'::jsonb),
+                         %s,
+                         %s::jsonb,
+                         true
+                       )
+                 WHERE project_id=%s
+                   AND provider='claude'
+                   AND provider_session_id=%s
+                   AND ended_at IS NULL
+                RETURNING id
+                """,
+                ([READ_ONLY_HOLD_KEY], json.dumps(hold, separators=(",", ":")), project_id, provider_session_id),
+            ).fetchone()
+            if not updated:
+                raise RuntimeError("Could not persist user-control hold on the active Claude session")
+    return staged
 
 
 def bind_session_to_project_focus(project_id: int, provider_session_id: str | None) -> str | None:
