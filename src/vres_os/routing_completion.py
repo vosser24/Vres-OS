@@ -17,11 +17,11 @@ def complete_routed_task(
 ) -> dict[str, Any]:
     """Apply the governed completion contract at the final completion boundary.
 
-    Ordinary checkpoints intentionally reset validation_status to pending. For a Fable-
-    governed routine route, `not_required` is therefore granted only immediately before
-    completion, after the route has already established all-Sonnet execution. The database
-    completion trigger independently rechecks the Fable plan/team, host-observed worker
-    tiers, and decision-ready orchestration before accepting the task status change.
+    Ordinary checkpoints intentionally reset validation_status to pending. For a governed
+    routine all-Sonnet route, `not_required` is therefore granted only immediately before
+    completion. The database completion trigger independently rechecks the persisted
+    route/team, host-observed worker tiers, and decision-ready orchestration before accepting
+    the task status change.
 
     Protected routes never pass through this state transition; they retain the existing
     fresh protected-validation requirement unchanged.
