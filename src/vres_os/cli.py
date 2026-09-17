@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import getpass
 import json
 import os
 import shutil
@@ -14,6 +15,7 @@ from .bootstrap import interactive_setup, last_setup_result, prerequisite_status
 from .config import ConfigStore
 from .db import DatabaseUnavailable, migrate
 from .hooks import compact, post_compact, session_end, session_start, stop, user_prompt, validator_stop
+from .local_secrets import LocalSecretError, LocalSecretManager
 from .onboarding import OnboardingService
 from .project import discover_project
 from .repository import Repository
@@ -21,7 +23,9 @@ from .redaction import redact, redact_text
 
 app = typer.Typer(pretty_exceptions_show_locals=False, help="Vres-OS control CLI. Normal users primarily interact through the Claude Code Chairman.")
 hook_app = typer.Typer(hidden=True)
+secret_app = typer.Typer(help="Manage project-scoped local secret handles backed by the OS credential store.")
 app.add_typer(hook_app, name="hook")
+app.add_typer(secret_app, name="secret")
 console = Console()
 
 
@@ -125,6 +129,88 @@ def status() -> None:
     # Repository rows may contain native date/datetime values. Normalize and redact
     # at the CLI JSON boundary before Rich hands the object to json.dumps().
     console.print_json(data=redact(data))
+
+
+@secret_app.command("set")
+def secret_set(alias: str) -> None:
+    """Capture a secret locally with hidden terminal input; never echo the value."""
+    value = getpass.getpass("Secret value: ")
+    if not value:
+        raise typer.BadParameter("secret value must not be empty")
+    try:
+        meta = LocalSecretManager().set(alias, value)
+    except (LocalSecretError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    console.print(f"Stored local secret handle [bold]{meta.alias}[/bold] in the OS credential store.")
+
+
+@secret_app.command("list")
+def secret_list() -> None:
+    """List secret handle metadata without reading or printing secret values."""
+    try:
+        rows = LocalSecretManager().list()
+    except (LocalSecretError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    table = Table(title="Vres local secret handles")
+    table.add_column("Alias")
+    table.add_column("Available")
+    table.add_column("Updated")
+    for row in rows:
+        table.add_row(row.alias, "yes" if row.available else "no", row.updated_at)
+    console.print(table)
+
+
+@secret_app.command("delete")
+def secret_delete(alias: str, yes: bool = typer.Option(False, "--yes", help="Delete without confirmation.")) -> None:
+    """Delete a project-scoped secret handle from the OS credential store."""
+    if not yes and not typer.confirm(f"Delete local secret handle '{alias}'?"):
+        raise typer.Exit(1)
+    try:
+        existed = LocalSecretManager().delete(alias)
+    except (LocalSecretError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    console.print("Deleted." if existed else "Handle was not registered locally.")
+
+
+@secret_app.command("run", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def secret_run(
+    ctx: typer.Context,
+    env: list[str] = typer.Option([], "--env", help="Child environment mapping NAME=alias. Repeat as needed."),
+) -> None:
+    """Run a child command with selected handles injected only into the child environment."""
+    command = list(ctx.args)
+    if command and command[0] == "--":
+        command = command[1:]
+    if not command:
+        raise typer.BadParameter("provide a child command after --")
+    try:
+        code = LocalSecretManager().run(command, env)
+    except (LocalSecretError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    raise typer.Exit(code)
+
+
+@secret_app.command("materialize")
+def secret_materialize(
+    alias: str,
+    path: Path | None = typer.Option(None, "--path", help="Path under .vres/local-secrets; defaults to the alias."),
+) -> None:
+    """Write a temporary project-local credential file; the durable source remains the OS vault."""
+    try:
+        target = LocalSecretManager().materialize(alias, path)
+    except (LocalSecretError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    console.print(str(target))
+
+
+@secret_app.command("cleanup")
+def secret_cleanup() -> None:
+    """Delete all project-local materialized secret files."""
+    try:
+        count = LocalSecretManager().cleanup_materialized()
+    except (LocalSecretError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    console.print(f"Removed {count} materialized secret file(s).")
 
 
 @hook_app.command("session-start")

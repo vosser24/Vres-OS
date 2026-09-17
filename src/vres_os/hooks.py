@@ -7,7 +7,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .config import ConfigStore
-from .db import DatabaseUnavailable
+from .db import DatabaseUnavailable, connect
+from .local_secrets import LocalSecretManager
 from .paths import logs_dir
 from .project import discover_project
 from .redaction import redact_text
@@ -243,7 +244,8 @@ def session_end() -> None:
         return
     try:
         repo = Repository()
-        project_id = _project_id(repo, payload)
+        project = discover_project(payload.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR", "."))
+        project_id = repo.ensure_project(project)
         sid = _session_id(payload)
         reason = str(payload.get("reason") or payload.get("source") or "session_end")
         task = repo.active_task(project_id, sid)
@@ -252,6 +254,23 @@ def session_end() -> None:
             repo.record_event(task.task_key, "SESSION_END", "vres-lifecycle", {"reason": reason}, sid)
         if sid:
             repo.close_session(project_id, sid, reason)
+        try:
+            with connect() as conn:
+                row = conn.execute(
+                    """
+                    SELECT count(*) AS n
+                      FROM vres.sessions
+                     WHERE provider='claude' AND project_id=%s AND ended_at IS NULL
+                    """,
+                    (project_id,),
+                ).fetchone()
+            if row and int(row["n"]) == 0:
+                LocalSecretManager(project).cleanup_materialized()
+        except Exception as cleanup_exc:
+            # Secret cleanup is best-effort at session end. Failure must not rewrite
+            # lifecycle authority or expose a credential; the explicit cleanup command
+            # remains available and the failure is recorded only in the local hook log.
+            _log_hook_error("SessionEndSecretCleanup", cleanup_exc)
     except Exception as exc:
         _log_hook_error("SessionEnd", exc)
 

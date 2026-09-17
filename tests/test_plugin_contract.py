@@ -42,6 +42,7 @@ def test_all_skills_have_valid_frontmatter():
     assert len(names) == len(set(names))
     assert "procedural-learning" in names
     assert "assumption-firewall" in names
+    assert "local-secrets" in names
 
 
 def test_hook_commands_resolve_to_shipped_wrappers():
