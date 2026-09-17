@@ -54,7 +54,7 @@ vres secret materialize <alias>
 vres secret materialize <alias> --path nested/credentials.json
 ```
 
-Relative paths are rooted under `.vres/local-secrets/`. Absolute or escaping paths are refused. Vres adds `/.vres/local-secrets/` to the repository's local `.git/info/exclude`, creates restrictive local permissions/ACLs, and keeps the OS credential store as the durable source of truth.
+Relative paths are rooted under `.vres/local-secrets/`. Absolute or escaping paths are refused. Vres resolves the repository's actual Git metadata path (including linked worktrees), adds `/.vres/local-secrets/` to the local exclude file, refuses to overwrite any already tracked Git path, rejects symlinked secret roots/targets, creates restrictive local permissions/ACLs, and keeps the OS credential store as the durable source of truth.
 
 Remove materialized plaintext as soon as it is no longer needed:
 
@@ -62,7 +62,7 @@ Remove materialized plaintext as soon as it is no longer needed:
 vres secret cleanup
 ```
 
-Do not treat gitignore as encryption. A materialized file is plaintext while it exists.
+Vres also performs best-effort cleanup when the last open Vres Claude session for the project ends. If another Vres session remains open, materialized files are preserved for that active session. Do not treat Git exclusion as encryption: a materialized file is plaintext while it exists.
 
 ## Delete/rotate
 
@@ -72,12 +72,12 @@ To remove a handle from the local OS vault:
 vres secret delete <alias>
 ```
 
-To rotate, run `vres secret set <alias>` again and paste the replacement. Metadata updates atomically with the vault operation; failures restore the prior value when possible.
+To rotate, run `vres secret set <alias>` again and paste the replacement. Metadata updates atomically with the vault operation; failures restore the prior value when possible. Vault/backend failures are surfaced generically without including the secret value.
 
 ## Persistence model
 
 - Secret value: OS credential store only.
 - Handle metadata: local Vres user-data registry; contains alias/timestamps/project identity but never values.
 - Child environment: ephemeral for the launched process.
-- Materialized file: optional, temporary, project-local, git-excluded, restrictive permissions.
+- Materialized file: optional, temporary, project-local, Git-excluded, restrictive permissions, best-effort last-session cleanup.
 - PostgreSQL: never used as the credential vault.
