@@ -142,8 +142,6 @@ def _project_row(registry: dict, project: ProjectIdentity, *, create: bool) -> d
 
 def _redact_known_values(text: str, values: Iterable[str]) -> str:
     safe = text
-    # Longer values first so one credential that is a prefix of another cannot
-    # leave a suffix behind after replacement.
     for value in sorted({x for x in values if x}, key=len, reverse=True):
         safe = safe.replace(value, "[REDACTED_SECRET]")
     return safe
@@ -178,9 +176,6 @@ class LocalSecretManager:
         try:
             _write_registry(registry)
         except Exception:
-            # Keep the vault and discoverable metadata atomic from the caller's
-            # perspective. Restore an overwritten value rather than silently
-            # leaving the new value behind under stale metadata.
             if old_value is not None:
                 self.store.set(key, old_value)
             else:
@@ -199,12 +194,24 @@ class LocalSecretManager:
         alias = validate_alias(alias)
         registry = _read_registry()
         row = _project_row(registry, self.project, create=False)
-        existed = bool(row and alias in row["aliases"])
-        self.store.delete(_secret_key(self.project, alias))
-        if row and alias in row["aliases"]:
-            del row["aliases"][alias]
+        if not row or alias not in row["aliases"]:
+            # Clean up an orphaned vault value if one somehow exists without
+            # metadata, but do not claim a registered handle was deleted.
+            self.store.delete(_secret_key(self.project, alias))
+            return False
+        key = _secret_key(self.project, alias)
+        old_value = self.store.get(key)
+        old_meta = row["aliases"][alias]
+        self.store.delete(key)
+        del row["aliases"][alias]
+        try:
             _write_registry(registry)
-        return existed
+        except Exception:
+            row["aliases"][alias] = old_meta
+            if old_value is not None:
+                self.store.set(key, old_value)
+            raise
+        return True
 
     def list(self) -> list[SecretMetadata]:
         registry = _read_registry()
@@ -240,12 +247,7 @@ class LocalSecretManager:
         return env, values
 
     def run(self, command: list[str], mappings: Iterable[str], *, timeout: float = 3600) -> int:
-        """Run one bounded child process with selected handles only in child env.
-
-        Output is captured by the bounded runner before being emitted, which lets
-        Vres remove the exact injected values even when they do not match a known
-        token pattern. Secret values are never placed in command-line arguments.
-        """
+        """Run one bounded child process with selected handles only in child env."""
         if not command:
             raise ValueError("A child command is required")
         injected, secret_values = self.environment(mappings)
@@ -302,8 +304,6 @@ class LocalSecretManager:
         local_root.mkdir(parents=True, exist_ok=True)
         _restrict_directory(local_root)
         target.parent.mkdir(parents=True, exist_ok=True)
-        # Nested folders inherit the protected Windows ACL. On POSIX explicitly
-        # restrict any newly created nested directory too.
         if os.name != "nt":
             current = target.parent
             while current != local_root.parent and current.is_relative_to(local_root):
