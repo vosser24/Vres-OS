@@ -38,7 +38,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "^(?!Read$|Glob$|Grep$|TaskOutput$|AskUserQuestion$|mcp__plugin_vres-os_vres__(routing_evidence|orchestration_evidence|validation_evidence|vres_status|task_open_list|task_reply_gate|reply_activity_observe)$).+",
+        "matcher": "^(?!Read$|Glob$|Grep$|TaskOutput$|mcp__plugin_vres-os_vres__(routing_evidence|orchestration_evidence|validation_evidence|vres_status|task_open_list|task_reply_gate|reply_activity_observe)$).+",
         "hooks": [
           {
             "type": "command",
