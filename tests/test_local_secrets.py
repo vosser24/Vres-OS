@@ -68,6 +68,18 @@ def test_secret_value_lives_only_in_store_not_metadata(monkeypatch, tmp_path):
     assert manager.get("github_token") == value
 
 
+def test_overwrite_restores_old_vault_value_if_metadata_write_fails(monkeypatch, tmp_path):
+    manager, store, _data = _manager(monkeypatch, tmp_path)
+    manager.set("api_key", "old-value")
+
+    monkeypatch.setattr("vres_os.local_secrets._write_registry", lambda _registry: (_ for _ in ()).throw(OSError("disk")))
+
+    with pytest.raises(OSError):
+        manager.set("api_key", "new-value")
+    assert manager.get("api_key") == "old-value"
+    assert list(store.values.values()) == ["old-value"]
+
+
 def test_list_never_returns_secret_value(monkeypatch, tmp_path):
     manager, _store, _data = _manager(monkeypatch, tmp_path)
     manager.set("db_password", "dont-print-this")
@@ -110,10 +122,21 @@ def test_materialized_secret_is_local_only_and_git_excluded(monkeypatch, tmp_pat
     assert "/.vres/local-secrets/" in exclude
     if os.name != "nt":
         assert target.stat().st_mode & 0o777 == 0o600
+        assert target.parent.stat().st_mode & 0o777 == 0o700
 
     removed = manager.cleanup_materialized()
     assert removed == 1
     assert not target.exists()
+
+
+def test_relative_materialization_is_rooted_under_local_secret_directory(monkeypatch, tmp_path):
+    manager, _store, _data = _manager(monkeypatch, tmp_path)
+    manager.set("service_token", "materialized-secret")
+
+    target = manager.materialize("service_token", Path("nested/credentials.txt"))
+
+    assert target == tmp_path / ".vres" / "local-secrets" / "nested" / "credentials.txt"
+    assert target.read_text(encoding="utf-8") == "materialized-secret"
 
 
 def test_materialization_cannot_escape_secret_directory(monkeypatch, tmp_path):
