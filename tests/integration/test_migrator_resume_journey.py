@@ -19,21 +19,19 @@ from vres_os.config import VresConfig
 from vres_os.database_boundary import default_boundary_roles, provision_boundary
 
 
-def _dsn_for_database(base: str, database: str) -> str:
+def _dsn(base: str, *, database: str | None = None, user: str | None = None, secret: str | None = None) -> str:
     parts = conninfo_to_dict(base)
-    parts["dbname"] = database
+    if database is not None:
+        parts["dbname"] = database
+    if user is not None:
+        parts["user"] = user
+    if secret is not None:
+        parts["password"] = secret
     return make_conninfo(**parts)
 
 
-def _dsn_as(base: str, user: str, password: str) -> str:
-    parts = conninfo_to_dict(base)
-    parts["user"] = user
-    parts["password"] = password
-    return make_conninfo(**parts)
-
-
-def _drop_database_and_roles(admin_server_dsn: str, database: str, roles: list[str]) -> None:
-    with psycopg.connect(admin_server_dsn, autocommit=True, row_factory=dict_row) as admin:
+def _cleanup(admin_dsn: str, database: str, roles: list[str]) -> None:
+    with psycopg.connect(admin_dsn, autocommit=True, row_factory=dict_row) as admin:
         admin.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(database)))
         for role in roles:
             admin.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(role)))
@@ -47,21 +45,17 @@ def test_migrator_resumes_023_without_database_create(monkeypatch):
     suffix = uuid.uuid4().hex[:10]
     database = f"vres_resume_{suffix}"
     runtime_user = f"vres_rt_{suffix}"
-    runtime_password = uuid.uuid4().hex
+    secret = uuid.uuid4().hex
     writer_user, migrator_user = default_boundary_roles(runtime_user)
-    admin_server_dsn = _dsn_for_database(base, "postgres")
-    target_admin_dsn = _dsn_for_database(base, database)
+    server_dsn = _dsn(base, database="postgres")
+    target_dsn = _dsn(base, database=database)
 
-    _drop_database_and_roles(
-        admin_server_dsn,
-        database,
-        [writer_user, migrator_user, runtime_user],
-    )
+    _cleanup(server_dsn, database, [writer_user, migrator_user, runtime_user])
     try:
-        with psycopg.connect(admin_server_dsn, autocommit=True, row_factory=dict_row) as admin:
+        with psycopg.connect(server_dsn, autocommit=True, row_factory=dict_row) as admin:
             admin.execute(
                 sql.SQL("CREATE ROLE {} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD {}")
-                .format(sql.Identifier(runtime_user), sql.Literal(runtime_password))
+                .format(sql.Identifier(runtime_user), sql.Literal(secret))
             )
             admin.execute(
                 sql.SQL("CREATE DATABASE {} OWNER {}").format(
@@ -69,7 +63,7 @@ def test_migrator_resumes_023_without_database_create(monkeypatch):
                 )
             )
 
-        runtime_dsn = _dsn_as(target_admin_dsn, runtime_user, runtime_password)
+        runtime_dsn = _dsn(target_dsn, user=runtime_user, secret=secret)
         migration_root = resources.files("vres_os").joinpath("migrations")
         pre_boundary = sorted(
             p for p in migration_root.iterdir()
@@ -78,13 +72,8 @@ def test_migrator_resumes_023_without_database_create(monkeypatch):
         with psycopg.connect(runtime_dsn, autocommit=True, row_factory=dict_row) as runtime:
             runtime.execute("CREATE SCHEMA vres AUTHORIZATION CURRENT_USER")
             runtime.execute(
-                """
-                CREATE TABLE vres.schema_migrations(
-                  version text PRIMARY KEY,
-                  checksum text,
-                  applied_at timestamptz NOT NULL DEFAULT now()
-                )
-                """
+                "CREATE TABLE vres.schema_migrations("
+                "version text PRIMARY KEY, checksum text, applied_at timestamptz NOT NULL DEFAULT now())"
             )
             for migration in pre_boundary:
                 text = migration.read_text(encoding="utf-8")
@@ -98,25 +87,27 @@ def test_migrator_resumes_023_without_database_create(monkeypatch):
         cfg = VresConfig(configured=True)
         cfg.database.database = database
         cfg.database.user = runtime_user
-        credentials = provision_boundary(cfg, admin_dsn=target_admin_dsn)
+        credentials = provision_boundary(cfg, admin_dsn=target_dsn)
         assert credentials.writer_user == writer_user
         assert credentials.migration_user == migrator_user
 
         cfg.database.provenance_writer_user = credentials.writer_user
         cfg.database.migration_user = credentials.migration_user
         cfg.database.provenance_boundary_version = 0
+        migrator_dsn = _dsn(
+            target_dsn,
+            user=credentials.migration_user,
+            secret=credentials.migration_password,
+        )
 
-        migrator_dsn = _dsn_as(target_admin_dsn, credentials.migration_user, credentials.migration_password)
-        with psycopg.connect(target_admin_dsn, row_factory=dict_row) as admin:
-            privileges = admin.execute(
+        with psycopg.connect(target_dsn, row_factory=dict_row) as admin:
+            assert admin.execute(
                 "SELECT has_database_privilege(%s,%s,'CREATE') AS can_create",
                 (migrator_user, database),
-            ).fetchone()
-            schema_owner = admin.execute(
+            ).fetchone()["can_create"] is False
+            assert admin.execute(
                 "SELECT pg_get_userbyid(nspowner) AS owner FROM pg_namespace WHERE nspname='vres'"
-            ).fetchone()["owner"]
-        assert privileges["can_create"] is False
-        assert schema_owner == migrator_user
+            ).fetchone()["owner"] == migrator_user
 
         monkeypatch.delenv("VRES_ALLOW_TEST_DB", raising=False)
         monkeypatch.delenv("VRES_TEST_DATABASE_URL", raising=False)
@@ -124,64 +115,57 @@ def test_migrator_resumes_023_without_database_create(monkeypatch):
         monkeypatch.setenv("VRES_MIGRATION_DATABASE_URL", migrator_dsn)
         monkeypatch.setattr(db, "ConfigStore", lambda: SimpleNamespace(load=lambda: cfg))
 
-        applied = db.migrate()
-        assert applied == [
+        expected = [
             "023_user_event_writer_boundary.sql",
             "024_user_event_immutability.sql",
             "025_aigo_orchestration.sql",
             "026_capability_retrieval_aliases.sql",
             "027_routing_governor.sql",
+            "028_validation_pass_checkpoint_guard.sql",
         ]
+        assert db.migrate() == expected
 
-        with psycopg.connect(target_admin_dsn, row_factory=dict_row) as admin:
+        with psycopg.connect(target_dsn, row_factory=dict_row) as admin:
             versions = {
                 row["version"]
                 for row in admin.execute(
                     "SELECT version FROM vres.schema_migrations WHERE version LIKE '02%'"
                 ).fetchall()
             }
-            schema_owner = admin.execute(
+            assert set(expected) <= versions
+            assert admin.execute(
                 "SELECT pg_get_userbyid(nspowner) AS owner FROM pg_namespace WHERE nspname='vres'"
-            ).fetchone()["owner"]
-            authority = admin.execute(
+            ).fetchone()["owner"] == migrator_user
+            assert admin.execute(
                 "SELECT writer_role FROM vres.provenance_authority WHERE authority_key='user_event_writer'"
-            ).fetchone()["writer_role"]
+            ).fetchone()["writer_role"] == writer_user
             before = admin.execute(
-                """
-                SELECT
-                  (SELECT count(*) FROM vres.task_events
-                    WHERE actor='user' AND event_type IN ('USER_INSTRUCTION','USER_CONTROL')) AS authority_events,
-                  (SELECT count(*) FROM vres.approval_events) AS approvals
-                """
+                "SELECT "
+                "(SELECT count(*) FROM vres.task_events WHERE actor='user' "
+                "AND event_type IN ('USER_INSTRUCTION','USER_CONTROL')) AS authority_events, "
+                "(SELECT count(*) FROM vres.approval_events) AS approvals"
             ).fetchone()
-        assert "023_user_event_writer_boundary.sql" in versions
-        assert "024_user_event_immutability.sql" in versions
-        assert "025_aigo_orchestration.sql" in versions
-        assert "026_capability_retrieval_aliases.sql" in versions
-        assert "027_routing_governor.sql" in versions
-        assert schema_owner == migrator_user
-        assert authority == writer_user
 
         from vres_os.selftest import run_core_selftest
 
         result = run_core_selftest()
-        assert result["passed"] is True
-        assert result["task_resume"] is True
-        assert result["knowledge_retrieval"] is True
-        assert result["procedure_reuse"] is True
-        assert result["pareto_gate"] is True
+        assert result == {
+            "task_resume": True,
+            "knowledge_retrieval": True,
+            "procedure_reuse": True,
+            "pareto_gate": True,
+            "passed": True,
+        }
 
-        with psycopg.connect(target_admin_dsn, row_factory=dict_row) as admin:
+        with psycopg.connect(target_dsn, row_factory=dict_row) as admin:
             after = admin.execute(
-                """
-                SELECT
-                  (SELECT count(*) FROM vres.task_events
-                    WHERE actor='user' AND event_type IN ('USER_INSTRUCTION','USER_CONTROL')) AS authority_events,
-                  (SELECT count(*) FROM vres.approval_events) AS approvals,
-                  (SELECT count(*) FROM vres.projects WHERE project_key LIKE 'selftest:%%') AS selftest_projects,
-                  (SELECT count(*) FROM vres.procedures WHERE procedure_key LIKE 'SELFTEST-PROC-%%') AS selftest_procedures,
-                  (SELECT count(*) FROM vres.knowledge_items WHERE knowledge_key LIKE 'SELFTEST-KNOW-%%') AS selftest_knowledge
-                """
+                "SELECT "
+                "(SELECT count(*) FROM vres.task_events WHERE actor='user' "
+                "AND event_type IN ('USER_INSTRUCTION','USER_CONTROL')) AS authority_events, "
+                "(SELECT count(*) FROM vres.approval_events) AS approvals, "
+                "(SELECT count(*) FROM vres.projects WHERE project_key LIKE 'selftest:%%') AS selftest_projects, "
+                "(SELECT count(*) FROM vres.procedures WHERE procedure_key LIKE 'SELFTEST-PROC-%%') AS selftest_procedures, "
+                "(SELECT count(*) FROM vres.knowledge_items WHERE knowledge_key LIKE 'SELFTEST-KNOW-%%') AS selftest_knowledge"
             ).fetchone()
         assert after["authority_events"] == before["authority_events"]
         assert after["approvals"] == before["approvals"]
@@ -189,8 +173,4 @@ def test_migrator_resumes_023_without_database_create(monkeypatch):
         assert after["selftest_procedures"] == 0
         assert after["selftest_knowledge"] == 0
     finally:
-        _drop_database_and_roles(
-            admin_server_dsn,
-            database,
-            [writer_user, migrator_user, runtime_user],
-        )
+        _cleanup(server_dsn, database, [writer_user, migrator_user, runtime_user])
