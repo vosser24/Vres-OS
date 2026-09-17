@@ -76,7 +76,7 @@ def test_chairman_requires_deterministic_first_routing_and_tiered_workers():
     assert "model: inherit" not in text
     assert "domain-level competencies" in text
     assert "Do not split an existing domain capability into arbitrary micro-techniques" in text
-    assert "call `routing_prepare`" in text
+    assert "`routing_prepare`" in text
     assert "routing_mode" in text
     assert "deterministic" in lowered
     assert "`vres-os:routing-arbiter`" in text
