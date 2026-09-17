@@ -34,7 +34,7 @@ _CONTROL_COMMANDS = {
     "/vim",
 }
 _READ_ONLY_LINE = re.compile(
-    r"(?im)^\s*(?:inspection\s+only|read[- ]only(?:\s+(?:inspection|mode))?)\s*[.!:;-]*\s*$"
+    r"(?im)^\s*(?:inspection\s+only|read[- ]only(?:\s+(?:inspection|mode))?)\b(?:\s*[.!:;-]|\s*$)"
 )
 _READ_ONLY_PHRASE = re.compile(
     r"(?i)\b(?:this\s+is|treat\s+this\s+as|for\s+this\s+turn[, ]*)\s+(?:an?\s+)?(?:inspection[- ]only|read[- ]only)\b"
@@ -67,6 +67,8 @@ def is_explicit_read_only_instruction(text: str) -> bool:
 
 
 def _entry_kind(text: str) -> str:
+    if is_explicit_read_only_instruction(text):
+        return "control"
     first = text.strip().split(maxsplit=1)[0].casefold() if text.strip() else ""
     return "control" if first in _CONTROL_COMMANDS else "instruction"
 
