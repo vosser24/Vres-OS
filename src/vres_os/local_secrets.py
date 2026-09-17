@@ -272,11 +272,32 @@ class LocalSecretManager:
             sys.stdout.flush()
         return int(result.returncode)
 
+    def _git_metadata_path(self, relative: str) -> Path | None:
+        """Resolve a Git metadata path, including linked worktrees where `.git` is a file."""
+        marker = self.project.root / ".git"
+        if not marker.exists():
+            return None
+        try:
+            result = run_bounded(
+                ["git", "-C", str(self.project.root), "rev-parse", "--git-path", relative],
+                timeout=5,
+                max_output_bytes=64 * 1024,
+                max_result_chars=64 * 1024,
+                redact_output=False,
+                stdin_devnull=True,
+            )
+        except OSError as exc:
+            raise LocalSecretError("Could not resolve Git metadata for local secret exclusion") from exc
+        raw = result.output.strip()
+        if result.returncode != 0 or not raw:
+            raise LocalSecretError("Could not resolve Git metadata for local secret exclusion")
+        path = Path(raw)
+        return path.resolve() if path.is_absolute() else (self.project.root / path).resolve()
+
     def _ensure_local_exclude(self) -> None:
-        git_dir = self.project.root / ".git"
-        if not git_dir.is_dir():
+        exclude = self._git_metadata_path("info/exclude")
+        if exclude is None:
             return
-        exclude = git_dir / "info" / "exclude"
         exclude.parent.mkdir(parents=True, exist_ok=True)
         existing = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
         lines = {line.strip() for line in existing.splitlines()}
@@ -287,7 +308,7 @@ class LocalSecretManager:
                 handle.write(_EXCLUDE_LINE + "\n")
 
     def _assert_not_tracked(self, target: Path) -> None:
-        if not (self.project.root / ".git").is_dir():
+        if not (self.project.root / ".git").exists():
             return
         relative = target.relative_to(self.project.root.resolve()).as_posix()
         try:
@@ -302,9 +323,7 @@ class LocalSecretManager:
         except OSError as exc:
             raise LocalSecretError("Could not verify that the materialized secret path is untracked") from exc
         if result.returncode == 0:
-            raise LocalSecretError(
-                f"Refusing to materialize a credential onto tracked Git path '{relative}'"
-            )
+            raise LocalSecretError(f"Refusing to materialize a credential onto tracked Git path '{relative}'")
         if result.returncode != 1:
             raise LocalSecretError("Could not verify that the materialized secret path is untracked")
 
