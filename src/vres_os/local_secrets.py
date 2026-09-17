@@ -159,6 +159,33 @@ class LocalSecretManager:
         self.project = project or discover_project(".")
         self.store = store or SecretStore()
 
+    def _vault_get(self, alias: str) -> str | None:
+        key = _secret_key(self.project, alias)
+        try:
+            return self.store.get(key)
+        except Exception as exc:
+            raise LocalSecretError(
+                f"Could not read local secret handle '{alias}' from the OS credential store"
+            ) from exc
+
+    def _vault_set(self, alias: str, value: str) -> None:
+        key = _secret_key(self.project, alias)
+        try:
+            self.store.set(key, value)
+        except Exception as exc:
+            raise LocalSecretError(
+                f"Could not store local secret handle '{alias}' in the OS credential store"
+            ) from exc
+
+    def _vault_delete(self, alias: str) -> None:
+        key = _secret_key(self.project, alias)
+        try:
+            self.store.delete(key)
+        except Exception as exc:
+            raise LocalSecretError(
+                f"Could not delete local secret handle '{alias}' from the OS credential store"
+            ) from exc
+
     def set(self, alias: str, value: str) -> SecretMetadata:
         alias = validate_alias(alias)
         if not isinstance(value, str) or not value:
@@ -167,25 +194,31 @@ class LocalSecretManager:
         row = _project_row(registry, self.project, create=True)
         assert row is not None
         old_meta = row["aliases"].get(alias)
-        key = _secret_key(self.project, alias)
-        old_value = self.store.get(key) if old_meta is not None else None
+        old_value = self._vault_get(alias) if old_meta is not None else None
         now = _now()
         created_at = old_meta.get("created_at") if isinstance(old_meta, dict) else now
-        self.store.set(key, value)
+        self._vault_set(alias, value)
         row["aliases"][alias] = {"created_at": created_at, "updated_at": now}
         try:
             _write_registry(registry)
-        except Exception:
-            if old_value is not None:
-                self.store.set(key, old_value)
-            else:
-                self.store.delete(key)
-            raise
+        except Exception as exc:
+            try:
+                if old_value is not None:
+                    self._vault_set(alias, old_value)
+                else:
+                    self._vault_delete(alias)
+            except LocalSecretError as rollback_exc:
+                raise LocalSecretError(
+                    "Local secret metadata write failed and OS credential rollback could not be confirmed"
+                ) from rollback_exc
+            raise LocalSecretError(
+                "Local secret metadata write failed; OS credential store was restored"
+            ) from exc
         return SecretMetadata(alias, str(created_at), now, True)
 
     def get(self, alias: str) -> str:
         alias = validate_alias(alias)
-        value = self.store.get(_secret_key(self.project, alias))
+        value = self._vault_get(alias)
         if not value:
             raise LocalSecretError(f"Local secret handle '{alias}' is unavailable")
         return value
@@ -195,20 +228,26 @@ class LocalSecretManager:
         registry = _read_registry()
         row = _project_row(registry, self.project, create=False)
         if not row or alias not in row["aliases"]:
-            self.store.delete(_secret_key(self.project, alias))
+            self._vault_delete(alias)
             return False
-        key = _secret_key(self.project, alias)
-        old_value = self.store.get(key)
+        old_value = self._vault_get(alias)
         old_meta = row["aliases"][alias]
-        self.store.delete(key)
+        self._vault_delete(alias)
         del row["aliases"][alias]
         try:
             _write_registry(registry)
-        except Exception:
+        except Exception as exc:
             row["aliases"][alias] = old_meta
             if old_value is not None:
-                self.store.set(key, old_value)
-            raise
+                try:
+                    self._vault_set(alias, old_value)
+                except LocalSecretError as rollback_exc:
+                    raise LocalSecretError(
+                        "Local secret metadata delete failed and OS credential rollback could not be confirmed"
+                    ) from rollback_exc
+            raise LocalSecretError(
+                "Local secret metadata delete failed; OS credential store was restored"
+            ) from exc
         return True
 
     def list(self) -> list[SecretMetadata]:
@@ -220,7 +259,7 @@ class LocalSecretManager:
         for alias, meta in sorted(row["aliases"].items()):
             if not isinstance(meta, dict):
                 continue
-            available = bool(self.store.get(_secret_key(self.project, alias)))
+            available = bool(self._vault_get(alias))
             output.append(
                 SecretMetadata(
                     alias=alias,
@@ -327,21 +366,44 @@ class LocalSecretManager:
         if result.returncode != 1:
             raise LocalSecretError("Could not verify that the materialized secret path is untracked")
 
+    def _local_secret_root(self) -> tuple[Path, Path]:
+        project_root = self.project.root.resolve()
+        vres_dir = project_root / ".vres"
+        local_root = vres_dir / "local-secrets"
+        if vres_dir.is_symlink() or local_root.is_symlink():
+            raise LocalSecretError("Local secret directories must not be symbolic links")
+        if vres_dir.exists() and not vres_dir.is_dir():
+            raise LocalSecretError(".vres must be a directory before local secrets can be materialized")
+        if local_root.exists() and not local_root.is_dir():
+            raise LocalSecretError(".vres/local-secrets must be a directory")
+        resolved = local_root.resolve()
+        try:
+            resolved.relative_to(project_root)
+        except ValueError as exc:
+            raise LocalSecretError("Local secret directory escapes the project root") from exc
+        return project_root, local_root
+
     def materialize(self, alias: str, path: Path | None = None) -> Path:
         """Materialize a plaintext credential only under the git-excluded secret root."""
         alias = validate_alias(alias)
-        project_root = self.project.root.resolve()
-        local_root = (project_root / _LOCAL_SECRET_DIR).resolve()
+        project_root, local_root = self._local_secret_root()
         requested = path or Path(alias)
-        target = requested.resolve() if requested.is_absolute() else (local_root / requested).resolve()
+        if requested.is_absolute():
+            raise LocalSecretError("Materialized secret paths must be relative to .vres/local-secrets")
+        candidate = local_root / requested
+        if candidate.is_symlink():
+            raise LocalSecretError("Materialized secret target must not be a symbolic link")
+        target = candidate.resolve()
         try:
-            target.relative_to(local_root)
+            target.relative_to(local_root.resolve())
         except ValueError as exc:
             raise LocalSecretError("Materialized secret files must live under .vres/local-secrets") from exc
 
         self._assert_not_tracked(target)
         self._ensure_local_exclude()
         local_root.mkdir(parents=True, exist_ok=True)
+        # Re-check after creation so a pre-existing/swap-in symlink is never trusted.
+        _, local_root = self._local_secret_root()
         _restrict_directory(local_root)
         target.parent.mkdir(parents=True, exist_ok=True)
         if os.name != "nt":
@@ -361,9 +423,12 @@ class LocalSecretManager:
         return target
 
     def cleanup_materialized(self) -> int:
-        root = (self.project.root / _LOCAL_SECRET_DIR).resolve()
+        _project_root, root = self._local_secret_root()
         if not root.exists():
             return 0
         count = sum(1 for p in root.rglob("*") if p.is_file())
-        shutil.rmtree(root)
+        try:
+            shutil.rmtree(root)
+        except OSError as exc:
+            raise LocalSecretError("Could not remove materialized local secret files") from exc
         return count
