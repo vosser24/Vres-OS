@@ -7,14 +7,18 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .config import ConfigStore
-from .db import DatabaseUnavailable, connect
-from .local_secrets import LocalSecretManager
+from .db import DatabaseUnavailable
 from .paths import logs_dir
 from .project import discover_project
 from .redaction import redact_text
 from .reply_guard import begin_reply_turn, inspect_stop_guard, mark_stop_guard_blocked
 from .repository import Repository
-from .session_lifecycle import host_pid_from_env, reconcile_open_sessions, touch_session_host
+from .session_lifecycle import (
+    cleanup_materialized_secrets_if_last_session,
+    host_pid_from_env,
+    reconcile_open_sessions,
+    touch_session_host,
+)
 from .session_prompts import (
     bind_session_to_project_focus,
     commit_staged_user_instruction,
@@ -255,17 +259,7 @@ def session_end() -> None:
         if sid:
             repo.close_session(project_id, sid, reason)
         try:
-            with connect() as conn:
-                row = conn.execute(
-                    """
-                    SELECT count(*) AS n
-                      FROM vres.sessions
-                     WHERE provider='claude' AND project_id=%s AND ended_at IS NULL
-                    """,
-                    (project_id,),
-                ).fetchone()
-            if row and int(row["n"]) == 0:
-                LocalSecretManager(project).cleanup_materialized()
+            cleanup_materialized_secrets_if_last_session(project_id, project)
         except Exception as cleanup_exc:
             # Secret cleanup is best-effort at session end. Failure must not rewrite
             # lifecycle authority or expose a credential; the explicit cleanup command
