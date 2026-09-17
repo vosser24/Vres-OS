@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -41,6 +42,18 @@ def _manager(monkeypatch, tmp_path: Path) -> tuple[LocalSecretManager, FakeSecre
     store = FakeSecretStore()
     manager = LocalSecretManager(_project(tmp_path), store=store)
     return manager, store, data
+
+
+def _init_git(root: Path) -> None:
+    subprocess.run(
+        ["git", "init", "-q"],
+        cwd=root,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+        timeout=10,
+    )
 
 
 def test_alias_validation_is_bounded():
@@ -112,7 +125,7 @@ def test_child_environment_output_is_redacted(monkeypatch, tmp_path, capsys):
 def test_materialized_secret_is_local_only_and_git_excluded(monkeypatch, tmp_path):
     manager, _store, _data = _manager(monkeypatch, tmp_path)
     manager.set("service_token", "materialized-secret")
-    (tmp_path / ".git" / "info").mkdir(parents=True)
+    _init_git(tmp_path)
 
     target = manager.materialize("service_token")
 
@@ -120,6 +133,16 @@ def test_materialized_secret_is_local_only_and_git_excluded(monkeypatch, tmp_pat
     assert target.read_text(encoding="utf-8") == "materialized-secret"
     exclude = (tmp_path / ".git" / "info" / "exclude").read_text(encoding="utf-8")
     assert "/.vres/local-secrets/" in exclude
+    ignored = subprocess.run(
+        ["git", "check-ignore", "-q", ".vres/local-secrets/service_token"],
+        cwd=tmp_path,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+        timeout=10,
+    )
+    assert ignored.returncode == 0
     if os.name != "nt":
         assert target.stat().st_mode & 0o777 == 0o600
         assert target.parent.stat().st_mode & 0o777 == 0o700
@@ -127,6 +150,29 @@ def test_materialized_secret_is_local_only_and_git_excluded(monkeypatch, tmp_pat
     removed = manager.cleanup_materialized()
     assert removed == 1
     assert not target.exists()
+
+
+def test_materialization_refuses_tracked_git_path_before_writing_secret(monkeypatch, tmp_path):
+    manager, _store, _data = _manager(monkeypatch, tmp_path)
+    manager.set("service_token", "must-never-overwrite-tracked-file")
+    _init_git(tmp_path)
+    tracked = tmp_path / ".vres" / "local-secrets" / "already-tracked.txt"
+    tracked.parent.mkdir(parents=True)
+    tracked.write_text("repository-placeholder", encoding="utf-8")
+    subprocess.run(
+        ["git", "add", "-f", ".vres/local-secrets/already-tracked.txt"],
+        cwd=tmp_path,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+        timeout=10,
+    )
+
+    with pytest.raises(LocalSecretError, match="tracked Git path"):
+        manager.materialize("service_token", Path("already-tracked.txt"))
+
+    assert tracked.read_text(encoding="utf-8") == "repository-placeholder"
 
 
 def test_relative_materialization_is_rooted_under_local_secret_directory(monkeypatch, tmp_path):
