@@ -22,6 +22,7 @@ _SAFE_VRES_TOOLS = {
     "vres_status",
     "task_open_list",
     "capability_resolve",
+    "artifact_get",
     # Reply/activity bookkeeping does not advance task state and is needed to
     # finish an inspection turn without fighting the Stop/reply guard.
     "task_reply_gate",
