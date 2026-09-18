@@ -124,6 +124,7 @@ def test_migrator_resumes_023_without_database_create(monkeypatch):
             "028_validation_pass_checkpoint_guard.sql",
             "029_user_read_only_hold.sql",
             "030_protected_governance_freshness.sql",
+            "031_software_architecture_routing_calibration.sql",
         ]
         assert db.migrate() == expected
 
@@ -131,7 +132,7 @@ def test_migrator_resumes_023_without_database_create(monkeypatch):
             versions = {
                 row["version"]
                 for row in admin.execute(
-                    "SELECT version FROM vres.schema_migrations WHERE version LIKE '02%' OR version LIKE '030%%'"
+                    "SELECT version FROM vres.schema_migrations WHERE version LIKE '02%' OR version LIKE '03%'"
                 ).fetchall()
             }
             assert set(expected) <= versions

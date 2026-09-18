@@ -44,6 +44,48 @@ def _explicit_acceptance(text: Any) -> bool:
     return bool(_LV_MARKER.search(value) and "acceptance" in value)
 
 
+
+
+_DEEP_ARCHITECTURE_ANCHORS = (
+    "software architecture",
+    "system architecture",
+    "systems architecture",
+    "architecture design",
+    "migration architecture",
+    "zero-downtime",
+    "zero downtime",
+)
+_DEEP_ARCHITECTURE_SIGNALS = (
+    "concurrency",
+    "concurrent",
+    "rollback",
+    "cutover",
+    "backfill",
+    "state machine",
+    "failure scenario",
+    "failure atomicity",
+    "idempotency",
+    "out of order",
+    "out-of-order",
+    "rolling deployment",
+)
+
+
+def _explicit_deep_reasoning(text: Any) -> bool:
+    """Recognize a narrow class of clearly deep architecture workloads.
+
+    This is a routing-complexity signal, not a protected-assurance trigger. It only
+    asks Fable to adjudicate Sonnet vs Opus. Requiring an architecture anchor plus
+    several independent complexity signals avoids turning ordinary "pricing
+    architecture" or simple implementation work into premium routing.
+    """
+    value = _normalized_text(text)
+    if not value or not any(anchor in value for anchor in _DEEP_ARCHITECTURE_ANCHORS):
+        return False
+    matched = sum(1 for signal in _DEEP_ARCHITECTURE_SIGNALS if signal in value)
+    return matched >= 3
+
+
 def _explicit_durable_disagreement(text: Any) -> bool:
     """Recognize only explicit user intent for the governed disagreement/Challenger path.
 
@@ -70,8 +112,9 @@ def effective_risk_triggers(
 
     This is intentionally narrow. It does not guess broad legal/security/financial risk
     from keywords. It prevents explicit acceptance-test and explicit durable-disagreement
-    instructions from being downgraded because the caller omitted their corresponding
-    triggers.
+    instructions from being downgraded, and recognizes a bounded high-complexity
+    architecture pattern only to force model-tier adjudication. deep_reasoning is not
+    itself a protected-assurance trigger.
     """
     triggers = _normalized_supplied(supplied)
     texts: list[str] = []
@@ -108,4 +151,6 @@ def effective_risk_triggers(
         and "material_durable_disagreement" not in triggers
     ):
         triggers.append("material_durable_disagreement")
+    if any(_explicit_deep_reasoning(text) for text in texts) and "deep_reasoning" not in triggers:
+        triggers.append("deep_reasoning")
     return triggers
