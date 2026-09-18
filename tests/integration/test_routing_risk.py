@@ -141,3 +141,84 @@ def test_supplied_triggers_are_preserved_and_derived_trigger_is_deduplicated(pg_
         supplied=["acceptance_test", "user_requested_protected_review"],
     )
     assert triggers == ["acceptance_test", "user_requested_protected_review"]
+
+
+
+def test_complex_migration_architecture_derives_deep_reasoning_without_protected_trigger(pg_project):
+    pid = pg_project
+    task_key, session_id = _task_and_session(
+        pid,
+        "Design a zero-downtime software architecture migration with concurrency, "
+        "backfill, cutover, rollback, a state machine, and explicit failure scenarios.",
+    )
+
+    triggers = effective_risk_triggers(
+        project_id=pid,
+        task_key=task_key,
+        session_id=session_id,
+        supplied=[],
+    )
+
+    assert triggers == ["deep_reasoning"]
+
+
+def test_deep_reasoning_prevents_deterministic_single_owner_route(pg_project):
+    pid = pg_project
+    task_key, session_id = _task_and_session(
+        pid,
+        "Design a zero-downtime migration architecture with concurrency, backfill, "
+        "cutover, rollback, state machine transitions, and failure scenarios.",
+    )
+    discovery = OrchestrationService().discover(
+        project_id=pid,
+        task_key=task_key,
+        session_id=session_id,
+        capability_needs=["software engineering architecture"],
+    )
+
+    assert discovery["missing_capabilities"] == []
+    software = next(
+        row
+        for row in discovery["capability_matches"]["software engineering architecture"]
+        if row["capability_key"] == "cap.software-engineering"
+    )
+    assert software["owner_role"] == "cto"
+
+    triggers = effective_risk_triggers(
+        project_id=pid,
+        task_key=task_key,
+        session_id=session_id,
+        supplied=[],
+    )
+    result = try_deterministic_route(
+        project_id=pid,
+        task_key=task_key,
+        session_id=session_id,
+        discovery_key=discovery["discovery_key"],
+        risk_triggers=triggers,
+    )
+
+    assert triggers == ["deep_reasoning"]
+    assert result is None
+
+
+def test_simple_software_implementation_does_not_derive_deep_reasoning(pg_project):
+    pid = pg_project
+    task_key, session_id = _task_and_session(
+        pid,
+        "Implement a small bounded application validation helper.",
+    )
+    assert stage_user_instruction(
+        pid,
+        session_id,
+        "Implement a small bounded application validation helper.",
+    )
+
+    triggers = effective_risk_triggers(
+        project_id=pid,
+        task_key=task_key,
+        session_id=session_id,
+        supplied=[],
+    )
+
+    assert triggers == []
