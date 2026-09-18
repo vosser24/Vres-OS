@@ -39,6 +39,7 @@ KNOWN_RISK_TRIGGERS = HARD_PROTECTED_TRIGGERS | {
     "new_capability_gap",
     "large_change_surface",
     "material_unknowns",
+    "deep_reasoning",
 }
 
 
@@ -199,7 +200,9 @@ class RoutingService:
             "Choose the smallest competent team from the discovered capability owners. Capability needs are domain-level "
             "competencies, not arbitrary micro-techniques; do not invent a specialist because a normal substep has a narrower name. "
             "Use execution_tier='sonnet' by default. Use 'opus' only when the actual worker needs materially deeper multi-step reasoning, "
-            "hard debugging/architecture, high ambiguity, long-context synthesis, or difficult trade-off analysis. Complexity and consequence "
+            "hard debugging/architecture, high ambiguity, long-context synthesis, or difficult trade-off analysis. When risk_triggers contains "
+            "'deep_reasoning', explicitly adjudicate execution depth from the objective; choose Sonnet only when the deep-reasoning signal is "
+            "overstated for the bounded worker assignment. Complexity and consequence "
             "are separate: hard_protected may require protected validation even when Sonnet is sufficient to execute. Any Opus worker requires "
             "assurance='protected'. Infer consequence from the objective as well as the supplied risk triggers; a missing flag is never permission "
             "to downgrade obvious release/security/governance/high-stakes work. If discovery contains a real unresolved capability gap, return "
