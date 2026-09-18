@@ -24,6 +24,24 @@ def test_capability_alias_migration_covers_pricing_subproblems_without_new_autho
     assert "capability_proofs" not in sql
 
 
+def test_software_architecture_alias_migration_reuses_shipped_capability_without_new_authority():
+    sql = resources.files("vres_os").joinpath(
+        "migrations", "031_software_architecture_routing_calibration.sql"
+    ).read_text(encoding="utf-8")
+    for phrase in [
+        "software architecture",
+        "system architecture",
+        "systems architecture",
+        "architecture design",
+        "migration architecture",
+        "software engineering architecture",
+    ]:
+        assert phrase in sql
+    assert "cap.software-engineering" in sql
+    assert "scope_approval" not in sql
+    assert "capability_proofs" not in sql
+
+
 def test_routable_roster_matches_supported_executive_roles_without_validator_or_chairman():
     assert ROUTABLE_ROLES == {
         "challenger",
@@ -57,6 +75,8 @@ def test_mcp_entrypoint_registers_orchestration_and_routing_from_dedicated_modul
     assert "latest_staged_user_instruction" in risk_text
     assert "USER_INSTRUCTION" in risk_text
     assert "acceptance_test" in risk_text
+    assert "deep_reasoning" in risk_text
+    assert '"deep_reasoning"' in deterministic_text
     assert "routing_source" in deterministic_text
     for tool in [
         "orchestration_discover",
@@ -88,6 +108,7 @@ def test_chairman_requires_deterministic_first_routing_and_tiered_workers():
     assert "`vres-os:routing-arbiter`" in text
     assert "`vres-os:sonnet-expert`" in text
     assert "`vres-os:opus-expert`" in text
+    assert "deep_reasoning" in text
     assert "any opus worker automatically requires" in lowered
     assert "protected" in lowered
     assert "task_complete_routed" in text
