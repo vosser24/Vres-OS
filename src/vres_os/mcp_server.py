@@ -369,6 +369,14 @@ def artifact_register(
 
 
 @mcp.tool()
+def artifact_get(artifact_key: str) -> dict:
+    """Read one persisted artifact registration in the current project for independent verification."""
+    _require_node("artifact", artifact_key)
+    pid, _ = _project()
+    return ArtifactService().get(artifact_key, project_id=pid)
+
+
+@mcp.tool()
 def procedure_get(procedure_key: str, version_no: int | None = None) -> dict:
     """Retrieve an accepted version's complete method, contracts and corrections before reuse."""
     _require_node("procedure", procedure_key)

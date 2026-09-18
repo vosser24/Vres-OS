@@ -71,6 +71,7 @@ def test_read_only_hold_denies_mutation_but_allows_inspection():
         "mcp__plugin_vres-os_vres__vres_status",
         "mcp__plugin_vres-os_vres__task_open_list",
         "mcp__plugin_vres-os_vres__capability_resolve",
+        "mcp__plugin_vres-os_vres__artifact_get",
         "mcp__plugin_vres-os_vres__task_reply_gate",
         "mcp__plugin_vres-os_vres__reply_activity_observe",
     ]
@@ -131,4 +132,5 @@ def test_plugin_pretool_matcher_exempts_inspection_discovery_and_capability_reso
 
     assert "ToolSearch$" in matcher
     assert "capability_resolve" in matcher
+    assert "artifact_get" in matcher
     assert "Agent" not in matcher

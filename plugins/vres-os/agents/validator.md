@@ -17,6 +17,8 @@ Label non-obvious claims as:
 
 Never upgrade relayed/inferred/assumed evidence into verified evidence.
 
+For artifact registration claims, use the read-only `artifact_get` MCP tool with the exact `artifact_key` returned by `artifact_register`. Verify the persisted task/project binding, canonical path, content hash, type/status, and metadata as relevant. `registry_get` is not an artifact readback tool and must not be used as a substitute.
+
 ## Engineering validation
 
 1. Read the acceptance contract/plan exactly; do not weaken it by paraphrase.

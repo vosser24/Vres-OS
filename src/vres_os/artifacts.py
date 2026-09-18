@@ -89,3 +89,29 @@ class ArtifactService:
                 ),
             )
         return key
+
+    def get(self, artifact_key: str, *, project_id: int | None) -> dict[str, Any]:
+        """Return one persisted artifact registration within the caller's visible scope."""
+        artifact_key = str(artifact_key or "").strip()
+        if not artifact_key:
+            raise ValueError("artifact_key is required")
+        with _connect() as conn:
+            row = conn.execute(
+                """
+                SELECT a.artifact_key,a.project_id,t.task_key,s.source_key,a.artifact_type,
+                       a.title,a.canonical_path,a.content_hash,a.media_type,a.status,
+                       a.metadata,a.created_at
+                  FROM vres.artifacts a
+                  LEFT JOIN vres.tasks t ON t.id=a.task_id
+                  LEFT JOIN vres.sources s ON s.id=a.source_id
+                 WHERE a.artifact_key=%s
+                   AND (
+                     (%s IS NULL AND a.project_id IS NULL)
+                     OR (%s IS NOT NULL AND (a.project_id=%s OR a.project_id IS NULL))
+                   )
+                """,
+                (artifact_key, project_id, project_id, project_id),
+            ).fetchone()
+        if not row:
+            raise KeyError(artifact_key)
+        return dict(row)

@@ -39,8 +39,9 @@ def surface(monkeypatch, tmp_path):
 
 
 def test_mcp_registration_has_full_contract_and_no_pass_setter(surface):
-    assert len(surface.mcp.registered) == 44
+    assert len(surface.mcp.registered) == 45
     assert 'procedure_get' in surface.mcp.registered
+    assert 'artifact_get' in surface.mcp.registered
     assert 'validation_record' not in surface.mcp.registered
     assert 'optimization_gate' not in surface.mcp.registered
 
