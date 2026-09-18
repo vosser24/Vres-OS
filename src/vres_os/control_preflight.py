@@ -13,6 +13,7 @@ _SAFE_HOST_TOOLS = {
     "Glob",
     "Grep",
     "TaskOutput",
+    "ToolSearch",
 }
 _SAFE_VRES_TOOLS = {
     "routing_evidence",
@@ -20,6 +21,7 @@ _SAFE_VRES_TOOLS = {
     "validation_evidence",
     "vres_status",
     "task_open_list",
+    "capability_resolve",
     # Reply/activity bookkeeping does not advance task state and is needed to
     # finish an inspection turn without fighting the Stop/reply guard.
     "task_reply_gate",
