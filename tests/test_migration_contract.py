@@ -155,6 +155,15 @@ def test_user_read_only_hold_is_protected_by_trusted_writer_boundary():
     assert "session_user <> allowed::text" in sql
 
 
+def test_latest_observed_user_instruction_is_writer_only_security_definer():
+    sql = _migration("032_latest_observed_user_instruction.sql")
+    assert "latest_observed_user_instruction" in sql
+    assert "SECURITY DEFINER" in sql
+    assert "session_user <> allowed::text" in sql
+    assert "user_input_observations" in sql
+    assert "REVOKE ALL ON FUNCTION" in sql
+
+
 def test_initial_migration_does_not_make_pg_trgm_a_hard_requirement():
     sql = _migration("001_initial.sql")
     assert "pg_available_extensions" in sql
