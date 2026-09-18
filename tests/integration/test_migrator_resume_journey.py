@@ -125,8 +125,64 @@ def test_migrator_resumes_023_without_database_create(monkeypatch):
             "029_user_read_only_hold.sql",
             "030_protected_governance_freshness.sql",
             "031_software_architecture_routing_calibration.sql",
+            "032_latest_observed_user_instruction.sql",
         ]
         assert db.migrate() == expected
+
+        writer_dsn = _dsn(
+            target_dsn,
+            user=credentials.writer_user,
+            secret=credentials.writer_password,
+        )
+
+        # Reproduce the real split-role boundary: runtime/writer cannot read the
+        # protected observation table directly, but the writer can use the narrow
+        # SECURITY DEFINER observation function and runtime cannot.
+        with psycopg.connect(runtime_dsn, autocommit=True, row_factory=dict_row) as runtime:
+            project_id = runtime.execute(
+                """
+                INSERT INTO vres.projects(project_key,name,root_path)
+                VALUES (%s,%s,%s) RETURNING id
+                """,
+                (f"boundary-observation-{suffix}", "Boundary observation", f"/tmp/{suffix}"),
+            ).fetchone()["id"]
+            runtime.execute(
+                """
+                INSERT INTO vres.sessions(
+                    session_key,provider,provider_session_id,project_id
+                ) VALUES (%s,'claude',%s,%s)
+                """,
+                (f"SESSION-{suffix}", f"writer-observation-{suffix}", project_id),
+            )
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                runtime.execute(
+                    "SELECT * FROM vres.latest_observed_user_instruction(%s,%s)",
+                    (project_id, f"writer-observation-{suffix}"),
+                )
+
+        with psycopg.connect(writer_dsn, autocommit=True, row_factory=dict_row) as writer:
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                writer.execute("SELECT count(*) FROM vres.user_input_observations")
+            assert writer.execute(
+                """
+                SELECT vres.stage_user_input(
+                    %s,%s,%s,'user_prompt','instruction',NULL,NULL,now()
+                ) AS staged
+                """,
+                (
+                    project_id,
+                    f"writer-observation-{suffix}",
+                    "cancel this task",
+                ),
+            ).fetchone()["staged"] is True
+            observed = writer.execute(
+                "SELECT * FROM vres.latest_observed_user_instruction(%s,%s)",
+                (project_id, f"writer-observation-{suffix}"),
+            ).fetchone()
+            assert observed["text"] == "cancel this task"
+            assert observed["kind"] == "instruction"
+            assert observed["committed_event_id"] is None
+            assert observed["committed_task_key"] is None
 
         with psycopg.connect(target_dsn, row_factory=dict_row) as admin:
             versions = {

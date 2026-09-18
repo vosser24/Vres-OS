@@ -345,6 +345,7 @@ def activate_boundary(conn, cfg: VresConfig) -> None:
         "vres.user_event_writer_role()",
         "vres.stage_user_input(bigint,text,text,text,text,text,text,timestamptz)",
         "vres.latest_pending_user_instruction(bigint,text)",
+        "vres.latest_observed_user_instruction(bigint,text)",
         "vres.commit_user_inputs(bigint,text,text)",
     ]
     for signature in protected_functions:
