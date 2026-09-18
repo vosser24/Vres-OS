@@ -288,17 +288,7 @@ def latest_observed_user_instruction(
         return None
     with connect(purpose="writer") as conn:
         row = conn.execute(
-            """
-            SELECT o.id,o.text,o.source,o.kind,o.observed_at,o.committed_at,
-                   o.committed_event_id,t.task_key AS committed_task_key
-              FROM vres.user_input_observations o
-              LEFT JOIN vres.tasks t ON t.id=o.committed_task_id
-             WHERE o.project_id=%s
-               AND o.provider_session_id=%s
-               AND o.kind='instruction'
-             ORDER BY o.observed_at DESC,o.id DESC
-             LIMIT 1
-            """,
+            "SELECT * FROM vres.latest_observed_user_instruction(%s,%s)",
             (project_id, provider_session_id),
         ).fetchone()
     return dict(row) if row else None
