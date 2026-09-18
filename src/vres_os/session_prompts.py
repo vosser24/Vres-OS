@@ -275,6 +275,35 @@ def stage_ask_user_answers(
     return staged
 
 
+def latest_observed_user_instruction(
+    project_id: int,
+    provider_session_id: str | None,
+) -> dict[str, Any] | None:
+    """Read the latest trusted substantive user observation, staged or already committed.
+
+    This stays behind the provenance-writer boundary so runtime code cannot forge
+    cancellation authority by inserting a task event or rewriting task state.
+    """
+    if not provider_session_id or not _writer_available():
+        return None
+    with connect(purpose="writer") as conn:
+        row = conn.execute(
+            """
+            SELECT o.id,o.text,o.source,o.kind,o.observed_at,o.committed_at,
+                   o.committed_event_id,t.task_key AS committed_task_key
+              FROM vres.user_input_observations o
+              LEFT JOIN vres.tasks t ON t.id=o.committed_task_id
+             WHERE o.project_id=%s
+               AND o.provider_session_id=%s
+               AND o.kind='instruction'
+             ORDER BY o.observed_at DESC,o.id DESC
+             LIMIT 1
+            """,
+            (project_id, provider_session_id),
+        ).fetchone()
+    return dict(row) if row else None
+
+
 def latest_staged_user_instruction(project_id: int, provider_session_id: str | None) -> str | None:
     """Read the latest protected, uncommitted substantive user instruction."""
     if not provider_session_id or not _writer_available():
