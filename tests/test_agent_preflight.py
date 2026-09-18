@@ -49,31 +49,32 @@ def _payload(agent_type: str, model: str | None = None) -> dict:
         ("vres-os:opus-expert", "opus"),
     ],
 )
-def test_governed_agents_allow_frontmatter_or_matching_override(agent_type: str, expected: str):
+def test_governed_agents_allow_frontmatter_only(agent_type: str, expected: str):
     assert evaluate_agent_preflight(_payload(agent_type)) is None
-    assert evaluate_agent_preflight(_payload(agent_type, expected)) is None
-    assert evaluate_agent_preflight(_payload(agent_type, f"claude-{expected}-5")) is None
 
 
 @pytest.mark.parametrize(
-    ("agent_type", "wrong_model", "expected"),
+    ("agent_type", "override", "expected"),
     [
         ("vres-os:validator", "opus", "fable"),
-        ("vres-os:routing-arbiter", "sonnet", "fable"),
-        ("vres-os:sonnet-expert", "opus", "sonnet"),
-        ("vres-os:opus-expert", "sonnet", "opus"),
+        ("vres-os:validator", "fable", "fable"),
+        ("vres-os:routing-arbiter", "fable", "fable"),
+        ("vres-os:sonnet-expert", "sonnet", "sonnet"),
+        ("vres-os:opus-expert", "opus", "opus"),
     ],
 )
-def test_governed_agents_deny_mismatched_override_before_launch(
-    agent_type: str, wrong_model: str, expected: str
+def test_governed_agents_deny_any_explicit_model_override_before_launch(
+    agent_type: str, override: str, expected: str
 ):
-    decision = evaluate_agent_preflight(_payload(agent_type, wrong_model))
+    decision = evaluate_agent_preflight(_payload(agent_type, override))
     assert decision is not None
     output = decision["hookSpecificOutput"]
     assert output["hookEventName"] == "PreToolUse"
     assert output["permissionDecision"] == "deny"
-    assert agent_type in output["permissionDecisionReason"]
-    assert expected in output["permissionDecisionReason"]
+    reason = output["permissionDecisionReason"]
+    assert agent_type in reason
+    assert expected in reason
+    assert "omit model entirely" in reason
 
 
 def test_physical_lv38_validator_opus_override_is_denied():
