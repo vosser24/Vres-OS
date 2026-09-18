@@ -113,6 +113,8 @@ def test_chairman_requires_deterministic_first_routing_and_tiered_workers():
     assert "protected" in lowered
     assert "task_complete_routed" in text
     assert "Host-observed worker model evidence is authoritative" in text
+    assert "must never set the Agent `model` parameter" in text
+    assert "decision_ready=true" in text
 
 
 def test_governed_agents_pin_router_and_execution_model_families():
