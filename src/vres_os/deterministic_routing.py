@@ -16,6 +16,7 @@ _ROUTE_ADJUDICATION_TRIGGERS = {
     "large_change_surface",
     "material_unknowns",
     "material_durable_disagreement",
+    "deep_reasoning",
 }
 
 
