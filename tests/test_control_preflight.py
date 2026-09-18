@@ -64,11 +64,13 @@ def test_read_only_hold_denies_mutation_but_allows_inspection():
         "Glob",
         "Grep",
         "TaskOutput",
+        "ToolSearch",
         "mcp__plugin_vres-os_vres__routing_evidence",
         "mcp__plugin_vres-os_vres__orchestration_evidence",
         "mcp__plugin_vres-os_vres__validation_evidence",
         "mcp__plugin_vres-os_vres__vres_status",
         "mcp__plugin_vres-os_vres__task_open_list",
+        "mcp__plugin_vres-os_vres__capability_resolve",
         "mcp__plugin_vres-os_vres__task_reply_gate",
         "mcp__plugin_vres-os_vres__reply_activity_observe",
     ]
@@ -117,3 +119,16 @@ def test_stage_user_instruction_uses_only_trusted_stage_function(monkeypatch):
     assert stage_user_instruction(7, "S-LV38", "Inspection only.\nDo not resume or add evidence.") is True
     assert len(calls) == 1
     assert calls[0][1][0:4] == (7, "S-LV38", "Inspection only.\nDo not resume or add evidence.", "user_prompt")
+
+
+def test_plugin_pretool_matcher_exempts_inspection_discovery_and_capability_resolve():
+    import json
+    from pathlib import Path
+
+    hooks_path = Path(__file__).parents[1] / "plugins" / "vres-os" / "hooks" / "hooks.json"
+    hooks = json.loads(hooks_path.read_text(encoding="utf-8"))
+    matcher = hooks["hooks"]["PreToolUse"][0]["matcher"]
+
+    assert "ToolSearch$" in matcher
+    assert "capability_resolve" in matcher
+    assert "Agent" not in matcher
