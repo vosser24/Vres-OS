@@ -4,7 +4,7 @@ pytest.importorskip("psycopg")
 
 from vres_os.db import connect
 from vres_os.repository import Repository
-from vres_os.session_prompts import stage_user_instruction
+from vres_os.session_prompts import commit_staged_user_instruction_events, stage_user_instruction
 from vres_os.task_lifecycle import transition_task_status
 from vres_os.validation import ValidationService
 
@@ -146,6 +146,92 @@ def test_cancellation_requires_current_explicit_user_instruction(pg_project):
 
     assert _task_snapshot(task)["status"] == "active"
 
+
+
+
+
+def test_cancellation_succeeds_after_same_turn_instruction_was_precommitted(pg_project):
+    repo = Repository()
+    task = repo.begin_task(
+        pg_project,
+        "Cancel precommitted",
+        "Allow durable same-turn cancellation provenance to be reused",
+        "test",
+        "chairman",
+    )
+    sid = "cancel-precommitted-session"
+    _bound_session(repo, pg_project, task, sid)
+    stage_user_instruction(pg_project, sid, "cancel this task")
+
+    committed = commit_staged_user_instruction_events(pg_project, sid, task)
+    assert len(committed) == 1
+    assert committed[0]["event_type"] == "USER_INSTRUCTION"
+    assert committed[0]["text"] == "cancel this task"
+
+    result = transition_task_status(
+        pg_project,
+        task,
+        "cancelled",
+        "User cancellation was already durably committed earlier in this turn",
+        provider_session_id=sid,
+    )
+
+    assert result["status"] == "cancelled"
+    assert _task_snapshot(task)["status"] == "cancelled"
+
+
+def test_newer_non_cancel_instruction_blocks_reuse_of_older_committed_cancel(pg_project):
+    repo = Repository()
+    task = repo.begin_task(
+        pg_project,
+        "Cancel stale authority",
+        "Do not replay an older cancellation after the user changes direction",
+        "test",
+        "chairman",
+    )
+    sid = "cancel-stale-authority-session"
+    _bound_session(repo, pg_project, task, sid)
+
+    stage_user_instruction(pg_project, sid, "cancel this task")
+    committed = commit_staged_user_instruction_events(pg_project, sid, task)
+    assert committed and committed[-1]["text"] == "cancel this task"
+
+    stage_user_instruction(pg_project, sid, "continue the task")
+    with pytest.raises(ValueError, match="explicit current user instruction"):
+        transition_task_status(
+            pg_project,
+            task,
+            "cancelled",
+            "Older committed cancellation must not override the newer user instruction",
+            provider_session_id=sid,
+        )
+
+    assert _task_snapshot(task)["status"] == "active"
+
+
+def test_committed_cancellation_authority_cannot_cross_task_binding(pg_project):
+    repo = Repository()
+    first = repo.begin_task(pg_project, "First", "First task", "test", "chairman")
+    second = repo.begin_task(pg_project, "Second", "Second task", "test", "chairman")
+    sid = "cancel-cross-task-session"
+    _bound_session(repo, pg_project, first, sid)
+
+    stage_user_instruction(pg_project, sid, "cancel this task")
+    committed = commit_staged_user_instruction_events(pg_project, sid, first)
+    assert committed and committed[-1]["text"] == "cancel this task"
+
+    repo.bind_session(pg_project, sid, second)
+    with pytest.raises(ValueError, match="different task"):
+        transition_task_status(
+            pg_project,
+            second,
+            "cancelled",
+            "Cancellation authority from the first task must not transfer",
+            provider_session_id=sid,
+        )
+
+    assert _task_snapshot(first)["status"] == "active"
+    assert _task_snapshot(second)["status"] == "active"
 
 def test_cancellation_preserves_state_persists_user_authority_and_unbinds_sessions(pg_project):
     repo = Repository()
