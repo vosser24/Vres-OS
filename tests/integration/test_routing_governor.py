@@ -8,6 +8,7 @@ import pytest
 from vres_os.orchestration import OrchestrationService, ROUTABLE_ROLES
 from vres_os.repository import Repository
 from vres_os.routing import RoutingService
+from vres_os.validation import ValidationService
 
 
 def _task_and_session(pid: int) -> tuple[str, str]:
@@ -363,3 +364,94 @@ def test_real_discovery_gap_must_block_before_project_capability_acquisition(pg_
     )
     assert result["outcome"] == "blocked"
     assert result["required_gap_needs"] == [need]
+
+
+
+def test_protected_routed_validation_requires_decision_ready_final(pg_project, tmp_path):
+    pid = pg_project
+    task_key, session_id = _task_and_session(pid)
+    need = "pricing"
+    discovery, pricing = _pricing_discovery(pid, task_key, session_id, need)
+    routing = RoutingService()
+    prepared = routing.prepare(
+        project_id=pid,
+        task_key=task_key,
+        session_id=session_id,
+        discovery_key=discovery["discovery_key"],
+        risk_triggers=["acceptance_test"],
+    )
+    routing._record_validated_decision(
+        project_id=pid,
+        request_key=prepared["request_key"],
+        report=_route_report(
+            prepared["request_key"],
+            need,
+            pricing["capability_key"],
+            tier="sonnet",
+            assurance="protected",
+        ),
+        observed_model="claude-fable-5",
+        agent_id=f"router-{uuid.uuid4().hex}",
+        session_id=session_id,
+    )
+    orchestration = OrchestrationService()
+    plan = orchestration.record_plan(
+        project_id=pid,
+        task_key=task_key,
+        session_id=session_id,
+        discovery_key=discovery["discovery_key"],
+        lead_role="commercial-director",
+        selected_experts=[
+            {
+                "role": "commercial-director",
+                "rationale": "Single governed pricing owner.",
+                "covers": [need],
+                "capability_keys": [pricing["capability_key"]],
+            }
+        ],
+        excluded_experts=_excluded("commercial-director"),
+        routing_rationale="Match the protected route exactly.",
+    )
+    report = orchestration.record_expert_report(
+        project_id=pid,
+        task_key=task_key,
+        session_id=session_id,
+        plan_key=plan["plan_key"],
+        role="commercial-director",
+        recommendation="Use the bounded recommendation.",
+        evidence=[{"kind": "integration", "result": "evidence"}],
+    )
+    blocked_final = orchestration.finalize(
+        project_id=pid,
+        task_key=task_key,
+        session_id=session_id,
+        plan_key=plan["plan_key"],
+        synthesis="The analysis is complete but one residual unknown is still marked blocking.",
+        accepted_report_keys=[report["report_key"]],
+        reused_capability_keys=[pricing["capability_key"]],
+        unresolved_unknowns=["blocking integration unknown"],
+    )
+    assert blocked_final["decision_ready"] is False
+
+    artifact = tmp_path / "review.md"
+    artifact.write_text("review me", encoding="utf-8")
+    validation = ValidationService()
+
+    with pytest.raises(ValueError, match="decision-ready orchestration final"):
+        validation.prepare(task_key, pid, tmp_path, ["review.md"])
+
+    ready_final = orchestration.finalize(
+        project_id=pid,
+        task_key=task_key,
+        session_id=session_id,
+        plan_key=plan["plan_key"],
+        synthesis="The residual item was classified as non-blocking; the routed decision is ready.",
+        accepted_report_keys=[report["report_key"]],
+        reused_capability_keys=[pricing["capability_key"]],
+        unresolved_unknowns=[],
+    )
+    assert ready_final["decision_ready"] is True
+
+    prepared_validation = validation.prepare(task_key, pid, tmp_path, ["review.md"])
+    assert prepared_validation["task_key"] == task_key
+    assert prepared_validation["validator"] == "vres-os:validator"

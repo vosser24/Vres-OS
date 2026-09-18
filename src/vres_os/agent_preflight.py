@@ -30,19 +30,13 @@ _LEGACY_ROLE_AGENT_TYPES = {
 }
 
 
-def _matches_family(model: str, family: str) -> bool:
-    normalized = model.strip().lower()
-    return normalized == family or normalized.startswith(f"claude-{family}-")
-
-
 def evaluate_agent_preflight(payload: dict[str, Any]) -> dict[str, Any] | None:
-    """Deny incompatible or non-canonical governed launches before Agent executes.
+    """Deny explicit model overrides and non-canonical governed launches before execution.
 
-    An absent override is allowed so governed agent frontmatter remains authoritative.
-    SubagentStop host observation remains the independent post-run evidence layer.
-    Routed expert roles execute only through vres-os:sonnet-expert or
-    vres-os:opus-expert according to the persisted execution tier. The old role-
-    specific agent surfaces are reference assets, not governed execution surfaces.
+    Governed agent frontmatter is the sole launch-time model-family authority. The
+    Chairman must omit Agent.model entirely; SubagentStop host observation remains
+    the independent post-run evidence layer. Routed expert roles execute only through
+    vres-os:sonnet-expert or vres-os:opus-expert according to the persisted tier.
     """
     if payload.get("hook_event_name") != "PreToolUse" or payload.get("tool_name") != "Agent":
         return None
@@ -69,17 +63,17 @@ def evaluate_agent_preflight(payload: dict[str, Any]) -> dict[str, Any] | None:
     if expected is None:
         return None
     model = str(tool_input.get("model") or "").strip()
-    if not model or _matches_family(model, expected):
+    if not model:
         return None
     return {
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
             "permissionDecisionReason": (
-                f"Governed agent {agent_type} requires the {expected} model family. "
-                f"Remove the incompatible model override '{model}' or use {expected}. "
-                "This Agent call did not execute: retry the same governed launch/request with the correct or no "
-                "override; do not regenerate upstream routing or validation state solely because of this denial."
+                f"Governed agent {agent_type} pins the {expected} model family in its agent frontmatter. "
+                f"Remove the explicit model override '{model}'. Governed Agent calls must omit model entirely "
+                "so model choice has one authority surface. This Agent call did not execute: retry the same "
+                "governed launch/request without regenerating routing, validation, plans, or reports."
             ),
         }
     }

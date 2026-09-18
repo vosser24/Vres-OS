@@ -211,6 +211,23 @@ class ValidationService:
                 or row["status"] not in {"active", "blocked", "waiting_user"}
             ):
                 raise ValueError("Validation must target an unfinished task in this project")
+            routed = conn.execute(
+                "SELECT 1 FROM vres.routing_requests "
+                "WHERE task_id=%s AND status='routed' LIMIT 1",
+                (row["task_id"],),
+            ).fetchone()
+            if routed:
+                final = conn.execute(
+                    "SELECT payload FROM vres.task_events "
+                    "WHERE task_id=%s AND event_type='ORCHESTRATION_FINAL' "
+                    "ORDER BY id DESC LIMIT 1",
+                    (row["task_id"],),
+                ).fetchone()
+                if not final or final["payload"].get("decision_ready") is not True:
+                    raise ValueError(
+                        "Routed task must have a latest decision-ready orchestration final "
+                        "before protected validation can be prepared"
+                    )
             conn.execute(
                 "UPDATE vres.task_state SET validation_status='pending' WHERE task_id=%s",
                 (row["task_id"],),
