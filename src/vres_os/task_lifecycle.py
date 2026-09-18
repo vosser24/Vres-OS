@@ -6,7 +6,7 @@ from typing import Any
 
 from .db import connect
 from .redaction import redact
-from .session_prompts import commit_staged_user_instruction_events, latest_staged_user_instruction
+from .session_prompts import commit_staged_user_instruction_events, latest_observed_user_instruction
 
 _TRANSITIONS = {
     "active": {"waiting_user", "blocked", "cancelled"},
@@ -75,11 +75,21 @@ def _authorize_cancel_instruction(
 ) -> None:
     if not provider_session_id:
         raise ValueError("Cancelling a task requires the current provider session")
-    text = latest_staged_user_instruction(project_id, provider_session_id)
-    if not isinstance(text, str) or not _is_explicit_cancel_instruction(text):
+    observed = latest_observed_user_instruction(project_id, provider_session_id)
+    text = str(observed.get("text") or "") if observed else ""
+    if not observed or not _is_explicit_cancel_instruction(text):
         raise ValueError(
             "Cancelling a task requires an explicit current user instruction such as 'cancel this task'"
         )
+
+    committed_event_id = observed.get("committed_event_id")
+    if committed_event_id is not None:
+        if str(observed.get("committed_task_key") or "") != task_key:
+            raise ValueError(
+                "Cancellation user instruction was already committed to a different task"
+            )
+        return
+
     events = commit_staged_user_instruction_events(project_id, provider_session_id, task_key)
     if not any(
         event.get("event_type") == "USER_INSTRUCTION"
