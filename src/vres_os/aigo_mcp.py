@@ -98,6 +98,7 @@ def project_agent_search(
 def capability_acquire_project(
     task_key: str,
     session_id: str,
+    gap_need: str,
     capability_key: str,
     name: str,
     description: str,
@@ -105,11 +106,10 @@ def capability_acquire_project(
     acquisition_evidence: dict[str, Any],
     domain: str | None = None,
 ) -> dict[str, Any]:
-    """Register newly acquired expertise only in the current project with provenance.
+    """Register project expertise only for an exact gap confirmed by the latest blocked route.
 
-    Use only after the Fable routing governor has confirmed a real discovery gap. This
-    does not publish company-wide capability authority and does not mark the
-    capability proven. Proof still requires a completed task with protected validation.
+    gap_need must be one of that route's required_gap_needs and one of its discovery's
+    missing_capabilities. This never publishes company-wide authority or marks proof.
     """
     pid, _ = _project()
     sid = _current_session(pid, session_id)
@@ -118,6 +118,7 @@ def capability_acquire_project(
         project_id=pid,
         task_key=task_key,
         session_id=sid,
+        gap_need=gap_need,
         capability_key=capability_key,
         name=name,
         description=description,

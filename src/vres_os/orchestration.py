@@ -301,6 +301,7 @@ class OrchestrationService:
         project_id: int,
         task_key: str,
         session_id: str,
+        gap_need: str,
         capability_key: str,
         name: str,
         description: str,
@@ -310,6 +311,9 @@ class OrchestrationService:
     ) -> dict[str, Any]:
         if not acquisition_evidence:
             raise ValueError("Project capability acquisition requires provenance/evidence")
+        gap = str(gap_need or "").strip()
+        if not gap or len(gap) > 500:
+            raise ValueError("gap_need is required and must be <= 500 characters")
         owner_role = owner_role.strip()
         if not owner_role or len(owner_role) > 200:
             raise ValueError("owner_role is required and must be <= 200 characters")
@@ -317,27 +321,113 @@ class OrchestrationService:
             raise ValueError(
                 "Newly acquired project expertise must use an explicit specialist owner role, not relabel a stable executive role"
             )
-        with connect() as conn:
-            self._bound_task(conn, project_id, task_key, session_id)
-        key = CapabilityService().register_project(
-            key=capability_key,
-            name=name,
-            description=description,
-            domain=domain,
-            owner_role=owner_role,
-            project_id=project_id,
-            task_key=task_key,
-            acquisition_evidence=acquisition_evidence,
-        )
-        payload = {
-            "capability_key": key,
-            "scope": "project",
-            "owner_role": owner_role,
-            "domain": domain,
-            "acquisition_evidence": redact(acquisition_evidence),
-        }
+
         with connect() as conn, conn.transaction():
             task = self._bound_task(conn, project_id, task_key, session_id)
+            route = conn.execute(
+                """
+                SELECT request_key,discovery_key,status,decision
+                  FROM vres.routing_requests
+                 WHERE task_id=%s
+                 ORDER BY id DESC
+                 LIMIT 1
+                """,
+                (task["id"],),
+            ).fetchone()
+            if not route or route["status"] != "blocked":
+                raise ValueError(
+                    "Project capability acquisition requires the task's latest route to be governor-blocked"
+                )
+            decision = dict(route.get("decision") or {})
+            required = {str(x) for x in decision.get("required_gap_needs") or []}
+            if gap not in required:
+                raise ValueError(
+                    "gap_need is not authorized by the latest blocked routing decision"
+                )
+            conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
+                (
+                    f"capability-gap:{task['id']}:{route['request_key']}:{gap}",
+                ),
+            )
+            discovery = self._event_by_key(
+                conn,
+                int(task["id"]),
+                "ORCHESTRATION_DISCOVERY",
+                "discovery_key",
+                str(route["discovery_key"]),
+            )["payload"]
+            missing = {str(x) for x in discovery.get("missing_capabilities") or []}
+            if gap not in missing:
+                raise ValueError(
+                    "gap_need is not missing in the blocked route's recorded discovery"
+                )
+            duplicate = conn.execute(
+                """
+                SELECT 1
+                  FROM vres.task_events
+                 WHERE task_id=%s
+                   AND event_type='ORCHESTRATION_CAPABILITY_ACQUIRED'
+                   AND payload->>'routing_request_key'=%s
+                   AND payload->>'gap_need'=%s
+                 LIMIT 1
+                """,
+                (task["id"], route["request_key"], gap),
+            ).fetchone()
+            if duplicate:
+                raise ValueError(
+                    "This governed gap already acquired project expertise; rediscover before adding another specialist"
+                )
+
+            route_key = str(route["request_key"])
+            discovery_key = str(route["discovery_key"])
+            governed_evidence = {
+                **dict(acquisition_evidence),
+                "gap_need": gap,
+                "routing_request_key": route_key,
+                "discovery_key": discovery_key,
+            }
+            key = CapabilityService().register_project(
+                key=capability_key,
+                name=name,
+                description=description,
+                domain=domain,
+                owner_role=owner_role,
+                project_id=project_id,
+                task_key=task_key,
+                acquisition_evidence=governed_evidence,
+                connection=conn,
+            )
+
+            latest = conn.execute(
+                """
+                SELECT request_key,status
+                  FROM vres.routing_requests
+                 WHERE task_id=%s
+                 ORDER BY id DESC
+                 LIMIT 1
+                """,
+                (task["id"],),
+            ).fetchone()
+            if (
+                not latest
+                or latest["request_key"] != route_key
+                or latest["status"] != "blocked"
+            ):
+                raise ValueError(
+                    "Routing changed during capability acquisition; the capability write was rolled back"
+                )
+
+            payload = {
+                "capability_key": key,
+                "scope": "project",
+                "gap_need": gap,
+                "routing_request_key": route_key,
+                "discovery_key": discovery_key,
+                "owner_role": owner_role,
+                "domain": domain,
+                "acquisition_evidence": redact(governed_evidence),
+            }
             event_id = self._insert_event(
                 conn,
                 int(task["id"]),
