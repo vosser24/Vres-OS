@@ -196,6 +196,21 @@ class OrchestrationService:
             raise KeyError(f"Unknown {event_type} record {key_value}")
         return dict(row)
 
+    @staticmethod
+    def _require_latest_plan(conn, task_id: int, plan_key: str) -> None:
+        latest = conn.execute(
+            """
+            SELECT payload->>'plan_key' AS plan_key
+              FROM vres.task_events
+             WHERE task_id=%s AND event_type='ORCHESTRATION_PLAN'
+             ORDER BY id DESC
+             LIMIT 1
+            """,
+            (task_id,),
+        ).fetchone()
+        if not latest or latest["plan_key"] != plan_key:
+            raise ValueError("Only the task's latest orchestration plan may execute or finalize work")
+
     def discover(
         self,
         *,
@@ -456,6 +471,23 @@ class OrchestrationService:
             raise ValueError("expert roster exceeds the bounded orchestration limit")
         with connect() as conn, conn.transaction():
             task = self._bound_task(conn, project_id, task_key, session_id)
+            conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
+                (f"orchestration-start:{project_id}",),
+            )
+            running = conn.execute(
+                """
+                SELECT 1
+                  FROM vres.orchestration_work_units
+                 WHERE task_id=%s AND status='running'
+                 LIMIT 1
+                """,
+                (task["id"],),
+            ).fetchone()
+            if running:
+                raise ValueError(
+                    "Cannot record a new orchestration plan while prior work units are running"
+                )
             discovery = self._event_by_key(
                 conn,
                 int(task["id"]),
@@ -663,6 +695,7 @@ class OrchestrationService:
                 "plan_key",
                 plan_key,
             )["payload"]
+            self._require_latest_plan(conn, int(task["id"]), plan_key)
             selected_roles = {
                 str(item.get("role") or "") for item in plan.get("selected_experts") or []
             }
@@ -758,6 +791,7 @@ class OrchestrationService:
             plan = self._event_by_key(
                 conn, int(task["id"]), "ORCHESTRATION_PLAN", "plan_key", plan_key
             )["payload"]
+            self._require_latest_plan(conn, int(task["id"]), plan_key)
             existing = conn.execute(
                 "SELECT * FROM vres.orchestration_work_units WHERE task_id=%s AND plan_key=%s ORDER BY id",
                 (task["id"], plan_key),
@@ -871,6 +905,7 @@ class OrchestrationService:
             ).fetchone()
             if not task:
                 raise KeyError(task_key)
+            self._require_latest_plan(conn, int(task["id"]), plan_key)
             rows = conn.execute(
                 "SELECT * FROM vres.orchestration_work_units WHERE task_id=%s AND plan_key=%s ORDER BY id",
                 (task["id"], plan_key),
@@ -995,6 +1030,7 @@ class OrchestrationService:
                 "SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
                 (f"orchestration-start:{project_id}",),
             )
+            self._require_latest_plan(conn, int(task["id"]), str(unit["plan_key"]))
             running = conn.execute(
                 """
                 SELECT w.work_unit_key,w.write_scope
@@ -1144,6 +1180,7 @@ class OrchestrationService:
                 "plan_key",
                 plan_key,
             )
+            self._require_latest_plan(conn, int(task["id"]), plan_key)
             roles: set[str] = set()
             for report_key in keys:
                 report = self._event_by_key(
@@ -1236,6 +1273,7 @@ class OrchestrationService:
                 "plan_key",
                 plan_key,
             )["payload"]
+            self._require_latest_plan(conn, int(task["id"]), plan_key)
             selected_roles = {
                 str(item.get("role") or "") for item in plan.get("selected_experts") or []
             }
