@@ -484,6 +484,58 @@ def test_deterministic_acceptance_needs_no_verifier_agent(pg_project, tmp_path):
     }
 
 
+def test_failed_deterministic_acceptance_marks_observed_unit_failed_and_retryable(pg_project, tmp_path):
+    task, sid = _task_and_session(pg_project)
+    orchestration, routing, plan, unit_key, _ = _single_agent_graph(
+        pg_project, task, sid, tmp_path
+    )
+    orchestration.start_work_unit(
+        project_id=pg_project, task_key=task, session_id=sid, work_unit_key=unit_key
+    )
+    report = orchestration.record_expert_report(
+        project_id=pg_project,
+        task_key=task,
+        session_id=sid,
+        plan_key=plan["plan_key"],
+        role="cto",
+        recommendation="The implementation ran its check but did not satisfy acceptance.",
+        evidence=[{"source": "fixture"}],
+        work_unit_key=unit_key,
+        criteria_results=[
+            {
+                "target_work_unit_key": unit_key,
+                "criterion_key": "done",
+                "status": "failed",
+                "evidence": {"command": "pytest", "result": "failed"},
+            }
+        ],
+    )
+    observed = routing._record_worker_observation(
+        project_id=pg_project,
+        task_key=task,
+        plan_key=plan["plan_key"],
+        role="cto",
+        execution_tier="sonnet",
+        agent_type="vres-os:sonnet-expert",
+        agent_id=f"worker-{uuid.uuid4().hex}",
+        session_id=sid,
+        observed_model="claude-sonnet-5",
+        work_unit_key=unit_key,
+    )
+    assert report["report_key"]
+    assert observed["work_unit_accepted"] is False
+    assert observed["failed_criteria"] == ["done"]
+
+    ready = orchestration.ready_work(
+        project_id=pg_project,
+        task_key=task,
+        plan_key=plan["plan_key"],
+        project_root=tmp_path,
+    )
+    assert [row["work_unit_key"] for row in ready["ready"]] == [unit_key]
+    assert ready["ready"][0]["attempt_count"] == 1
+
+
 def test_judgmental_write_acceptance_requires_dependent_report_only_verifier(pg_project, tmp_path):
     task, sid = _task_and_session(pg_project)
     orchestration, _, plan, _, _ = _product_acceptance_graph(
