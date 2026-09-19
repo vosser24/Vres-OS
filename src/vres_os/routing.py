@@ -556,6 +556,145 @@ class RoutingService:
                     return tool_input
         raise ValueError("Expert transcript contains no orchestration_expert_report call")
 
+    @staticmethod
+    def _work_unit_start_tool_input(records: list[dict[str, Any]]) -> dict[str, Any] | None:
+        for obj in reversed(records):
+            if not isinstance(obj, dict):
+                continue
+            message = obj.get("message")
+            observed = message if isinstance(message, dict) else obj
+            content = observed.get("content") if isinstance(observed, dict) else None
+            if not isinstance(content, list):
+                continue
+            for block in reversed(content):
+                if not isinstance(block, dict) or block.get("type") != "tool_use":
+                    continue
+                if not str(block.get("name") or "").endswith("orchestration_work_unit_start"):
+                    continue
+                tool_input = block.get("input")
+                if isinstance(tool_input, dict):
+                    return tool_input
+        return None
+
+    def _record_failed_worker_observation(
+        self,
+        *,
+        project_id: int,
+        agent_type: str,
+        agent_id: str,
+        session_id: str,
+        observed_model: str,
+        reason: str,
+        work_unit_key: str | None = None,
+    ) -> dict[str, Any]:
+        safe_reason = redact_text(str(reason or "").strip()) or "Governed worker attempt was rejected"
+        model = str(observed_model or "").strip() or "unknown"
+        with connect() as conn, conn.transaction():
+            if work_unit_key:
+                rows = conn.execute(
+                    """
+                    SELECT w.*,t.task_key,t.status AS task_status,t.project_id
+                      FROM vres.orchestration_work_units w
+                      JOIN vres.tasks t ON t.id=w.task_id
+                     WHERE t.project_id=%s AND w.work_unit_key=%s
+                       AND w.status IN ('running','failed')
+                     FOR UPDATE OF w
+                    """,
+                    (project_id, work_unit_key),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT w.*,t.task_key,t.status AS task_status,t.project_id
+                      FROM vres.orchestration_work_units w
+                      JOIN vres.tasks t ON t.id=w.task_id
+                     WHERE t.project_id=%s AND w.host_agent_id=%s
+                       AND w.status IN ('running','failed')
+                     ORDER BY w.started_at DESC,w.id DESC
+                     LIMIT 2
+                     FOR UPDATE OF w
+                    """,
+                    (project_id, agent_id),
+                ).fetchall()
+            if len(rows) != 1:
+                raise ValueError("No unique governed work unit is bound to this failed host worker")
+            unit = rows[0]
+            if unit["task_status"] not in _ACTIVE_TASK_STATUSES:
+                raise ValueError("Failed worker observation targets a finished task")
+            bound_agent = str(unit.get("host_agent_id") or "").strip()
+            if bound_agent and bound_agent != agent_id:
+                raise ValueError("Failed worker agent_id does not match the claimed work unit")
+
+            conn.execute(
+                """
+                INSERT INTO vres.worker_runs(
+                  task_id,plan_key,role,execution_tier,work_unit_key,project_agent_key,
+                  agent_type,agent_id,session_id,observed_model,status
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'rejected')
+                ON CONFLICT(agent_id,plan_key,role) DO NOTHING
+                """,
+                (
+                    unit["task_id"],
+                    unit["plan_key"],
+                    unit["role"],
+                    unit["execution_tier"],
+                    unit["work_unit_key"],
+                    unit.get("project_agent_key"),
+                    agent_type,
+                    agent_id,
+                    session_id or None,
+                    model,
+                ),
+            )
+            was_running = unit["status"] == "running"
+            conn.execute(
+                """
+                UPDATE vres.orchestration_work_units
+                   SET status='failed',
+                       host_agent_id=%s,
+                       observed_model=%s,
+                       last_error=CASE WHEN status='running' OR last_error IS NULL THEN %s ELSE last_error END,
+                       completed_at=COALESCE(completed_at,now())
+                 WHERE id=%s
+                """,
+                (agent_id, model, safe_reason, unit["id"]),
+            )
+            conn.execute(
+                """
+                INSERT INTO vres.task_events(task_id,event_type,actor,payload,session_id)
+                VALUES (%s,'ORCHESTRATION_WORKER_ATTEMPT_REJECTED',%s,%s::jsonb,%s)
+                """,
+                (
+                    unit["task_id"],
+                    unit["role"],
+                    json.dumps(
+                        redact(
+                            {
+                                "work_unit_key": unit["work_unit_key"],
+                                "plan_key": unit["plan_key"],
+                                "agent_id": agent_id,
+                                "observed_model": model,
+                                "reason": safe_reason,
+                                "auto_failed_running_unit": was_running,
+                            }
+                        )
+                    ),
+                    session_id or None,
+                ),
+            )
+        return {
+            "recorded": True,
+            "accepted": False,
+            "task_key": unit["task_key"],
+            "plan_key": unit["plan_key"],
+            "role": unit["role"],
+            "work_unit_key": unit["work_unit_key"],
+            "project_agent_key": unit.get("project_agent_key"),
+            "execution_tier": unit["execution_tier"],
+            "observed_model": model,
+            "reason": safe_reason,
+        }
+
     def _record_worker_observation(
         self,
         *,
@@ -699,16 +838,65 @@ class RoutingService:
             _SONNET_AGENT: "sonnet",
             _OPUS_AGENT: "opus",
         }.get(agent_type)
-        if expected_tier is None or not payload.get("agent_id"):
+        agent_id = str(payload.get("agent_id") or "").strip()
+        if expected_tier is None or not agent_id:
             raise ValueError("Only namespaced Sonnet/Opus Vres workers are accepted")
+
         transcript = payload.get("agent_transcript_path")
-        if not transcript:
-            raise ValueError("Missing worker transcript; model identity cannot be verified")
-        records = transcript_tail(Path(transcript).expanduser())
+        records = transcript_tail(Path(transcript).expanduser()) if transcript else []
+        start_input = self._work_unit_start_tool_input(records)
+        started_unit = (
+            str(start_input.get("work_unit_key") or "").strip()
+            if isinstance(start_input, dict)
+            else ""
+        ) or None
         models = _models(records)
+        observed_model = models[-1] if models else "unknown"
+
+        if not transcript:
+            try:
+                return self._record_failed_worker_observation(
+                    project_id=project_id,
+                    agent_type=agent_type,
+                    agent_id=agent_id,
+                    session_id=str(payload.get("session_id") or ""),
+                    observed_model=observed_model,
+                    reason="Missing worker transcript; model identity cannot be verified",
+                    work_unit_key=started_unit,
+                )
+            except ValueError:
+                raise ValueError("Missing worker transcript; model identity cannot be verified")
+
         if not models or not all(_family_matches(model, expected_tier) for model in models):
-            raise ValueError(f"Observed worker model does not match required {expected_tier} tier")
-        tool_input = self._expert_tool_input(records)
+            try:
+                return self._record_failed_worker_observation(
+                    project_id=project_id,
+                    agent_type=agent_type,
+                    agent_id=agent_id,
+                    session_id=str(payload.get("session_id") or ""),
+                    observed_model=observed_model,
+                    reason=f"Observed worker model does not match required {expected_tier} tier",
+                    work_unit_key=started_unit,
+                )
+            except ValueError:
+                raise ValueError(f"Observed worker model does not match required {expected_tier} tier")
+
+        try:
+            tool_input = self._expert_tool_input(records)
+        except ValueError as exc:
+            try:
+                return self._record_failed_worker_observation(
+                    project_id=project_id,
+                    agent_type=agent_type,
+                    agent_id=agent_id,
+                    session_id=str(payload.get("session_id") or ""),
+                    observed_model=observed_model,
+                    reason="Governed worker stopped without a valid orchestration expert report",
+                    work_unit_key=started_unit,
+                )
+            except ValueError:
+                raise exc
+
         task_key = str(tool_input.get("task_key") or "").strip()
         plan_key = str(tool_input.get("plan_key") or "").strip()
         role = str(tool_input.get("role") or "").strip()
@@ -725,9 +913,9 @@ class RoutingService:
             work_unit_key=work_unit_key,
             project_agent_key=project_agent_key,
             agent_type=agent_type,
-            agent_id=str(payload["agent_id"]),
+            agent_id=agent_id,
             session_id=str(payload.get("session_id") or ""),
-            observed_model=models[-1],
+            observed_model=observed_model,
         )
 
     def _completion_contract(self, *, project_id: int, task_key: str) -> dict[str, Any]:
