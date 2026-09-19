@@ -170,6 +170,7 @@ def orchestration_expert_report(
     assumptions: list[str] | None = None,
     unknowns: list[str] | None = None,
     report_type: str = "expert",
+    work_unit_key: str | None = None,
 ) -> dict[str, Any]:
     """Persist one selected expert's evidence, recommendation, assumptions and unknowns.
 
@@ -191,6 +192,79 @@ def orchestration_expert_report(
         assumptions=assumptions,
         unknowns=unknowns,
         report_type=report_type,
+        work_unit_key=work_unit_key,
+    )
+
+
+@mcp.tool()
+def orchestration_work_graph_record(
+    task_key: str,
+    session_id: str,
+    plan_key: str,
+    units: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Persist one dependency graph for the governed plan; dependencies are the only readiness source."""
+    pid, project = _project()
+    sid = _current_session(pid, session_id)
+    _require_node("task", task_key, write=True)
+    return OrchestrationService().record_work_graph(
+        project_id=pid,
+        task_key=task_key,
+        session_id=sid,
+        plan_key=plan_key,
+        units=units,
+        project_root=project.root,
+    )
+
+
+@mcp.tool()
+def orchestration_work_ready(task_key: str, plan_key: str) -> dict[str, Any]:
+    """Return all currently ready work units so independent assignments can be dispatched in one parallel turn."""
+    pid, project = _project()
+    _require_node("task", task_key)
+    return OrchestrationService().ready_work(
+        project_id=pid,
+        task_key=task_key,
+        plan_key=plan_key,
+        project_root=project.root,
+    )
+
+
+@mcp.tool()
+def orchestration_work_unit_start(
+    task_key: str,
+    session_id: str,
+    work_unit_key: str,
+) -> dict[str, Any]:
+    """Atomically claim one ready unit, rejecting unmet dependencies or overlapping running write scopes."""
+    pid, _ = _project()
+    sid = _current_session(pid, session_id)
+    _require_node("task", task_key, write=True)
+    return OrchestrationService().start_work_unit(
+        project_id=pid,
+        task_key=task_key,
+        session_id=sid,
+        work_unit_key=work_unit_key,
+    )
+
+
+@mcp.tool()
+def orchestration_work_unit_fail(
+    task_key: str,
+    session_id: str,
+    work_unit_key: str,
+    error: str,
+) -> dict[str, Any]:
+    """Persist one failed attempt; successful independent siblings remain accepted and are not rerun."""
+    pid, _ = _project()
+    sid = _current_session(pid, session_id)
+    _require_node("task", task_key, write=True)
+    return OrchestrationService().fail_work_unit(
+        project_id=pid,
+        task_key=task_key,
+        session_id=sid,
+        work_unit_key=work_unit_key,
+        error=error,
     )
 
 
