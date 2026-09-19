@@ -33,6 +33,8 @@ _MAX_NEEDS = 20
 _MAX_QUERIES = 10
 _MAX_EXPERTS = 20
 _MAX_EVIDENCE = 20
+_MAX_CRITERIA = 20
+_MAX_CRITERIA_RESULTS = 60
 _MAX_PARALLEL_WORKERS = 4
 _SPECIALIST_PREFIXES = ("specialist-", "specialist:")
 
@@ -56,6 +58,90 @@ def _strings(values: list[str] | None, *, limit: int, field: str) -> list[str]:
         out.append(value)
         if len(out) > limit:
             raise ValueError(f"{field} exceeds the maximum of {limit} entries")
+    return out
+
+
+def _acceptance_criteria(values: list[dict[str, Any]] | None) -> list[dict[str, str]]:
+    if values is None:
+        return []
+    if not isinstance(values, list):
+        raise ValueError("acceptance_criteria must be a list")
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for raw in values:
+        if not isinstance(raw, dict):
+            raise ValueError("acceptance_criteria entries must be objects")
+        key = str(raw.get("key") or "").strip()
+        statement = str(raw.get("statement") or "").strip()
+        verification = str(raw.get("verification") or "").strip().lower()
+        if not key or len(key) > 100:
+            raise ValueError("acceptance criterion key is required and must be <= 100 characters")
+        if key in seen:
+            raise ValueError(f"Duplicate acceptance criterion key {key!r}")
+        if not statement or len(statement) > 1000:
+            raise ValueError(
+                "acceptance criterion statement is required and must be <= 1000 characters"
+            )
+        if verification not in {"deterministic", "judgmental"}:
+            raise ValueError(
+                "acceptance criterion verification must be deterministic or judgmental"
+            )
+        seen.add(key)
+        out.append(
+            {
+                "key": key,
+                "statement": statement,
+                "verification": verification,
+            }
+        )
+        if len(out) > _MAX_CRITERIA:
+            raise ValueError(
+                f"acceptance_criteria exceeds the maximum of {_MAX_CRITERIA} entries"
+            )
+    return out
+
+
+def _criteria_results(values: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    if values is None:
+        return []
+    if not isinstance(values, list):
+        raise ValueError("criteria_results must be a list")
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for raw in values:
+        if not isinstance(raw, dict):
+            raise ValueError("criteria_results entries must be objects")
+        target = str(raw.get("target_work_unit_key") or "").strip()
+        criterion = str(raw.get("criterion_key") or "").strip()
+        status = str(raw.get("status") or "").strip().lower()
+        evidence = raw.get("evidence")
+        if not criterion or len(criterion) > 100:
+            raise ValueError("criteria result criterion_key is required and must be <= 100 characters")
+        if target and len(target) > 200:
+            raise ValueError("criteria result target_work_unit_key must be <= 200 characters")
+        if status not in {"passed", "failed", "not_run"}:
+            raise ValueError("criteria result status must be passed, failed, or not_run")
+        if evidence is None or evidence == "" or evidence == {} or evidence == []:
+            raise ValueError("criteria result requires concrete evidence")
+        encoded = json.dumps(evidence, ensure_ascii=False, default=str)
+        if len(encoded) > 5000:
+            raise ValueError("criteria result evidence must serialize to <= 5000 characters")
+        identity = (target, criterion)
+        if identity in seen:
+            raise ValueError("criteria_results may contain each target/criterion only once")
+        seen.add(identity)
+        out.append(
+            {
+                "target_work_unit_key": target or None,
+                "criterion_key": criterion,
+                "status": status,
+                "evidence": evidence,
+            }
+        )
+        if len(out) > _MAX_CRITERIA_RESULTS:
+            raise ValueError(
+                f"criteria_results exceeds the maximum of {_MAX_CRITERIA_RESULTS} entries"
+            )
     return out
 
 
