@@ -7,6 +7,7 @@ import pytest
 
 pytest.importorskip("psycopg")
 
+from vres_os.deterministic_routing import try_deterministic_route
 from vres_os.orchestration import OrchestrationService, ROUTABLE_ROLES
 from vres_os.project_agents import ProjectAgentService
 from vres_os.repository import Repository
@@ -303,14 +304,14 @@ def test_report_only_project_agent_cannot_receive_write_scope(pg_project, tmp_pa
         project_root=tmp_path,
     )
     routing = RoutingService()
-    prepared = routing.prepare(
+    prepared = try_deterministic_route(
         project_id=pg_project,
         task_key=task,
         session_id=sid,
         discovery_key=discovery["discovery_key"],
         risk_triggers=[],
     )
-    assert prepared["routing_mode"] == "deterministic"
+    assert prepared is not None and prepared["routing_mode"] == "deterministic"
     decision = prepared["decision"]
     assert decision["experts"][0]["agent_key"] == key
     plan = orchestration.record_plan(
@@ -365,13 +366,14 @@ def test_host_observed_worker_evidence_binds_exact_project_agent_and_work_unit(p
         project_root=tmp_path,
     )
     routed = RoutingService()
-    prepared = routed.prepare(
+    prepared = try_deterministic_route(
         project_id=pg_project,
         task_key=task,
         session_id=sid,
         discovery_key=discovery["discovery_key"],
         risk_triggers=[],
     )
+    assert prepared is not None
     assert prepared["decision"]["experts"][0]["agent_key"] == key
     plan = orchestration.record_plan(
         project_id=pg_project,
