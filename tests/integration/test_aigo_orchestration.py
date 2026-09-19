@@ -4,6 +4,7 @@ import pytest
 
 from vres_os.orchestration import OrchestrationService, ROUTABLE_ROLES
 from vres_os.repository import Repository
+from vres_os.routing import RoutingService
 
 
 def _task_and_session(pid: int) -> tuple[str, str]:
@@ -29,12 +30,15 @@ def _excluded(*selected: str) -> list[dict[str, str]]:
     ]
 
 
-def test_missing_capability_is_acquired_project_locally_then_rediscovered(pg_project):
+def test_missing_capability_requires_blocked_gap_then_acquires_once_and_rediscoveres(pg_project):
     pid = pg_project
     task_key, session_id = _task_and_session(pid)
     service = OrchestrationService()
+    routing = RoutingService()
     token = uuid.uuid4().hex
     need = f"rare-{token} regulatory geometry"
+    capability_key = f"cap.project.{token}"
+    owner_role = f"specialist-{token[:8]}"
 
     first = service.discover(
         project_id=pid,
@@ -44,12 +48,64 @@ def test_missing_capability_is_acquired_project_locally_then_rediscovered(pg_pro
     )
     assert first["missing_capabilities"] == [need]
 
-    capability_key = f"cap.project.{token}"
-    owner_role = f"specialist-{token[:8]}"
+    with pytest.raises(ValueError, match="latest route to be governor-blocked"):
+        service.acquire_project_capability(
+            project_id=pid,
+            task_key=task_key,
+            session_id=session_id,
+            gap_need=need,
+            capability_key=capability_key,
+            name=f"Rare {token} Regulatory Geometry",
+            description=f"Expertise for {need} with bounded project-only use.",
+            domain="specialist",
+            owner_role=owner_role,
+            acquisition_evidence={"source": "integration-test"},
+        )
+
+    prepared = routing.prepare(
+        project_id=pid,
+        task_key=task_key,
+        session_id=session_id,
+        discovery_key=first["discovery_key"],
+        risk_triggers=["new_capability_gap"],
+    )
+    blocked = routing._record_validated_decision(
+        project_id=pid,
+        request_key=prepared["request_key"],
+        report={
+            "request_key": prepared["request_key"],
+            "outcome": "blocked",
+            "lead_role": None,
+            "experts": [],
+            "assurance": None,
+            "routing_rationale": "The discovery has one genuine unowned specialist need.",
+            "required_gap_needs": [need],
+        },
+        observed_model="claude-fable-5",
+        agent_id=f"router-{uuid.uuid4().hex}",
+        session_id=session_id,
+    )
+    assert blocked["outcome"] == "blocked"
+
+    with pytest.raises(ValueError, match="not authorized by the latest blocked routing decision"):
+        service.acquire_project_capability(
+            project_id=pid,
+            task_key=task_key,
+            session_id=session_id,
+            gap_need=f"wrong-{token}",
+            capability_key=f"{capability_key}.wrong",
+            name="Wrong specialist",
+            description="Must not be authorized by a different blocked gap.",
+            domain="specialist",
+            owner_role=f"specialist-wrong-{token[:6]}",
+            acquisition_evidence={"source": "integration-test"},
+        )
+
     acquired = service.acquire_project_capability(
         project_id=pid,
         task_key=task_key,
         session_id=session_id,
+        gap_need=need,
         capability_key=capability_key,
         name=f"Rare {token} Regulatory Geometry",
         description=f"Expertise for {need} with bounded project-only use.",
@@ -61,6 +117,23 @@ def test_missing_capability_is_acquired_project_locally_then_rediscovered(pg_pro
         },
     )
     assert acquired["scope"] == "project"
+    assert acquired["gap_need"] == need
+    assert acquired["routing_request_key"] == prepared["request_key"]
+    assert acquired["discovery_key"] == first["discovery_key"]
+
+    with pytest.raises(ValueError, match="already acquired project expertise"):
+        service.acquire_project_capability(
+            project_id=pid,
+            task_key=task_key,
+            session_id=session_id,
+            gap_need=need,
+            capability_key=f"{capability_key}.duplicate",
+            name="Duplicate specialist",
+            description="A second specialist for the same blocked gap must require rediscovery.",
+            domain="specialist",
+            owner_role=f"specialist-duplicate-{token[:6]}",
+            acquisition_evidence={"source": "integration-test"},
+        )
 
     second = service.discover(
         project_id=pid,
@@ -72,6 +145,40 @@ def test_missing_capability_is_acquired_project_locally_then_rediscovered(pg_pro
     assert second["capability_matches"][need][0]["capability_key"] == capability_key
     assert second["capability_matches"][need][0]["project_id"] == pid
 
+    second_route = routing.prepare(
+        project_id=pid,
+        task_key=task_key,
+        session_id=session_id,
+        discovery_key=second["discovery_key"],
+        risk_triggers=[],
+    )
+    routed = routing._record_validated_decision(
+        project_id=pid,
+        request_key=second_route["request_key"],
+        report={
+            "request_key": second_route["request_key"],
+            "outcome": "routed",
+            "lead_role": owner_role,
+            "experts": [
+                {
+                    "role": owner_role,
+                    "agent_key": None,
+                    "covers": [need],
+                    "capability_keys": [capability_key],
+                    "execution_tier": "sonnet",
+                    "rationale": "Use the one newly discovered project specialist.",
+                }
+            ],
+            "assurance": "routine",
+            "routing_rationale": "One qualified project specialist is now the smallest competent team.",
+            "required_gap_needs": [],
+        },
+        observed_model="claude-fable-5",
+        agent_id=f"router-{uuid.uuid4().hex}",
+        session_id=session_id,
+    )
+    assert routed["outcome"] == "routed"
+
     plan = service.record_plan(
         project_id=pid,
         task_key=task_key,
@@ -81,6 +188,7 @@ def test_missing_capability_is_acquired_project_locally_then_rediscovered(pg_pro
         selected_experts=[
             {
                 "role": owner_role,
+                "agent_key": None,
                 "rationale": "Only discovered owner for the required rare capability.",
                 "covers": [need],
                 "capability_keys": [capability_key],
@@ -131,6 +239,7 @@ def test_acquisition_cannot_relabel_a_stable_executive_as_missing_expertise(pg_p
             project_id=pid,
             task_key=task_key,
             session_id=session_id,
+            gap_need="synthetic-stable-role-gap",
             capability_key=f"cap.project.{uuid.uuid4().hex}",
             name="Invented extension of finance",
             description="Must not silently teach a stable executive a missing capability.",
