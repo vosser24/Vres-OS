@@ -907,6 +907,41 @@ class OrchestrationService:
             "event_id": event_id,
         }
 
+    def bind_work_unit_host(
+        self,
+        *,
+        project_id: int,
+        work_unit_key: str,
+        agent_id: str,
+    ) -> dict[str, Any]:
+        agent = str(agent_id or "").strip()
+        if not agent:
+            raise ValueError("Work-unit host binding requires agent_id")
+        with connect() as conn, conn.transaction():
+            unit = conn.execute(
+                """
+                SELECT w.id,w.work_unit_key,w.status,w.host_agent_id,t.project_id
+                  FROM vres.orchestration_work_units w
+                  JOIN vres.tasks t ON t.id=w.task_id
+                 WHERE w.work_unit_key=%s
+                 FOR UPDATE OF w
+                """,
+                (work_unit_key,),
+            ).fetchone()
+            if not unit or int(unit["project_id"] or 0) != int(project_id):
+                raise ValueError("Work unit is unknown or belongs to another project")
+            if unit["status"] != "running":
+                raise ValueError("Only a running work unit can bind host agent identity")
+            current = str(unit.get("host_agent_id") or "").strip()
+            if current and current != agent:
+                raise ValueError("Work unit is already bound to another host agent")
+            conn.execute(
+                "UPDATE vres.orchestration_work_units SET host_agent_id=%s WHERE id=%s",
+                (agent, unit["id"]),
+            )
+        return {"work_unit_key": work_unit_key, "agent_id": agent, "bound": True}
+
+
     def fail_work_unit(
         self,
         *,
