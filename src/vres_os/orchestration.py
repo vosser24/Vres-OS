@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from .capabilities import CapabilityService
 from .db import connect
 from .knowledge import KnowledgeService
 from .procedures import ProcedureService
+from .project_agents import ProjectAgentService
 from .redaction import redact, redact_text
 
 
@@ -157,6 +159,7 @@ class OrchestrationService:
         procedure_intent: str | None = None,
         task_family: str | None = None,
         knowledge_queries: list[str] | None = None,
+        project_root: Path | None = None,
     ) -> dict[str, Any]:
         needs = _strings(capability_needs, limit=_MAX_NEEDS, field="capability_needs")
         if not needs:
@@ -175,6 +178,30 @@ class OrchestrationService:
             for need in needs
         }
         missing = [need for need in needs if not capabilities[need]]
+
+        project_agents = (
+            ProjectAgentService().search(
+                project_id=project_id,
+                root=project_root,
+            )
+            if project_root is not None
+            else []
+        )
+        agent_matches: dict[str, list[dict[str, Any]]] = {}
+        for need, rows in capabilities.items():
+            allowed = {
+                (str(row.get("capability_key") or ""), str(row.get("owner_role") or ""))
+                for row in rows
+            }
+            matched: list[dict[str, Any]] = []
+            for agent in project_agents:
+                if any(
+                    capability_key in set(agent["capability_keys"])
+                    and owner == agent["role"]
+                    for capability_key, owner in allowed
+                ):
+                    matched.append(agent)
+            agent_matches[need] = matched
 
         procedures: list[dict[str, Any]] = []
         if procedure_intent:
@@ -203,6 +230,7 @@ class OrchestrationService:
             "capability_needs": needs,
             "capability_matches": capabilities,
             "missing_capabilities": missing,
+            "agent_matches": agent_matches,
             "procedure_intent": procedure_intent or None,
             "procedure_matches": procedures,
             "knowledge_queries": queries,
