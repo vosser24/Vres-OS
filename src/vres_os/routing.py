@@ -750,7 +750,7 @@ class RoutingService:
                 unit = conn.execute(
                     """
                     SELECT id,status,project_agent_key,execution_tier,role,report_key,host_agent_id,
-                           acceptance_criteria,verifies
+                           acceptance_criteria,verifies,last_error
                       FROM vres.orchestration_work_units
                      WHERE task_id=%s AND plan_key=%s AND work_unit_key=%s
                      FOR UPDATE
@@ -762,7 +762,7 @@ class RoutingService:
                 if project_agent_key is None:
                     project_agent_key = unit.get("project_agent_key") or None
                 if (
-                    unit["status"] != "running"
+                    unit["status"] not in {"running", "failed"}
                     or not unit.get("report_key")
                     or unit["role"] != role
                     or unit["execution_tier"] != execution_tier
@@ -774,7 +774,8 @@ class RoutingService:
             if unit and unit.get("host_agent_id") and str(unit["host_agent_id"]) != agent_id:
                 raise ValueError("Observed worker agent_id does not match the claimed work unit")
 
-            acceptance_ok = True
+            explicitly_failed = bool(unit and unit["status"] == "failed")
+            acceptance_ok = not explicitly_failed
             failed_criteria: list[str] = []
             if unit and not (unit.get("verifies") or []):
                 report = conn.execute(
@@ -805,7 +806,7 @@ class RoutingService:
                     for key in deterministic
                     if not results.get(key) or results[key].get("status") != "passed"
                 ]
-                acceptance_ok = not failed_criteria
+                acceptance_ok = not failed_criteria and not explicitly_failed
 
             conn.execute(
                 """
@@ -829,7 +830,17 @@ class RoutingService:
                 ),
             )
             if work_unit_key:
-                if acceptance_ok:
+                if explicitly_failed:
+                    conn.execute(
+                        """
+                        UPDATE vres.orchestration_work_units
+                           SET host_agent_id=%s,observed_model=%s,
+                               completed_at=COALESCE(completed_at,now())
+                         WHERE task_id=%s AND plan_key=%s AND work_unit_key=%s
+                        """,
+                        (agent_id, observed_model, task["id"], plan_key, work_unit_key),
+                    )
+                elif acceptance_ok:
                     conn.execute(
                         """
                         UPDATE vres.orchestration_work_units
@@ -875,19 +886,20 @@ class RoutingService:
                         "observed_model": observed_model,
                         "failed_criteria": failed_criteria,
                     }
-                conn.execute(
-                    """
-                    INSERT INTO vres.task_events(task_id,event_type,actor,payload,session_id)
-                    VALUES (%s,%s,%s,%s::jsonb,%s)
-                    """,
-                    (
-                        task["id"],
-                        event_type,
-                        role,
-                        json.dumps(event_payload),
-                        session_id or None,
-                    ),
-                )
+                if not explicitly_failed:
+                    conn.execute(
+                        """
+                        INSERT INTO vres.task_events(task_id,event_type,actor,payload,session_id)
+                        VALUES (%s,%s,%s,%s::jsonb,%s)
+                        """,
+                        (
+                            task["id"],
+                            event_type,
+                            role,
+                            json.dumps(event_payload),
+                            session_id or None,
+                        ),
+                    )
         return {
             "recorded": True,
             "task_key": task_key,
