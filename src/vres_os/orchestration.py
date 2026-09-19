@@ -33,6 +33,7 @@ _MAX_NEEDS = 20
 _MAX_QUERIES = 10
 _MAX_EXPERTS = 20
 _MAX_EVIDENCE = 20
+_MAX_PARALLEL_WORKERS = 4
 _SPECIALIST_PREFIXES = ("specialist-", "specialist:")
 
 
@@ -709,12 +710,16 @@ class OrchestrationService:
                     raise ValueError("Work graph role is absent from the governed route")
                 agent_key = selected_item.get("agent_key") or None
                 if agent_key and project_root is not None:
-                    ProjectAgentService().get(
+                    agent = ProjectAgentService().get(
                         agent_key=str(agent_key),
                         project_id=project_id,
                         root=project_root,
                         include_instruction=False,
                     )
+                    if agent["write_policy"] == "report_only" and scope:
+                        raise ValueError(
+                            f"Report-only project agent {agent_key!r} cannot receive a write scope"
+                        )
                 normalized.append(
                     {
                         "work_unit_key": role_to_key[role],
@@ -782,6 +787,7 @@ class OrchestrationService:
         for row in by_key.values():
             deps = [str(x) for x in row.get("depends_on") or []]
             dep_statuses = {dep: by_key[dep]["status"] for dep in deps if dep in by_key}
+            missing_dependencies = [dep for dep in deps if dep not in by_key]
             item = {
                 "work_unit_key": row["work_unit_key"],
                 "plan_key": plan_key,
@@ -794,6 +800,7 @@ class OrchestrationService:
                 "status": row["status"],
                 "attempt_count": row["attempt_count"],
                 "dependencies": dep_statuses,
+                "missing_dependencies": missing_dependencies,
                 "objective": task["objective"],
                 "worker_agent": (
                     "vres-os:opus-expert"
@@ -807,8 +814,10 @@ class OrchestrationService:
                     project_id=project_id,
                     root=project_root,
                 )
-            if row["status"] in {"pending", "failed"} and all(
-                status == "passed" for status in dep_statuses.values()
+            if (
+                row["status"] in {"pending", "failed"}
+                and not missing_dependencies
+                and all(status == "passed" for status in dep_statuses.values())
             ):
                 ready.append(item)
             else:
@@ -845,16 +854,26 @@ class OrchestrationService:
                 statuses = {str(row["work_unit_key"]): row["status"] for row in rows}
                 if any(statuses.get(dep) != "passed" for dep in deps):
                     raise ValueError("Work-unit dependencies have not passed")
+            conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
+                (f"orchestration-start:{project_id}",),
+            )
+            running = conn.execute(
+                """
+                SELECT w.work_unit_key,w.write_scope
+                  FROM vres.orchestration_work_units w
+                  JOIN vres.tasks t ON t.id=w.task_id
+                 WHERE t.project_id=%s AND w.status='running' AND w.work_unit_key<>%s
+                 FOR UPDATE OF w
+                """,
+                (project_id, work_unit_key),
+            ).fetchall()
+            if len(running) >= _MAX_PARALLEL_WORKERS:
+                raise ValueError(
+                    f"Project already has {_MAX_PARALLEL_WORKERS} running governed work units"
+                )
             scope = [str(x) for x in unit.get("write_scope") or []]
             if scope:
-                running = conn.execute(
-                    """
-                    SELECT work_unit_key,write_scope FROM vres.orchestration_work_units
-                     WHERE task_id=%s AND status='running' AND work_unit_key<>%s
-                     FOR UPDATE
-                    """,
-                    (task["id"], work_unit_key),
-                ).fetchall()
                 for other in running:
                     if _scopes_overlap(scope, [str(x) for x in other.get("write_scope") or []]):
                         raise ValueError(
