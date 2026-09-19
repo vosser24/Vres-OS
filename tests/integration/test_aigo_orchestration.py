@@ -2,6 +2,7 @@ import uuid
 
 import pytest
 
+from vres_os.deterministic_routing import try_deterministic_route
 from vres_os.orchestration import OrchestrationService, ROUTABLE_ROLES
 from vres_os.repository import Repository
 from vres_os.routing import RoutingService
@@ -145,39 +146,17 @@ def test_missing_capability_requires_blocked_gap_then_acquires_once_and_rediscov
     assert second["capability_matches"][need][0]["capability_key"] == capability_key
     assert second["capability_matches"][need][0]["project_id"] == pid
 
-    second_route = routing.prepare(
+    routed = try_deterministic_route(
         project_id=pid,
         task_key=task_key,
         session_id=session_id,
         discovery_key=second["discovery_key"],
         risk_triggers=[],
     )
-    routed = routing._record_validated_decision(
-        project_id=pid,
-        request_key=second_route["request_key"],
-        report={
-            "request_key": second_route["request_key"],
-            "outcome": "routed",
-            "lead_role": owner_role,
-            "experts": [
-                {
-                    "role": owner_role,
-                    "agent_key": None,
-                    "covers": [need],
-                    "capability_keys": [capability_key],
-                    "execution_tier": "sonnet",
-                    "rationale": "Use the one newly discovered project specialist.",
-                }
-            ],
-            "assurance": "routine",
-            "routing_rationale": "One qualified project specialist is now the smallest competent team.",
-            "required_gap_needs": [],
-        },
-        observed_model="claude-fable-5",
-        agent_id=f"router-{uuid.uuid4().hex}",
-        session_id=session_id,
-    )
-    assert routed["outcome"] == "routed"
+    assert routed is not None
+    assert routed["routing_mode"] == "deterministic"
+    assert routed["decision"]["lead_role"] == owner_role
+    assert routed["decision"]["experts"][0]["capability_keys"] == [capability_key]
 
     plan = service.record_plan(
         project_id=pid,
