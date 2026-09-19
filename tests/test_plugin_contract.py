@@ -119,6 +119,12 @@ def test_hook_commands_resolve_to_shipped_wrappers():
                 }:
                     assert wrapper_name == "vres-subagent-hook.ps1"
                     governed_subagent_wrapper_seen = True
+                elif (
+                    event == "PostToolUse"
+                    and group.get("matcher")
+                    == "^mcp__plugin_vres-os_vres__orchestration_work_unit_start$"
+                ):
+                    assert wrapper_name == "vres-subagent-hook.ps1"
                 else:
                     assert wrapper_name == "vres-hook.ps1"
     assert ask_user_wrapper_seen
