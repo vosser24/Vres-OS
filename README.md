@@ -4,7 +4,7 @@
 
 Vres-OS is a new, modular Python/PostgreSQL runtime and Claude Code plugin. The Chairman is the conversational entry point. The runtime preserves task state, documented knowledge, approval-backed procedures and evidence. It draws on AIGO's engineering principles; it does **not** bundle or inherit the validated AIGO runtime/test suite.
 
-Start here: [Windows installation](docs/INSTALL-WINDOWS.md) · [live verification](docs/LIVE-VERIFICATION.md) · [release evidence](docs/RELEASE-VALIDATION.md) · [limitations](docs/KNOWN-LIMITATIONS.md).
+Start here: [Windows installation](docs/INSTALL-WINDOWS.md) · [finalization verification](docs/FINAL-VERIFICATION.md) · [full regression catalog](docs/LIVE-VERIFICATION.md) · [release evidence](docs/RELEASE-VALIDATION.md) · [limitations](docs/KNOWN-LIMITATIONS.md).
 
 ## What this preview implements
 

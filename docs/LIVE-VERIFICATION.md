@@ -1,5 +1,7 @@
 # Vres-OS live verification runbook
 
+> **Finalization:** use [FINAL-VERIFICATION.md](FINAL-VERIFICATION.md) and `final-results-template.csv` as the current blocking suite. This file remains the exhaustive historical/regression catalog. Do not rerun every LV/PA/UE case by default after unrelated changes; use the surface-triggered policy in the finalization suite.
+
 **Target:** 0.2.0a1 controlled-live-test preview. These tests are NOT recorded as run by this audit.
 The local evidence archive records a different, non-Windows gate. Complete this runbook on the exact packaged
 commit before describing the Windows experience as verified.
