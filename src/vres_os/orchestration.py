@@ -851,6 +851,27 @@ class OrchestrationService:
                 raise KeyError(work_unit_key)
             if unit["status"] not in {"pending", "failed"}:
                 raise ValueError("Only pending or failed work units can start")
+            if unit["status"] == "failed" and unit.get("host_agent_id"):
+                stopped = conn.execute(
+                    """
+                    SELECT 1
+                      FROM vres.worker_runs
+                     WHERE task_id=%s AND plan_key=%s AND role=%s
+                       AND work_unit_key=%s AND agent_id=%s AND status='rejected'
+                     LIMIT 1
+                    """,
+                    (
+                        task["id"],
+                        unit["plan_key"],
+                        unit["role"],
+                        work_unit_key,
+                        unit["host_agent_id"],
+                    ),
+                ).fetchone()
+                if not stopped:
+                    raise ValueError(
+                        "Failed claimed work unit cannot retry until the prior host worker stop is observed"
+                    )
             deps = [str(x) for x in unit.get("depends_on") or []]
             if deps:
                 rows = conn.execute(
@@ -889,7 +910,8 @@ class OrchestrationService:
                 """
                 UPDATE vres.orchestration_work_units
                    SET status='running',attempt_count=attempt_count+1,started_at=now(),
-                       completed_at=NULL,last_error=NULL,report_key=NULL
+                       completed_at=NULL,last_error=NULL,report_key=NULL,
+                       host_agent_id=NULL,observed_model=NULL
                  WHERE id=%s
                 """,
                 (unit["id"],),
