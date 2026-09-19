@@ -172,12 +172,13 @@ def orchestration_expert_report(
     unknowns: list[str] | None = None,
     report_type: str = "expert",
     work_unit_key: str | None = None,
+    criteria_results: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Persist one selected expert's evidence, recommendation, assumptions and unknowns.
+    """Persist one selected expert report plus structured work-unit acceptance results.
 
-    A role not selected in the durable plan cannot report. Challenger reports must use
-    report_type='challenge'. The governed worker should call this itself before returning;
-    its SubagentStop hook separately records host-observed Sonnet/Opus model evidence.
+    Implementation workers report every deterministic criterion with concrete evidence.
+    Verifier workers report only judgmental criteria on the declared work units they
+    verify. Product/domain acceptance remains separate from protected Vres validation.
     """
     pid, _ = _project()
     sid = _current_session(pid, session_id)
@@ -194,6 +195,7 @@ def orchestration_expert_report(
         unknowns=unknowns,
         report_type=report_type,
         work_unit_key=work_unit_key,
+        criteria_results=criteria_results,
     )
 
 
