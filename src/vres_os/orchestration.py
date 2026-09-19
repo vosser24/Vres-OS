@@ -344,6 +344,12 @@ class OrchestrationService:
                 raise ValueError(
                     "gap_need is not authorized by the latest blocked routing decision"
                 )
+            conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
+                (
+                    f"capability-gap:{task['id']}:{route['request_key']}:{gap}",
+                ),
+            )
             discovery = self._event_by_key(
                 conn,
                 int(task["id"]),
