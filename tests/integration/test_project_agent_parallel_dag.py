@@ -200,6 +200,96 @@ def _single_agent_graph(pid: int, task: str, sid: str, root: Path):
     return orchestration, RoutingService(), plan, graph["work_units"][0]["work_unit_key"], agent_key
 
 
+def _replan_single_agent(
+    orchestration: OrchestrationService,
+    pid: int,
+    task: str,
+    sid: str,
+    discovery_key: str,
+    agent_key: str,
+) -> dict:
+    return orchestration.record_plan(
+        project_id=pid,
+        task_key=task,
+        session_id=sid,
+        discovery_key=discovery_key,
+        lead_role="cto",
+        selected_experts=[{
+            "role": "cto",
+            "agent_key": agent_key,
+            "rationale": "Replacement plan using the same governed route.",
+            "covers": ["software engineering"],
+            "capability_keys": ["cap.software-engineering"],
+        }],
+        excluded_experts=_excluded("cto"),
+        routing_rationale="Replace the prior inactive plan without changing routed ownership.",
+    )
+
+
+def test_newer_plan_makes_old_pending_graph_non_executable(pg_project, tmp_path):
+    task, sid = _task_and_session(pg_project)
+    orchestration, _, first_plan, old_unit, agent_key = _single_agent_graph(
+        pg_project, task, sid, tmp_path
+    )
+
+    second_plan = _replan_single_agent(
+        orchestration,
+        pg_project,
+        task,
+        sid,
+        first_plan["discovery_key"],
+        agent_key,
+    )
+    assert second_plan["plan_key"] != first_plan["plan_key"]
+
+    with pytest.raises(ValueError, match="latest orchestration plan"):
+        orchestration.ready_work(
+            project_id=pg_project,
+            task_key=task,
+            plan_key=first_plan["plan_key"],
+            project_root=tmp_path,
+        )
+    with pytest.raises(ValueError, match="latest orchestration plan"):
+        orchestration.start_work_unit(
+            project_id=pg_project,
+            task_key=task,
+            session_id=sid,
+            work_unit_key=old_unit,
+        )
+    with pytest.raises(ValueError, match="latest orchestration plan"):
+        orchestration.record_work_graph(
+            project_id=pg_project,
+            task_key=task,
+            session_id=sid,
+            plan_key=first_plan["plan_key"],
+            units=[{"role": "cto", "depends_on": [], "write_scope": ["src"]}],
+            project_root=tmp_path,
+        )
+
+
+def test_replanning_is_blocked_while_prior_work_unit_is_running(pg_project, tmp_path):
+    task, sid = _task_and_session(pg_project)
+    orchestration, _, first_plan, unit_key, agent_key = _single_agent_graph(
+        pg_project, task, sid, tmp_path
+    )
+    orchestration.start_work_unit(
+        project_id=pg_project,
+        task_key=task,
+        session_id=sid,
+        work_unit_key=unit_key,
+    )
+
+    with pytest.raises(ValueError, match="prior work units are running"):
+        _replan_single_agent(
+            orchestration,
+            pg_project,
+            task,
+            sid,
+            first_plan["discovery_key"],
+            agent_key,
+        )
+
+
 def test_project_agent_rejects_model_authority_and_detects_source_drift(pg_project, tmp_path):
     task, sid = _task_and_session(pg_project)
     path = tmp_path / ".claude" / "agents" / "bad.md"
