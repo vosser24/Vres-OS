@@ -99,7 +99,8 @@ def test_mcp_entrypoint_registers_orchestration_and_routing_from_dedicated_modul
     for tool in ["routing_prepare", "routing_result", "routing_evidence", "task_complete_routed"]:
         assert f"def {tool}(" in routing_text
         assert f"def {tool}(" not in entrypoint_text
-    assert "does not mark the\n    capability proven" in aigo_text
+    assert "latest blocked route" in aigo_text
+    assert "never publishes company-wide authority or marks proof" in aigo_text
 
 
 def test_chairman_requires_deterministic_first_routing_and_tiered_workers():
