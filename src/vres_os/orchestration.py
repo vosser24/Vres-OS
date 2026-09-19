@@ -33,6 +33,8 @@ _MAX_NEEDS = 20
 _MAX_QUERIES = 10
 _MAX_EXPERTS = 20
 _MAX_EVIDENCE = 20
+_MAX_CRITERIA = 20
+_MAX_CRITERIA_RESULTS = 60
 _MAX_PARALLEL_WORKERS = 4
 _SPECIALIST_PREFIXES = ("specialist-", "specialist:")
 
@@ -56,6 +58,90 @@ def _strings(values: list[str] | None, *, limit: int, field: str) -> list[str]:
         out.append(value)
         if len(out) > limit:
             raise ValueError(f"{field} exceeds the maximum of {limit} entries")
+    return out
+
+
+def _acceptance_criteria(values: list[dict[str, Any]] | None) -> list[dict[str, str]]:
+    if values is None:
+        return []
+    if not isinstance(values, list):
+        raise ValueError("acceptance_criteria must be a list")
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for raw in values:
+        if not isinstance(raw, dict):
+            raise ValueError("acceptance_criteria entries must be objects")
+        key = str(raw.get("key") or "").strip()
+        statement = str(raw.get("statement") or "").strip()
+        verification = str(raw.get("verification") or "").strip().lower()
+        if not key or len(key) > 100:
+            raise ValueError("acceptance criterion key is required and must be <= 100 characters")
+        if key in seen:
+            raise ValueError(f"Duplicate acceptance criterion key {key!r}")
+        if not statement or len(statement) > 1000:
+            raise ValueError(
+                "acceptance criterion statement is required and must be <= 1000 characters"
+            )
+        if verification not in {"deterministic", "judgmental"}:
+            raise ValueError(
+                "acceptance criterion verification must be deterministic or judgmental"
+            )
+        seen.add(key)
+        out.append(
+            {
+                "key": key,
+                "statement": statement,
+                "verification": verification,
+            }
+        )
+        if len(out) > _MAX_CRITERIA:
+            raise ValueError(
+                f"acceptance_criteria exceeds the maximum of {_MAX_CRITERIA} entries"
+            )
+    return out
+
+
+def _criteria_results(values: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    if values is None:
+        return []
+    if not isinstance(values, list):
+        raise ValueError("criteria_results must be a list")
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for raw in values:
+        if not isinstance(raw, dict):
+            raise ValueError("criteria_results entries must be objects")
+        target = str(raw.get("target_work_unit_key") or "").strip()
+        criterion = str(raw.get("criterion_key") or "").strip()
+        status = str(raw.get("status") or "").strip().lower()
+        evidence = raw.get("evidence")
+        if not criterion or len(criterion) > 100:
+            raise ValueError("criteria result criterion_key is required and must be <= 100 characters")
+        if target and len(target) > 200:
+            raise ValueError("criteria result target_work_unit_key must be <= 200 characters")
+        if status not in {"passed", "failed", "not_run"}:
+            raise ValueError("criteria result status must be passed, failed, or not_run")
+        if evidence is None or evidence == "" or evidence == {} or evidence == []:
+            raise ValueError("criteria result requires concrete evidence")
+        encoded = json.dumps(evidence, ensure_ascii=False, default=str)
+        if len(encoded) > 5000:
+            raise ValueError("criteria result evidence must serialize to <= 5000 characters")
+        identity = (target, criterion)
+        if identity in seen:
+            raise ValueError("criteria_results may contain each target/criterion only once")
+        seen.add(identity)
+        out.append(
+            {
+                "target_work_unit_key": target or None,
+                "criterion_key": criterion,
+                "status": status,
+                "evidence": evidence,
+            }
+        )
+        if len(out) > _MAX_CRITERIA_RESULTS:
+            raise ValueError(
+                f"criteria_results exceeds the maximum of {_MAX_CRITERIA_RESULTS} entries"
+            )
     return out
 
 
@@ -210,6 +296,112 @@ class OrchestrationService:
         ).fetchone()
         if not latest or latest["plan_key"] != plan_key:
             raise ValueError("Only the task's latest orchestration plan may execute or finalize work")
+
+    @staticmethod
+    def _acceptance_summary(conn, task_id: int, plan_key: str) -> dict[str, Any]:
+        rows = conn.execute(
+            """
+            SELECT work_unit_key,role,write_scope,acceptance_criteria,verifies,status,report_key
+              FROM vres.orchestration_work_units
+             WHERE task_id=%s AND plan_key=%s
+             ORDER BY id
+            """,
+            (task_id, plan_key),
+        ).fetchall()
+        if not rows:
+            return {
+                "deterministic_criteria": 0,
+                "judgmental_criteria": 0,
+                "verifier_units": [],
+            }
+
+        reports: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            if not row.get("report_key"):
+                continue
+            event = conn.execute(
+                """
+                SELECT payload
+                  FROM vres.task_events
+                 WHERE task_id=%s AND event_type='ORCHESTRATION_EXPERT_REPORT'
+                   AND payload->>'report_key'=%s
+                 ORDER BY id DESC LIMIT 1
+                """,
+                (task_id, row["report_key"]),
+            ).fetchone()
+            if event:
+                reports[str(row["work_unit_key"])] = dict(event["payload"])
+
+        deterministic_count = 0
+        judgmental_count = 0
+        verifier_units: list[str] = []
+        for row in rows:
+            work_key = str(row["work_unit_key"])
+            criteria = list(row.get("acceptance_criteria") or [])
+            verifies = [str(x) for x in row.get("verifies") or []]
+            if verifies:
+                verifier_units.append(work_key)
+                continue
+            report = reports.get(work_key, {})
+            own_results = {
+                str(result.get("criterion_key") or ""): result
+                for result in report.get("criteria_results") or []
+                if str(result.get("target_work_unit_key") or work_key) == work_key
+            }
+            for criterion in criteria:
+                if criterion.get("verification") == "deterministic":
+                    deterministic_count += 1
+                    result = own_results.get(str(criterion.get("key") or ""))
+                    if not result or result.get("status") != "passed":
+                        raise ValueError(
+                            f"Deterministic acceptance criterion {criterion.get('key')!r} "
+                            f"for role {row['role']!r} has not passed"
+                        )
+
+            if not row.get("write_scope"):
+                continue
+            judgmental = [
+                criterion
+                for criterion in criteria
+                if criterion.get("verification") == "judgmental"
+            ]
+            judgmental_count += len(judgmental)
+            if not judgmental:
+                continue
+            verifiers = [
+                candidate
+                for candidate in rows
+                if work_key in [str(x) for x in candidate.get("verifies") or []]
+                and candidate["status"] == "passed"
+            ]
+            if not verifiers:
+                raise ValueError(
+                    f"Judgmental acceptance for role {row['role']!r} requires a passed verifier"
+                )
+            for criterion in judgmental:
+                statuses: list[str] = []
+                for verifier in verifiers:
+                    verifier_key = str(verifier["work_unit_key"])
+                    verifier_report = reports.get(verifier_key, {})
+                    for result in verifier_report.get("criteria_results") or []:
+                        if (
+                            str(result.get("target_work_unit_key") or "") == work_key
+                            and str(result.get("criterion_key") or "")
+                            == str(criterion.get("key") or "")
+                        ):
+                            statuses.append(str(result.get("status") or ""))
+                if not statuses or any(status != "passed" for status in statuses):
+                    raise ValueError(
+                        f"Judgmental acceptance criterion {criterion.get('key')!r} "
+                        f"for role {row['role']!r} has not passed independent verification"
+                    )
+
+        return {
+            "deterministic_criteria": deterministic_count,
+            "judgmental_criteria": judgmental_count,
+            "verifier_units": verifier_units,
+        }
+
 
     def discover(
         self,
@@ -673,6 +865,7 @@ class OrchestrationService:
         unknowns: list[str] | None = None,
         report_type: str = "expert",
         work_unit_key: str | None = None,
+        criteria_results: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         role = role.strip()
         recommendation = recommendation.strip()
@@ -686,6 +879,7 @@ class OrchestrationService:
             raise ValueError("Expert report recommendation is required")
         if not evidence or len(evidence) > _MAX_EVIDENCE:
             raise ValueError("Expert reports require 1-20 evidence entries")
+        normalized_results = _criteria_results(criteria_results)
         with connect() as conn, conn.transaction():
             task = self._bound_task(conn, project_id, task_key, session_id)
             plan = self._event_by_key(
@@ -726,6 +920,70 @@ class OrchestrationService:
                     or unit.get("report_key")
                 ):
                     raise ValueError("Expert report must close the matching unreported running work unit")
+
+                criteria = list(unit.get("acceptance_criteria") or [])
+                verifies = [str(x) for x in unit.get("verifies") or []]
+                if verifies:
+                    targets = conn.execute(
+                        """
+                        SELECT work_unit_key,acceptance_criteria
+                          FROM vres.orchestration_work_units
+                         WHERE task_id=%s AND plan_key=%s AND work_unit_key=ANY(%s)
+                        """,
+                        (task["id"], plan_key, verifies),
+                    ).fetchall()
+                    target_map = {
+                        str(row["work_unit_key"]): list(row.get("acceptance_criteria") or [])
+                        for row in targets
+                    }
+                    if set(target_map) != set(verifies):
+                        raise ValueError("Verifier report targets are incomplete or stale")
+                    expected = {
+                        (target_key, str(criterion["key"]))
+                        for target_key, target_criteria in target_map.items()
+                        for criterion in target_criteria
+                        if criterion.get("verification") == "judgmental"
+                    }
+                    actual = {
+                        (
+                            str(result.get("target_work_unit_key") or ""),
+                            str(result["criterion_key"]),
+                        )
+                        for result in normalized_results
+                    }
+                    if actual != expected:
+                        raise ValueError(
+                            "Verifier criteria_results must cover every judgmental criterion on its declared targets exactly once"
+                        )
+                else:
+                    deterministic = {
+                        str(criterion["key"])
+                        for criterion in criteria
+                        if criterion.get("verification") == "deterministic"
+                    }
+                    own_results: list[dict[str, Any]] = []
+                    for result in normalized_results:
+                        target = str(result.get("target_work_unit_key") or work_unit_key)
+                        if target != work_unit_key:
+                            raise ValueError(
+                                "Implementation work units may report criteria only for themselves"
+                            )
+                        if result["criterion_key"] not in deterministic:
+                            raise ValueError(
+                                "Implementation workers may not self-approve judgmental criteria"
+                            )
+                        own_results.append({**result, "target_work_unit_key": work_unit_key})
+                    if len(own_results) != len({r["criterion_key"] for r in own_results}):
+                        raise ValueError(
+                            "Implementation criteria_results may contain each criterion only once"
+                        )
+                    if {r["criterion_key"] for r in own_results} != deterministic:
+                        raise ValueError(
+                            "Implementation criteria_results must cover every deterministic criterion exactly once"
+                        )
+                    normalized_results = own_results
+            elif normalized_results:
+                raise ValueError("criteria_results require a persisted orchestration work graph")
             report_key = _key("ORCHREP")
             payload = {
                 "report_key": report_key,
@@ -746,6 +1004,7 @@ class OrchestrationService:
                     limit=_MAX_EVIDENCE,
                     field="unknowns",
                 ),
+                "criteria_results": redact(normalized_results),
             }
             event_id = self._insert_event(
                 conn,
@@ -834,6 +1093,26 @@ class OrchestrationService:
                     raise ValueError("Work-unit dependencies must reference other selected roles")
                 dependency_graph[role] = deps
                 scope = _scope_paths(raw.get("write_scope") or [])
+                criteria = _acceptance_criteria(raw.get("acceptance_criteria"))
+                verify_roles = _strings(
+                    raw.get("verifies") or [],
+                    limit=_MAX_EXPERTS,
+                    field="work_units.verifies",
+                )
+                if role in verify_roles or any(target not in selected for target in verify_roles):
+                    raise ValueError(
+                        "Verifier targets must be other selected expert roles in the same work graph"
+                    )
+                if scope and not criteria:
+                    raise ValueError(
+                        f"Write-capable work unit {role!r} requires frozen acceptance_criteria"
+                    )
+                if verify_roles and scope:
+                    raise ValueError("Verifier work units must be report-only")
+                if verify_roles and criteria:
+                    raise ValueError(
+                        "Verifier work units report target acceptance criteria and must not define their own"
+                    )
                 selected_item = selected[role]
                 routed_item = routed.get(role)
                 if routed_item is None:
@@ -860,26 +1139,67 @@ class OrchestrationService:
                         "capability_keys": selected_item.get("capability_keys") or [],
                         "depends_on": deps,
                         "write_scope": scope,
+                        "acceptance_criteria": criteria,
+                        "_verify_roles": verify_roles,
                     }
                 )
             _assert_acyclic(dependency_graph)
             for item in normalized:
                 dep_keys = [role_to_key[role] for role in item["depends_on"]]
+                verify_keys = [role_to_key[role] for role in item.pop("_verify_roles")]
+                if any(key not in dep_keys for key in verify_keys):
+                    raise ValueError("Verifier work units must depend on every work unit they verify")
+                item["depends_on"] = dep_keys
+                item["verifies"] = verify_keys
+
+            by_work_key = {item["work_unit_key"]: item for item in normalized}
+            verifier_targets = {
+                target
+                for item in normalized
+                for target in item["verifies"]
+            }
+            for item in normalized:
+                if item["verifies"]:
+                    judgmental = [
+                        criterion
+                        for target in item["verifies"]
+                        for criterion in by_work_key[target]["acceptance_criteria"]
+                        if criterion["verification"] == "judgmental"
+                    ]
+                    if not judgmental:
+                        raise ValueError(
+                            "Verifier work units are unnecessary when their targets have no judgmental criteria"
+                        )
+                if (
+                    item["write_scope"]
+                    and any(
+                        criterion["verification"] == "judgmental"
+                        for criterion in item["acceptance_criteria"]
+                    )
+                    and item["work_unit_key"] not in verifier_targets
+                ):
+                    raise ValueError(
+                        f"Judgmental acceptance criteria for {item['role']!r} require a dependent verifier"
+                    )
+
+            for item in normalized:
                 conn.execute(
                     """
                     INSERT INTO vres.orchestration_work_units(
                       work_unit_key,task_id,plan_key,role,project_agent_key,execution_tier,
-                      covers,capability_keys,depends_on,write_scope
-                    ) VALUES (%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb)
+                      covers,capability_keys,depends_on,write_scope,acceptance_criteria,verifies
+                    ) VALUES (
+                      %s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb
+                    )
                     """,
                     (
                         item["work_unit_key"], task["id"], plan_key, item["role"],
                         item["project_agent_key"], item["execution_tier"],
                         json.dumps(item["covers"]), json.dumps(item["capability_keys"]),
-                        json.dumps(dep_keys), json.dumps(item["write_scope"]),
+                        json.dumps(item["depends_on"]), json.dumps(item["write_scope"]),
+                        json.dumps(item["acceptance_criteria"]), json.dumps(item["verifies"]),
                     ),
                 )
-                item["depends_on"] = dep_keys
             event_id = self._insert_event(
                 conn,
                 int(task["id"]),
@@ -910,20 +1230,20 @@ class OrchestrationService:
                 "SELECT * FROM vres.orchestration_work_units WHERE task_id=%s AND plan_key=%s ORDER BY id",
                 (task["id"], plan_key),
             ).fetchall()
-            rejected_rows = conn.execute(
+            stopped_rows = conn.execute(
                 """
                 SELECT work_unit_key,agent_id
                   FROM vres.worker_runs
-                 WHERE task_id=%s AND plan_key=%s AND status='rejected'
+                 WHERE task_id=%s AND plan_key=%s AND status IN ('observed','rejected')
                 """,
                 (task["id"], plan_key),
             ).fetchall()
         if not rows:
             raise ValueError("No work graph exists for this plan")
         by_key = {str(row["work_unit_key"]): dict(row) for row in rows}
-        rejected = {
+        stopped = {
             (str(row["work_unit_key"]), str(row["agent_id"]))
-            for row in rejected_rows
+            for row in stopped_rows
             if row.get("work_unit_key") and row.get("agent_id")
         }
         ready: list[dict[str, Any]] = []
@@ -935,7 +1255,7 @@ class OrchestrationService:
             retry_waiting_for_host_stop = (
                 row["status"] == "failed"
                 and bool(row.get("host_agent_id"))
-                and (str(row["work_unit_key"]), str(row["host_agent_id"])) not in rejected
+                and (str(row["work_unit_key"]), str(row["host_agent_id"])) not in stopped
             )
             item = {
                 "work_unit_key": row["work_unit_key"],
@@ -946,6 +1266,8 @@ class OrchestrationService:
                 "covers": row.get("covers") or [],
                 "capability_keys": row.get("capability_keys") or [],
                 "write_scope": row.get("write_scope") or [],
+                "acceptance_criteria": row.get("acceptance_criteria") or [],
+                "verifies": row.get("verifies") or [],
                 "status": row["status"],
                 "attempt_count": row["attempt_count"],
                 "retry_waiting_for_host_stop": retry_waiting_for_host_stop,
@@ -964,6 +1286,17 @@ class OrchestrationService:
                     project_id=project_id,
                     root=project_root,
                 )
+            if row.get("verifies"):
+                item["verification_targets"] = [
+                    {
+                        "work_unit_key": target,
+                        "role": by_key[target]["role"],
+                        "status": by_key[target]["status"],
+                        "acceptance_criteria": by_key[target].get("acceptance_criteria") or [],
+                    }
+                    for target in row["verifies"]
+                    if target in by_key
+                ]
             if (
                 row["status"] in {"pending", "failed"}
                 and not retry_waiting_for_host_stop
@@ -1002,7 +1335,8 @@ class OrchestrationService:
                     SELECT 1
                       FROM vres.worker_runs
                      WHERE task_id=%s AND plan_key=%s AND role=%s
-                       AND work_unit_key=%s AND agent_id=%s AND status='rejected'
+                       AND work_unit_key=%s AND agent_id=%s
+                       AND status IN ('observed','rejected')
                      LIMIT 1
                     """,
                     (
@@ -1337,6 +1671,12 @@ class OrchestrationService:
                         "Arbitration belongs to a different orchestration plan"
                     )
 
+            acceptance_summary = self._acceptance_summary(
+                conn,
+                int(task["id"]),
+                plan_key,
+            )
+
             discovery = self._event_by_key(
                 conn,
                 int(task["id"]),
@@ -1384,6 +1724,7 @@ class OrchestrationService:
                 "reused_capability_keys": capability_reuse,
                 "reused_procedure_keys": procedure_reuse,
                 "unresolved_unknowns": unknowns,
+                "acceptance_summary": acceptance_summary,
                 "decision_ready": not unknowns,
             }
             event_id = self._insert_event(

@@ -38,6 +38,27 @@ def _excluded(*selected: str) -> list[dict[str, str]]:
     ]
 
 
+def _deterministic_criteria(key: str = "done") -> list[dict[str, str]]:
+    return [
+        {
+            "key": key,
+            "statement": "The bounded implementation requirement is mechanically satisfied.",
+            "verification": "deterministic",
+        }
+    ]
+
+
+def _passed_criteria_result(work_unit_key: str, key: str = "done") -> list[dict[str, object]]:
+    return [
+        {
+            "target_work_unit_key": work_unit_key,
+            "criterion_key": key,
+            "status": "passed",
+            "evidence": {"source": "integration-test", "result": "mechanical check passed"},
+        }
+    ]
+
+
 def _agent_file(root: Path, name: str, body: str = "Do the bounded assigned work.") -> str:
     path = root / ".claude" / "agents" / f"{name}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -194,10 +215,120 @@ def _single_agent_graph(pid: int, task: str, sid: str, root: Path):
         task_key=task,
         session_id=sid,
         plan_key=plan["plan_key"],
-        units=[{"role": "cto", "depends_on": [], "write_scope": ["src"]}],
+        units=[{
+            "role": "cto",
+            "depends_on": [],
+            "write_scope": ["src"],
+            "acceptance_criteria": _deterministic_criteria(),
+        }],
         project_root=root,
     )
     return orchestration, RoutingService(), plan, graph["work_units"][0]["work_unit_key"], agent_key
+
+
+def _product_acceptance_graph(pid: int, task: str, sid: str, root: Path):
+    dev_key = f"agent.acceptance.dev.{uuid.uuid4().hex[:8]}"
+    verifier_key = f"agent.acceptance.product.{uuid.uuid4().hex[:8]}"
+    ProjectAgentService().register(
+        project_id=pid,
+        root=root,
+        task_key=task,
+        session_id=sid,
+        agent_key=dev_key,
+        name="acceptance-developer",
+        role="cto",
+        capability_keys=["cap.software-engineering"],
+        source_path=_agent_file(root, f"acceptance-dev-{uuid.uuid4().hex[:8]}"),
+        write_policy="project_files",
+    )
+    ProjectAgentService().register(
+        project_id=pid,
+        root=root,
+        task_key=task,
+        session_id=sid,
+        agent_key=verifier_key,
+        name="acceptance-product-owner",
+        role="digital-director",
+        capability_keys=["cap.cro"],
+        source_path=_agent_file(root, f"acceptance-product-{uuid.uuid4().hex[:8]}"),
+        write_policy="report_only",
+    )
+
+    orchestration = OrchestrationService()
+    discovery = orchestration.discover(
+        project_id=pid,
+        task_key=task,
+        session_id=sid,
+        capability_needs=["software engineering", "conversion optimization"],
+        project_root=root,
+    )
+    routing = RoutingService()
+    prepared = routing.prepare(
+        project_id=pid,
+        task_key=task,
+        session_id=sid,
+        discovery_key=discovery["discovery_key"],
+        risk_triggers=["cross_domain"],
+    )
+    routing._record_validated_decision(
+        project_id=pid,
+        request_key=prepared["request_key"],
+        report={
+            "request_key": prepared["request_key"],
+            "outcome": "routed",
+            "lead_role": "cto",
+            "experts": [
+                {
+                    "role": "cto",
+                    "agent_key": dev_key,
+                    "covers": ["software engineering"],
+                    "capability_keys": ["cap.software-engineering"],
+                    "execution_tier": "sonnet",
+                    "rationale": "CTO owns the bounded implementation.",
+                },
+                {
+                    "role": "digital-director",
+                    "agent_key": verifier_key,
+                    "covers": ["conversion optimization"],
+                    "capability_keys": ["cap.cro"],
+                    "execution_tier": "sonnet",
+                    "rationale": "Digital owns the residual product/journey acceptance.",
+                },
+            ],
+            "assurance": "routine",
+            "routing_rationale": "Implementation plus one independent judgmental product acceptance owner.",
+            "required_gap_needs": [],
+        },
+        observed_model="claude-fable-5",
+        agent_id=f"router-{uuid.uuid4().hex}",
+        session_id=sid,
+    )
+    plan = orchestration.record_plan(
+        project_id=pid,
+        task_key=task,
+        session_id=sid,
+        discovery_key=discovery["discovery_key"],
+        lead_role="cto",
+        selected_experts=[
+            {
+                "role": "cto",
+                "agent_key": dev_key,
+                "rationale": "Implement the bounded product slice.",
+                "covers": ["software engineering"],
+                "capability_keys": ["cap.software-engineering"],
+            },
+            {
+                "role": "digital-director",
+                "agent_key": verifier_key,
+                "rationale": "Independently accept the judgmental product criterion.",
+                "covers": ["conversion optimization"],
+                "capability_keys": ["cap.cro"],
+            },
+        ],
+        excluded_experts=_excluded("cto", "digital-director"),
+        routing_rationale="Match the governed two-role route.",
+    )
+    return orchestration, routing, plan, dev_key, verifier_key
 
 
 def _replan_single_agent(
@@ -262,7 +393,12 @@ def test_newer_plan_makes_old_pending_graph_non_executable(pg_project, tmp_path)
             task_key=task,
             session_id=sid,
             plan_key=first_plan["plan_key"],
-            units=[{"role": "cto", "depends_on": [], "write_scope": ["src"]}],
+            units=[{
+                "role": "cto",
+                "depends_on": [],
+                "write_scope": ["src"],
+                "acceptance_criteria": _deterministic_criteria(),
+            }],
             project_root=tmp_path,
         )
 
@@ -287,6 +423,418 @@ def test_replanning_is_blocked_while_prior_work_unit_is_running(pg_project, tmp_
             sid,
             first_plan["discovery_key"],
             agent_key,
+        )
+
+
+def test_deterministic_acceptance_needs_no_verifier_agent(pg_project, tmp_path):
+    task, sid = _task_and_session(pg_project)
+    orchestration, routing, plan, unit_key, _ = _single_agent_graph(
+        pg_project, task, sid, tmp_path
+    )
+    ready = orchestration.ready_work(
+        project_id=pg_project,
+        task_key=task,
+        plan_key=plan["plan_key"],
+        project_root=tmp_path,
+    )
+    assert len(ready["ready"]) == 1
+    assert ready["ready"][0]["verifies"] == []
+    assert ready["ready"][0]["acceptance_criteria"][0]["verification"] == "deterministic"
+
+    orchestration.start_work_unit(
+        project_id=pg_project, task_key=task, session_id=sid, work_unit_key=unit_key
+    )
+    report = orchestration.record_expert_report(
+        project_id=pg_project,
+        task_key=task,
+        session_id=sid,
+        plan_key=plan["plan_key"],
+        role="cto",
+        recommendation="The bounded implementation is complete.",
+        evidence=[{"source": "fixture"}],
+        work_unit_key=unit_key,
+        criteria_results=_passed_criteria_result(unit_key),
+    )
+    observed = routing._record_worker_observation(
+        project_id=pg_project,
+        task_key=task,
+        plan_key=plan["plan_key"],
+        role="cto",
+        execution_tier="sonnet",
+        agent_type="vres-os:sonnet-expert",
+        agent_id=f"worker-{uuid.uuid4().hex}",
+        session_id=sid,
+        observed_model="claude-sonnet-5",
+        work_unit_key=unit_key,
+    )
+    assert observed["work_unit_accepted"] is True
+
+    final = orchestration.finalize(
+        project_id=pg_project,
+        task_key=task,
+        session_id=sid,
+        plan_key=plan["plan_key"],
+        synthesis="The deterministic product slice is accepted without a judgmental reviewer.",
+        accepted_report_keys=[report["report_key"]],
+    )
+    assert final["acceptance_summary"] == {
+        "deterministic_criteria": 1,
+        "judgmental_criteria": 0,
+        "verifier_units": [],
+    }
+
+
+def test_failed_deterministic_acceptance_marks_observed_unit_failed_and_retryable(pg_project, tmp_path):
+    task, sid = _task_and_session(pg_project)
+    orchestration, routing, plan, unit_key, _ = _single_agent_graph(
+        pg_project, task, sid, tmp_path
+    )
+    orchestration.start_work_unit(
+        project_id=pg_project, task_key=task, session_id=sid, work_unit_key=unit_key
+    )
+    report = orchestration.record_expert_report(
+        project_id=pg_project,
+        task_key=task,
+        session_id=sid,
+        plan_key=plan["plan_key"],
+        role="cto",
+        recommendation="The implementation ran its check but did not satisfy acceptance.",
+        evidence=[{"source": "fixture"}],
+        work_unit_key=unit_key,
+        criteria_results=[
+            {
+                "target_work_unit_key": unit_key,
+                "criterion_key": "done",
+                "status": "failed",
+                "evidence": {"command": "pytest", "result": "failed"},
+            }
+        ],
+    )
+    observed = routing._record_worker_observation(
+        project_id=pg_project,
+        task_key=task,
+        plan_key=plan["plan_key"],
+        role="cto",
+        execution_tier="sonnet",
+        agent_type="vres-os:sonnet-expert",
+        agent_id=f"worker-{uuid.uuid4().hex}",
+        session_id=sid,
+        observed_model="claude-sonnet-5",
+        work_unit_key=unit_key,
+    )
+    assert report["report_key"]
+    assert observed["work_unit_accepted"] is False
+    assert observed["failed_criteria"] == ["done"]
+
+    ready = orchestration.ready_work(
+        project_id=pg_project,
+        task_key=task,
+        plan_key=plan["plan_key"],
+        project_root=tmp_path,
+    )
+    assert [row["work_unit_key"] for row in ready["ready"]] == [unit_key]
+    assert ready["ready"][0]["attempt_count"] == 1
+
+
+def test_judgmental_write_acceptance_requires_dependent_report_only_verifier(pg_project, tmp_path):
+    task, sid = _task_and_session(pg_project)
+    orchestration, _, plan, _, _ = _product_acceptance_graph(
+        pg_project, task, sid, tmp_path
+    )
+    with pytest.raises(ValueError, match="require a dependent verifier"):
+        orchestration.record_work_graph(
+            project_id=pg_project,
+            task_key=task,
+            session_id=sid,
+            plan_key=plan["plan_key"],
+            units=[
+                {
+                    "role": "cto",
+                    "depends_on": [],
+                    "write_scope": ["src/app"],
+                    "acceptance_criteria": [
+                        {
+                            "key": "tests",
+                            "statement": "The implementation passes its executable tests.",
+                            "verification": "deterministic",
+                        },
+                        {
+                            "key": "usable",
+                            "statement": "The dashboard workflow is understandable to its product user.",
+                            "verification": "judgmental",
+                        },
+                    ],
+                },
+                {
+                    "role": "digital-director",
+                    "depends_on": ["cto"],
+                    "write_scope": [],
+                },
+            ],
+            project_root=tmp_path,
+        )
+
+
+def test_judgmental_product_acceptance_fans_in_through_independent_verifier(pg_project, tmp_path):
+    task, sid = _task_and_session(pg_project)
+    orchestration, routing, plan, _, _ = _product_acceptance_graph(
+        pg_project, task, sid, tmp_path
+    )
+    graph = orchestration.record_work_graph(
+        project_id=pg_project,
+        task_key=task,
+        session_id=sid,
+        plan_key=plan["plan_key"],
+        units=[
+            {
+                "role": "cto",
+                "depends_on": [],
+                "write_scope": ["src/app"],
+                "acceptance_criteria": [
+                    {
+                        "key": "tests",
+                        "statement": "The implementation passes its executable tests.",
+                        "verification": "deterministic",
+                    },
+                    {
+                        "key": "usable",
+                        "statement": "The dashboard workflow is understandable to its product user.",
+                        "verification": "judgmental",
+                    },
+                ],
+            },
+            {
+                "role": "digital-director",
+                "depends_on": ["cto"],
+                "write_scope": [],
+                "verifies": ["cto"],
+            },
+        ],
+        project_root=tmp_path,
+    )
+    keys = {row["role"]: row["work_unit_key"] for row in graph["work_units"]}
+    first_ready = orchestration.ready_work(
+        project_id=pg_project,
+        task_key=task,
+        plan_key=plan["plan_key"],
+        project_root=tmp_path,
+    )
+    assert [row["role"] for row in first_ready["ready"]] == ["cto"]
+
+    orchestration.start_work_unit(
+        project_id=pg_project, task_key=task, session_id=sid, work_unit_key=keys["cto"]
+    )
+    dev_report = orchestration.record_expert_report(
+        project_id=pg_project,
+        task_key=task,
+        session_id=sid,
+        plan_key=plan["plan_key"],
+        role="cto",
+        recommendation="Implementation ready for product acceptance.",
+        evidence=[{"source": "fixture"}],
+        work_unit_key=keys["cto"],
+        criteria_results=[
+            {
+                "target_work_unit_key": keys["cto"],
+                "criterion_key": "tests",
+                "status": "passed",
+                "evidence": {"command": "pytest", "result": "passed"},
+            }
+        ],
+    )
+    routing._record_worker_observation(
+        project_id=pg_project,
+        task_key=task,
+        plan_key=plan["plan_key"],
+        role="cto",
+        execution_tier="sonnet",
+        agent_type="vres-os:sonnet-expert",
+        agent_id=f"dev-{uuid.uuid4().hex}",
+        session_id=sid,
+        observed_model="claude-sonnet-5",
+        work_unit_key=keys["cto"],
+    )
+    second_ready = orchestration.ready_work(
+        project_id=pg_project,
+        task_key=task,
+        plan_key=plan["plan_key"],
+        project_root=tmp_path,
+    )
+    assert [row["role"] for row in second_ready["ready"]] == ["digital-director"]
+    verifier_assignment = second_ready["ready"][0]
+    assert verifier_assignment["verification_targets"][0]["work_unit_key"] == keys["cto"]
+    assert any(
+        criterion["key"] == "usable"
+        for criterion in verifier_assignment["verification_targets"][0]["acceptance_criteria"]
+    )
+
+    orchestration.start_work_unit(
+        project_id=pg_project,
+        task_key=task,
+        session_id=sid,
+        work_unit_key=keys["digital-director"],
+    )
+    verifier_report = orchestration.record_expert_report(
+        project_id=pg_project,
+        task_key=task,
+        session_id=sid,
+        plan_key=plan["plan_key"],
+        role="digital-director",
+        recommendation="Product acceptance passed.",
+        evidence=[{"source": "fixture"}],
+        work_unit_key=keys["digital-director"],
+        criteria_results=[
+            {
+                "target_work_unit_key": keys["cto"],
+                "criterion_key": "usable",
+                "status": "passed",
+                "evidence": {"review": "bounded UX/product walkthrough passed"},
+            }
+        ],
+    )
+    routing._record_worker_observation(
+        project_id=pg_project,
+        task_key=task,
+        plan_key=plan["plan_key"],
+        role="digital-director",
+        execution_tier="sonnet",
+        agent_type="vres-os:sonnet-expert",
+        agent_id=f"verifier-{uuid.uuid4().hex}",
+        session_id=sid,
+        observed_model="claude-sonnet-5",
+        work_unit_key=keys["digital-director"],
+    )
+    final = orchestration.finalize(
+        project_id=pg_project,
+        task_key=task,
+        session_id=sid,
+        plan_key=plan["plan_key"],
+        synthesis="Implementation and independent product acceptance are complete.",
+        accepted_report_keys=[dev_report["report_key"], verifier_report["report_key"]],
+    )
+    assert final["decision_ready"] is True
+    assert final["acceptance_summary"]["deterministic_criteria"] == 1
+    assert final["acceptance_summary"]["judgmental_criteria"] == 1
+    assert final["acceptance_summary"]["verifier_units"] == [keys["digital-director"]]
+
+
+def test_failed_judgmental_acceptance_blocks_finalization_without_failing_verifier_unit(pg_project, tmp_path):
+    task, sid = _task_and_session(pg_project)
+    orchestration, routing, plan, _, _ = _product_acceptance_graph(
+        pg_project, task, sid, tmp_path
+    )
+    graph = orchestration.record_work_graph(
+        project_id=pg_project,
+        task_key=task,
+        session_id=sid,
+        plan_key=plan["plan_key"],
+        units=[
+            {
+                "role": "cto",
+                "depends_on": [],
+                "write_scope": ["src/app"],
+                "acceptance_criteria": [
+                    {
+                        "key": "tests",
+                        "statement": "Executable tests pass.",
+                        "verification": "deterministic",
+                    },
+                    {
+                        "key": "usable",
+                        "statement": "Product workflow meets the bounded usability acceptance.",
+                        "verification": "judgmental",
+                    },
+                ],
+            },
+            {
+                "role": "digital-director",
+                "depends_on": ["cto"],
+                "write_scope": [],
+                "verifies": ["cto"],
+            },
+        ],
+        project_root=tmp_path,
+    )
+    keys = {row["role"]: row["work_unit_key"] for row in graph["work_units"]}
+    orchestration.start_work_unit(
+        project_id=pg_project, task_key=task, session_id=sid, work_unit_key=keys["cto"]
+    )
+    dev_report = orchestration.record_expert_report(
+        project_id=pg_project,
+        task_key=task,
+        session_id=sid,
+        plan_key=plan["plan_key"],
+        role="cto",
+        recommendation="Implementation ready for review.",
+        evidence=[{"source": "fixture"}],
+        work_unit_key=keys["cto"],
+        criteria_results=[
+            {
+                "target_work_unit_key": keys["cto"],
+                "criterion_key": "tests",
+                "status": "passed",
+                "evidence": {"test": "passed"},
+            }
+        ],
+    )
+    routing._record_worker_observation(
+        project_id=pg_project,
+        task_key=task,
+        plan_key=plan["plan_key"],
+        role="cto",
+        execution_tier="sonnet",
+        agent_type="vres-os:sonnet-expert",
+        agent_id=f"dev-{uuid.uuid4().hex}",
+        session_id=sid,
+        observed_model="claude-sonnet-5",
+        work_unit_key=keys["cto"],
+    )
+    orchestration.start_work_unit(
+        project_id=pg_project,
+        task_key=task,
+        session_id=sid,
+        work_unit_key=keys["digital-director"],
+    )
+    verifier_report = orchestration.record_expert_report(
+        project_id=pg_project,
+        task_key=task,
+        session_id=sid,
+        plan_key=plan["plan_key"],
+        role="digital-director",
+        recommendation="Product acceptance found a blocking usability defect.",
+        evidence=[{"source": "fixture"}],
+        work_unit_key=keys["digital-director"],
+        criteria_results=[
+            {
+                "target_work_unit_key": keys["cto"],
+                "criterion_key": "usable",
+                "status": "failed",
+                "evidence": {"review": "primary workflow is ambiguous"},
+            }
+        ],
+    )
+    verifier_observed = routing._record_worker_observation(
+        project_id=pg_project,
+        task_key=task,
+        plan_key=plan["plan_key"],
+        role="digital-director",
+        execution_tier="sonnet",
+        agent_type="vres-os:sonnet-expert",
+        agent_id=f"verifier-{uuid.uuid4().hex}",
+        session_id=sid,
+        observed_model="claude-sonnet-5",
+        work_unit_key=keys["digital-director"],
+    )
+    assert verifier_observed["work_unit_accepted"] is True
+
+    with pytest.raises(ValueError, match="has not passed independent verification"):
+        orchestration.finalize(
+            project_id=pg_project,
+            task_key=task,
+            session_id=sid,
+            plan_key=plan["plan_key"],
+            synthesis="Must not finalize with failed product acceptance.",
+            accepted_report_keys=[dev_report["report_key"], verifier_report["report_key"]],
         )
 
 
@@ -558,7 +1106,12 @@ def test_report_only_project_agent_cannot_receive_write_scope(pg_project, tmp_pa
             task_key=task,
             session_id=sid,
             plan_key=plan["plan_key"],
-            units=[{"role": "cto", "depends_on": [], "write_scope": ["src"]}],
+            units=[{
+                "role": "cto",
+                "depends_on": [],
+                "write_scope": ["src"],
+                "acceptance_criteria": _deterministic_criteria(),
+            }],
             project_root=tmp_path,
         )
 
@@ -725,6 +1278,7 @@ def test_claimed_failed_worker_waits_for_host_stop_then_rebinds_retry(pg_project
         recommendation="Retry succeeded.",
         evidence=[{"source": "fixture"}],
         work_unit_key=unit_key,
+        criteria_results=_passed_criteria_result(unit_key),
     )
     passed = routing._record_worker_observation(
         project_id=pg_project,
@@ -827,8 +1381,18 @@ def test_parallel_write_scope_overlap_is_rejected(pg_project, tmp_path):
     graph = orchestration.record_work_graph(
         project_id=pg_project, task_key=task, session_id=sid, plan_key=plan["plan_key"],
         units=[
-            {"role": "commercial-director", "depends_on": [], "write_scope": ["src/shared"]},
-            {"role": "data-director", "depends_on": [], "write_scope": ["src/shared/db"]},
+            {
+                "role": "commercial-director",
+                "depends_on": [],
+                "write_scope": ["src/shared"],
+                "acceptance_criteria": _deterministic_criteria("commercial-write"),
+            },
+            {
+                "role": "data-director",
+                "depends_on": [],
+                "write_scope": ["src/shared/db"],
+                "acceptance_criteria": _deterministic_criteria("data-write"),
+            },
             {"role": "cto", "depends_on": ["commercial-director", "data-director"], "write_scope": []},
         ],
         project_root=tmp_path,

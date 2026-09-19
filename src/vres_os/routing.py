@@ -749,7 +749,8 @@ class RoutingService:
             if work_unit_key:
                 unit = conn.execute(
                     """
-                    SELECT id,status,project_agent_key,execution_tier,role,report_key,host_agent_id
+                    SELECT id,status,project_agent_key,execution_tier,role,report_key,host_agent_id,
+                           acceptance_criteria,verifies,last_error
                       FROM vres.orchestration_work_units
                      WHERE task_id=%s AND plan_key=%s AND work_unit_key=%s
                      FOR UPDATE
@@ -761,7 +762,7 @@ class RoutingService:
                 if project_agent_key is None:
                     project_agent_key = unit.get("project_agent_key") or None
                 if (
-                    unit["status"] != "running"
+                    unit["status"] not in {"running", "failed"}
                     or not unit.get("report_key")
                     or unit["role"] != role
                     or unit["execution_tier"] != execution_tier
@@ -772,6 +773,41 @@ class RoutingService:
                 raise ValueError("Observed project agent does not match the governed route")
             if unit and unit.get("host_agent_id") and str(unit["host_agent_id"]) != agent_id:
                 raise ValueError("Observed worker agent_id does not match the claimed work unit")
+
+            explicitly_failed = bool(unit and unit["status"] == "failed")
+            acceptance_ok = not explicitly_failed
+            failed_criteria: list[str] = []
+            if unit and not (unit.get("verifies") or []):
+                report = conn.execute(
+                    """
+                    SELECT payload
+                      FROM vres.task_events
+                     WHERE task_id=%s AND event_type='ORCHESTRATION_EXPERT_REPORT'
+                       AND payload->>'report_key'=%s
+                     ORDER BY id DESC LIMIT 1
+                    """,
+                    (task["id"], unit["report_key"]),
+                ).fetchone()
+                if not report:
+                    raise ValueError("Observed worker report event is missing")
+                results = {
+                    str(result.get("criterion_key") or ""): result
+                    for result in report["payload"].get("criteria_results") or []
+                    if str(result.get("target_work_unit_key") or work_unit_key)
+                    == work_unit_key
+                }
+                deterministic = [
+                    str(criterion.get("key") or "")
+                    for criterion in unit.get("acceptance_criteria") or []
+                    if criterion.get("verification") == "deterministic"
+                ]
+                failed_criteria = [
+                    key
+                    for key in deterministic
+                    if not results.get(key) or results[key].get("status") != "passed"
+                ]
+                acceptance_ok = not failed_criteria and not explicitly_failed
+
             conn.execute(
                 """
                 INSERT INTO vres.worker_runs(
@@ -794,33 +830,76 @@ class RoutingService:
                 ),
             )
             if work_unit_key:
-                conn.execute(
-                    """
-                    UPDATE vres.orchestration_work_units
-                       SET status='passed',host_agent_id=%s,observed_model=%s,completed_at=now()
-                     WHERE task_id=%s AND plan_key=%s AND work_unit_key=%s
-                    """,
-                    (agent_id, observed_model, task["id"], plan_key, work_unit_key),
-                )
-                conn.execute(
-                    """
-                    INSERT INTO vres.task_events(task_id,event_type,actor,payload,session_id)
-                    VALUES (%s,'ORCHESTRATION_WORK_UNIT_PASSED',%s,%s::jsonb,%s)
-                    """,
-                    (
-                        task["id"],
-                        role,
-                        json.dumps(
-                            {
-                                "work_unit_key": work_unit_key,
-                                "plan_key": plan_key,
-                                "report_key": unit["report_key"] if unit else None,
-                                "observed_model": observed_model,
-                            }
+                if explicitly_failed:
+                    conn.execute(
+                        """
+                        UPDATE vres.orchestration_work_units
+                           SET host_agent_id=%s,observed_model=%s,
+                               completed_at=COALESCE(completed_at,now())
+                         WHERE task_id=%s AND plan_key=%s AND work_unit_key=%s
+                        """,
+                        (agent_id, observed_model, task["id"], plan_key, work_unit_key),
+                    )
+                elif acceptance_ok:
+                    conn.execute(
+                        """
+                        UPDATE vres.orchestration_work_units
+                           SET status='passed',host_agent_id=%s,observed_model=%s,
+                               last_error=NULL,completed_at=now()
+                         WHERE task_id=%s AND plan_key=%s AND work_unit_key=%s
+                        """,
+                        (agent_id, observed_model, task["id"], plan_key, work_unit_key),
+                    )
+                    event_type = "ORCHESTRATION_WORK_UNIT_PASSED"
+                    event_payload = {
+                        "work_unit_key": work_unit_key,
+                        "plan_key": plan_key,
+                        "report_key": unit["report_key"] if unit else None,
+                        "observed_model": observed_model,
+                    }
+                else:
+                    message = (
+                        "Deterministic acceptance criteria did not pass: "
+                        + ", ".join(failed_criteria)
+                    )
+                    conn.execute(
+                        """
+                        UPDATE vres.orchestration_work_units
+                           SET status='failed',host_agent_id=%s,observed_model=%s,
+                               last_error=%s,completed_at=now()
+                         WHERE task_id=%s AND plan_key=%s AND work_unit_key=%s
+                        """,
+                        (
+                            agent_id,
+                            observed_model,
+                            message,
+                            task["id"],
+                            plan_key,
+                            work_unit_key,
                         ),
-                        session_id or None,
-                    ),
-                )
+                    )
+                    event_type = "ORCHESTRATION_WORK_UNIT_ACCEPTANCE_FAILED"
+                    event_payload = {
+                        "work_unit_key": work_unit_key,
+                        "plan_key": plan_key,
+                        "report_key": unit["report_key"] if unit else None,
+                        "observed_model": observed_model,
+                        "failed_criteria": failed_criteria,
+                    }
+                if not explicitly_failed:
+                    conn.execute(
+                        """
+                        INSERT INTO vres.task_events(task_id,event_type,actor,payload,session_id)
+                        VALUES (%s,%s,%s,%s::jsonb,%s)
+                        """,
+                        (
+                            task["id"],
+                            event_type,
+                            role,
+                            json.dumps(event_payload),
+                            session_id or None,
+                        ),
+                    )
         return {
             "recorded": True,
             "task_key": task_key,
@@ -830,6 +909,8 @@ class RoutingService:
             "project_agent_key": project_agent_key,
             "execution_tier": execution_tier,
             "observed_model": observed_model,
+            "work_unit_accepted": acceptance_ok,
+            "failed_criteria": failed_criteria,
         }
 
     def record_worker_from_hook(self, payload: dict[str, Any], project_id: int) -> dict[str, Any]:

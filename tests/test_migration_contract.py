@@ -176,6 +176,16 @@ def test_project_agent_work_unit_migration_is_minimal_dependency_dag():
     assert "enforce_current_work_graph_completion" in sql
 
 
+def test_work_unit_acceptance_migration_extends_existing_dag_without_new_subsystem():
+    sql = _migration("034_work_unit_acceptance_contract.sql")
+    assert "acceptance_criteria jsonb" in sql
+    assert "verifies jsonb" in sql
+    assert "orchestration_work_units" in sql
+    assert "CREATE TABLE" not in sql
+    assert "story" not in sql.lower()
+    assert "test_case" not in sql.lower()
+
+
 def test_initial_migration_does_not_make_pg_trgm_a_hard_requirement():
     sql = _migration("001_initial.sql")
     assert "pg_available_extensions" in sql

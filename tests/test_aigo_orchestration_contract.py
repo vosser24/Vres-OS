@@ -130,6 +130,9 @@ def test_chairman_requires_deterministic_first_routing_and_tiered_workers():
     assert "only authorized capability gaps" in text
     assert "orchestration_work_graph_record" in text
     assert "orchestration_work_ready" in text
+    assert "acceptance_criteria" in text
+    assert "criteria_results" in text
+    assert "Do not manufacture a product-owner/QA worker" in text
     assert "older plans remain evidence only" in text
     assert "prior work units are no longer running" in text
 
@@ -154,6 +157,21 @@ def test_work_execution_is_bound_to_latest_orchestration_plan_without_new_state_
     assert "superseded" not in (
         ROOT / "src/vres_os/migrations/033_project_agent_work_units.sql"
     ).read_text(encoding="utf-8")
+
+
+def test_work_unit_acceptance_contract_is_durable_but_not_a_test_management_system():
+    orchestration = (ROOT / "src/vres_os/orchestration.py").read_text(encoding="utf-8")
+    mcp_text = (ROOT / "src/vres_os/aigo_mcp.py").read_text(encoding="utf-8")
+    sonnet = (ROOT / "plugins/vres-os/agents/sonnet-expert.md").read_text(encoding="utf-8")
+    opus = (ROOT / "plugins/vres-os/agents/opus-expert.md").read_text(encoding="utf-8")
+    assert "acceptance_criteria" in orchestration
+    assert "criteria_results" in orchestration
+    assert "judgmental" in orchestration
+    assert "deterministic" in orchestration
+    assert "criteria_results" in mcp_text
+    assert "Never mark a judgmental criterion passed yourself" in sonnet
+    assert "Never mark a judgmental criterion passed yourself" in opus
+    assert "story" not in (ROOT / "src/vres_os/migrations/034_work_unit_acceptance_contract.sql").read_text(encoding="utf-8").lower()
 
 
 def test_governed_agents_pin_router_and_execution_model_families():
