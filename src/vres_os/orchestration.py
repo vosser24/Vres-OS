@@ -78,8 +78,9 @@ def _scope_paths(values: list[str] | None) -> list[str]:
 
 
 def _scopes_overlap(left: list[str], right: list[str]) -> bool:
-    for a in left:
-        for b in right:
+    for raw_a in left:
+        for raw_b in right:
+            a, b = raw_a.casefold(), raw_b.casefold()
             if a == b or a.startswith(b + "/") or b.startswith(a + "/"):
                 return True
     return False
