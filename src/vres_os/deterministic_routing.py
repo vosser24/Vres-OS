@@ -80,6 +80,18 @@ def _deterministic_report(discovery: dict[str, Any], *, protected: bool) -> dict
             keys.append(owned_keys[0])
     if not owner:
         return None
+    agent_candidates: dict[str, dict[str, Any]] = {}
+    for rows in (discovery.get("agent_matches") or {}).values():
+        for agent in rows or []:
+            if (
+                str(agent.get("role") or "") == owner
+                and set(keys).issubset(set(agent.get("capability_keys") or []))
+            ):
+                agent_candidates[str(agent.get("agent_key") or "")] = agent
+    agent_candidates.pop("", None)
+    if len(agent_candidates) > 1:
+        return None
+    agent_key = next(iter(agent_candidates), None)
     assurance = "protected" if protected else "routine"
     return {
         "outcome": "routed",
@@ -88,6 +100,7 @@ def _deterministic_report(discovery: dict[str, Any], *, protected: bool) -> dict
         "experts": [
             {
                 "role": owner,
+                "agent_key": agent_key,
                 "covers": needs,
                 "capability_keys": keys,
                 "execution_tier": "sonnet",

@@ -573,6 +573,9 @@ def start_for_project(project_root: str = ".") -> dict:
             }
     applied = migrate()
     project = discover_project(project_root)
+    from .claude_contract import ensure_project_claude
+
+    claude_contract = ensure_project_claude(project.root, project.name)
     project_id = Repository().ensure_project(project)
     return {
         "status": "READY",
@@ -580,4 +583,5 @@ def start_for_project(project_root: str = ".") -> dict:
         "project": asdict(project) | {"root": str(project.root)},
         "migrations": applied,
         "prerequisites": prerequisite_status(),
+        "claude_contract": claude_contract,
     }

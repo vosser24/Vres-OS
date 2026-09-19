@@ -126,6 +126,7 @@ def test_migrator_resumes_023_without_database_create(monkeypatch):
             "030_protected_governance_freshness.sql",
             "031_software_architecture_routing_calibration.sql",
             "032_latest_observed_user_instruction.sql",
+            "033_project_agent_work_units.sql",
         ]
         assert db.migrate() == expected
 

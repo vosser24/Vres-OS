@@ -7,7 +7,8 @@ from .approvals import require_company_approval
 from .redaction import redact, redact_text
 
 _ALLOWED_TYPES = {
-    "module", "system", "dataset", "process", "interface", "api", "metric", "team", "external_service"
+    "module", "system", "dataset", "process", "interface", "api", "metric", "team", "external_service",
+    "agent",
 }
 
 

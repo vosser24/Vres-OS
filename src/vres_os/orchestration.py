@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from .capabilities import CapabilityService
 from .db import connect
 from .knowledge import KnowledgeService
 from .procedures import ProcedureService
+from .project_agents import ProjectAgentService
 from .redaction import redact, redact_text
 
 
@@ -31,6 +33,7 @@ _MAX_NEEDS = 20
 _MAX_QUERIES = 10
 _MAX_EXPERTS = 20
 _MAX_EVIDENCE = 20
+_MAX_PARALLEL_WORKERS = 4
 _SPECIALIST_PREFIXES = ("specialist-", "specialist:")
 
 
@@ -54,6 +57,52 @@ def _strings(values: list[str] | None, *, limit: int, field: str) -> list[str]:
         if len(out) > limit:
             raise ValueError(f"{field} exceeds the maximum of {limit} entries")
     return out
+
+
+def _scope_paths(values: list[str] | None) -> list[str]:
+    out: list[str] = []
+    for raw in values or []:
+        value = str(raw).strip().replace("\\", "/")
+        while value.startswith("./"):
+            value = value[2:]
+        value = value.rstrip("/")
+        if not value:
+            continue
+        if value.startswith("/") or ":" in value.split("/", 1)[0] or ".." in value.split("/"):
+            raise ValueError("write_scope entries must be project-relative paths")
+        if value not in out:
+            out.append(value)
+        if len(out) > 50:
+            raise ValueError("write_scope exceeds 50 entries")
+    return out
+
+
+def _scopes_overlap(left: list[str], right: list[str]) -> bool:
+    for raw_a in left:
+        for raw_b in right:
+            a, b = raw_a.casefold(), raw_b.casefold()
+            if a == b or a.startswith(b + "/") or b.startswith(a + "/"):
+                return True
+    return False
+
+
+def _assert_acyclic(graph: dict[str, list[str]]) -> None:
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(role: str) -> None:
+        if role in visited:
+            return
+        if role in visiting:
+            raise ValueError("orchestration work graph contains a dependency cycle")
+        visiting.add(role)
+        for dep in graph.get(role, []):
+            visit(dep)
+        visiting.remove(role)
+        visited.add(role)
+
+    for role in graph:
+        visit(role)
 
 
 def _summary_capability(row: dict[str, Any]) -> dict[str, Any]:
@@ -157,6 +206,7 @@ class OrchestrationService:
         procedure_intent: str | None = None,
         task_family: str | None = None,
         knowledge_queries: list[str] | None = None,
+        project_root: Path | None = None,
     ) -> dict[str, Any]:
         needs = _strings(capability_needs, limit=_MAX_NEEDS, field="capability_needs")
         if not needs:
@@ -175,6 +225,30 @@ class OrchestrationService:
             for need in needs
         }
         missing = [need for need in needs if not capabilities[need]]
+
+        project_agents = (
+            ProjectAgentService().search(
+                project_id=project_id,
+                root=project_root,
+            )
+            if project_root is not None
+            else []
+        )
+        agent_matches: dict[str, list[dict[str, Any]]] = {}
+        for need, rows in capabilities.items():
+            allowed = {
+                (str(row.get("capability_key") or ""), str(row.get("owner_role") or ""))
+                for row in rows
+            }
+            matched: list[dict[str, Any]] = []
+            for agent in project_agents:
+                if any(
+                    capability_key in set(agent["capability_keys"])
+                    and owner == agent["role"]
+                    for capability_key, owner in allowed
+                ):
+                    matched.append(agent)
+            agent_matches[need] = matched
 
         procedures: list[dict[str, Any]] = []
         if procedure_intent:
@@ -203,6 +277,7 @@ class OrchestrationService:
             "capability_needs": needs,
             "capability_matches": capabilities,
             "missing_capabilities": missing,
+            "agent_matches": agent_matches,
             "procedure_intent": procedure_intent or None,
             "procedure_matches": procedures,
             "knowledge_queries": queries,
@@ -320,6 +395,7 @@ class OrchestrationService:
             covered: set[str] = set()
             for raw in selected_experts:
                 role = str(raw.get("role") or "").strip()
+                agent_key = str(raw.get("agent_key") or "").strip() or None
                 rationale = str(raw.get("rationale") or "").strip()
                 covers = _strings(
                     raw.get("covers") or [],
@@ -376,6 +452,7 @@ class OrchestrationService:
                 selected.append(
                     {
                         "role": role,
+                        "agent_key": agent_key,
                         "rationale": redact_text(rationale),
                         "covers": covers,
                         "capability_keys": capability_keys,
@@ -414,6 +491,32 @@ class OrchestrationService:
             if lead_role not in selected_roles:
                 raise ValueError("lead_role must be one of the selected experts")
 
+            route = conn.execute(
+                """
+                SELECT decision FROM vres.routing_requests
+                 WHERE task_id=%s AND discovery_key=%s AND status='routed'
+                 ORDER BY id DESC LIMIT 1
+                """,
+                (task["id"], discovery_key),
+            ).fetchone()
+            if route:
+                routed = {
+                    str(item.get("role") or ""): item
+                    for item in route["decision"].get("experts") or []
+                }
+                if set(routed) != selected_roles:
+                    raise ValueError("Orchestration plan roles must match the governed route")
+                if route["decision"].get("lead_role") != lead_role:
+                    raise ValueError("Orchestration lead must match the governed route")
+                for item in selected:
+                    expected = routed[item["role"]]
+                    if (item.get("agent_key") or None) != (expected.get("agent_key") or None):
+                        raise ValueError("Project-agent selection must match the governed route")
+                    if set(item["covers"]) != set(expected.get("covers") or []):
+                        raise ValueError("Expert capability coverage must match the governed route")
+                    if set(item["capability_keys"]) != set(expected.get("capability_keys") or []):
+                        raise ValueError("Expert capability keys must match the governed route")
+
             plan_key = _key("ORCHPLAN")
             payload = {
                 "plan_key": plan_key,
@@ -447,6 +550,7 @@ class OrchestrationService:
         assumptions: list[str] | None = None,
         unknowns: list[str] | None = None,
         report_type: str = "expert",
+        work_unit_key: str | None = None,
     ) -> dict[str, Any]:
         role = role.strip()
         recommendation = recommendation.strip()
@@ -476,11 +580,36 @@ class OrchestrationService:
                 raise ValueError(
                     "Only an expert selected in the durable orchestration plan may report"
                 )
+            graph_exists = conn.execute(
+                "SELECT 1 FROM vres.orchestration_work_units WHERE task_id=%s AND plan_key=%s LIMIT 1",
+                (task["id"], plan_key),
+            ).fetchone()
+            unit = None
+            if graph_exists:
+                if not work_unit_key:
+                    raise ValueError("Work-graph expert reports require work_unit_key")
+                unit = conn.execute(
+                    """
+                    SELECT * FROM vres.orchestration_work_units
+                     WHERE task_id=%s AND plan_key=%s AND work_unit_key=%s
+                     FOR UPDATE
+                    """,
+                    (task["id"], plan_key, work_unit_key),
+                ).fetchone()
+                if (
+                    not unit
+                    or unit["role"] != role
+                    or unit["status"] != "running"
+                    or unit.get("report_key")
+                ):
+                    raise ValueError("Expert report must close the matching unreported running work unit")
             report_key = _key("ORCHREP")
             payload = {
                 "report_key": report_key,
                 "plan_key": plan_key,
                 "role": role,
+                "work_unit_key": work_unit_key,
+                "project_agent_key": unit.get("project_agent_key") if unit else None,
                 "report_type": report_type,
                 "recommendation": redact_text(recommendation),
                 "evidence": redact(evidence),
@@ -503,7 +632,355 @@ class OrchestrationService:
                 payload,
                 session_id,
             )
+            if unit:
+                conn.execute(
+                    """
+                    UPDATE vres.orchestration_work_units
+                       SET report_key=%s,last_error=NULL
+                     WHERE id=%s
+                    """,
+                    (report_key, unit["id"]),
+                )
+                self._insert_event(
+                    conn,
+                    int(task["id"]),
+                    "ORCHESTRATION_WORK_UNIT_REPORTED",
+                    role,
+                    {"work_unit_key": work_unit_key, "report_key": report_key, "plan_key": plan_key},
+                    session_id,
+                )
         return {**payload, "event_id": event_id}
+
+    def record_work_graph(
+        self,
+        *,
+        project_id: int,
+        task_key: str,
+        session_id: str,
+        plan_key: str,
+        units: list[dict[str, Any]],
+        project_root: Path | None = None,
+    ) -> dict[str, Any]:
+        if not units or len(units) > _MAX_EXPERTS:
+            raise ValueError("Work graph requires one bounded unit per selected expert")
+        with connect() as conn, conn.transaction():
+            task = self._bound_task(conn, project_id, task_key, session_id)
+            plan = self._event_by_key(
+                conn, int(task["id"]), "ORCHESTRATION_PLAN", "plan_key", plan_key
+            )["payload"]
+            existing = conn.execute(
+                "SELECT * FROM vres.orchestration_work_units WHERE task_id=%s AND plan_key=%s ORDER BY id",
+                (task["id"], plan_key),
+            ).fetchall()
+            if existing:
+                return {
+                    "plan_key": plan_key,
+                    "work_units": [dict(row) for row in existing],
+                    "created": False,
+                }
+            selected = {
+                str(item.get("role") or ""): item
+                for item in plan.get("selected_experts") or []
+            }
+            supplied_roles = [str(item.get("role") or "").strip() for item in units]
+            if set(supplied_roles) != set(selected) or len(supplied_roles) != len(set(supplied_roles)):
+                raise ValueError("Work graph must contain every selected expert role exactly once")
+            route = conn.execute(
+                """
+                SELECT decision FROM vres.routing_requests
+                 WHERE task_id=%s AND discovery_key=%s AND status='routed'
+                 ORDER BY id DESC LIMIT 1
+                """,
+                (task["id"], plan["discovery_key"]),
+            ).fetchone()
+            if not route:
+                raise ValueError("Work graph requires a governed route")
+            routed = {str(x.get("role") or ""): x for x in route["decision"].get("experts") or []}
+            role_to_key = {role: _key("ORCHWORK") for role in selected}
+            dependency_graph: dict[str, list[str]] = {}
+            normalized: list[dict[str, Any]] = []
+            for raw in units:
+                role = str(raw.get("role") or "").strip()
+                deps = _strings(
+                    raw.get("depends_on") or [],
+                    limit=_MAX_EXPERTS,
+                    field="work_units.depends_on",
+                )
+                if role in deps or any(dep not in selected for dep in deps):
+                    raise ValueError("Work-unit dependencies must reference other selected roles")
+                dependency_graph[role] = deps
+                scope = _scope_paths(raw.get("write_scope") or [])
+                selected_item = selected[role]
+                routed_item = routed.get(role)
+                if routed_item is None:
+                    raise ValueError("Work graph role is absent from the governed route")
+                agent_key = selected_item.get("agent_key") or None
+                if agent_key and project_root is not None:
+                    agent = ProjectAgentService().get(
+                        agent_key=str(agent_key),
+                        project_id=project_id,
+                        root=project_root,
+                        include_instruction=False,
+                    )
+                    if agent["write_policy"] == "report_only" and scope:
+                        raise ValueError(
+                            f"Report-only project agent {agent_key!r} cannot receive a write scope"
+                        )
+                normalized.append(
+                    {
+                        "work_unit_key": role_to_key[role],
+                        "role": role,
+                        "project_agent_key": agent_key,
+                        "execution_tier": routed_item["execution_tier"],
+                        "covers": selected_item.get("covers") or [],
+                        "capability_keys": selected_item.get("capability_keys") or [],
+                        "depends_on": deps,
+                        "write_scope": scope,
+                    }
+                )
+            _assert_acyclic(dependency_graph)
+            for item in normalized:
+                dep_keys = [role_to_key[role] for role in item["depends_on"]]
+                conn.execute(
+                    """
+                    INSERT INTO vres.orchestration_work_units(
+                      work_unit_key,task_id,plan_key,role,project_agent_key,execution_tier,
+                      covers,capability_keys,depends_on,write_scope
+                    ) VALUES (%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb)
+                    """,
+                    (
+                        item["work_unit_key"], task["id"], plan_key, item["role"],
+                        item["project_agent_key"], item["execution_tier"],
+                        json.dumps(item["covers"]), json.dumps(item["capability_keys"]),
+                        json.dumps(dep_keys), json.dumps(item["write_scope"]),
+                    ),
+                )
+                item["depends_on"] = dep_keys
+            event_id = self._insert_event(
+                conn,
+                int(task["id"]),
+                "ORCHESTRATION_WORK_GRAPH",
+                "chairman",
+                {"plan_key": plan_key, "work_units": normalized},
+                session_id,
+            )
+        return {"plan_key": plan_key, "work_units": normalized, "created": True, "event_id": event_id}
+
+    def ready_work(
+        self,
+        *,
+        project_id: int,
+        task_key: str,
+        plan_key: str,
+        project_root: Path,
+    ) -> dict[str, Any]:
+        with connect() as conn:
+            task = conn.execute(
+                "SELECT id,objective FROM vres.tasks WHERE task_key=%s AND project_id=%s",
+                (task_key, project_id),
+            ).fetchone()
+            if not task:
+                raise KeyError(task_key)
+            rows = conn.execute(
+                "SELECT * FROM vres.orchestration_work_units WHERE task_id=%s AND plan_key=%s ORDER BY id",
+                (task["id"], plan_key),
+            ).fetchall()
+        if not rows:
+            raise ValueError("No work graph exists for this plan")
+        by_key = {str(row["work_unit_key"]): dict(row) for row in rows}
+        ready: list[dict[str, Any]] = []
+        waiting: list[dict[str, Any]] = []
+        for row in by_key.values():
+            deps = [str(x) for x in row.get("depends_on") or []]
+            dep_statuses = {dep: by_key[dep]["status"] for dep in deps if dep in by_key}
+            missing_dependencies = [dep for dep in deps if dep not in by_key]
+            item = {
+                "work_unit_key": row["work_unit_key"],
+                "plan_key": plan_key,
+                "role": row["role"],
+                "agent_key": row.get("project_agent_key"),
+                "execution_tier": row["execution_tier"],
+                "covers": row.get("covers") or [],
+                "capability_keys": row.get("capability_keys") or [],
+                "write_scope": row.get("write_scope") or [],
+                "status": row["status"],
+                "attempt_count": row["attempt_count"],
+                "dependencies": dep_statuses,
+                "missing_dependencies": missing_dependencies,
+                "objective": task["objective"],
+                "worker_agent": (
+                    "vres-os:opus-expert"
+                    if row["execution_tier"] == "opus"
+                    else "vres-os:sonnet-expert"
+                ),
+            }
+            if row.get("project_agent_key"):
+                item["project_agent"] = ProjectAgentService().get(
+                    agent_key=str(row["project_agent_key"]),
+                    project_id=project_id,
+                    root=project_root,
+                )
+            if (
+                row["status"] in {"pending", "failed"}
+                and not missing_dependencies
+                and all(status == "passed" for status in dep_statuses.values())
+            ):
+                ready.append(item)
+            else:
+                waiting.append(item)
+        return {"plan_key": plan_key, "ready": ready, "waiting": waiting}
+
+    def start_work_unit(
+        self,
+        *,
+        project_id: int,
+        task_key: str,
+        session_id: str,
+        work_unit_key: str,
+    ) -> dict[str, Any]:
+        with connect() as conn, conn.transaction():
+            task = self._bound_task(conn, project_id, task_key, session_id)
+            unit = conn.execute(
+                """
+                SELECT * FROM vres.orchestration_work_units
+                 WHERE task_id=%s AND work_unit_key=%s FOR UPDATE
+                """,
+                (task["id"], work_unit_key),
+            ).fetchone()
+            if not unit:
+                raise KeyError(work_unit_key)
+            if unit["status"] not in {"pending", "failed"}:
+                raise ValueError("Only pending or failed work units can start")
+            deps = [str(x) for x in unit.get("depends_on") or []]
+            if deps:
+                rows = conn.execute(
+                    "SELECT work_unit_key,status FROM vres.orchestration_work_units WHERE task_id=%s AND work_unit_key=ANY(%s)",
+                    (task["id"], deps),
+                ).fetchall()
+                statuses = {str(row["work_unit_key"]): row["status"] for row in rows}
+                if any(statuses.get(dep) != "passed" for dep in deps):
+                    raise ValueError("Work-unit dependencies have not passed")
+            conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
+                (f"orchestration-start:{project_id}",),
+            )
+            running = conn.execute(
+                """
+                SELECT w.work_unit_key,w.write_scope
+                  FROM vres.orchestration_work_units w
+                  JOIN vres.tasks t ON t.id=w.task_id
+                 WHERE t.project_id=%s AND w.status='running' AND w.work_unit_key<>%s
+                 FOR UPDATE OF w
+                """,
+                (project_id, work_unit_key),
+            ).fetchall()
+            if len(running) >= _MAX_PARALLEL_WORKERS:
+                raise ValueError(
+                    f"Project already has {_MAX_PARALLEL_WORKERS} running governed work units"
+                )
+            scope = [str(x) for x in unit.get("write_scope") or []]
+            if scope:
+                for other in running:
+                    if _scopes_overlap(scope, [str(x) for x in other.get("write_scope") or []]):
+                        raise ValueError(
+                            f"Write scope overlaps running work unit {other['work_unit_key']}"
+                        )
+            conn.execute(
+                """
+                UPDATE vres.orchestration_work_units
+                   SET status='running',attempt_count=attempt_count+1,started_at=now(),
+                       completed_at=NULL,last_error=NULL,report_key=NULL
+                 WHERE id=%s
+                """,
+                (unit["id"],),
+            )
+            event_id = self._insert_event(
+                conn,
+                int(task["id"]),
+                "ORCHESTRATION_WORK_UNIT_STARTED",
+                str(unit["role"]),
+                {
+                    "work_unit_key": work_unit_key,
+                    "plan_key": unit["plan_key"],
+                    "attempt": int(unit["attempt_count"]) + 1,
+                },
+                session_id,
+            )
+        return {
+            "work_unit_key": work_unit_key,
+            "status": "running",
+            "attempt": int(unit["attempt_count"]) + 1,
+            "event_id": event_id,
+        }
+
+    def bind_work_unit_host(
+        self,
+        *,
+        project_id: int,
+        work_unit_key: str,
+        agent_id: str,
+    ) -> dict[str, Any]:
+        agent = str(agent_id or "").strip()
+        if not agent:
+            raise ValueError("Work-unit host binding requires agent_id")
+        with connect() as conn, conn.transaction():
+            unit = conn.execute(
+                """
+                SELECT w.id,w.work_unit_key,w.status,w.host_agent_id,t.project_id
+                  FROM vres.orchestration_work_units w
+                  JOIN vres.tasks t ON t.id=w.task_id
+                 WHERE w.work_unit_key=%s
+                 FOR UPDATE OF w
+                """,
+                (work_unit_key,),
+            ).fetchone()
+            if not unit or int(unit["project_id"] or 0) != int(project_id):
+                raise ValueError("Work unit is unknown or belongs to another project")
+            if unit["status"] != "running":
+                raise ValueError("Only a running work unit can bind host agent identity")
+            current = str(unit.get("host_agent_id") or "").strip()
+            if current and current != agent:
+                raise ValueError("Work unit is already bound to another host agent")
+            conn.execute(
+                "UPDATE vres.orchestration_work_units SET host_agent_id=%s WHERE id=%s",
+                (agent, unit["id"]),
+            )
+        return {"work_unit_key": work_unit_key, "agent_id": agent, "bound": True}
+
+
+    def fail_work_unit(
+        self,
+        *,
+        project_id: int,
+        task_key: str,
+        session_id: str,
+        work_unit_key: str,
+        error: str,
+    ) -> dict[str, Any]:
+        message = redact_text(str(error or "").strip())
+        if not message:
+            raise ValueError("Failed work unit requires an error")
+        with connect() as conn, conn.transaction():
+            task = self._bound_task(conn, project_id, task_key, session_id)
+            unit = conn.execute(
+                "SELECT * FROM vres.orchestration_work_units WHERE task_id=%s AND work_unit_key=%s FOR UPDATE",
+                (task["id"], work_unit_key),
+            ).fetchone()
+            if not unit or unit["status"] != "running":
+                raise ValueError("Only a running work unit can fail")
+            conn.execute(
+                "UPDATE vres.orchestration_work_units SET status='failed',last_error=%s,completed_at=now() WHERE id=%s",
+                (message, unit["id"]),
+            )
+            event_id = self._insert_event(
+                conn,
+                int(task["id"]),
+                "ORCHESTRATION_WORK_UNIT_FAILED",
+                str(unit["role"]),
+                {"work_unit_key": work_unit_key, "plan_key": unit["plan_key"], "error": message},
+                session_id,
+            )
+        return {"work_unit_key": work_unit_key, "status": "failed", "event_id": event_id}
 
     def record_arbitration(
         self,
@@ -630,6 +1107,21 @@ class OrchestrationService:
             selected_roles = {
                 str(item.get("role") or "") for item in plan.get("selected_experts") or []
             }
+            work_units = conn.execute(
+                "SELECT role,status,report_key FROM vres.orchestration_work_units WHERE task_id=%s AND plan_key=%s",
+                (task["id"], plan_key),
+            ).fetchall()
+            if work_units:
+                incomplete = [
+                    str(row["role"]) for row in work_units if row["status"] != "passed"
+                ]
+                if incomplete:
+                    raise ValueError(
+                        f"Final orchestration is blocked by incomplete work units: {sorted(incomplete)}"
+                    )
+                unit_reports = {str(row["report_key"]) for row in work_units if row.get("report_key")}
+                if not unit_reports.issubset(set(report_keys)):
+                    raise ValueError("Final orchestration must accept every passed work-unit report")
             reported_roles: set[str] = set()
             for report_key in report_keys:
                 report = self._event_by_key(

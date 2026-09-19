@@ -205,9 +205,9 @@ class RoutingService:
             "overstated for the bounded worker assignment. Complexity and consequence "
             "are separate: hard_protected may require protected validation even when Sonnet is sufficient to execute. Any Opus worker requires "
             "assurance='protected'. Infer consequence from the objective as well as the supplied risk triggers; a missing flag is never permission "
-            "to downgrade obvious release/security/governance/high-stakes work. If discovery contains a real unresolved capability gap, return "
+            "to downgrade obvious release/security/governance/high-stakes work. When discovery offers a current project agent whose registered capability set covers an expert's assigned needs, prefer the smallest exact match and return its agent_key; never invent an agent key. If discovery contains a real unresolved capability gap, return "
             "outcome='blocked' and list only those gap needs; do not route around them. Shape for a route: "
-            "{request_key,outcome:'routed',lead_role,experts:[{role,covers:[...],capability_keys:[...],execution_tier:'sonnet|opus',rationale}],"
+            "{request_key,outcome:'routed',lead_role,experts:[{role,agent_key:null|'<registered-project-agent>',covers:[...],capability_keys:[...],execution_tier:'sonnet|opus',rationale}],"
             "assurance:'routine|protected',routing_rationale,required_gap_needs:[]}. Shape for a gap: "
             "{request_key,outcome:'blocked',lead_role:null,experts:[],assurance:null,routing_rationale,required_gap_needs:[...]}."
         )
@@ -296,6 +296,7 @@ class RoutingService:
             if not isinstance(raw, dict):
                 raise ValueError("Each routed expert must be an object")
             role = str(raw.get("role") or "").strip()
+            agent_key = str(raw.get("agent_key") or "").strip() or None
             tier = str(raw.get("execution_tier") or "").strip()
             exp_rationale = redact_text(str(raw.get("rationale") or "").strip())
             covers = _bounded_strings(raw.get("covers") or [], field="experts.covers", limit=20)
@@ -311,8 +312,8 @@ class RoutingService:
             if not exp_rationale:
                 raise ValueError(f"Routing role {role!r} requires rationale")
             if role == "challenger":
-                if covers or keys:
-                    raise ValueError("Challenger must not claim a domain capability")
+                if covers or keys or agent_key:
+                    raise ValueError("Challenger must not claim a domain capability or project agent")
             else:
                 if not covers or not keys:
                     raise ValueError(f"Routing role {role!r} must cover discovered capability needs")
@@ -326,11 +327,44 @@ class RoutingService:
                             f"Routing role {role!r} must cite a discovered capability it owns for {need!r}"
                         )
                     covered.add(need)
+                candidate_map: dict[str, dict[str, Any]] = {}
+                candidate_sets: list[set[str]] = []
+                for need in covers:
+                    matches_for_need = discovery.get("agent_matches", {}).get(need) or []
+                    matching_keys: set[str] = set()
+                    for agent in matches_for_need:
+                        if str(agent.get("role") or "") != role:
+                            continue
+                        key = str(agent.get("agent_key") or "").strip()
+                        if not key:
+                            continue
+                        candidate_map[key] = agent
+                        matching_keys.add(key)
+                    candidate_sets.append(matching_keys)
+                compatible_keys = (
+                    set.intersection(*candidate_sets) if candidate_sets else set()
+                )
+                compatible_keys = {
+                    key
+                    for key in compatible_keys
+                    if set(keys).issubset(
+                        set(candidate_map[key].get("capability_keys") or [])
+                    )
+                }
+                if compatible_keys and not agent_key:
+                    raise ValueError(
+                        f"Routing role {role!r} must select a compatible registered project agent"
+                    )
+                if agent_key and agent_key not in compatible_keys:
+                    raise ValueError(
+                        f"Routing role {role!r} cites unregistered, mismatched, or insufficient project agent {agent_key!r}"
+                    )
             selected_roles.add(role)
             any_opus = any_opus or tier == "opus"
             experts.append(
                 {
                     "role": role,
+                    "agent_key": agent_key,
                     "covers": covers,
                     "capability_keys": keys,
                     "execution_tier": tier,
@@ -534,6 +568,8 @@ class RoutingService:
         agent_id: str,
         session_id: str,
         observed_model: str,
+        work_unit_key: str | None = None,
+        project_agent_key: str | None = None,
     ) -> dict[str, Any]:
         with connect() as conn, conn.transaction():
             task = conn.execute(
@@ -569,11 +605,40 @@ class RoutingService:
             ]
             if len(expected) != 1 or expected[0].get("execution_tier") != execution_tier:
                 raise ValueError("Observed worker tier/role does not match the Fable route")
+            expected_agent = expected[0].get("agent_key") or None
+            unit = None
+            if work_unit_key:
+                unit = conn.execute(
+                    """
+                    SELECT id,status,project_agent_key,execution_tier,role,report_key,host_agent_id
+                      FROM vres.orchestration_work_units
+                     WHERE task_id=%s AND plan_key=%s AND work_unit_key=%s
+                     FOR UPDATE
+                    """,
+                    (task["id"], plan_key, work_unit_key),
+                ).fetchone()
+                if not unit:
+                    raise ValueError("Observed worker does not match a known work unit")
+                if project_agent_key is None:
+                    project_agent_key = unit.get("project_agent_key") or None
+                if (
+                    unit["status"] != "running"
+                    or not unit.get("report_key")
+                    or unit["role"] != role
+                    or unit["execution_tier"] != execution_tier
+                    or (unit.get("project_agent_key") or None) != (project_agent_key or None)
+                ):
+                    raise ValueError("Observed worker does not match the passed work unit")
+            if (project_agent_key or None) != expected_agent:
+                raise ValueError("Observed project agent does not match the governed route")
+            if unit and unit.get("host_agent_id") and str(unit["host_agent_id"]) != agent_id:
+                raise ValueError("Observed worker agent_id does not match the claimed work unit")
             conn.execute(
                 """
                 INSERT INTO vres.worker_runs(
-                  task_id,plan_key,role,execution_tier,agent_type,agent_id,session_id,observed_model,status
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'observed')
+                  task_id,plan_key,role,execution_tier,work_unit_key,project_agent_key,
+                  agent_type,agent_id,session_id,observed_model,status
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'observed')
                 ON CONFLICT(agent_id,plan_key,role) DO NOTHING
                 """,
                 (
@@ -581,17 +646,49 @@ class RoutingService:
                     plan_key,
                     role,
                     execution_tier,
+                    work_unit_key,
+                    project_agent_key,
                     agent_type,
                     agent_id,
                     session_id or None,
                     observed_model,
                 ),
             )
+            if work_unit_key:
+                conn.execute(
+                    """
+                    UPDATE vres.orchestration_work_units
+                       SET status='passed',host_agent_id=%s,observed_model=%s,completed_at=now()
+                     WHERE task_id=%s AND plan_key=%s AND work_unit_key=%s
+                    """,
+                    (agent_id, observed_model, task["id"], plan_key, work_unit_key),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO vres.task_events(task_id,event_type,actor,payload,session_id)
+                    VALUES (%s,'ORCHESTRATION_WORK_UNIT_PASSED',%s,%s::jsonb,%s)
+                    """,
+                    (
+                        task["id"],
+                        role,
+                        json.dumps(
+                            {
+                                "work_unit_key": work_unit_key,
+                                "plan_key": plan_key,
+                                "report_key": unit["report_key"] if unit else None,
+                                "observed_model": observed_model,
+                            }
+                        ),
+                        session_id or None,
+                    ),
+                )
         return {
             "recorded": True,
             "task_key": task_key,
             "plan_key": plan_key,
             "role": role,
+            "work_unit_key": work_unit_key,
+            "project_agent_key": project_agent_key,
             "execution_tier": execution_tier,
             "observed_model": observed_model,
         }
@@ -615,6 +712,8 @@ class RoutingService:
         task_key = str(tool_input.get("task_key") or "").strip()
         plan_key = str(tool_input.get("plan_key") or "").strip()
         role = str(tool_input.get("role") or "").strip()
+        work_unit_key = str(tool_input.get("work_unit_key") or "").strip() or None
+        project_agent_key = str(tool_input.get("project_agent_key") or "").strip() or None
         if not task_key or not plan_key or not role:
             raise ValueError("Observed expert report is missing task/plan/role identifiers")
         return self._record_worker_observation(
@@ -623,6 +722,8 @@ class RoutingService:
             plan_key=plan_key,
             role=role,
             execution_tier=expected_tier,
+            work_unit_key=work_unit_key,
+            project_agent_key=project_agent_key,
             agent_type=agent_type,
             agent_id=str(payload["agent_id"]),
             session_id=str(payload.get("session_id") or ""),
@@ -743,7 +844,7 @@ class RoutingService:
             ).fetchall()
             workers = conn.execute(
                 """
-                SELECT plan_key,role,execution_tier,agent_type,agent_id,session_id,
+                SELECT plan_key,role,work_unit_key,project_agent_key,execution_tier,agent_type,agent_id,session_id,
                        observed_model,status,created_at
                   FROM vres.worker_runs WHERE task_id=%s ORDER BY id
                 """,

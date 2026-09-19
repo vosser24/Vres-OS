@@ -38,7 +38,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "^(?!Read$|Glob$|Grep$|TaskOutput$|ToolSearch$|mcp__plugin_vres-os_vres__(routing_evidence|orchestration_evidence|validation_evidence|vres_status|task_open_list|capability_resolve|artifact_get|task_reply_gate|reply_activity_observe)$).+",
+        "matcher": "^(?!Read$|Glob$|Grep$|TaskOutput$|ToolSearch$|mcp__plugin_vres-os_vres__(routing_evidence|orchestration_evidence|validation_evidence|vres_status|task_open_list|capability_resolve|project_agent_get|project_agent_search|orchestration_work_ready|artifact_get|task_reply_gate|reply_activity_observe)$).+",
         "hooks": [
           {
             "type": "command",
@@ -73,6 +73,24 @@
       }
     ],
     "PostToolUse": [
+      {
+        "matcher": "^mcp__plugin_vres-os_vres__orchestration_work_unit_start$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe",
+            "args": [
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              "${CLAUDE_PLUGIN_ROOT}/bin/vres-subagent-hook.ps1",
+              "work-unit-started"
+            ],
+            "timeout": 10
+          }
+        ]
+      },
       {
         "matcher": "^AskUserQuestion$",
         "hooks": [

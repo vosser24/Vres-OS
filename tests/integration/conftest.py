@@ -46,4 +46,5 @@ def pg_project(monkeypatch, tmp_path):
             conn.execute("DELETE FROM vres.approval_events WHERE project_id=%s", (pid,))
             conn.execute("DELETE FROM vres.sessions WHERE project_id=%s", (pid,))
             conn.execute("DELETE FROM vres.tasks WHERE project_id=%s", (pid,))
+            conn.execute("DELETE FROM vres.registry_objects WHERE project_id=%s", (pid,))
             conn.execute("DELETE FROM vres.projects WHERE id=%s", (pid,))

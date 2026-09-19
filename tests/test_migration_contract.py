@@ -164,6 +164,18 @@ def test_latest_observed_user_instruction_is_writer_only_security_definer():
     assert "REVOKE ALL ON FUNCTION" in sql
 
 
+def test_project_agent_work_unit_migration_is_minimal_dependency_dag():
+    sql = _migration("033_project_agent_work_units.sql")
+    assert "orchestration_work_units" in sql
+    assert "depends_on jsonb" in sql
+    assert "write_scope jsonb" in sql
+    assert "attempt_count" in sql
+    assert "work_unit_key" in sql
+    assert "project_agent_key" in sql
+    assert "parallel_group" not in sql
+    assert "enforce_current_work_graph_completion" in sql
+
+
 def test_initial_migration_does_not_make_pg_trgm_a_hard_requirement():
     sql = _migration("001_initial.sql")
     assert "pg_available_extensions" in sql

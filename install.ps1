@@ -18,6 +18,10 @@ $ClaudeHome = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join
 $SkillRoot = Join-Path $ClaudeHome 'skills'
 $PluginTarget = Join-Path $SkillRoot 'vres-os'
 $BackupRoot = Join-Path $InstallRoot 'backups'
+$GlobalClaudePath = Join-Path $ClaudeHome 'CLAUDE.md'
+$GlobalRulesPath = Join-Path $ClaudeHome 'vres-rules.md'
+$GlobalClaudeBefore = if (Test-Path -LiteralPath $GlobalClaudePath) { [IO.File]::ReadAllBytes($GlobalClaudePath) } else { $null }
+$GlobalRulesBefore = if (Test-Path -LiteralPath $GlobalRulesPath) { [IO.File]::ReadAllBytes($GlobalRulesPath) } else { $null }
 
 function Confirm-Choice([string]$Question, [bool]$Default=$false) {
     $hint = if ($Default) { 'Y/n' } else { 'y/N' }
@@ -110,7 +114,9 @@ $runningVres = @(Get-CimInstance Win32_Process -Filter "Name = 'python.exe' OR N
 })
 if ($runningVres.Count -gt 0) { throw 'A Vres Python worker is still running. Let it finish or stop that specific process before updating.' }
 
-if (-not (Test-Path (Join-Path $RepoRoot 'pyproject.toml')) -or -not (Test-Path (Join-Path $RepoRoot 'plugins\vres-os\.claude-plugin\plugin.json'))) {
+if (-not (Test-Path (Join-Path $RepoRoot 'pyproject.toml')) -or
+    -not (Test-Path (Join-Path $RepoRoot 'plugins\vres-os\.claude-plugin\plugin.json')) -or
+    -not (Test-Path (Join-Path $RepoRoot 'rules\vres-rules.md'))) {
     throw 'Extract the COMPLETE source ZIP before running install.ps1.'
 }
 if (Get-Process -Name 'claude','codex' -ErrorAction SilentlyContinue) {
@@ -198,6 +204,11 @@ try {
     [IO.File]::WriteAllText((Join-Path $Bin 'vres-mcp.cmd'), "@echo off`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File `"%~dp0vres-mcp-launch.ps1`"`r`n", [Text.Encoding]::ASCII)
     Write-JsonAtomic $ActivePath @{product='Vres-OS'; release=$ReleaseId; previous=$oldPointer; plugin_path=$PluginTarget; installed_at=(Get-Date -Format o)}
     $published=$true
+    Run $NewPython @(
+        '-m','vres_os.claude_contract','install-global',
+        '--claude-home',$ClaudeHome,
+        '--rules-source',(Join-Path $RepoRoot 'rules\vres-rules.md')
+    )
     $userPath=[Environment]::GetEnvironmentVariable('Path','User')
     $parts=@($userPath -split ';' | Where-Object { $_ })
     if ($parts -notcontains $Bin) { [Environment]::SetEnvironmentVariable('Path', (($parts+$Bin)-join ';'), 'User') }
@@ -219,8 +230,20 @@ try {
         if (Test-Path $PluginTarget) { Assert-Managed $PluginTarget; Remove-Item -LiteralPath $PluginTarget -Recurse -Force }
         if ($pluginMoved -and (Test-Path $PluginBackup)) { Move-Item -LiteralPath $PluginBackup -Destination $PluginTarget }
     }
+    if ($null -eq $GlobalClaudeBefore) {
+        Remove-Item -LiteralPath $GlobalClaudePath -Force -ErrorAction SilentlyContinue
+    } else {
+        New-Item -ItemType Directory -Force -Path $ClaudeHome | Out-Null
+        [IO.File]::WriteAllBytes($GlobalClaudePath, $GlobalClaudeBefore)
+    }
+    if ($null -eq $GlobalRulesBefore) {
+        Remove-Item -LiteralPath $GlobalRulesPath -Force -ErrorAction SilentlyContinue
+    } else {
+        New-Item -ItemType Directory -Force -Path $ClaudeHome | Out-Null
+        [IO.File]::WriteAllBytes($GlobalRulesPath, $GlobalRulesBefore)
+    }
     if (Test-Path (Join-Path $InstallRoot 'pending-install.json')) { Remove-Item -LiteralPath (Join-Path $InstallRoot 'pending-install.json') }
-    Write-Warning 'Installation failed. Previous runtime/plugin restored where they existed. A failed staged release is retained for diagnosis. No database migration was performed by this installer.'
+    Write-Warning 'Installation failed. Previous runtime/plugin/global Claude contract restored where they existed. A failed staged release is retained for diagnosis. No database migration was performed by this installer.'
     throw
 } finally {
     $installLock.Dispose()

@@ -429,6 +429,58 @@ administrator action; the helper never guesses an admin credential or creates a 
 
 **Record:** actual result, sanitized evidence path, native versions, defect/reviewer.
 
+## Project-agent / parallel-DAG acceptance extension
+
+These cases are required before describing project-agent parallel execution as live verified. They deliberately test both over-orchestration and under-orchestration.
+
+### PA-01 — Machine CLAUDE contract ownership
+
+**Execute:** In a disposable Windows profile, create a user-owned `~/.claude/CLAUDE.md` with sentinel content before installing/updating Vres. Install the exact candidate build, inspect `~/.claude/CLAUDE.md` and `~/.claude/vres-rules.md`, update once more, then uninstall without local-data removal.
+
+**Pass evidence:** User content survives byte-for-byte outside one Vres-managed pointer block; exactly one Vres block exists after repeated install/update; the installed rules file matches the shipped rules; uninstall removes only the Vres block/rules file. A malformed managed block fails closed instead of rewriting the file.
+
+### PA-02 — Project CLAUDE scope and anti-overengineering
+
+**Execute:** Start Vres in one fresh project with no `CLAUDE.md`, and another project containing a custom existing `CLAUDE.md`. Ask the fresh project for one mechanically simple bounded task.
+
+**Pass evidence:** The missing project gets only the minimal project scaffold; the existing project file is untouched. The simple task uses the smallest direct path (deterministic tool or one worker as appropriate): no manufactured capability, no project agent, and no work graph merely to demonstrate orchestration.
+
+### PA-03 — First-class project agents and real parallel overlap
+
+**Execute:** In a fresh synthetic project, use a bounded multi-domain design fixture that genuinely requires at least two independent specialist capabilities. Let Vres confirm real gaps, create project-local `.claude/agents/*.md` definitions without model/effort frontmatter, register them, rediscover, route and persist a work graph. Launch at least two ready independent units in one assistant turn.
+
+**Pass evidence:** Discovery names the exact registered `agent_key` values; routing keeps agent identity separate from role and execution tier; two distinct native subagents are host-observed; persisted work-unit `started_at`/`completed_at` intervals overlap in real time; model provenance binds each worker to its exact work unit and project agent. Assistant prose saying "parallel" is not evidence.
+
+### PA-04 — Dependency join barrier
+
+**Execute:** Add one dependent system-integration/design work unit whose `depends_on` contains both parallel specialists. Inspect readiness before and after the prerequisites finish.
+
+**Pass evidence:** The dependent unit is absent from ready work while either prerequisite is incomplete and becomes ready only after both pass. `orchestration_finalize` fails before the join and succeeds only after all required units have accepted reports.
+
+### PA-05 — Failed-unit-only retry
+
+**Execute:** In a synthetic graph with two independent first-stage workers, deliberately make one bounded worker fail after claim while the sibling succeeds. Query ready work and retry.
+
+**Pass evidence:** The successful sibling stays passed and is not relaunched. Only the failed unit becomes ready for attempt 2. Attempt history/evidence is retained, and downstream dependency remains blocked until the retry passes.
+
+### PA-06 — Parallel write-scope collision and direct-edit scope guard
+
+**Execute:** Create two independent file-writing units in the same project. First attempt overlapping scopes (for example `src/shared` and `src/shared/db`), then use disjoint scopes. From a claimed worker, attempt one direct Write/Edit inside its scope and one outside it.
+
+**Pass evidence:** The second overlapping unit cannot start while the first is running. Disjoint units may start up to the project concurrency ceiling. Direct Write/Edit inside the worker's scope is allowed; outside scope is denied. Do not claim Bash is sandboxed; this test covers Vres's declared scheduling/write-tool boundary only.
+
+### PA-07 — Agent source/model authority and drift
+
+**Execute:** Try to register a project agent whose frontmatter sets `model:` or `effort:`; then register a valid agent, modify its source file after registration, and attempt reuse.
+
+**Pass evidence:** Model/effort-bearing project agent registration is rejected because Vres owns execution-tier selection. Source drift invalidates the stored digest and requires explicit re-registration before routing/execution.
+
+### PA-08 — SEO-style multi-domain synthesis
+
+**Execute:** Run the bounded synthetic SEO/ecommerce application-design fixture defined for the release candidate. It should require several real domains (for example SEO, Google/API integration, data/database, ecommerce/digital and system architecture) while keeping tasks with existing shipped capabilities on those owners and acquiring only genuinely missing specialist capabilities. Domain-independent discovery/design units may fan out; system architecture is a downstream synthesis unit.
+
+**Pass evidence:** Team size is justified by capability discovery rather than prompt ceremony; independent specialist work overlaps; dependencies are respected; directors/owners and project specialists remain distinguishable; the system synthesis uses every required report; unresolved conflict is arbitrated rather than averaged; no project agent selects its own model; final protected/routine assurance follows the governed route. The same installation must still keep PA-02's simple fixture single-path.
+
 ## Final release decision
 
 Sign the actual matrix, not this blank plan. Record remaining defects and held functions. The decision can be
