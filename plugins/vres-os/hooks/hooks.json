@@ -74,6 +74,24 @@
     ],
     "PostToolUse": [
       {
+        "matcher": "^mcp__plugin_vres-os_vres__orchestration_work_unit_start$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe",
+            "args": [
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              "${CLAUDE_PLUGIN_ROOT}/bin/vres-subagent-hook.ps1",
+              "work-unit-started"
+            ],
+            "timeout": 10
+          }
+        ]
+      },
+      {
         "matcher": "^AskUserQuestion$",
         "hooks": [
           {
