@@ -920,6 +920,26 @@ class OrchestrationService:
                     raise ValueError("Work-unit dependencies must reference other selected roles")
                 dependency_graph[role] = deps
                 scope = _scope_paths(raw.get("write_scope") or [])
+                criteria = _acceptance_criteria(raw.get("acceptance_criteria"))
+                verify_roles = _strings(
+                    raw.get("verifies") or [],
+                    limit=_MAX_EXPERTS,
+                    field="work_units.verifies",
+                )
+                if role in verify_roles or any(target not in selected for target in verify_roles):
+                    raise ValueError(
+                        "Verifier targets must be other selected expert roles in the same work graph"
+                    )
+                if scope and not criteria:
+                    raise ValueError(
+                        f"Write-capable work unit {role!r} requires frozen acceptance_criteria"
+                    )
+                if verify_roles and scope:
+                    raise ValueError("Verifier work units must be report-only")
+                if verify_roles and criteria:
+                    raise ValueError(
+                        "Verifier work units report target acceptance criteria and must not define their own"
+                    )
                 selected_item = selected[role]
                 routed_item = routed.get(role)
                 if routed_item is None:
@@ -946,26 +966,67 @@ class OrchestrationService:
                         "capability_keys": selected_item.get("capability_keys") or [],
                         "depends_on": deps,
                         "write_scope": scope,
+                        "acceptance_criteria": criteria,
+                        "_verify_roles": verify_roles,
                     }
                 )
             _assert_acyclic(dependency_graph)
             for item in normalized:
                 dep_keys = [role_to_key[role] for role in item["depends_on"]]
+                verify_keys = [role_to_key[role] for role in item.pop("_verify_roles")]
+                if any(key not in dep_keys for key in verify_keys):
+                    raise ValueError("Verifier work units must depend on every work unit they verify")
+                item["depends_on"] = dep_keys
+                item["verifies"] = verify_keys
+
+            by_work_key = {item["work_unit_key"]: item for item in normalized}
+            verifier_targets = {
+                target
+                for item in normalized
+                for target in item["verifies"]
+            }
+            for item in normalized:
+                if item["verifies"]:
+                    judgmental = [
+                        criterion
+                        for target in item["verifies"]
+                        for criterion in by_work_key[target]["acceptance_criteria"]
+                        if criterion["verification"] == "judgmental"
+                    ]
+                    if not judgmental:
+                        raise ValueError(
+                            "Verifier work units are unnecessary when their targets have no judgmental criteria"
+                        )
+                if (
+                    item["write_scope"]
+                    and any(
+                        criterion["verification"] == "judgmental"
+                        for criterion in item["acceptance_criteria"]
+                    )
+                    and item["work_unit_key"] not in verifier_targets
+                ):
+                    raise ValueError(
+                        f"Judgmental acceptance criteria for {item['role']!r} require a dependent verifier"
+                    )
+
+            for item in normalized:
                 conn.execute(
                     """
                     INSERT INTO vres.orchestration_work_units(
                       work_unit_key,task_id,plan_key,role,project_agent_key,execution_tier,
-                      covers,capability_keys,depends_on,write_scope
-                    ) VALUES (%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb)
+                      covers,capability_keys,depends_on,write_scope,acceptance_criteria,verifies
+                    ) VALUES (
+                      %s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb
+                    )
                     """,
                     (
                         item["work_unit_key"], task["id"], plan_key, item["role"],
                         item["project_agent_key"], item["execution_tier"],
                         json.dumps(item["covers"]), json.dumps(item["capability_keys"]),
-                        json.dumps(dep_keys), json.dumps(item["write_scope"]),
+                        json.dumps(item["depends_on"]), json.dumps(item["write_scope"]),
+                        json.dumps(item["acceptance_criteria"]), json.dumps(item["verifies"]),
                     ),
                 )
-                item["depends_on"] = dep_keys
             event_id = self._insert_event(
                 conn,
                 int(task["id"]),
@@ -1032,6 +1093,8 @@ class OrchestrationService:
                 "covers": row.get("covers") or [],
                 "capability_keys": row.get("capability_keys") or [],
                 "write_scope": row.get("write_scope") or [],
+                "acceptance_criteria": row.get("acceptance_criteria") or [],
+                "verifies": row.get("verifies") or [],
                 "status": row["status"],
                 "attempt_count": row["attempt_count"],
                 "retry_waiting_for_host_stop": retry_waiting_for_host_stop,
@@ -1050,6 +1113,17 @@ class OrchestrationService:
                     project_id=project_id,
                     root=project_root,
                 )
+            if row.get("verifies"):
+                item["verification_targets"] = [
+                    {
+                        "work_unit_key": target,
+                        "role": by_key[target]["role"],
+                        "status": by_key[target]["status"],
+                        "acceptance_criteria": by_key[target].get("acceptance_criteria") or [],
+                    }
+                    for target in row["verifies"]
+                    if target in by_key
+                ]
             if (
                 row["status"] in {"pending", "failed"}
                 and not retry_waiting_for_host_stop
