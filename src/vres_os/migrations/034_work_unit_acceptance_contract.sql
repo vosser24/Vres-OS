@@ -1,6 +1,6 @@
 -- Durable acceptance contracts for governed work units.
 -- Criteria stay on the work unit; results stay on expert-report events.
--- No separate story/test-case subsystem is introduced.
+-- No separate acceptance-management subsystem is introduced.
 
 ALTER TABLE vres.orchestration_work_units
     ADD COLUMN IF NOT EXISTS acceptance_criteria jsonb NOT NULL DEFAULT '[]'::jsonb,
