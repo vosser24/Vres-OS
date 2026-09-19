@@ -342,6 +342,101 @@ def test_report_only_project_agent_cannot_receive_write_scope(pg_project, tmp_pa
         )
 
 
+def test_host_observed_worker_evidence_binds_exact_project_agent_and_work_unit(pg_project, tmp_path):
+    task, sid = _task_and_session(pg_project)
+    key = f"agent.observed.{uuid.uuid4().hex[:8]}"
+    ProjectAgentService().register(
+        project_id=pg_project,
+        root=tmp_path,
+        task_key=task,
+        session_id=sid,
+        agent_key=key,
+        name="observed",
+        role="cto",
+        capability_keys=["cap.software-engineering"],
+        source_path=_agent_file(tmp_path, "observed"),
+    )
+    orchestration = OrchestrationService()
+    discovery = orchestration.discover(
+        project_id=pg_project,
+        task_key=task,
+        session_id=sid,
+        capability_needs=["software engineering"],
+        project_root=tmp_path,
+    )
+    routed = RoutingService()
+    prepared = routed.prepare(
+        project_id=pg_project,
+        task_key=task,
+        session_id=sid,
+        discovery_key=discovery["discovery_key"],
+        risk_triggers=[],
+    )
+    assert prepared["decision"]["experts"][0]["agent_key"] == key
+    plan = orchestration.record_plan(
+        project_id=pg_project,
+        task_key=task,
+        session_id=sid,
+        discovery_key=discovery["discovery_key"],
+        lead_role="cto",
+        selected_experts=[{
+            "role": "cto",
+            "agent_key": key,
+            "rationale": "Exact project agent.",
+            "covers": ["software engineering"],
+            "capability_keys": ["cap.software-engineering"],
+        }],
+        excluded_experts=_excluded("cto"),
+        routing_rationale="Match deterministic route.",
+    )
+    graph = orchestration.record_work_graph(
+        project_id=pg_project,
+        task_key=task,
+        session_id=sid,
+        plan_key=plan["plan_key"],
+        units=[{"role": "cto", "depends_on": [], "write_scope": []}],
+        project_root=tmp_path,
+    )
+    unit_key = graph["work_units"][0]["work_unit_key"]
+    orchestration.start_work_unit(
+        project_id=pg_project,
+        task_key=task,
+        session_id=sid,
+        work_unit_key=unit_key,
+    )
+    orchestration.record_expert_report(
+        project_id=pg_project,
+        task_key=task,
+        session_id=sid,
+        plan_key=plan["plan_key"],
+        role="cto",
+        recommendation="Observed project-agent result.",
+        evidence=[{"source": "fixture"}],
+        work_unit_key=unit_key,
+    )
+
+    result = routed._record_worker_observation(
+        project_id=pg_project,
+        task_key=task,
+        plan_key=plan["plan_key"],
+        role="cto",
+        execution_tier="sonnet",
+        agent_type="vres-os:sonnet-expert",
+        agent_id=f"worker-{uuid.uuid4().hex}",
+        session_id=sid,
+        observed_model="claude-sonnet-5",
+        work_unit_key=unit_key,
+    )
+    assert result["project_agent_key"] == key
+    assert result["work_unit_key"] == unit_key
+
+    evidence = routed.evidence(project_id=pg_project, task_key=task)
+    worker = evidence["workers"][-1]
+    assert worker["project_agent_key"] == key
+    assert worker["work_unit_key"] == unit_key
+    assert worker["observed_model"] == "claude-sonnet-5"
+
+
 def test_parallel_write_scope_overlap_is_rejected(pg_project, tmp_path):
     task, sid = _task_and_session(pg_project)
     agents = _register_agents(pg_project, task, sid, tmp_path)
