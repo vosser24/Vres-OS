@@ -38,6 +38,27 @@ def _excluded(*selected: str) -> list[dict[str, str]]:
     ]
 
 
+def _deterministic_criteria(key: str = "done") -> list[dict[str, str]]:
+    return [
+        {
+            "key": key,
+            "statement": "The bounded implementation requirement is mechanically satisfied.",
+            "verification": "deterministic",
+        }
+    ]
+
+
+def _passed_criteria_result(work_unit_key: str, key: str = "done") -> list[dict[str, object]]:
+    return [
+        {
+            "target_work_unit_key": work_unit_key,
+            "criterion_key": key,
+            "status": "passed",
+            "evidence": {"source": "integration-test", "result": "mechanical check passed"},
+        }
+    ]
+
+
 def _agent_file(root: Path, name: str, body: str = "Do the bounded assigned work.") -> str:
     path = root / ".claude" / "agents" / f"{name}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -194,7 +215,12 @@ def _single_agent_graph(pid: int, task: str, sid: str, root: Path):
         task_key=task,
         session_id=sid,
         plan_key=plan["plan_key"],
-        units=[{"role": "cto", "depends_on": [], "write_scope": ["src"]}],
+        units=[{
+            "role": "cto",
+            "depends_on": [],
+            "write_scope": ["src"],
+            "acceptance_criteria": _deterministic_criteria(),
+        }],
         project_root=root,
     )
     return orchestration, RoutingService(), plan, graph["work_units"][0]["work_unit_key"], agent_key
@@ -262,7 +288,12 @@ def test_newer_plan_makes_old_pending_graph_non_executable(pg_project, tmp_path)
             task_key=task,
             session_id=sid,
             plan_key=first_plan["plan_key"],
-            units=[{"role": "cto", "depends_on": [], "write_scope": ["src"]}],
+            units=[{
+                "role": "cto",
+                "depends_on": [],
+                "write_scope": ["src"],
+                "acceptance_criteria": _deterministic_criteria(),
+            }],
             project_root=tmp_path,
         )
 
@@ -558,7 +589,12 @@ def test_report_only_project_agent_cannot_receive_write_scope(pg_project, tmp_pa
             task_key=task,
             session_id=sid,
             plan_key=plan["plan_key"],
-            units=[{"role": "cto", "depends_on": [], "write_scope": ["src"]}],
+            units=[{
+                "role": "cto",
+                "depends_on": [],
+                "write_scope": ["src"],
+                "acceptance_criteria": _deterministic_criteria(),
+            }],
             project_root=tmp_path,
         )
 
@@ -725,6 +761,7 @@ def test_claimed_failed_worker_waits_for_host_stop_then_rebinds_retry(pg_project
         recommendation="Retry succeeded.",
         evidence=[{"source": "fixture"}],
         work_unit_key=unit_key,
+        criteria_results=_passed_criteria_result(unit_key),
     )
     passed = routing._record_worker_observation(
         project_id=pg_project,
@@ -827,8 +864,18 @@ def test_parallel_write_scope_overlap_is_rejected(pg_project, tmp_path):
     graph = orchestration.record_work_graph(
         project_id=pg_project, task_key=task, session_id=sid, plan_key=plan["plan_key"],
         units=[
-            {"role": "commercial-director", "depends_on": [], "write_scope": ["src/shared"]},
-            {"role": "data-director", "depends_on": [], "write_scope": ["src/shared/db"]},
+            {
+                "role": "commercial-director",
+                "depends_on": [],
+                "write_scope": ["src/shared"],
+                "acceptance_criteria": _deterministic_criteria("commercial-write"),
+            },
+            {
+                "role": "data-director",
+                "depends_on": [],
+                "write_scope": ["src/shared/db"],
+                "acceptance_criteria": _deterministic_criteria("data-write"),
+            },
             {"role": "cto", "depends_on": ["commercial-director", "data-director"], "write_scope": []},
         ],
         project_root=tmp_path,
