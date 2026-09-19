@@ -205,9 +205,9 @@ class RoutingService:
             "overstated for the bounded worker assignment. Complexity and consequence "
             "are separate: hard_protected may require protected validation even when Sonnet is sufficient to execute. Any Opus worker requires "
             "assurance='protected'. Infer consequence from the objective as well as the supplied risk triggers; a missing flag is never permission "
-            "to downgrade obvious release/security/governance/high-stakes work. If discovery contains a real unresolved capability gap, return "
+            "to downgrade obvious release/security/governance/high-stakes work. When discovery offers a current project agent whose registered capability set covers an expert's assigned needs, prefer the smallest exact match and return its agent_key; never invent an agent key. If discovery contains a real unresolved capability gap, return "
             "outcome='blocked' and list only those gap needs; do not route around them. Shape for a route: "
-            "{request_key,outcome:'routed',lead_role,experts:[{role,covers:[...],capability_keys:[...],execution_tier:'sonnet|opus',rationale}],"
+            "{request_key,outcome:'routed',lead_role,experts:[{role,agent_key:null|'<registered-project-agent>',covers:[...],capability_keys:[...],execution_tier:'sonnet|opus',rationale}],"
             "assurance:'routine|protected',routing_rationale,required_gap_needs:[]}. Shape for a gap: "
             "{request_key,outcome:'blocked',lead_role:null,experts:[],assurance:null,routing_rationale,required_gap_needs:[...]}."
         )
@@ -296,6 +296,7 @@ class RoutingService:
             if not isinstance(raw, dict):
                 raise ValueError("Each routed expert must be an object")
             role = str(raw.get("role") or "").strip()
+            agent_key = str(raw.get("agent_key") or "").strip() or None
             tier = str(raw.get("execution_tier") or "").strip()
             exp_rationale = redact_text(str(raw.get("rationale") or "").strip())
             covers = _bounded_strings(raw.get("covers") or [], field="experts.covers", limit=20)
@@ -311,8 +312,8 @@ class RoutingService:
             if not exp_rationale:
                 raise ValueError(f"Routing role {role!r} requires rationale")
             if role == "challenger":
-                if covers or keys:
-                    raise ValueError("Challenger must not claim a domain capability")
+                if covers or keys or agent_key:
+                    raise ValueError("Challenger must not claim a domain capability or project agent")
             else:
                 if not covers or not keys:
                     raise ValueError(f"Routing role {role!r} must cover discovered capability needs")
@@ -326,11 +327,36 @@ class RoutingService:
                             f"Routing role {role!r} must cite a discovered capability it owns for {need!r}"
                         )
                     covered.add(need)
+                if agent_key:
+                    candidate = None
+                    for need in covers:
+                        matches_for_need = discovery.get("agent_matches", {}).get(need) or []
+                        match = next(
+                            (
+                                agent
+                                for agent in matches_for_need
+                                if str(agent.get("agent_key") or "") == agent_key
+                                and str(agent.get("role") or "") == role
+                            ),
+                            None,
+                        )
+                        if match is None:
+                            raise ValueError(
+                                f"Routing role {role!r} cites unregistered or mismatched project agent {agent_key!r}"
+                            )
+                        candidate = match
+                    if candidate is None or not set(keys).issubset(
+                        set(candidate.get("capability_keys") or [])
+                    ):
+                        raise ValueError(
+                            f"Project agent {agent_key!r} does not cover the routed capability keys"
+                        )
             selected_roles.add(role)
             any_opus = any_opus or tier == "opus"
             experts.append(
                 {
                     "role": role,
+                    "agent_key": agent_key,
                     "covers": covers,
                     "capability_keys": keys,
                     "execution_tier": tier,
