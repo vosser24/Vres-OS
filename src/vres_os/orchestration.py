@@ -297,6 +297,114 @@ class OrchestrationService:
         if not latest or latest["plan_key"] != plan_key:
             raise ValueError("Only the task's latest orchestration plan may execute or finalize work")
 
+    @staticmethod
+    def _acceptance_summary(conn, task_id: int, plan_key: str) -> dict[str, Any]:
+        rows = conn.execute(
+            """
+            SELECT work_unit_key,role,write_scope,acceptance_criteria,verifies,status,report_key
+              FROM vres.orchestration_work_units
+             WHERE task_id=%s AND plan_key=%s
+             ORDER BY id
+            """,
+            (task_id, plan_key),
+        ).fetchall()
+        if not rows:
+            return {
+                "deterministic_criteria": 0,
+                "judgmental_criteria": 0,
+                "verifier_units": [],
+            }
+
+        reports: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            if not row.get("report_key"):
+                continue
+            event = conn.execute(
+                """
+                SELECT payload
+                  FROM vres.task_events
+                 WHERE task_id=%s AND event_type='ORCHESTRATION_EXPERT_REPORT'
+                   AND payload->>'report_key'=%s
+                 ORDER BY id DESC LIMIT 1
+                """,
+                (task_id, row["report_key"]),
+            ).fetchone()
+            if event:
+                reports[str(row["work_unit_key"])] = dict(event["payload"])
+
+        deterministic_count = 0
+        judgmental_count = 0
+        verifier_units: list[str] = []
+        row_by_key = {str(row["work_unit_key"]): row for row in rows}
+
+        for row in rows:
+            work_key = str(row["work_unit_key"])
+            criteria = list(row.get("acceptance_criteria") or [])
+            verifies = [str(x) for x in row.get("verifies") or []]
+            if verifies:
+                verifier_units.append(work_key)
+                continue
+            report = reports.get(work_key, {})
+            own_results = {
+                str(result.get("criterion_key") or ""): result
+                for result in report.get("criteria_results") or []
+                if str(result.get("target_work_unit_key") or work_key) == work_key
+            }
+            for criterion in criteria:
+                if criterion.get("verification") == "deterministic":
+                    deterministic_count += 1
+                    result = own_results.get(str(criterion.get("key") or ""))
+                    if not result or result.get("status") != "passed":
+                        raise ValueError(
+                            f"Deterministic acceptance criterion {criterion.get('key')!r} "
+                            f"for role {row['role']!r} has not passed"
+                        )
+
+            if not row.get("write_scope"):
+                continue
+            judgmental = [
+                criterion
+                for criterion in criteria
+                if criterion.get("verification") == "judgmental"
+            ]
+            judgmental_count += len(judgmental)
+            if not judgmental:
+                continue
+            verifiers = [
+                candidate
+                for candidate in rows
+                if work_key in [str(x) for x in candidate.get("verifies") or []]
+                and candidate["status"] == "passed"
+            ]
+            if not verifiers:
+                raise ValueError(
+                    f"Judgmental acceptance for role {row['role']!r} requires a passed verifier"
+                )
+            for criterion in judgmental:
+                statuses: list[str] = []
+                for verifier in verifiers:
+                    verifier_key = str(verifier["work_unit_key"])
+                    verifier_report = reports.get(verifier_key, {})
+                    for result in verifier_report.get("criteria_results") or []:
+                        if (
+                            str(result.get("target_work_unit_key") or "") == work_key
+                            and str(result.get("criterion_key") or "")
+                            == str(criterion.get("key") or "")
+                        ):
+                            statuses.append(str(result.get("status") or ""))
+                if not statuses or any(status != "passed" for status in statuses):
+                    raise ValueError(
+                        f"Judgmental acceptance criterion {criterion.get('key')!r} "
+                        f"for role {row['role']!r} has not passed independent verification"
+                    )
+
+        return {
+            "deterministic_criteria": deterministic_count,
+            "judgmental_criteria": judgmental_count,
+            "verifier_units": verifier_units,
+        }
+
+
     def discover(
         self,
         *,
@@ -1565,6 +1673,12 @@ class OrchestrationService:
                         "Arbitration belongs to a different orchestration plan"
                     )
 
+            acceptance_summary = self._acceptance_summary(
+                conn,
+                int(task["id"]),
+                plan_key,
+            )
+
             discovery = self._event_by_key(
                 conn,
                 int(task["id"]),
@@ -1612,6 +1726,7 @@ class OrchestrationService:
                 "reused_capability_keys": capability_reuse,
                 "reused_procedure_keys": procedure_reuse,
                 "unresolved_unknowns": unknowns,
+                "acceptance_summary": acceptance_summary,
                 "decision_ready": not unknowns,
             }
             event_id = self._insert_event(
