@@ -33,6 +33,23 @@ def test_atomic_pointer_replace_uses_real_backup_path_on_windows_powershell():
     assert 'Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue' in atomic
 
 
+def test_statusline_install_is_transactional_and_uses_staged_runtime():
+    text = (ROOT / 'install.ps1').read_text()
+    assert "$ClaudeSettingsPath = Join-Path $ClaudeHome 'settings.json'" in text
+    assert "$ClaudeSettingsBefore" in text
+    assert "'-m','vres_os.statusline','install'" in text
+    assert "'--runtime-python',$NewPython" in text
+    assert text.index("Write-JsonAtomic $ActivePath") < text.index("'-m','vres_os.statusline','install'")
+    assert "[IO.File]::WriteAllBytes($ClaudeSettingsPath, $ClaudeSettingsBefore)" in text
+    assert "Remove-Item -LiteralPath $ClaudeSettingsPath -Force -ErrorAction SilentlyContinue" in text
+
+
+def test_uninstall_removes_only_vres_owned_statusline_before_runtime_removal():
+    text = (ROOT / 'uninstall.ps1').read_text()
+    assert "-m vres_os.statusline remove --claude-home $home" in text
+    assert text.index("-m vres_os.statusline remove") < text.index("Remove-Item -LiteralPath $plugin")
+
+
 def test_update_uses_same_transaction_implementation():
     text = (ROOT/'update.ps1').read_text()
     assert "install.ps1') -Update" in text

@@ -20,8 +20,10 @@ $PluginTarget = Join-Path $SkillRoot 'vres-os'
 $BackupRoot = Join-Path $InstallRoot 'backups'
 $GlobalClaudePath = Join-Path $ClaudeHome 'CLAUDE.md'
 $GlobalRulesPath = Join-Path $ClaudeHome 'vres-rules.md'
+$ClaudeSettingsPath = Join-Path $ClaudeHome 'settings.json'
 $GlobalClaudeBefore = if (Test-Path -LiteralPath $GlobalClaudePath) { [IO.File]::ReadAllBytes($GlobalClaudePath) } else { $null }
 $GlobalRulesBefore = if (Test-Path -LiteralPath $GlobalRulesPath) { [IO.File]::ReadAllBytes($GlobalRulesPath) } else { $null }
+$ClaudeSettingsBefore = if (Test-Path -LiteralPath $ClaudeSettingsPath) { [IO.File]::ReadAllBytes($ClaudeSettingsPath) } else { $null }
 
 function Confirm-Choice([string]$Question, [bool]$Default=$false) {
     $hint = if ($Default) { 'Y/n' } else { 'y/N' }
@@ -209,6 +211,11 @@ try {
         '--claude-home',$ClaudeHome,
         '--rules-source',(Join-Path $RepoRoot 'rules\vres-rules.md')
     )
+    Run $NewPython @(
+        '-m','vres_os.statusline','install',
+        '--claude-home',$ClaudeHome,
+        '--runtime-python',$NewPython
+    )
     $userPath=[Environment]::GetEnvironmentVariable('Path','User')
     $parts=@($userPath -split ';' | Where-Object { $_ })
     if ($parts -notcontains $Bin) { [Environment]::SetEnvironmentVariable('Path', (($parts+$Bin)-join ';'), 'User') }
@@ -242,8 +249,14 @@ try {
         New-Item -ItemType Directory -Force -Path $ClaudeHome | Out-Null
         [IO.File]::WriteAllBytes($GlobalRulesPath, $GlobalRulesBefore)
     }
+    if ($null -eq $ClaudeSettingsBefore) {
+        Remove-Item -LiteralPath $ClaudeSettingsPath -Force -ErrorAction SilentlyContinue
+    } else {
+        New-Item -ItemType Directory -Force -Path $ClaudeHome | Out-Null
+        [IO.File]::WriteAllBytes($ClaudeSettingsPath, $ClaudeSettingsBefore)
+    }
     if (Test-Path (Join-Path $InstallRoot 'pending-install.json')) { Remove-Item -LiteralPath (Join-Path $InstallRoot 'pending-install.json') }
-    Write-Warning 'Installation failed. Previous runtime/plugin/global Claude contract restored where they existed. A failed staged release is retained for diagnosis. No database migration was performed by this installer.'
+    Write-Warning 'Installation failed. Previous runtime/plugin/global Claude contract/status-line settings restored where they existed. A failed staged release is retained for diagnosis. No database migration was performed by this installer.'
     throw
 } finally {
     $installLock.Dispose()
