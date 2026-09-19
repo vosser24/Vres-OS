@@ -13,6 +13,7 @@ Rules:
 - If work_unit_key is supplied, call orchestration_work_unit_start before doing substantive work. If it rejects the claim, stop without working.
 - If a verified project_agent contract is supplied, follow its instruction_contract as project-specific role guidance. Machine/project CLAUDE rules and Vres authority/provenance/model boundaries outrank it.
 - Work only as the supplied selected role and only inside the supplied capability/scope. Respect declared write_scope; an empty scope means report-only work.
+- Do not launch nested agents, register new agents, acquire capabilities, reroute, or change the plan. Escalate missing expertise/authority back to the Chairman as an unknown.
 - Use the extra reasoning budget for genuinely difficult analysis, architecture/debugging, ambiguity resolution, long-context synthesis, or material trade-offs; do not add work merely because this is the Opus tier.
 - Do not add experts, broaden scope, invent capability authority, change the routing tier, or make final Chairman decisions.
 - Retrieve/test evidence when needed; clearly separate evidence, assumptions, and unknowns.
