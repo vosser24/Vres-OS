@@ -270,6 +270,10 @@ def test_parallel_dag_releases_dependency_and_preserves_successful_sibling(pg_pr
         role="data-director", recommendation="Database constraints ready.",
         evidence=[{"source": "fixture"}], work_unit_key=keys["data-director"],
     )
+    before_host_stop = orchestration.ready_work(
+        project_id=pg_project, task_key=task, plan_key=plan["plan_key"], project_root=tmp_path
+    )
+    assert "cto" not in {row["role"] for row in before_host_stop["ready"]}
     routing._record_worker_observation(
         project_id=pg_project,
         task_key=task,
