@@ -239,6 +239,18 @@ def test_parallel_dag_releases_dependency_and_preserves_successful_sibling(pg_pr
         role="commercial-director", recommendation="Pricing constraints ready.",
         evidence=[{"source": "fixture"}], work_unit_key=keys["commercial-director"],
     )
+    routing._record_worker_observation(
+        project_id=pg_project,
+        task_key=task,
+        plan_key=plan["plan_key"],
+        role="commercial-director",
+        execution_tier="sonnet",
+        agent_type="vres-os:sonnet-expert",
+        agent_id=f"worker-commercial-{uuid.uuid4().hex}",
+        session_id=sid,
+        observed_model="claude-sonnet-5",
+        work_unit_key=keys["commercial-director"],
+    )
     orchestration.fail_work_unit(
         project_id=pg_project, task_key=task, session_id=sid,
         work_unit_key=keys["data-director"], error="synthetic transient failure",
@@ -258,6 +270,18 @@ def test_parallel_dag_releases_dependency_and_preserves_successful_sibling(pg_pr
         role="data-director", recommendation="Database constraints ready.",
         evidence=[{"source": "fixture"}], work_unit_key=keys["data-director"],
     )
+    routing._record_worker_observation(
+        project_id=pg_project,
+        task_key=task,
+        plan_key=plan["plan_key"],
+        role="data-director",
+        execution_tier="sonnet",
+        agent_type="vres-os:sonnet-expert",
+        agent_id=f"worker-data-{uuid.uuid4().hex}",
+        session_id=sid,
+        observed_model="claude-sonnet-5",
+        work_unit_key=keys["data-director"],
+    )
     after_join = orchestration.ready_work(
         project_id=pg_project, task_key=task, plan_key=plan["plan_key"], project_root=tmp_path
     )
@@ -270,6 +294,18 @@ def test_parallel_dag_releases_dependency_and_preserves_successful_sibling(pg_pr
         project_id=pg_project, task_key=task, session_id=sid, plan_key=plan["plan_key"],
         role="cto", recommendation="Integrated architecture ready.",
         evidence=[{"source": "fixture"}], work_unit_key=keys["cto"],
+    )
+    routing._record_worker_observation(
+        project_id=pg_project,
+        task_key=task,
+        plan_key=plan["plan_key"],
+        role="cto",
+        execution_tier="sonnet",
+        agent_type="vres-os:sonnet-expert",
+        agent_id=f"worker-cto-{uuid.uuid4().hex}",
+        session_id=sid,
+        observed_model="claude-sonnet-5",
+        work_unit_key=keys["cto"],
     )
     final = orchestration.finalize(
         project_id=pg_project, task_key=task, session_id=sid, plan_key=plan["plan_key"],
