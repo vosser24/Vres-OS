@@ -125,8 +125,22 @@ def test_chairman_requires_deterministic_first_routing_and_tiered_workers():
     assert "up to the mechanically enforced project limit of four" in text
     assert "Native Claude Agent calls remain the executor" in text
     assert "project_agent_register" in text
+    assert "gap_need" in text
+    assert "only authorized capability gaps" in text
     assert "orchestration_work_graph_record" in text
     assert "orchestration_work_ready" in text
+
+
+def test_project_capability_acquisition_is_mechanically_bound_to_latest_blocked_gap():
+    mcp_text = (ROOT / "src/vres_os/aigo_mcp.py").read_text(encoding="utf-8")
+    orchestration = (ROOT / "src/vres_os/orchestration.py").read_text(encoding="utf-8")
+    assert "gap_need: str" in mcp_text
+    assert "latest route to be governor-blocked" in orchestration
+    assert "required_gap_needs" in orchestration
+    assert "missing_capabilities" in orchestration
+    assert "already acquired project expertise" in orchestration
+    assert 'payload->>\'routing_request_key\'' in orchestration
+    assert 'payload->>\'gap_need\'' in orchestration
 
 
 def test_governed_agents_pin_router_and_execution_model_families():
