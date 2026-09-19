@@ -556,6 +556,8 @@ class RoutingService:
         plan_key: str,
         role: str,
         execution_tier: str,
+        work_unit_key: str | None,
+        project_agent_key: str | None,
         agent_type: str,
         agent_id: str,
         session_id: str,
@@ -595,11 +597,33 @@ class RoutingService:
             ]
             if len(expected) != 1 or expected[0].get("execution_tier") != execution_tier:
                 raise ValueError("Observed worker tier/role does not match the Fable route")
+            expected_agent = expected[0].get("agent_key") or None
+            if (project_agent_key or None) != expected_agent:
+                raise ValueError("Observed project agent does not match the governed route")
+            if work_unit_key:
+                unit = conn.execute(
+                    """
+                    SELECT id,status,project_agent_key,execution_tier,role
+                      FROM vres.orchestration_work_units
+                     WHERE task_id=%s AND plan_key=%s AND work_unit_key=%s
+                     FOR UPDATE
+                    """,
+                    (task["id"], plan_key, work_unit_key),
+                ).fetchone()
+                if (
+                    not unit
+                    or unit["status"] != "passed"
+                    or unit["role"] != role
+                    or unit["execution_tier"] != execution_tier
+                    or (unit.get("project_agent_key") or None) != (project_agent_key or None)
+                ):
+                    raise ValueError("Observed worker does not match the passed work unit")
             conn.execute(
                 """
                 INSERT INTO vres.worker_runs(
-                  task_id,plan_key,role,execution_tier,agent_type,agent_id,session_id,observed_model,status
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'observed')
+                  task_id,plan_key,role,execution_tier,work_unit_key,project_agent_key,
+                  agent_type,agent_id,session_id,observed_model,status
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'observed')
                 ON CONFLICT(agent_id,plan_key,role) DO NOTHING
                 """,
                 (
@@ -607,17 +631,30 @@ class RoutingService:
                     plan_key,
                     role,
                     execution_tier,
+                    work_unit_key,
+                    project_agent_key,
                     agent_type,
                     agent_id,
                     session_id or None,
                     observed_model,
                 ),
             )
+            if work_unit_key:
+                conn.execute(
+                    """
+                    UPDATE vres.orchestration_work_units
+                       SET host_agent_id=%s,observed_model=%s
+                     WHERE task_id=%s AND plan_key=%s AND work_unit_key=%s
+                    """,
+                    (agent_id, observed_model, task["id"], plan_key, work_unit_key),
+                )
         return {
             "recorded": True,
             "task_key": task_key,
             "plan_key": plan_key,
             "role": role,
+            "work_unit_key": work_unit_key,
+            "project_agent_key": project_agent_key,
             "execution_tier": execution_tier,
             "observed_model": observed_model,
         }
@@ -641,6 +678,8 @@ class RoutingService:
         task_key = str(tool_input.get("task_key") or "").strip()
         plan_key = str(tool_input.get("plan_key") or "").strip()
         role = str(tool_input.get("role") or "").strip()
+        work_unit_key = str(tool_input.get("work_unit_key") or "").strip() or None
+        project_agent_key = str(tool_input.get("project_agent_key") or "").strip() or None
         if not task_key or not plan_key or not role:
             raise ValueError("Observed expert report is missing task/plan/role identifiers")
         return self._record_worker_observation(
@@ -649,6 +688,8 @@ class RoutingService:
             plan_key=plan_key,
             role=role,
             execution_tier=expected_tier,
+            work_unit_key=work_unit_key,
+            project_agent_key=project_agent_key,
             agent_type=agent_type,
             agent_id=str(payload["agent_id"]),
             session_id=str(payload.get("session_id") or ""),
@@ -769,7 +810,7 @@ class RoutingService:
             ).fetchall()
             workers = conn.execute(
                 """
-                SELECT plan_key,role,execution_tier,agent_type,agent_id,session_id,
+                SELECT plan_key,role,work_unit_key,project_agent_key,execution_tier,agent_type,agent_id,session_id,
                        observed_model,status,created_at
                   FROM vres.worker_runs WHERE task_id=%s ORDER BY id
                 """,
