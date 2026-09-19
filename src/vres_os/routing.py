@@ -556,12 +556,12 @@ class RoutingService:
         plan_key: str,
         role: str,
         execution_tier: str,
-        work_unit_key: str | None,
-        project_agent_key: str | None,
         agent_type: str,
         agent_id: str,
         session_id: str,
         observed_model: str,
+        work_unit_key: str | None = None,
+        project_agent_key: str | None = None,
     ) -> dict[str, Any]:
         with connect() as conn, conn.transaction():
             task = conn.execute(
