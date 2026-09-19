@@ -598,8 +598,7 @@ class RoutingService:
             if len(expected) != 1 or expected[0].get("execution_tier") != execution_tier:
                 raise ValueError("Observed worker tier/role does not match the Fable route")
             expected_agent = expected[0].get("agent_key") or None
-            if (project_agent_key or None) != expected_agent:
-                raise ValueError("Observed project agent does not match the governed route")
+            unit = None
             if work_unit_key:
                 unit = conn.execute(
                     """
@@ -610,14 +609,19 @@ class RoutingService:
                     """,
                     (task["id"], plan_key, work_unit_key),
                 ).fetchone()
+                if not unit:
+                    raise ValueError("Observed worker does not match a known work unit")
+                if project_agent_key is None:
+                    project_agent_key = unit.get("project_agent_key") or None
                 if (
-                    not unit
-                    or unit["status"] != "passed"
+                    unit["status"] != "passed"
                     or unit["role"] != role
                     or unit["execution_tier"] != execution_tier
                     or (unit.get("project_agent_key") or None) != (project_agent_key or None)
                 ):
                     raise ValueError("Observed worker does not match the passed work unit")
+            if (project_agent_key or None) != expected_agent:
+                raise ValueError("Observed project agent does not match the governed route")
             conn.execute(
                 """
                 INSERT INTO vres.worker_runs(
