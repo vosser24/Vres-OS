@@ -130,6 +130,8 @@ def test_chairman_requires_deterministic_first_routing_and_tiered_workers():
     assert "only authorized capability gaps" in text
     assert "orchestration_work_graph_record" in text
     assert "orchestration_work_ready" in text
+    assert "older plans remain evidence only" in text
+    assert "prior work units are no longer running" in text
 
 
 def test_project_capability_acquisition_is_mechanically_bound_to_latest_blocked_gap():
@@ -142,6 +144,16 @@ def test_project_capability_acquisition_is_mechanically_bound_to_latest_blocked_
     assert "already acquired project expertise" in orchestration
     assert 'payload->>\'routing_request_key\'' in orchestration
     assert 'payload->>\'gap_need\'' in orchestration
+
+
+def test_work_execution_is_bound_to_latest_orchestration_plan_without_new_state_machine():
+    orchestration = (ROOT / "src/vres_os/orchestration.py").read_text(encoding="utf-8")
+    assert "def _require_latest_plan" in orchestration
+    assert "Only the task's latest orchestration plan may execute or finalize work" in orchestration
+    assert "Cannot record a new orchestration plan while prior work units are running" in orchestration
+    assert "superseded" not in (
+        ROOT / "src/vres_os/migrations/033_project_agent_work_units.sql"
+    ).read_text(encoding="utf-8")
 
 
 def test_governed_agents_pin_router_and_execution_model_families():
