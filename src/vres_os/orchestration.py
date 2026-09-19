@@ -759,6 +759,7 @@ class OrchestrationService:
         unknowns: list[str] | None = None,
         report_type: str = "expert",
         work_unit_key: str | None = None,
+        criteria_results: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         role = role.strip()
         recommendation = recommendation.strip()
@@ -772,6 +773,7 @@ class OrchestrationService:
             raise ValueError("Expert report recommendation is required")
         if not evidence or len(evidence) > _MAX_EVIDENCE:
             raise ValueError("Expert reports require 1-20 evidence entries")
+        normalized_results = _criteria_results(criteria_results)
         with connect() as conn, conn.transaction():
             task = self._bound_task(conn, project_id, task_key, session_id)
             plan = self._event_by_key(
@@ -812,6 +814,70 @@ class OrchestrationService:
                     or unit.get("report_key")
                 ):
                     raise ValueError("Expert report must close the matching unreported running work unit")
+
+                criteria = list(unit.get("acceptance_criteria") or [])
+                verifies = [str(x) for x in unit.get("verifies") or []]
+                if verifies:
+                    targets = conn.execute(
+                        """
+                        SELECT work_unit_key,acceptance_criteria
+                          FROM vres.orchestration_work_units
+                         WHERE task_id=%s AND plan_key=%s AND work_unit_key=ANY(%s)
+                        """,
+                        (task["id"], plan_key, verifies),
+                    ).fetchall()
+                    target_map = {
+                        str(row["work_unit_key"]): list(row.get("acceptance_criteria") or [])
+                        for row in targets
+                    }
+                    if set(target_map) != set(verifies):
+                        raise ValueError("Verifier report targets are incomplete or stale")
+                    expected = {
+                        (target_key, str(criterion["key"]))
+                        for target_key, target_criteria in target_map.items()
+                        for criterion in target_criteria
+                        if criterion.get("verification") == "judgmental"
+                    }
+                    actual = {
+                        (
+                            str(result.get("target_work_unit_key") or ""),
+                            str(result["criterion_key"]),
+                        )
+                        for result in normalized_results
+                    }
+                    if actual != expected:
+                        raise ValueError(
+                            "Verifier criteria_results must cover every judgmental criterion on its declared targets exactly once"
+                        )
+                else:
+                    deterministic = {
+                        str(criterion["key"])
+                        for criterion in criteria
+                        if criterion.get("verification") == "deterministic"
+                    }
+                    own_results: list[dict[str, Any]] = []
+                    for result in normalized_results:
+                        target = str(result.get("target_work_unit_key") or work_unit_key)
+                        if target != work_unit_key:
+                            raise ValueError(
+                                "Implementation work units may report criteria only for themselves"
+                            )
+                        if result["criterion_key"] not in deterministic:
+                            raise ValueError(
+                                "Implementation workers may not self-approve judgmental criteria"
+                            )
+                        own_results.append({**result, "target_work_unit_key": work_unit_key})
+                    if len(own_results) != len({r["criterion_key"] for r in own_results}):
+                        raise ValueError(
+                            "Implementation criteria_results may contain each criterion only once"
+                        )
+                    if {r["criterion_key"] for r in own_results} != deterministic:
+                        raise ValueError(
+                            "Implementation criteria_results must cover every deterministic criterion exactly once"
+                        )
+                    normalized_results = own_results
+            elif normalized_results:
+                raise ValueError("criteria_results require a persisted orchestration work graph")
             report_key = _key("ORCHREP")
             payload = {
                 "report_key": report_key,
@@ -832,6 +898,7 @@ class OrchestrationService:
                     limit=_MAX_EVIDENCE,
                     field="unknowns",
                 ),
+                "criteria_results": redact(normalized_results),
             }
             event_id = self._insert_event(
                 conn,
