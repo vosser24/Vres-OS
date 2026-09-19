@@ -83,11 +83,11 @@ def work_scope_for_agent(agent_id: str) -> dict[str, Any] | None:
     with connect() as conn:
         row = conn.execute(
             """
-            SELECT w.work_unit_key,w.write_scope,p.root_path
+            SELECT w.work_unit_key,w.write_scope,w.status,p.root_path
               FROM vres.orchestration_work_units w
               JOIN vres.tasks t ON t.id=w.task_id
               JOIN vres.projects p ON p.id=t.project_id
-             WHERE w.host_agent_id=%s AND w.status='running'
+             WHERE w.host_agent_id=%s AND w.status IN ('running','failed')
              ORDER BY w.started_at DESC,w.id DESC
              LIMIT 1
             """,
@@ -106,6 +106,10 @@ def evaluate_work_scope_preflight(
     target = _scoped_file_path(payload)
     if target is None:
         return None
+    if scope.get("status") == "failed":
+        return _deny(
+            f"Work unit {scope['work_unit_key']} has failed and this host worker may not mutate project files."
+        )
     if not target:
         return _deny("Governed work-unit file mutation is missing an inspectable target path.")
     declared = [str(x).replace("\\", "/").strip("/").casefold() for x in scope.get("write_scope") or []]
