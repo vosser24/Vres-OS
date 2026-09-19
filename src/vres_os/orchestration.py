@@ -322,7 +322,7 @@ class OrchestrationService:
                 "Newly acquired project expertise must use an explicit specialist owner role, not relabel a stable executive role"
             )
 
-        with connect() as conn:
+        with connect() as conn, conn.transaction():
             task = self._bound_task(conn, project_id, task_key, session_id)
             route = conn.execute(
                 """
@@ -356,7 +356,7 @@ class OrchestrationService:
                 raise ValueError(
                     "gap_need is not missing in the blocked route's recorded discovery"
                 )
-            prior = conn.execute(
+            duplicate = conn.execute(
                 """
                 SELECT 1
                   FROM vres.task_events
@@ -368,41 +368,31 @@ class OrchestrationService:
                 """,
                 (task["id"], route["request_key"], gap),
             ).fetchone()
-            if prior:
+            if duplicate:
                 raise ValueError(
                     "This governed gap already acquired project expertise; rediscover before adding another specialist"
                 )
+
             route_key = str(route["request_key"])
             discovery_key = str(route["discovery_key"])
+            governed_evidence = {
+                **dict(acquisition_evidence),
+                "gap_need": gap,
+                "routing_request_key": route_key,
+                "discovery_key": discovery_key,
+            }
+            key = CapabilityService().register_project(
+                key=capability_key,
+                name=name,
+                description=description,
+                domain=domain,
+                owner_role=owner_role,
+                project_id=project_id,
+                task_key=task_key,
+                acquisition_evidence=governed_evidence,
+                connection=conn,
+            )
 
-        governed_evidence = {
-            **dict(acquisition_evidence),
-            "gap_need": gap,
-            "routing_request_key": route_key,
-            "discovery_key": discovery_key,
-        }
-        key = CapabilityService().register_project(
-            key=capability_key,
-            name=name,
-            description=description,
-            domain=domain,
-            owner_role=owner_role,
-            project_id=project_id,
-            task_key=task_key,
-            acquisition_evidence=governed_evidence,
-        )
-        payload = {
-            "capability_key": key,
-            "scope": "project",
-            "gap_need": gap,
-            "routing_request_key": route_key,
-            "discovery_key": discovery_key,
-            "owner_role": owner_role,
-            "domain": domain,
-            "acquisition_evidence": redact(governed_evidence),
-        }
-        with connect() as conn, conn.transaction():
-            task = self._bound_task(conn, project_id, task_key, session_id)
             latest = conn.execute(
                 """
                 SELECT request_key,status
@@ -419,24 +409,19 @@ class OrchestrationService:
                 or latest["status"] != "blocked"
             ):
                 raise ValueError(
-                    "Routing changed during capability acquisition; rediscover before persisting acquisition evidence"
+                    "Routing changed during capability acquisition; the capability write was rolled back"
                 )
-            duplicate = conn.execute(
-                """
-                SELECT 1
-                  FROM vres.task_events
-                 WHERE task_id=%s
-                   AND event_type='ORCHESTRATION_CAPABILITY_ACQUIRED'
-                   AND payload->>'routing_request_key'=%s
-                   AND payload->>'gap_need'=%s
-                 LIMIT 1
-                """,
-                (task["id"], route_key, gap),
-            ).fetchone()
-            if duplicate:
-                raise ValueError(
-                    "This governed gap already acquired project expertise; rediscover before adding another specialist"
-                )
+
+            payload = {
+                "capability_key": key,
+                "scope": "project",
+                "gap_need": gap,
+                "routing_request_key": route_key,
+                "discovery_key": discovery_key,
+                "owner_role": owner_role,
+                "domain": domain,
+                "acquisition_evidence": redact(governed_evidence),
+            }
             event_id = self._insert_event(
                 conn,
                 int(task["id"]),
