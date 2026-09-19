@@ -499,6 +499,46 @@ These cases are required before describing project-agent parallel execution as l
 
 **Pass evidence:** The verifier work unit itself may complete successfully because it performed the review, but `orchestration_finalize` is blocked by the failed judgmental criterion. The failed report remains durable evidence. Remediation requires a new/current plan/work unit; Vres must not rewrite the prior acceptance result or silently mark it passed.
 
+## Claude Code usage-efficiency acceptance extension
+
+These cases validate behavior, not a claimed token-saving percentage. Capture before/after observations only after the feature behavior itself passes.
+
+### UE-01 — Status-line telemetry and missing-data tolerance
+
+**Execute:** Update Vres on the target Windows profile with Claude Code closed, start Claude in a disposable project, send at least one prompt, and observe the installed status line while context grows.
+
+**Pass evidence:** The line shows the host-supplied model and effort when present, context percentage when present, and 5-hour/7-day usage only when those windows are supplied. Missing context/rate-limit/effort data never renders as a fabricated 0% and never breaks Claude. No obvious terminal latency or repeated background polling appears. If the user already had a different custom status line before install, Vres preserves it rather than overwriting it.
+
+### UE-02 — Focused native compaction with durable Vres continuity
+
+**Execute:** Run a persistent engineering task with decisions, changed files, executed tests and one unresolved next step, then invoke native `/compact`.
+
+**Pass evidence:** Existing PreCompact/PostCompact Vres checkpoints and rehydration still work. The compacted conversation retains the objective/constraints, durable decisions, changed surfaces, actual test/evidence results, blockers/current work state and exact next action while dropping repeated/stale exploration and raw output already reduced to conclusions. No custom compaction subsystem is invoked.
+
+### UE-03 — `/clear` replacement-session recovery
+
+**Execute:** During a persistent task, invoke `/clear`, continue in the replacement provider session and request task status/resumption.
+
+**Pass evidence:** The prior same-host provider session closes as `provider_session_replaced`; the persistent task remains intact and the new session rehydrates/binds correctly. Live concurrent sessions from another host process are not guessed closed.
+
+### UE-04 — Conditional bounded-read behavior
+
+**Execute:** Give the engineering flow one large unfamiliar source file or log and one short known file.
+
+**Pass evidence:** The large/unknown source is first narrowed by relevant symbol/error/test/summary search and only bounded surrounding ranges are read until more context is justified. The short known file is read directly without pointless Grep ceremony. No custom Read wrapper is introduced.
+
+### UE-05 — Bounded native Bash output
+
+**Execute:** Run one intentionally noisy test/build/log investigation.
+
+**Pass evidence:** Claude uses a targeted command or redirects/filters the large output and inspects bounded failure/summary excerpts. The real exit status remains available as evidence; the command is not piped through a truncation pattern that masks failure. Massive full logs/trees are not dumped into the conversation. Native Bash remains the execution surface.
+
+### UE-06 — Usage observations, not promotion claims
+
+**Execute:** After UE-01 through UE-05 pass, record representative before/after observations across comparable tasks for context growth, compaction frequency, 5h/7d usage, parent-agent broad reads, large Bash output and worker count.
+
+**Pass evidence:** Results are recorded as observations with task/scenario context. Do not claim measured savings or change model/routing policy from one anecdotal run.
+
 ## Final release decision
 
 Sign the actual matrix, not this blank plan. Record remaining defects and held functions. The decision can be
