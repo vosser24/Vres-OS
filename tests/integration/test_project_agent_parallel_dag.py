@@ -179,6 +179,38 @@ def test_project_agent_rejects_model_authority_and_detects_source_drift(pg_proje
         service.get(agent_key=good_key, project_id=pg_project, root=tmp_path)
 
 
+def test_fable_route_cannot_silently_drop_available_project_agent(pg_project, tmp_path):
+    task, sid = _task_and_session(pg_project)
+    agents = _register_agents(pg_project, task, sid, tmp_path)
+    orchestration = OrchestrationService()
+    discovery = orchestration.discover(
+        project_id=pg_project,
+        task_key=task,
+        session_id=sid,
+        capability_needs=["pricing", "postgresql", "software engineering"],
+        project_root=tmp_path,
+    )
+    routing = RoutingService()
+    prepared = routing.prepare(
+        project_id=pg_project,
+        task_key=task,
+        session_id=sid,
+        discovery_key=discovery["discovery_key"],
+        risk_triggers=["cross_domain"],
+    )
+    report = _route_report(prepared["request_key"], agents)
+    report["experts"][0]["agent_key"] = None
+    with pytest.raises(ValueError, match="must select a compatible registered project agent"):
+        routing._record_validated_decision(
+            project_id=pg_project,
+            request_key=prepared["request_key"],
+            report=report,
+            observed_model="claude-fable-5",
+            agent_id=f"router-{uuid.uuid4().hex}",
+            session_id=sid,
+        )
+
+
 def test_parallel_dag_releases_dependency_and_preserves_successful_sibling(pg_project, tmp_path):
     task, sid = _task_and_session(pg_project)
     agents = _register_agents(pg_project, task, sid, tmp_path)
