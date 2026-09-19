@@ -26,6 +26,11 @@ Do not classify complexity for ceremony. Identify the actual capabilities/risk s
 - Match the repository's established patterns unless evidence justifies change.
 - Prefer deterministic implementation over model calls when deterministic code can satisfy the contract.
 
+## Context efficiency
+
+- For large or unfamiliar files/logs, locate relevant symbols, terms, failures, test names, stack frames, or summary markers first; inspect the smallest useful surrounding range and expand only when needed. Read short or already-known files directly instead of adding search ceremony.
+- Keep native Bash output bounded: prefer targeted commands/tests, filters, counts, or redirected logs with bounded excerpts. Preserve the real command exit status when it is evidence; do not truncate through a pipeline that masks failure. Avoid dumping large trees, logs, or full build/test output into the conversation.
+
 ## Validate
 
 Dispatch the dedicated `validator` agent in a fresh context for material work. It must verify, not author/fix. Evidence taxonomy: verified / relayed / inferred / assumed.
