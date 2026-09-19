@@ -481,6 +481,24 @@ These cases are required before describing project-agent parallel execution as l
 
 **Pass evidence:** Team size is justified by capability discovery rather than prompt ceremony; independent specialist work overlaps; dependencies are respected; directors/owners and project specialists remain distinguishable; the system synthesis uses every required report; unresolved conflict is arbitrated rather than averaged; no project agent selects its own model; final protected/routine assurance follows the governed route. The same installation must still keep PA-02's simple fixture single-path.
 
+### PA-09 — Deterministic implementation acceptance stays single-worker
+
+**Execute:** In a fresh project, create one bounded write-capable implementation unit whose acceptance contract contains only deterministic criteria with executable/mechanical evidence. Do not add a product-owner/QA verifier merely for ceremony.
+
+**Pass evidence:** The work graph persists the criteria before execution; `orchestration_work_ready` returns them to the implementation worker; the worker reports exactly one structured result per deterministic criterion with concrete evidence; host-observed completion marks the unit passed; `orchestration_finalize` reports zero judgmental criteria and no verifier units. No extra review agent is manufactured.
+
+### PA-10 — Judgmental product acceptance uses an independent dependent verifier
+
+**Execute:** Use a bounded product slice with at least one deterministic implementation criterion and one genuinely judgmental product/UX/domain criterion. The implementation unit writes files. A separate report-only product/domain verifier depends on and declares `verifies` for that unit.
+
+**Pass evidence:** The verifier is not ready before the implementation passes. The implementation worker can report only its deterministic criterion and cannot self-approve the judgmental criterion. After implementation host-stop evidence passes, the verifier becomes ready with the target's persisted acceptance criteria. The verifier reports the judgmental result with target work-unit key, criterion key, status and evidence. Finalization succeeds only after the judgmental result is passed. Product acceptance remains distinct from any protected Vres validation required by the route.
+
+### PA-11 — Failed product acceptance blocks finalization and preserves evidence
+
+**Execute:** Repeat PA-10 but have the independent verifier mark one judgmental criterion failed with concrete evidence.
+
+**Pass evidence:** The verifier work unit itself may complete successfully because it performed the review, but `orchestration_finalize` is blocked by the failed judgmental criterion. The failed report remains durable evidence. Remediation requires a new/current plan/work unit; Vres must not rewrite the prior acceptance result or silently mark it passed.
+
 ## Final release decision
 
 Sign the actual matrix, not this blank plan. Record remaining defects and held functions. The decision can be
