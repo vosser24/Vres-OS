@@ -327,30 +327,38 @@ class RoutingService:
                             f"Routing role {role!r} must cite a discovered capability it owns for {need!r}"
                         )
                     covered.add(need)
-                if agent_key:
-                    candidate = None
-                    for need in covers:
-                        matches_for_need = discovery.get("agent_matches", {}).get(need) or []
-                        match = next(
-                            (
-                                agent
-                                for agent in matches_for_need
-                                if str(agent.get("agent_key") or "") == agent_key
-                                and str(agent.get("role") or "") == role
-                            ),
-                            None,
-                        )
-                        if match is None:
-                            raise ValueError(
-                                f"Routing role {role!r} cites unregistered or mismatched project agent {agent_key!r}"
-                            )
-                        candidate = match
-                    if candidate is None or not set(keys).issubset(
-                        set(candidate.get("capability_keys") or [])
-                    ):
-                        raise ValueError(
-                            f"Project agent {agent_key!r} does not cover the routed capability keys"
-                        )
+                candidate_map: dict[str, dict[str, Any]] = {}
+                candidate_sets: list[set[str]] = []
+                for need in covers:
+                    matches_for_need = discovery.get("agent_matches", {}).get(need) or []
+                    matching_keys: set[str] = set()
+                    for agent in matches_for_need:
+                        if str(agent.get("role") or "") != role:
+                            continue
+                        key = str(agent.get("agent_key") or "").strip()
+                        if not key:
+                            continue
+                        candidate_map[key] = agent
+                        matching_keys.add(key)
+                    candidate_sets.append(matching_keys)
+                compatible_keys = (
+                    set.intersection(*candidate_sets) if candidate_sets else set()
+                )
+                compatible_keys = {
+                    key
+                    for key in compatible_keys
+                    if set(keys).issubset(
+                        set(candidate_map[key].get("capability_keys") or [])
+                    )
+                }
+                if compatible_keys and not agent_key:
+                    raise ValueError(
+                        f"Routing role {role!r} must select a compatible registered project agent"
+                    )
+                if agent_key and agent_key not in compatible_keys:
+                    raise ValueError(
+                        f"Routing role {role!r} cites unregistered, mismatched, or insufficient project agent {agent_key!r}"
+                    )
             selected_roles.add(role)
             any_opus = any_opus or tier == "opus"
             experts.append(
