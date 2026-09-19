@@ -80,9 +80,16 @@ def test_mcp_entrypoint_registers_orchestration_and_routing_from_dedicated_modul
     assert "routing_source" in deterministic_text
     for tool in [
         "orchestration_discover",
+        "project_agent_register",
+        "project_agent_get",
+        "project_agent_search",
         "capability_acquire_project",
         "orchestration_plan_record",
         "orchestration_expert_report",
+        "orchestration_work_graph_record",
+        "orchestration_work_ready",
+        "orchestration_work_unit_start",
+        "orchestration_work_unit_fail",
         "orchestration_arbitrate",
         "orchestration_finalize",
         "orchestration_evidence",
@@ -115,6 +122,11 @@ def test_chairman_requires_deterministic_first_routing_and_tiered_workers():
     assert "Host-observed worker model evidence is authoritative" in text
     assert "must never set the Agent `model` parameter" in text
     assert "decision_ready=true" in text
+    assert "up to the mechanically enforced project limit of four" in text
+    assert "Native Claude Agent calls remain the executor" in text
+    assert "project_agent_register" in text
+    assert "orchestration_work_graph_record" in text
+    assert "orchestration_work_ready" in text
 
 
 def test_governed_agents_pin_router_and_execution_model_families():
@@ -135,3 +147,30 @@ def test_subagent_hooks_observe_router_and_worker_model_evidence():
     assert "routing-stop" in hooks
     assert "worker-stop" in hooks
     assert "vres-subagent-hook.ps1" in hooks
+
+
+
+def test_vres_claude_contract_preserves_aigo_simplicity_and_scope_separation():
+    universal = (ROOT / "rules/vres-rules.md").read_text(encoding="utf-8")
+    project = (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+    contract = (ROOT / "src/vres_os/claude_contract.py").read_text(encoding="utf-8")
+    install = (ROOT / "install.ps1").read_text(encoding="utf-8")
+    uninstall = (ROOT / "uninstall.ps1").read_text(encoding="utf-8")
+
+    for phrase in [
+        "Simplicity first",
+        "minimum code",
+        "Explicit is better than implicit",
+        "Flat is better than nested",
+        "one obvious way",
+        "Compose before building",
+        "Run agents in parallel only when their work is independent",
+        "single database is normally scanned by one query/script",
+    ]:
+        assert phrase in universal
+    assert "Machine-wide engineering rules" in project
+    assert len(project.splitlines()) <= 200
+    assert "<!-- vres-os:begin -->" in contract
+    assert "@~/.claude/vres-rules.md" in contract
+    assert "install-global" in install
+    assert "remove-global" in uninstall
