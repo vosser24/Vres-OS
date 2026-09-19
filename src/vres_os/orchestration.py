@@ -475,6 +475,7 @@ class OrchestrationService:
                 "SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
                 (f"orchestration-start:{project_id}",),
             )
+            self._require_latest_plan(conn, int(task["id"]), str(unit["plan_key"]))
             running = conn.execute(
                 """
                 SELECT 1
@@ -695,6 +696,7 @@ class OrchestrationService:
                 "plan_key",
                 plan_key,
             )["payload"]
+            self._require_latest_plan(conn, int(task["id"]), plan_key)
             selected_roles = {
                 str(item.get("role") or "") for item in plan.get("selected_experts") or []
             }
@@ -790,6 +792,7 @@ class OrchestrationService:
             plan = self._event_by_key(
                 conn, int(task["id"]), "ORCHESTRATION_PLAN", "plan_key", plan_key
             )["payload"]
+            self._require_latest_plan(conn, int(task["id"]), plan_key)
             existing = conn.execute(
                 "SELECT * FROM vres.orchestration_work_units WHERE task_id=%s AND plan_key=%s ORDER BY id",
                 (task["id"], plan_key),
@@ -903,6 +906,7 @@ class OrchestrationService:
             ).fetchone()
             if not task:
                 raise KeyError(task_key)
+            self._require_latest_plan(conn, int(task["id"]), plan_key)
             rows = conn.execute(
                 "SELECT * FROM vres.orchestration_work_units WHERE task_id=%s AND plan_key=%s ORDER BY id",
                 (task["id"], plan_key),
@@ -1176,6 +1180,7 @@ class OrchestrationService:
                 "plan_key",
                 plan_key,
             )
+            self._require_latest_plan(conn, int(task["id"]), plan_key)
             roles: set[str] = set()
             for report_key in keys:
                 report = self._event_by_key(
@@ -1268,6 +1273,7 @@ class OrchestrationService:
                 "plan_key",
                 plan_key,
             )["payload"]
+            self._require_latest_plan(conn, int(task["id"]), plan_key)
             selected_roles = {
                 str(item.get("role") or "") for item in plan.get("selected_experts") or []
             }
