@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from .orchestration import OrchestrationService
 from .project import discover_project
 from .redaction import redact_text
 from .repository import Repository
@@ -140,6 +141,19 @@ def main() -> None:
                 record_stale_routing_rejection(observed_payload, pid)
         elif mode == "worker-stop":
             service.record_worker_from_hook(payload, pid)
+        elif mode == "work-unit-started":
+            tool_input = payload.get("tool_input")
+            if not isinstance(tool_input, dict):
+                raise ValueError("Work-unit start hook is missing tool input")
+            work_unit_key = str(tool_input.get("work_unit_key") or "").strip()
+            agent_id = str(payload.get("agent_id") or "").strip()
+            if not work_unit_key or not agent_id:
+                raise ValueError("Work-unit start hook requires work_unit_key and host agent_id")
+            OrchestrationService().bind_work_unit_host(
+                project_id=pid,
+                work_unit_key=work_unit_key,
+                agent_id=agent_id,
+            )
         else:
             raise ValueError("Unsupported Vres subagent hook mode")
     except Exception as exc:
