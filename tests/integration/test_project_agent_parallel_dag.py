@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import uuid
 from pathlib import Path
 
@@ -140,6 +141,63 @@ def _plan(pid: int, task: str, sid: str, discovery: dict, agents: dict[str, str]
         excluded_experts=_excluded("commercial-director", "data-director", "cto"),
         routing_rationale="Match the governed route exactly.",
     )
+
+
+def _single_agent_graph(pid: int, task: str, sid: str, root: Path):
+    agent_key = f"agent.single.{uuid.uuid4().hex[:8]}"
+    ProjectAgentService().register(
+        project_id=pid,
+        root=root,
+        task_key=task,
+        session_id=sid,
+        agent_key=agent_key,
+        name="single-agent",
+        role="cto",
+        capability_keys=["cap.software-engineering"],
+        source_path=_agent_file(root, f"single-{uuid.uuid4().hex[:8]}"),
+        write_policy="project_files",
+    )
+    orchestration = OrchestrationService()
+    discovery = orchestration.discover(
+        project_id=pid,
+        task_key=task,
+        session_id=sid,
+        capability_needs=["software engineering"],
+        project_root=root,
+    )
+    routed = try_deterministic_route(
+        project_id=pid,
+        task_key=task,
+        session_id=sid,
+        discovery_key=discovery["discovery_key"],
+        risk_triggers=[],
+    )
+    assert routed is not None
+    plan = orchestration.record_plan(
+        project_id=pid,
+        task_key=task,
+        session_id=sid,
+        discovery_key=discovery["discovery_key"],
+        lead_role="cto",
+        selected_experts=[{
+            "role": "cto",
+            "agent_key": agent_key,
+            "rationale": "Exact project agent.",
+            "covers": ["software engineering"],
+            "capability_keys": ["cap.software-engineering"],
+        }],
+        excluded_experts=_excluded("cto"),
+        routing_rationale="Match deterministic route.",
+    )
+    graph = orchestration.record_work_graph(
+        project_id=pid,
+        task_key=task,
+        session_id=sid,
+        plan_key=plan["plan_key"],
+        units=[{"role": "cto", "depends_on": [], "write_scope": ["src"]}],
+        project_root=root,
+    )
+    return orchestration, RoutingService(), plan, graph["work_units"][0]["work_unit_key"], agent_key
 
 
 def test_project_agent_rejects_model_authority_and_detects_source_drift(pg_project, tmp_path):
@@ -509,6 +567,149 @@ def test_host_observed_worker_evidence_binds_exact_project_agent_and_work_unit(p
     assert worker["project_agent_key"] == key
     assert worker["work_unit_key"] == unit_key
     assert worker["observed_model"] == "claude-sonnet-5"
+
+
+def test_claimed_failed_worker_waits_for_host_stop_then_rebinds_retry(pg_project, tmp_path):
+    task, sid = _task_and_session(pg_project)
+    orchestration, routing, plan, unit_key, agent_key = _single_agent_graph(
+        pg_project, task, sid, tmp_path
+    )
+    worker_a = f"worker-a-{uuid.uuid4().hex}"
+    worker_b = f"worker-b-{uuid.uuid4().hex}"
+
+    orchestration.start_work_unit(
+        project_id=pg_project, task_key=task, session_id=sid, work_unit_key=unit_key
+    )
+    orchestration.bind_work_unit_host(
+        project_id=pg_project, work_unit_key=unit_key, agent_id=worker_a
+    )
+    orchestration.fail_work_unit(
+        project_id=pg_project,
+        task_key=task,
+        session_id=sid,
+        work_unit_key=unit_key,
+        error="synthetic worker failure",
+    )
+
+    before_stop = orchestration.ready_work(
+        project_id=pg_project, task_key=task, plan_key=plan["plan_key"], project_root=tmp_path
+    )
+    assert before_stop["ready"] == []
+    waiting = next(row for row in before_stop["waiting"] if row["work_unit_key"] == unit_key)
+    assert waiting["retry_waiting_for_host_stop"] is True
+    with pytest.raises(ValueError, match="prior host worker stop"):
+        orchestration.start_work_unit(
+            project_id=pg_project, task_key=task, session_id=sid, work_unit_key=unit_key
+        )
+
+    failed = routing._record_failed_worker_observation(
+        project_id=pg_project,
+        agent_type="vres-os:sonnet-expert",
+        agent_id=worker_a,
+        session_id=sid,
+        observed_model="claude-sonnet-5",
+        reason="synthetic worker failure",
+        work_unit_key=unit_key,
+    )
+    assert failed["accepted"] is False
+    assert failed["project_agent_key"] == agent_key
+
+    after_stop = orchestration.ready_work(
+        project_id=pg_project, task_key=task, plan_key=plan["plan_key"], project_root=tmp_path
+    )
+    assert [row["work_unit_key"] for row in after_stop["ready"]] == [unit_key]
+
+    retry = orchestration.start_work_unit(
+        project_id=pg_project, task_key=task, session_id=sid, work_unit_key=unit_key
+    )
+    assert retry["attempt"] == 2
+    orchestration.bind_work_unit_host(
+        project_id=pg_project, work_unit_key=unit_key, agent_id=worker_b
+    )
+    report = orchestration.record_expert_report(
+        project_id=pg_project,
+        task_key=task,
+        session_id=sid,
+        plan_key=plan["plan_key"],
+        role="cto",
+        recommendation="Retry succeeded.",
+        evidence=[{"source": "fixture"}],
+        work_unit_key=unit_key,
+    )
+    passed = routing._record_worker_observation(
+        project_id=pg_project,
+        task_key=task,
+        plan_key=plan["plan_key"],
+        role="cto",
+        execution_tier="sonnet",
+        agent_type="vres-os:sonnet-expert",
+        agent_id=worker_b,
+        session_id=sid,
+        observed_model="claude-sonnet-5",
+        work_unit_key=unit_key,
+    )
+    assert passed["recorded"] is True
+
+    evidence = routing.evidence(project_id=pg_project, task_key=task)
+    attempts = [row for row in evidence["workers"] if row["work_unit_key"] == unit_key]
+    assert [row["status"] for row in attempts] == ["rejected", "observed"]
+    assert report["report_key"]
+
+
+def test_worker_stop_without_report_auto_fails_claimed_unit(pg_project, tmp_path):
+    task, sid = _task_and_session(pg_project)
+    orchestration, routing, plan, unit_key, _ = _single_agent_graph(
+        pg_project, task, sid, tmp_path
+    )
+    worker = f"worker-crash-{uuid.uuid4().hex}"
+    orchestration.start_work_unit(
+        project_id=pg_project, task_key=task, session_id=sid, work_unit_key=unit_key
+    )
+    orchestration.bind_work_unit_host(
+        project_id=pg_project, work_unit_key=unit_key, agent_id=worker
+    )
+
+    transcript = tmp_path / "worker-crash.jsonl"
+    transcript.write_text(
+        json.dumps({
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "model": "claude-sonnet-5",
+                "content": [{
+                    "type": "tool_use",
+                    "name": "mcp__plugin_vres-os_vres__orchestration_work_unit_start",
+                    "input": {
+                        "task_key": task,
+                        "session_id": sid,
+                        "work_unit_key": unit_key,
+                    },
+                }],
+            },
+        }) + "\n",
+        encoding="utf-8",
+    )
+    result = routing.record_worker_from_hook(
+        {
+            "agent_type": "vres-os:sonnet-expert",
+            "agent_id": worker,
+            "session_id": sid,
+            "agent_transcript_path": str(transcript),
+        },
+        pg_project,
+    )
+    assert result["accepted"] is False
+    assert result["work_unit_key"] == unit_key
+
+    ready = orchestration.ready_work(
+        project_id=pg_project, task_key=task, plan_key=plan["plan_key"], project_root=tmp_path
+    )
+    assert [row["work_unit_key"] for row in ready["ready"]] == [unit_key]
+    evidence = routing.evidence(project_id=pg_project, task_key=task)
+    rejected = [row for row in evidence["workers"] if row["work_unit_key"] == unit_key]
+    assert len(rejected) == 1
+    assert rejected[0]["status"] == "rejected"
+    assert rejected[0]["observed_model"] == "claude-sonnet-5"
 
 
 def test_parallel_write_scope_overlap_is_rejected(pg_project, tmp_path):

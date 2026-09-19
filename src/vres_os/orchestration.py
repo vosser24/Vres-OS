@@ -785,15 +785,33 @@ class OrchestrationService:
                 "SELECT * FROM vres.orchestration_work_units WHERE task_id=%s AND plan_key=%s ORDER BY id",
                 (task["id"], plan_key),
             ).fetchall()
+            rejected_rows = conn.execute(
+                """
+                SELECT work_unit_key,agent_id
+                  FROM vres.worker_runs
+                 WHERE task_id=%s AND plan_key=%s AND status='rejected'
+                """,
+                (task["id"], plan_key),
+            ).fetchall()
         if not rows:
             raise ValueError("No work graph exists for this plan")
         by_key = {str(row["work_unit_key"]): dict(row) for row in rows}
+        rejected = {
+            (str(row["work_unit_key"]), str(row["agent_id"]))
+            for row in rejected_rows
+            if row.get("work_unit_key") and row.get("agent_id")
+        }
         ready: list[dict[str, Any]] = []
         waiting: list[dict[str, Any]] = []
         for row in by_key.values():
             deps = [str(x) for x in row.get("depends_on") or []]
             dep_statuses = {dep: by_key[dep]["status"] for dep in deps if dep in by_key}
             missing_dependencies = [dep for dep in deps if dep not in by_key]
+            retry_waiting_for_host_stop = (
+                row["status"] == "failed"
+                and bool(row.get("host_agent_id"))
+                and (str(row["work_unit_key"]), str(row["host_agent_id"])) not in rejected
+            )
             item = {
                 "work_unit_key": row["work_unit_key"],
                 "plan_key": plan_key,
@@ -805,6 +823,7 @@ class OrchestrationService:
                 "write_scope": row.get("write_scope") or [],
                 "status": row["status"],
                 "attempt_count": row["attempt_count"],
+                "retry_waiting_for_host_stop": retry_waiting_for_host_stop,
                 "dependencies": dep_statuses,
                 "missing_dependencies": missing_dependencies,
                 "objective": task["objective"],
@@ -822,6 +841,7 @@ class OrchestrationService:
                 )
             if (
                 row["status"] in {"pending", "failed"}
+                and not retry_waiting_for_host_stop
                 and not missing_dependencies
                 and all(status == "passed" for status in dep_statuses.values())
             ):
@@ -851,6 +871,27 @@ class OrchestrationService:
                 raise KeyError(work_unit_key)
             if unit["status"] not in {"pending", "failed"}:
                 raise ValueError("Only pending or failed work units can start")
+            if unit["status"] == "failed" and unit.get("host_agent_id"):
+                stopped = conn.execute(
+                    """
+                    SELECT 1
+                      FROM vres.worker_runs
+                     WHERE task_id=%s AND plan_key=%s AND role=%s
+                       AND work_unit_key=%s AND agent_id=%s AND status='rejected'
+                     LIMIT 1
+                    """,
+                    (
+                        task["id"],
+                        unit["plan_key"],
+                        unit["role"],
+                        work_unit_key,
+                        unit["host_agent_id"],
+                    ),
+                ).fetchone()
+                if not stopped:
+                    raise ValueError(
+                        "Failed claimed work unit cannot retry until the prior host worker stop is observed"
+                    )
             deps = [str(x) for x in unit.get("depends_on") or []]
             if deps:
                 rows = conn.execute(
@@ -889,7 +930,8 @@ class OrchestrationService:
                 """
                 UPDATE vres.orchestration_work_units
                    SET status='running',attempt_count=attempt_count+1,started_at=now(),
-                       completed_at=NULL,last_error=NULL,report_key=NULL
+                       completed_at=NULL,last_error=NULL,report_key=NULL,
+                       host_agent_id=NULL,observed_model=NULL
                  WHERE id=%s
                 """,
                 (unit["id"],),
