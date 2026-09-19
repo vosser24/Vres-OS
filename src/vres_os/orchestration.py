@@ -335,8 +335,6 @@ class OrchestrationService:
         deterministic_count = 0
         judgmental_count = 0
         verifier_units: list[str] = []
-        row_by_key = {str(row["work_unit_key"]): row for row in rows}
-
         for row in rows:
             work_key = str(row["work_unit_key"])
             criteria = list(row.get("acceptance_criteria") or [])
