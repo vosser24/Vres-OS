@@ -104,6 +104,20 @@ def test_governed_worker_direct_file_edits_stay_inside_declared_scope(tmp_path):
     assert "declared scope" in result["hookSpecificOutput"]["permissionDecisionReason"]
 
 
+def test_failed_bound_work_unit_denies_direct_file_mutation(tmp_path):
+    scope = {
+        "work_unit_key": "ORCHWORK-failed",
+        "root_path": str(tmp_path),
+        "write_scope": ["src/backend"],
+        "status": "failed",
+    }
+    payload = _payload("Edit", agent_id="worker-failed")
+    payload["tool_input"] = {"file_path": str(tmp_path / "src" / "backend" / "app.py")}
+    result = evaluate_work_scope_preflight(payload, scope)
+    assert result is not None
+    assert "has failed" in result["hookSpecificOutput"]["permissionDecisionReason"]
+
+
 def test_report_only_work_unit_denies_direct_file_mutation(tmp_path):
     scope = {
         "work_unit_key": "ORCHWORK-report",
