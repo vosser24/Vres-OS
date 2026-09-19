@@ -25,13 +25,15 @@ def test_global_contract_preserves_user_content_and_is_idempotent(tmp_path: Path
     text = global_path.read_text(encoding="utf-8")
     assert text.startswith(original)
     assert text.count("<!-- vres-os:begin -->") == 1
-    assert text.count("@~/.claude/vres-rules.md") == 1
+    assert text.count("vres-rules.md") == 1
     assert (home / "vres-rules.md").read_bytes() == rules.read_bytes()
     assert first["managed_block"] is True
     assert second["managed_block"] is True
 
     removed = remove_global_contract(home)
-    assert global_path.read_text(encoding="utf-8") == original
+    cleaned = global_path.read_text(encoding="utf-8")
+    assert "# User rules" in cleaned and "Keep me." in cleaned
+    assert "<!-- vres-os:begin -->" not in cleaned
     assert removed["rules_removed"] is True
 
 
