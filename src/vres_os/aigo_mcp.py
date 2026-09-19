@@ -5,6 +5,7 @@ from typing import Any
 from .company_mcp import mcp
 from .mcp_server import _current_session, _project, _require_node
 from .orchestration import OrchestrationService
+from .project_agents import ProjectAgentService
 
 
 @mcp.tool()
@@ -23,7 +24,7 @@ def orchestration_discover(
     specialist yet. Prepare a Fable routing decision so the governor confirms the real gap;
     only then acquire project-scoped expertise and rediscover.
     """
-    pid, _ = _project()
+    pid, project = _project()
     sid = _current_session(pid, session_id)
     _require_node("task", task_key, write=True)
     return OrchestrationService().discover(
@@ -34,6 +35,62 @@ def orchestration_discover(
         procedure_intent=procedure_intent or None,
         task_family=task_family,
         knowledge_queries=knowledge_queries,
+        project_root=project.root,
+    )
+
+
+@mcp.tool()
+def project_agent_register(
+    task_key: str,
+    session_id: str,
+    agent_key: str,
+    name: str,
+    role: str,
+    capability_keys: list[str],
+    source_path: str,
+    write_policy: str = "report_only",
+) -> dict[str, Any]:
+    """Register one git-tracked project agent under .claude/agents/ without granting it model authority."""
+    pid, project = _project()
+    sid = _current_session(pid, session_id)
+    _require_node("task", task_key, write=True)
+    return ProjectAgentService().register(
+        project_id=pid,
+        root=project.root,
+        task_key=task_key,
+        session_id=sid,
+        agent_key=agent_key,
+        name=name,
+        role=role,
+        capability_keys=capability_keys,
+        source_path=source_path,
+        write_policy=write_policy,
+    )
+
+
+@mcp.tool()
+def project_agent_get(agent_key: str) -> dict[str, Any]:
+    """Resolve one current-project agent and fail if its source digest drifted."""
+    pid, project = _project()
+    return ProjectAgentService().get(
+        agent_key=agent_key,
+        project_id=pid,
+        root=project.root,
+    )
+
+
+@mcp.tool()
+def project_agent_search(
+    role: str | None = None,
+    capability_keys: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """List current-project registered agents matching an optional role/capability set."""
+    pid, project = _project()
+    return ProjectAgentService().search(
+        project_id=pid,
+        root=project.root,
+        role=role,
+        capability_keys=capability_keys,
     )
 
 
