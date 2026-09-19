@@ -1124,20 +1124,20 @@ class OrchestrationService:
                 "SELECT * FROM vres.orchestration_work_units WHERE task_id=%s AND plan_key=%s ORDER BY id",
                 (task["id"], plan_key),
             ).fetchall()
-            rejected_rows = conn.execute(
+            stopped_rows = conn.execute(
                 """
                 SELECT work_unit_key,agent_id
                   FROM vres.worker_runs
-                 WHERE task_id=%s AND plan_key=%s AND status='rejected'
+                 WHERE task_id=%s AND plan_key=%s AND status IN ('observed','rejected')
                 """,
                 (task["id"], plan_key),
             ).fetchall()
         if not rows:
             raise ValueError("No work graph exists for this plan")
         by_key = {str(row["work_unit_key"]): dict(row) for row in rows}
-        rejected = {
+        stopped = {
             (str(row["work_unit_key"]), str(row["agent_id"]))
-            for row in rejected_rows
+            for row in stopped_rows
             if row.get("work_unit_key") and row.get("agent_id")
         }
         ready: list[dict[str, Any]] = []
@@ -1149,7 +1149,7 @@ class OrchestrationService:
             retry_waiting_for_host_stop = (
                 row["status"] == "failed"
                 and bool(row.get("host_agent_id"))
-                and (str(row["work_unit_key"]), str(row["host_agent_id"])) not in rejected
+                and (str(row["work_unit_key"]), str(row["host_agent_id"])) not in stopped
             )
             item = {
                 "work_unit_key": row["work_unit_key"],
@@ -1229,7 +1229,8 @@ class OrchestrationService:
                     SELECT 1
                       FROM vres.worker_runs
                      WHERE task_id=%s AND plan_key=%s AND role=%s
-                       AND work_unit_key=%s AND agent_id=%s AND status='rejected'
+                       AND work_unit_key=%s AND agent_id=%s
+                       AND status IN ('observed','rejected')
                      LIMIT 1
                     """,
                     (
