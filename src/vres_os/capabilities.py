@@ -137,6 +137,71 @@ class CapabilityService:
             )
         return key
 
+    @staticmethod
+    def _register_project_in_conn(
+        conn,
+        *,
+        key: str,
+        name: str,
+        description: str,
+        domain: str | None,
+        owner_role: str | None,
+        project_id: int,
+        task_key: str,
+        acquisition_evidence: dict[str, Any],
+    ) -> str:
+        subject = capability_register_subject(key, name, description, domain, owner_role)
+        key = subject["capability_key"]
+        name = subject["name"]
+        description = subject["description"]
+        if not key or not name.strip() or not description.strip():
+            raise ValueError("capability key, name and description are required")
+        if not acquisition_evidence:
+            raise ValueError("Project capability registration requires acquisition evidence")
+        safe_evidence = redact(acquisition_evidence)
+        task = conn.execute(
+            "SELECT id,project_id,status FROM vres.tasks WHERE task_key=%s",
+            (task_key,),
+        ).fetchone()
+        if not task or int(task["project_id"] or 0) != int(project_id):
+            raise ValueError("Capability acquisition task must belong to the target project")
+        if task["status"] not in {"active", "waiting_user", "blocked"}:
+            raise ValueError("New project expertise must be acquired during an unfinished task")
+        conn.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", ("capability:" + key,)
+        )
+        old = conn.execute(
+            "SELECT name,description,domain,project_id FROM vres.capabilities WHERE capability_key=%s",
+            (key,),
+        ).fetchone()
+        if old and old.get("project_id") != project_id:
+            raise ValueError("Capability key already belongs to another scope; choose a new project key")
+        if old and (old["name"], old["description"], old["domain"]) != (
+            name,
+            description,
+            domain,
+        ):
+            raise ValueError(
+                "Changed capability needs a new key; past proofs cannot transfer to different expertise"
+            )
+        metadata = {
+            "scope": "project",
+            "acquired_from_task": task_key,
+            "acquisition_evidence": safe_evidence,
+        }
+        conn.execute(
+            """
+            INSERT INTO vres.capabilities(
+              capability_key,name,description,domain,owner_role,status,project_id,metadata
+            ) VALUES (%s,%s,%s,%s,%s,'active',%s,%s::jsonb)
+            ON CONFLICT(capability_key) DO UPDATE SET
+              owner_role=excluded.owner_role,status='active',
+              metadata=vres.capabilities.metadata || excluded.metadata
+            """,
+            (key, name, description, domain, owner_role, project_id, json.dumps(metadata)),
+        )
+        return key
+
     def register_project(
         self,
         *,
@@ -148,60 +213,33 @@ class CapabilityService:
         project_id: int,
         task_key: str,
         acquisition_evidence: dict[str, Any],
+        connection=None,
     ) -> str:
-        """Register expertise only inside one project; this never grants company-wide catalog authority."""
-        subject = capability_register_subject(key, name, description, domain, owner_role)
-        key = subject["capability_key"]
-        name = subject["name"]
-        description = subject["description"]
-        if not key or not name.strip() or not description.strip():
-            raise ValueError("capability key, name and description are required")
-        if not acquisition_evidence:
-            raise ValueError("Project capability registration requires acquisition evidence")
-        safe_evidence = redact(acquisition_evidence)
+        """Register project expertise, optionally inside an existing governance transaction."""
+        if connection is not None:
+            return self._register_project_in_conn(
+                connection,
+                key=key,
+                name=name,
+                description=description,
+                domain=domain,
+                owner_role=owner_role,
+                project_id=project_id,
+                task_key=task_key,
+                acquisition_evidence=acquisition_evidence,
+            )
         with _connect() as conn, conn.transaction():
-            task = conn.execute(
-                "SELECT id,project_id,status FROM vres.tasks WHERE task_key=%s",
-                (task_key,),
-            ).fetchone()
-            if not task or int(task["project_id"] or 0) != int(project_id):
-                raise ValueError("Capability acquisition task must belong to the target project")
-            if task["status"] not in {"active", "waiting_user", "blocked"}:
-                raise ValueError("New project expertise must be acquired during an unfinished task")
-            conn.execute(
-                "SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", ("capability:" + key,)
+            return self._register_project_in_conn(
+                conn,
+                key=key,
+                name=name,
+                description=description,
+                domain=domain,
+                owner_role=owner_role,
+                project_id=project_id,
+                task_key=task_key,
+                acquisition_evidence=acquisition_evidence,
             )
-            old = conn.execute(
-                "SELECT name,description,domain,project_id FROM vres.capabilities WHERE capability_key=%s",
-                (key,),
-            ).fetchone()
-            if old and old.get("project_id") != project_id:
-                raise ValueError("Capability key already belongs to another scope; choose a new project key")
-            if old and (old["name"], old["description"], old["domain"]) != (
-                name,
-                description,
-                domain,
-            ):
-                raise ValueError(
-                    "Changed capability needs a new key; past proofs cannot transfer to different expertise"
-                )
-            metadata = {
-                "scope": "project",
-                "acquired_from_task": task_key,
-                "acquisition_evidence": safe_evidence,
-            }
-            conn.execute(
-                """
-                INSERT INTO vres.capabilities(
-                  capability_key,name,description,domain,owner_role,status,project_id,metadata
-                ) VALUES (%s,%s,%s,%s,%s,'active',%s,%s::jsonb)
-                ON CONFLICT(capability_key) DO UPDATE SET
-                  owner_role=excluded.owner_role,status='active',
-                  metadata=vres.capabilities.metadata || excluded.metadata
-                """,
-                (key, name, description, domain, owner_role, project_id, json.dumps(metadata)),
-            )
-        return key
 
     def mark_proven(self, key: str, *, task_key: str, evidence: dict[str, Any]) -> None:
         if not evidence:
