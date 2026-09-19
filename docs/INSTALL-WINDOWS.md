@@ -68,12 +68,16 @@ The package resolver uses declared compatibility ranges. `resolved-dependencies.
   logs\ and runtime\           local diagnostics / OS lock files
   backups\                     prior plugin preserved during updates
 
-%USERPROFILE%\.claude\skills\vres-os\
-  .claude-plugin\plugin.json  user-scoped plugin, automatically discovered
-  agents\ skills\ hooks\ bin\ .mcp.json
+%USERPROFILE%\.claude\
+  CLAUDE.md                    user-owned; Vres owns only its import marker block
+  vres-rules.md                Vres-owned universal rules
+  settings.json                user-owned; Vres adds/updates statusLine only when absent/Vres-owned
+  skills\vres-os\
+    .claude-plugin\plugin.json  user-scoped plugin, automatically discovered
+    agents\ skills\ hooks\ bin\ .mcp.json
 ```
 
-`CLAUDE_CONFIG_DIR` is honored for the plugin location. Remove a conflicting `VRES_DATA_DIR` override before using the managed Windows installer. The installer rejects unmanaged target directories, symlink/junction install roots, a legacy in-place venv, and unresolved installation journals. It does not delete other plugins or rewrite the user's CLAUDE.md/AGENTS.md.
+`CLAUDE_CONFIG_DIR` is honored for these Claude paths. Remove a conflicting `VRES_DATA_DIR` override before using the managed Windows installer. The installer rejects unmanaged target directories, symlink/junction install roots, a legacy in-place venv, and unresolved installation journals. It does not delete other plugins or modify unrelated CLAUDE.md/settings content. If a different custom Claude `statusLine` already exists, Vres preserves it and does not take ownership.
 
 The source extraction directory can be removed **after** the live test confirms the installed copy works; installation does not rely on that directory. Keep the release archive/evidence elsewhere.
 
@@ -91,7 +95,7 @@ cd C:\Projects\Vres-Live-Test
 claude
 ```
 
-Inspect the plugin interface if needed: the personal plugin should appear as `vres-os@skills-dir`; Chairman should be the active agent unless another explicit host setting overrides it. Do not assume this is working merely because installation printed success.
+Inspect the plugin interface if needed: the personal plugin should appear as `vres-os@skills-dir`; Chairman should be the active agent unless another explicit host setting overrides it. When Vres owns the Claude status line, it should render the host-supplied model/effort/context and optional 5-hour/7-day usage after Claude has emitted the relevant telemetry. Missing usage fields are omitted rather than shown as 0%. Do not assume any of this is working merely because installation printed success.
 
 Say:
 
