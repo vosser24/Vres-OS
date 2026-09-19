@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 
-from vres_os.control_preflight import evaluate_control_preflight, is_read_only_tool
+from vres_os.control_preflight import (
+    evaluate_control_preflight,
+    evaluate_work_scope_preflight,
+    is_read_only_tool,
+)
 from vres_os.session_prompts import (
     is_explicit_read_only_instruction,
     read_only_hold_from_metadata,
@@ -81,6 +85,36 @@ def test_read_only_hold_denies_mutation_but_allows_inspection():
     for tool in allowed:
         assert is_read_only_tool(tool), tool
         assert evaluate_control_preflight(_payload(tool), hold) is None
+
+
+def test_governed_worker_direct_file_edits_stay_inside_declared_scope(tmp_path):
+    scope = {
+        "work_unit_key": "ORCHWORK-1",
+        "root_path": str(tmp_path),
+        "write_scope": ["src/backend"],
+    }
+    allowed = _payload("Edit", agent_id="worker-1")
+    allowed["tool_input"] = {"file_path": str(tmp_path / "src" / "backend" / "app.py")}
+    assert evaluate_work_scope_preflight(allowed, scope) is None
+
+    denied = _payload("Write", agent_id="worker-1")
+    denied["tool_input"] = {"file_path": str(tmp_path / "src" / "frontend" / "app.ts")}
+    result = evaluate_work_scope_preflight(denied, scope)
+    assert result is not None
+    assert "declared scope" in result["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+def test_report_only_work_unit_denies_direct_file_mutation(tmp_path):
+    scope = {
+        "work_unit_key": "ORCHWORK-report",
+        "root_path": str(tmp_path),
+        "write_scope": [],
+    }
+    payload = _payload("Write", agent_id="worker-2")
+    payload["tool_input"] = {"file_path": str(tmp_path / "report.md")}
+    result = evaluate_work_scope_preflight(payload, scope)
+    assert result is not None
+    assert "report-only" in result["hookSpecificOutput"]["permissionDecisionReason"]
 
 
 def test_background_agent_tool_use_is_also_blocked_while_hold_active():
