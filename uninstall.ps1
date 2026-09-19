@@ -30,8 +30,10 @@ if (Test-Path $plugin) {
 }
 $answer=Read-Host 'Remove the Vres runtime and plugin? Config/credential are preserved unless -RemoveLocalData is supplied [y/N]'
 if ($answer -notin @('y','Y','yes','Yes')) { exit 0 }
+$python=Join-Path $root ("releases\{0}\venv\Scripts\python.exe" -f $state.release)
+& $python -I -X utf8 -m vres_os.claude_contract remove-global --claude-home $home
+if ($LASTEXITCODE -ne 0) { throw 'Could not remove the Vres-managed global Claude contract. Runtime retained for recovery.' }
 if ($RemoveLocalData) {
-    $python=Join-Path $root ("releases\{0}\venv\Scripts\python.exe" -f $state.release)
     & $python -I -X utf8 -c 'from vres_os.config import ConfigStore; from vres_os.secrets import SecretStore; c=ConfigStore().load(); SecretStore().delete(c.database.password_key)'
     if ($LASTEXITCODE -ne 0) { throw 'Could not remove the Vres credential. Runtime retained for recovery.' }
 }
