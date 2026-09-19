@@ -63,6 +63,7 @@ def _register_agents(pid: int, task: str, sid: str, root: Path) -> dict[str, str
             role=role,
             capability_keys=[capability],
             source_path=_agent_file(root, name),
+            write_policy="project_files",
         )
         out[role] = key
     return out
@@ -276,6 +277,69 @@ def test_parallel_dag_releases_dependency_and_preserves_successful_sibling(pg_pr
         ],
     )
     assert final["decision_ready"] is True
+
+
+def test_report_only_project_agent_cannot_receive_write_scope(pg_project, tmp_path):
+    task, sid = _task_and_session(pg_project)
+    key = f"agent.report-only.{uuid.uuid4().hex[:8]}"
+    ProjectAgentService().register(
+        project_id=pg_project,
+        root=tmp_path,
+        task_key=task,
+        session_id=sid,
+        agent_key=key,
+        name="report-only",
+        role="cto",
+        capability_keys=["cap.software-engineering"],
+        source_path=_agent_file(tmp_path, "report-only"),
+        write_policy="report_only",
+    )
+    orchestration = OrchestrationService()
+    discovery = orchestration.discover(
+        project_id=pg_project,
+        task_key=task,
+        session_id=sid,
+        capability_needs=["software engineering"],
+        project_root=tmp_path,
+    )
+    routing = RoutingService()
+    prepared = routing.prepare(
+        project_id=pg_project,
+        task_key=task,
+        session_id=sid,
+        discovery_key=discovery["discovery_key"],
+        risk_triggers=[],
+    )
+    assert prepared["routing_mode"] == "deterministic"
+    decision = prepared["decision"]
+    assert decision["experts"][0]["agent_key"] == key
+    plan = orchestration.record_plan(
+        project_id=pg_project,
+        task_key=task,
+        session_id=sid,
+        discovery_key=discovery["discovery_key"],
+        lead_role="cto",
+        selected_experts=[
+            {
+                "role": "cto",
+                "agent_key": key,
+                "rationale": "Use the exact registered project agent.",
+                "covers": ["software engineering"],
+                "capability_keys": ["cap.software-engineering"],
+            }
+        ],
+        excluded_experts=_excluded("cto"),
+        routing_rationale="Match the deterministic route.",
+    )
+    with pytest.raises(ValueError, match="Report-only project agent"):
+        orchestration.record_work_graph(
+            project_id=pg_project,
+            task_key=task,
+            session_id=sid,
+            plan_key=plan["plan_key"],
+            units=[{"role": "cto", "depends_on": [], "write_scope": ["src"]}],
+            project_root=tmp_path,
+        )
 
 
 def test_parallel_write_scope_overlap_is_rejected(pg_project, tmp_path):
