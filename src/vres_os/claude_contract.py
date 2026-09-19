@@ -7,7 +7,8 @@ from pathlib import Path
 _BEGIN = "<!-- vres-os:begin -->"
 _END = "<!-- vres-os:end -->"
 _IMPORT = "@~/.claude/vres-rules.md"
-_BLOCK = f"{_BEGIN}\n{_IMPORT}\n{_END}"
+def _block(import_ref: str) -> str:
+    return f"{_BEGIN}\n{import_ref}\n{_END}"
 
 
 def _atomic_write_bytes(path: Path, data: bytes) -> None:
@@ -37,20 +38,22 @@ def _write_user_text(path: Path, text: str, *, bom: bool) -> None:
     _atomic_write_bytes(path, raw)
 
 
-def merge_global_claude(existing: str) -> str:
-    """Install exactly one Vres-managed import block while preserving all other text."""
+def merge_global_claude(existing: str, import_ref: str = _IMPORT) -> str:
+    """Install exactly one Vres-managed import block while preserving user-owned content."""
+
     begin_count = existing.count(_BEGIN)
     end_count = existing.count(_END)
     if begin_count != end_count or begin_count > 1:
         raise ValueError("Malformed Vres managed block in global CLAUDE.md")
+    block = _block(import_ref)
     if begin_count == 1:
         start = existing.index(_BEGIN)
         end = existing.index(_END, start) + len(_END)
-        return existing[:start] + _BLOCK + existing[end:]
+        return existing[:start] + block + existing[end:]
     if not existing:
-        return _BLOCK + "\n"
+        return block + "\n"
     separator = "" if existing.endswith(("\n\n", "\r\n\r\n")) else ("\n" if existing.endswith(("\n", "\r\n")) else "\n\n")
-    return existing + separator + _BLOCK + "\n"
+    return existing + separator + block + "\n"
 
 
 def remove_global_claude(existing: str) -> str:
@@ -86,7 +89,13 @@ def install_global_contract(claude_home: Path, rules_source: Path) -> dict[str, 
         text, bom = _read_user_text(global_path)
     else:
         text, bom = "", False
-    merged = merge_global_claude(text)
+    default_home = (Path.home() / ".claude").resolve()
+    import_ref = (
+        _IMPORT
+        if claude_home == default_home
+        else "@" + rules_target.as_posix()
+    )
+    merged = merge_global_claude(text, import_ref=import_ref)
     _write_user_text(global_path, merged, bom=bom)
     return {
         "claude_home": str(claude_home),
