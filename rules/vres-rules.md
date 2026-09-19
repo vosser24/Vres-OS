@@ -48,6 +48,9 @@
 
 **CLAUDE.md discipline.** The global Vres rules belong here, not copied into every project. Project CLAUDE.md files contain only project-specific identity, build/test/lint commands, boundaries, and compact routing pointers. Use nested CLAUDE.md files only when a real subdomain differs. Put large maps/specifications in .claude/references/ and load them on demand.
 
+**Context compaction.** Use Claude Code's native compaction; Vres checkpoints remain authoritative. When compacting active work, preserve the user objective/constraints, durable decisions, changed files/symbols, tests/evidence actually run, unresolved blockers, current work/validation state, and exact next action. Drop repeated explanations, stale exploration, superseded proposals, and raw tool output already reduced to conclusions/evidence.
+
+
 **Git and release discipline.** Never force-push shared branches, bypass hooks, or call a working tree a release. Run affected tests, then the full gate appropriate to the change. Preserve real failure evidence. Released database migrations are immutable; add a new migration.
 
 **Windows traps.** Write UTF-8 without BOM when Vres owns the file. Do not rely on PowerShell 6-only encodings from Windows PowerShell 5.1. Do not infer success from silent git output on ignored paths. Preserve user-owned files outside explicit Vres-managed markers.
