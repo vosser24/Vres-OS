@@ -596,8 +596,13 @@ class OrchestrationService:
                     """,
                     (task["id"], plan_key, work_unit_key),
                 ).fetchone()
-                if not unit or unit["role"] != role or unit["status"] != "running":
-                    raise ValueError("Expert report must close the matching running work unit")
+                if (
+                    not unit
+                    or unit["role"] != role
+                    or unit["status"] != "running"
+                    or unit.get("report_key")
+                ):
+                    raise ValueError("Expert report must close the matching unreported running work unit")
             report_key = _key("ORCHREP")
             payload = {
                 "report_key": report_key,
@@ -631,7 +636,7 @@ class OrchestrationService:
                 conn.execute(
                     """
                     UPDATE vres.orchestration_work_units
-                       SET status='passed',report_key=%s,last_error=NULL,completed_at=now()
+                       SET report_key=%s,last_error=NULL
                      WHERE id=%s
                     """,
                     (report_key, unit["id"]),
@@ -639,7 +644,7 @@ class OrchestrationService:
                 self._insert_event(
                     conn,
                     int(task["id"]),
-                    "ORCHESTRATION_WORK_UNIT_PASSED",
+                    "ORCHESTRATION_WORK_UNIT_REPORTED",
                     role,
                     {"work_unit_key": work_unit_key, "report_key": report_key, "plan_key": plan_key},
                     session_id,
