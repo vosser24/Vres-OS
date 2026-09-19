@@ -475,7 +475,6 @@ class OrchestrationService:
                 "SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
                 (f"orchestration-start:{project_id}",),
             )
-            self._require_latest_plan(conn, int(task["id"]), str(unit["plan_key"]))
             running = conn.execute(
                 """
                 SELECT 1
@@ -1031,6 +1030,7 @@ class OrchestrationService:
                 "SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
                 (f"orchestration-start:{project_id}",),
             )
+            self._require_latest_plan(conn, int(task["id"]), str(unit["plan_key"]))
             running = conn.execute(
                 """
                 SELECT w.work_unit_key,w.write_scope
