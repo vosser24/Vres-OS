@@ -134,3 +134,41 @@ def test_detached_session_end_worker_closes_bound_session(pg_project, monkeypatc
     log = (tmp_path / "lifecycle.log").read_text(encoding="utf-8")
     assert "phase=worker-start" in log
     assert "phase=worker-finish result=success" in log
+
+
+def test_detached_clear_is_canonicalized_to_provider_session_replaced(pg_project, monkeypatch, tmp_path):
+    repo = Repository()
+    task = repo.begin_task(pg_project, "Detached clear", "Normalize native clear lifecycle", "test", "chairman")
+    sid = "detached-clear-session"
+    repo.open_session(pg_project, sid)
+    repo.bind_session(pg_project, sid, task)
+
+    class FixedProjectRepository(Repository):
+        def ensure_project(self, _project):
+            return pg_project
+
+    monkeypatch.setattr(session_end_worker, "Repository", FixedProjectRepository)
+    monkeypatch.setattr(session_end_worker, "discover_project", lambda _cwd: object())
+    monkeypatch.setattr(
+        session_end_worker.ConfigStore,
+        "load",
+        lambda _self: SimpleNamespace(configured=True),
+    )
+    monkeypatch.setattr(session_end_worker, "logs_dir", lambda: tmp_path)
+    monkeypatch.setenv("VRES_SESSION_END_ID", sid)
+    monkeypatch.setenv("VRES_SESSION_END_CWD", str(tmp_path))
+    monkeypatch.setenv("VRES_SESSION_END_REASON", "clear")
+
+    assert session_end_worker.run() == 0
+    row = _session(pg_project, sid)
+    assert row["ended_at"] is not None
+    assert row["end_reason"] == "provider_session_replaced"
+
+    with connect() as conn:
+        event = conn.execute(
+            "SELECT payload FROM vres.task_events WHERE task_id=(SELECT id FROM vres.tasks WHERE task_key=%s) "
+            "AND event_type='SESSION_END' AND session_id=%s ORDER BY id DESC LIMIT 1",
+            (task, sid),
+        ).fetchone()
+    assert event["payload"]["reason"] == "provider_session_replaced"
+    assert event["payload"]["source"] == "detached_session_end_worker"

@@ -14,6 +14,7 @@ from .redaction import redact_text
 from .reply_guard import begin_reply_turn, inspect_stop_guard, mark_stop_guard_blocked
 from .repository import Repository
 from .session_lifecycle import (
+    canonical_session_end_reason,
     cleanup_materialized_secrets_if_last_session,
     host_pid_from_env,
     reconcile_open_sessions,
@@ -251,7 +252,7 @@ def session_end() -> None:
         project = discover_project(payload.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR", "."))
         project_id = repo.ensure_project(project)
         sid = _session_id(payload)
-        reason = str(payload.get("reason") or payload.get("source") or "session_end")
+        reason = canonical_session_end_reason(payload.get("reason") or payload.get("source"))
         task = repo.active_task(project_id, sid)
         if task:
             commit_staged_user_instruction(project_id, sid, task.task_key)

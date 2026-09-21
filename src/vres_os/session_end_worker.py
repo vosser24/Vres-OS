@@ -7,7 +7,7 @@ from .config import ConfigStore
 from .paths import logs_dir
 from .project import discover_project
 from .repository import Repository
-from .session_lifecycle import cleanup_materialized_secrets_if_last_session
+from .session_lifecycle import canonical_session_end_reason, cleanup_materialized_secrets_if_last_session
 from .session_prompts import commit_staged_user_instruction
 
 _MAX_SESSION_ID = 200
@@ -38,7 +38,7 @@ def run() -> int:
     """Finish SessionEnd persistence outside Claude Code's teardown budget."""
     sid = _bounded_env("VRES_SESSION_END_ID", _MAX_SESSION_ID)
     cwd = _bounded_env("VRES_SESSION_END_CWD", _MAX_CWD)
-    reason = _bounded_env("VRES_SESSION_END_REASON", _MAX_REASON) or "session_end"
+    reason = canonical_session_end_reason(_bounded_env("VRES_SESSION_END_REASON", _MAX_REASON, required=False))
     _log("worker-start")
 
     if not ConfigStore().load().configured:
