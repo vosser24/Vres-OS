@@ -15,6 +15,14 @@ from .project import ProjectIdentity
 _ACTIVE = {"active", "waiting_user", "blocked"}
 
 
+def canonical_session_end_reason(reason: str | None) -> str:
+    """Normalize host lifecycle reasons to the durable Vres vocabulary."""
+    value = str(reason or "").strip()
+    if value == "clear":
+        return "provider_session_replaced"
+    return value or "session_end"
+
+
 def host_pid_from_env() -> int | None:
     raw = os.environ.get("VRES_HOST_PID", "").strip()
     if not raw:
