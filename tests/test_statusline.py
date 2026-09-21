@@ -58,13 +58,13 @@ def test_statusline_malformed_or_oversized_input_fails_harmlessly():
 
 def test_statusline_command_uses_forward_slashes_for_windows_runtime(monkeypatch):
     windows_python = PureWindowsPath(
-        r"C:\\Users\\User\\App Data\\Local\\VresOS\\venv\\Scripts\\python.exe"
+        r"C:\Users\User\App Data\Local\VresOS\venv\Scripts\python.exe"
     )
     monkeypatch.setattr(Path, "resolve", lambda self, strict=False: windows_python)
 
     command = _status_line_command(Path("python.exe"))
 
-    assert "\\\\" not in command
+    assert "\\" not in command
     assert command.startswith('"C:/Users/User/App Data/Local/VresOS/venv/Scripts/python.exe"')
     assert command.endswith(" -I -X utf8 -m vres_os.statusline")
 
