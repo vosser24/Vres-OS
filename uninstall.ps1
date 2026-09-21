@@ -21,8 +21,8 @@ foreach ($name in @('releases','bin','backups','logs','runtime')) {
 $state=Get-Content -Raw -Encoding UTF8 $pointer | ConvertFrom-Json
 if ($state.product -ne 'Vres-OS' -or $state.release -notmatch '^\d{14}-[a-f0-9]{8}$') { throw 'Unrecognized installation identity.' }
 $plugin=[IO.Path]::GetFullPath($state.plugin_path)
-$home=if ($env:CLAUDE_CONFIG_DIR) {$env:CLAUDE_CONFIG_DIR} else {Join-Path $env:USERPROFILE '.claude'}
-$expected=[IO.Path]::GetFullPath((Join-Path $home 'skills\vres-os'))
+$ClaudeHome=if ($env:CLAUDE_CONFIG_DIR) {$env:CLAUDE_CONFIG_DIR} else {Join-Path $env:USERPROFILE '.claude'}
+$expected=[IO.Path]::GetFullPath((Join-Path $ClaudeHome 'skills\vres-os'))
 if ($plugin -ne $expected) { throw 'Unexpected plugin path. Review manually; nothing was removed.' }
 if (Test-Path $plugin) {
     if (-not (Test-Path (Join-Path $plugin '.vres-managed')) -or (Get-Content -Raw -Encoding UTF8 (Join-Path $plugin '.vres-managed')).Trim() -ne 'Vres-OS') { throw 'Unmanaged plugin directory; refusing removal.' }
@@ -31,9 +31,9 @@ if (Test-Path $plugin) {
 $answer=Read-Host 'Remove the Vres runtime and plugin? Config/credential are preserved unless -RemoveLocalData is supplied [y/N]'
 if ($answer -notin @('y','Y','yes','Yes')) { exit 0 }
 $python=Join-Path $root ("releases\{0}\venv\Scripts\python.exe" -f $state.release)
-& $python -I -X utf8 -m vres_os.statusline remove --claude-home $home
+& $python -I -X utf8 -m vres_os.statusline remove --claude-home $ClaudeHome
 if ($LASTEXITCODE -ne 0) { throw 'Could not remove the Vres-managed Claude status line. Runtime retained for recovery.' }
-& $python -I -X utf8 -m vres_os.claude_contract remove-global --claude-home $home
+& $python -I -X utf8 -m vres_os.claude_contract remove-global --claude-home $ClaudeHome
 if ($LASTEXITCODE -ne 0) { throw 'Could not remove the Vres-managed global Claude contract. Runtime retained for recovery.' }
 if ($RemoveLocalData) {
     & $python -I -X utf8 -c 'from vres_os.config import ConfigStore; from vres_os.secrets import SecretStore; c=ConfigStore().load(); SecretStore().delete(c.database.password_key)'
