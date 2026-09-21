@@ -17,6 +17,7 @@ from .session_lifecycle import (
     canonical_session_end_reason,
     cleanup_materialized_secrets_if_last_session,
     host_pid_from_env,
+    inherit_replaced_session_task,
     reconcile_open_sessions,
     touch_session_host,
 )
@@ -59,14 +60,15 @@ def _project_id(repo: Repository, payload: dict | None = None) -> int:
     return repo.ensure_project(project)
 
 
-def _observe_session(project_id: int, sid: str | None, *, reconcile: bool = False) -> None:
+def _observe_session(project_id: int, sid: str | None, *, reconcile: bool = False) -> int | None:
     """Refresh bounded host evidence and optionally reconcile provably stale sessions."""
     if not sid:
-        return
+        return None
     host_pid = host_pid_from_env()
     touch_session_host(project_id, sid, host_pid)
     if reconcile:
         reconcile_open_sessions(project_id, sid, host_pid)
+    return host_pid
 
 
 def _resume_message(state: dict[str, Any], *, label: str) -> str:
@@ -101,7 +103,8 @@ def session_start() -> None:
             sid = _session_id(payload)
             if sid:
                 repo.open_session(project_id, sid)
-                _observe_session(project_id, sid, reconcile=True)
+                host_pid = _observe_session(project_id, sid, reconcile=True)
+                inherit_replaced_session_task(project_id, sid, host_pid)
                 bind_session_to_project_focus(project_id, sid)
             state = repo.resume_context(project_id, provider_session_id=sid)
             if state:
@@ -147,7 +150,8 @@ def user_prompt() -> None:
             repo.open_session(project_id, sid)
             # UserPromptSubmit is also a safe recovery point if the host skipped SessionStart
             # for a provider-session replacement.
-            _observe_session(project_id, sid, reconcile=True)
+            host_pid = _observe_session(project_id, sid, reconcile=True)
+            inherit_replaced_session_task(project_id, sid, host_pid)
             bind_session_to_project_focus(project_id, sid)
             # Do not attribute the prompt to the currently focused task yet. The model may
             # create/switch tasks during this turn; Stop commits it to the final binding.
