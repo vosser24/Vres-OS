@@ -46,7 +46,10 @@ def test_statusline_install_is_transactional_and_uses_staged_runtime():
 
 def test_uninstall_removes_only_vres_owned_statusline_before_runtime_removal():
     text = (ROOT / 'uninstall.ps1').read_text()
-    assert "-m vres_os.statusline remove --claude-home $home" in text
+    assert "$ClaudeHome=if ($env:CLAUDE_CONFIG_DIR)" in text
+    assert "$home=" not in text.lower()
+    assert "-m vres_os.statusline remove --claude-home $ClaudeHome" in text
+    assert "-m vres_os.claude_contract remove-global --claude-home $ClaudeHome" in text
     assert text.index("-m vres_os.statusline remove") < text.index("Remove-Item -LiteralPath $plugin")
 
 
