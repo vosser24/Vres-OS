@@ -1,4 +1,4 @@
-# Vres-OS Finalization — Technical Handoff (2026-09-21, updated after F-10)
+# Vres-OS Finalization — Technical Handoff (2026-09-21, updated after F-11)
 
 ## Purpose
 
@@ -20,10 +20,10 @@ Historical detailed matrix:
 
 At this handoff:
 
-- **F-00 through F-10 are physically PASS.**
-- **F-11 is the next blocking case and has not started yet.**
-- F-12 through F-15 remain pending.
-- Issue **#103 — first-class project agents / governed parallel DAG** remains open until the remaining physical #103 surfaces, especially F-11/F-12, pass.
+- **F-00 through F-11 are physically PASS.**
+- **F-12 is the next blocking case.**
+- F-13 through F-15 remain pending.
+- Issue **#103 — first-class project agents / governed parallel DAG** remains open; F-12 is its final physical acceptance surface.
 - No new feature work should begin before finalization is complete.
 
 ---
@@ -127,13 +127,13 @@ User working preferences:
 | F-08 | PASS | project-agent authority + governor-confirmed gap acquisition |
 | F-09 | PASS | real parallel fan-out + provenance + dependency join |
 | F-10 | PASS | retry isolation + latest-plan + write-scope safety |
-| F-11 | **NEXT** | SEO/ecommerce multi-domain synthesis |
-| F-12 | PENDING | independent judgmental product acceptance pass/fail |
+| F-11 | PASS | SEO/ecommerce multi-domain synthesis (corrected rerun; see section 11) |
+| F-12 | **NEXT** | independent judgmental product acceptance pass/fail |
 | F-13 | PENDING/REUSE-ELIGIBLE | procedure + durable knowledge reuse |
 | F-14 | PENDING/REUSE-ELIGIBLE | onboarding + retrieval baseline |
 | F-15 | PENDING | realistic-day integrated final verdict |
 
-Do not reopen F-00..F-10 unless a later code change touches an owning surface.
+Do not reopen F-00..F-11 unless a later code change touches an owning surface.
 
 ---
 
@@ -1113,9 +1113,66 @@ Do not “clean” or rewrite these away:
 
 ---
 
-# 11. F-11 — NEXT BLOCKING CASE
+# 11. F-11 — PASS
 
-F-11 has **not** started.
+Status: PASS, accepted by the user after the final evidence seal (`F11 FINAL EVIDENCE SEAL: PASS`).
+
+## Historical failed attempt — preserved, not rewritten
+
+`TASK-20260921-dd8b1517a7` (completed 2026-09-21T13:03:15Z).
+
+It is not a clean acceptance run: its formal arbitration was recorded after the CTO synthesis, and the task was completed although the fixture required it to stay active. Its evidence, including its protected validation `VAL-a8fa7149a6ec4541`, is preserved as history and is not part of the acceptance.
+
+## Corrected acceptance rerun
+
+- Task: `TASK-20260921-1e0eea9c54` — remains ACTIVE, `completed_at` NULL.
+- Project id: `7429`; project path `C:\Projects\Vres-F11-SEO-20260921` — do not clean.
+- Route: `ROUTE-aee2c09255e34ca5` (routed, protected; lead `cto`). SEO Sonnet with `agent.project.f11.seo`; data-director Sonnet; digital-director Sonnet; CTO Opus.
+- Plan: `ORCHPLAN-20260921-6f37e91013`
+- SEO report: `ORCHREP-20260921-79210106f8`
+- Digital/CRO report: `ORCHREP-20260921-46ed990f23`
+- Data report: `ORCHREP-20260921-d3b98caafe`
+- Arbitration: `ORCHARB-20260921-9ecbbd2ce0` (topic `F11 faceted-navigation indexation policy`)
+- CTO report: `ORCHREP-20260921-c05632b528`
+- Final: `ORCHFINAL-20260921-9662c9b003`, `decision_ready=true`
+- No extra protected validator was run on the corrected acceptance rerun, and the task was deliberately not completed.
+
+## Physical ordering proof
+
+1. SEO, Digital/CRO and Data units ran independently with real pairwise execution overlap.
+2. Arbitration was recorded after the relevant SEO and Digital/CRO reports and BEFORE CTO execution (event 1672 at 13:16:36Z; CTO start event 1674 at 13:17:25Z).
+3. The CTO began only after all prerequisite units completed (last prerequisite completed 13:16:42Z).
+4. The CTO report referenced all three prerequisite reports plus the arbitration.
+5. The final accepted every selected report plus the arbitration.
+
+## Arbitration substance
+
+- Arbitrary or generated facet combinations are not indexable.
+- Only explicitly controlled, high-intent, evidence-gated facet landing pages may become indexable.
+- The corrected run chose category plus exactly one facet only.
+- Everything outside the controlled allowlist stays outside the indexable set.
+
+## Fixture identity variance (documented naming variance, not a governance failure)
+
+- The original governor-authorized project capability remains `cap.technical-seo`, owner `specialist-technical-seo`. It remains project-scoped and was reused, not duplicated. The contract names below (`cap.project.f11.technical-seo` / `specialist-f11-seo`) were not created: no governed tool renames a capability, and a second SEO capability was not permitted.
+- The corrected executable F-11 project agent is `agent.project.f11.seo`, source `.claude/agents/f11-seo.md`, `write_policy=report_only`, no model or effort authority.
+- The old project agent `specialist-technical-seo` remains historical and was not selected.
+- Google/API: the rerun discovery used five needs, and the governor folded Google Search Console API ingestion into software engineering. No `cap.project.f11.google-api` or `agent.project.f11.google-api` was created.
+- The route was prepared with risk trigger `material_durable_disagreement`, not the contract's `cross_domain`.
+
+## Final evidence seal
+
+- The final PostgreSQL proof ran with `SHOW transaction_read_only -> on`. An earlier proof had reported `off`; the sealed proof supersedes it.
+- The task remained active with `completed_at` NULL.
+- No unauthorized company-wide capability or agent authority exists.
+- The direct-read tail created no new task, discovery, route, plan, graph, work unit or worker.
+- `f11_simple.txt` logical value: `F11_SIMPLE_DIRECT_READ=PASS`. The working-tree CRLF versus committed LF is attributable to `core.autocrlf=true`; Git reports no logical diff. One extra byte-identity clause in the sealing script reported FAIL for this reason; the assertion as specified holds.
+
+## Assumptions caveat
+
+The synthetic architecture retains uncalibrated assumptions and thresholds and unverified Search Console API details. They are documented as assumptions, not claimed as physically validated facts. `decision_ready=true` was obtained by carrying the CTO's 12 recorded unknowns as documented assumptions in the final synthesis (Chairman decision `DEC-20260921-56cf2fd08f`), not by resolving them.
+
+## F-11 contract (retained for reference)
 
 Official contract:
 
@@ -1437,6 +1494,8 @@ Do not mark F-11 PASS from Claude prose alone.
 
 ## F-12 — independent judgmental product acceptance
 
+F-12 is the next blocking case.
+
 Need one bounded write-capable slice with:
 
 - deterministic implementation criteria frozen before work;
@@ -1507,13 +1566,13 @@ Physical surfaces already proven:
 - F-08 project-agent authority / gap acquisition — PASS
 - F-09 parallel fan-out / provenance / dependency join — PASS
 - F-10 retry / latest-plan / write-scope safety — PASS
+- F-11 multi-domain synthesis — PASS
 
 Still needed before closure:
 
-- F-11 multi-domain synthesis — pending
-- F-12 independent product acceptance — pending
+- F-12 independent product acceptance — pending; this is the final physical #103 acceptance surface
 
-Keep #103 open until those acceptance surfaces pass and no critical defect remains.
+Do not close #103 yet. Keep it open until F-12 passes and no critical defect remains.
 
 ---
 
@@ -1555,6 +1614,10 @@ F-08/F-09:
 F-10:
 
 - `C:\Projects\Vres-F10-Safety-20260921`
+
+F-11 (failed attempt `TASK-20260921-dd8b1517a7` and corrected rerun `TASK-20260921-1e0eea9c54`, both in one project):
+
+- `C:\Projects\Vres-F11-SEO-20260921`
 
 These disposable repos contain physical evidence and should remain untouched until finalization is signed off.
 
@@ -1607,6 +1670,8 @@ Optional external development methodology only. Never a Vres runtime dependency.
 
 # 17. New-session resume instructions
 
+Update after F-11 acceptance: items 3 and 6-14 below, and the F-11 sentence after the list, are superseded because F-11 is PASS (section 11). Do not rerun F-00 through F-11. Resume directly at **F-12** (section 12).
+
 When opening a fresh ChatGPT session:
 
 1. Treat this handoff as authoritative.
@@ -1635,8 +1700,8 @@ Immediate next user-visible action in the new session should be the concise F-11
 
 **Current blocker:** none.
 
-**Last completed case:** F-10 PASS.
+**Last completed case:** F-11 PASS.
 
-**Next action:** create/run the fresh F-11 SEO/ecommerce fixture, beginning with six-need discovery and evidence-driven gap acquisition.
+**Next action:** create/run the fresh F-12 independent product-acceptance fixture.
 
-**Do not redo:** F-00..F-10.
+**Do not redo:** F-00..F-11.
