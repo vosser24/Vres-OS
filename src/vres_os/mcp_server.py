@@ -84,7 +84,10 @@ def _guard_onboarding_root(path: str, project_id: int, project_root: Path) -> Pa
     """Reject onboarding paths that overlap another registered Vres project."""
     from .db import connect
 
-    target = Path(path).expanduser().resolve(strict=True)
+    try:
+        target = Path(path).expanduser().resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise ValueError("onboarding root must be an existing directory") from None
     if not target.is_dir():
         raise ValueError("onboarding root must be an existing directory")
 
