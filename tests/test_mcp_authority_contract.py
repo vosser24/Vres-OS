@@ -50,4 +50,5 @@ def test_company_mcp_exposes_only_exact_approved_optimization_workflow():
 
 
 def test_onboarding_is_project_scoped_by_default():
-    assert "inventory(Path(path), project_id=pid)" in TEXT
+    assert "root = _guard_onboarding_root(path, pid, project.root)" in TEXT
+    assert "inventory(root, project_id=pid)" in TEXT
