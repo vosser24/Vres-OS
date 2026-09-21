@@ -1,4 +1,4 @@
-# Vres-OS Finalization — Technical Handoff (2026-09-21, updated after F-11)
+# Vres-OS Finalization — Technical Handoff (2026-09-21, updated after F-12)
 
 ## Purpose
 
@@ -20,10 +20,10 @@ Historical detailed matrix:
 
 At this handoff:
 
-- **F-00 through F-11 are physically PASS.**
-- **F-12 is the next blocking case.**
-- F-13 through F-15 remain pending.
-- Issue **#103 — first-class project agents / governed parallel DAG** remains open; F-12 is its final physical acceptance surface.
+- **F-00 through F-12 are physically PASS.**
+- **F-13 is next; audit reuse eligibility before rerunning.**
+- F-14 is PENDING/REUSE-ELIGIBLE; F-15 is PENDING.
+- Issue **#103** has completed its physical acceptance surfaces through F-12; close it after this handoff merges and post-merge CI succeeds.
 - No new feature work should begin before finalization is complete.
 
 ---
@@ -32,11 +32,11 @@ At this handoff:
 
 ## GitHub
 
-GitHub `main` immediately before this updated handoff commit:
+GitHub `main` immediately before this F-12 handoff update:
 
-`50dd4934115f01a8105657f9e286e215f6c353c1`
+`905a952870006d5912aa3720f6da7aab3baf62e7`
 
-That commit is the merge of PR #127, the previous finalization handoff.
+That commit is the merge of PR #128, which recorded F-11 PASS.
 
 Last behavior-changing main commit:
 
@@ -46,7 +46,7 @@ That is the #125/#126 cross-project onboarding boundary fix.
 
 The handoff update that contains this file will advance `main` again by documentation only. Do not mistake that docs commit for a behavior change.
 
-## Installed runtime used for F-06 through F-10
+## Installed runtime used for F-06 through F-12
 
 Active installed release observed during the finalization run:
 
@@ -128,12 +128,12 @@ User working preferences:
 | F-09 | PASS | real parallel fan-out + provenance + dependency join |
 | F-10 | PASS | retry isolation + latest-plan + write-scope safety |
 | F-11 | PASS | SEO/ecommerce multi-domain synthesis (corrected rerun; see section 11) |
-| F-12 | **NEXT** | independent judgmental product acceptance pass/fail |
-| F-13 | PENDING/REUSE-ELIGIBLE | procedure + durable knowledge reuse |
+| F-12 | PASS | independent judgmental product acceptance: PASS -> FAIL/block -> fresh remediation -> PASS |
+| F-13 | **NEXT / REUSE-ELIGIBLE** | procedure + durable knowledge reuse; audit before rerun |
 | F-14 | PENDING/REUSE-ELIGIBLE | onboarding + retrieval baseline |
 | F-15 | PENDING | realistic-day integrated final verdict |
 
-Do not reopen F-00..F-11 unless a later code change touches an owning surface.
+Do not reopen F-00..F-12 unless a later code change touches an owning surface.
 
 ---
 
@@ -1490,11 +1490,11 @@ Do not mark F-11 PASS from Claude prose alone.
 
 ---
 
-# 12. F-12 through F-15 pending
+# 12. F-12 PASS; F-13 through F-15 remaining
 
-## F-12 — independent judgmental product acceptance
+## F-12 — independent judgmental product acceptance — PASS
 
-F-12 is the next blocking case.
+F-12 is complete. The detailed accepted evidence is recorded below.
 
 Need one bounded write-capable slice with:
 
@@ -1553,26 +1553,49 @@ No claim of production readiness or measured token savings without evidence.
 
 ---
 
-# 13. Open issue #103
+## F-12 accepted physical evidence (2026-09-21)
+
+Project: `C:\\Projects\\Vres-F12-Acceptance-20260921`
+
+Task: `TASK-20260921-3f4d89508a` — ACTIVE, not completed.
+
+Frozen test SHA256: `56ECEAB561EC4D65707F9DD85EA99CCABE1A796FA2868C3A0C8F16F30DFB65DA`.
+
+Plan A PASS: `ORCHPLAN-20260921-11ae92c8aa`; implementation `ORCHREP-20260921-439767260c`; verifier `ORCHREP-20260921-411db6ba56`; final `ORCHFINAL-20260921-d1fbff091d`, decision_ready=true. Accepted artifact commit: `0b9866dbbe2d3fb751d995d6261be8986f9a551c`.
+
+Plan B required FAIL: `ORCHPLAN-20260921-522482004e`; deterministic implementation report `ORCHREP-20260921-3f3ea1c9c0` PASS; independent verifier `ORCHREP-20260921-9f0e5b7f18` FAIL; no successful final. Finalization was rejected because J1 had not passed independent verification. Failed artifact commit: `bee552142149c07f9871ec9bd1953c436734adf0`.
+
+Plan C remediation PASS: `ORCHPLAN-20260921-9ac3120cd9`; implementation `ORCHREP-20260921-fac8b9ef12`; verifier `ORCHREP-20260921-adc783baea`; final `ORCHFINAL-20260921-7a2c3de0f6`, decision_ready=true.
+
+Durable proof: every work graph preceded its implementation start; implementers reported deterministic criteria only; verifiers were dependent/report-only and ran only after implementation PASS; J1 sequence was PASS / FAIL / PASS; Plan-B failure remained durable after Plan C; all routes used routine assurance; no protected validator was required; read-only PostgreSQL proof used transaction_read_only=on. Final accepted conclusion: `F12 INDEPENDENT PRODUCT ACCEPTANCE: PASS`.
+
+F-12 evidence project must not be cleaned. Current preserved state at handoff: HEAD `bee552142149c07f9871ec9bd1953c436734adf0`; only `refund_notice.py` contains the uncommitted Plan-C remediation. Do not reset or commit it merely for tidiness.
+
+### F-13 resume rule
+
+F-13 is REUSE-ELIGIBLE, not automatically REUSED. First compare exact prior F-13 evidence/commit(s) against current main for changes to procedure, approval, preferences, knowledge, provenance, project-scope, or relevant native/provider contracts. If every reuse rule in `docs/FINAL-VERIFICATION.md` holds, record exact reused evidence and rationale. Otherwise rerun only the invalidated smallest synthetic fixture. Do not start F-14 until F-13 is PASS/REUSED.
+
+### Remaining ladder
+
+F-14: reuse audit first; pre-#126 evidence cannot prove the #125 cross-project onboarding-path boundary. If rerun is needed, use mixed-format synthetic input, duplicate, malformed/unsupported case, lexical retrieval; embeddings are NOT RUN when disabled.
+
+F-15: final realistic-day integration only after F-13/F-14 PASS or valid REUSED. No false production-readiness or measured-token-savings claims.
+
+# 13. Issue #103 — physical acceptance COMPLETE
 
 Issue:
 
 **#103 — Add first-class project agents and governed parallel execution DAG**
 
-Do not close solely because unit/integration tests exist.
-
-Physical surfaces already proven:
+All required physical acceptance surfaces are proven:
 
 - F-08 project-agent authority / gap acquisition — PASS
 - F-09 parallel fan-out / provenance / dependency join — PASS
 - F-10 retry / latest-plan / write-scope safety — PASS
 - F-11 multi-domain synthesis — PASS
+- F-12 independent judgmental product acceptance — PASS
 
-Still needed before closure:
-
-- F-12 independent product acceptance — pending; this is the final physical #103 acceptance surface
-
-Do not close #103 yet. Keep it open until F-12 passes and no critical defect remains.
+No critical #103 acceptance defect remains. Administrative close sequence: merge this handoff update, require post-merge main CI SUCCESS, then close #103 as completed with an F-08..F-12 evidence summary. Do not rerun those cases for issue closure.
 
 ---
 
@@ -1618,6 +1641,13 @@ F-10:
 F-11 (failed attempt `TASK-20260921-dd8b1517a7` and corrected rerun `TASK-20260921-1e0eea9c54`, both in one project):
 
 - `C:\Projects\Vres-F11-SEO-20260921`
+
+F-12 (task `TASK-20260921-3f4d89508a`):
+
+- `C:\Projects\Vres-F12-Acceptance-20260921`
+- preserved Plan-A artifact commit `0b9866dbbe2d3fb751d995d6261be8986f9a551c`
+- preserved Plan-B failed artifact commit `bee552142149c07f9871ec9bd1953c436734adf0`
+- current evidence state: HEAD remains the Plan-B commit and only `refund_notice.py` contains the uncommitted Plan-C remediation; do not reset, clean, or commit it merely for tidiness.
 
 These disposable repos contain physical evidence and should remain untouched until finalization is signed off.
 
@@ -1670,38 +1700,35 @@ Optional external development methodology only. Never a Vres runtime dependency.
 
 # 17. New-session resume instructions
 
-Update after F-11 acceptance: items 3 and 6-14 below, and the F-11 sentence after the list, are superseded because F-11 is PASS (section 11). Do not rerun F-00 through F-11. Resume directly at **F-12** (section 12).
-
 When opening a fresh ChatGPT session:
 
 1. Treat this handoff as authoritative.
-2. Verify GitHub `main` only if needed; do not spend a turn re-explaining old history.
-3. **Do not rerun F-00 through F-10.**
-4. Do not clean or rewrite prior disposable evidence projects.
-5. Confirm the installed runtime only if the new session has evidence it changed.
-6. Resume directly at **F-11** using `C:\Projects\Vres-F11-SEO-20260921`.
-7. Run the six-need discovery before acquiring or registering specialists.
-8. Reuse shipped capabilities; acquire only exact governor-confirmed gaps.
-9. Preserve model/effort authority in Vres routing; project agents never choose them.
-10. Require real parallel worker overlap where work is independent.
-11. Record explicit arbitration for the SEO-vs-digital facet-indexation disagreement.
-12. Require CTO to wait for all prerequisites and use every required report plus arbitration.
-13. Run the simple direct-read tail without creating another governance stack.
-14. Verify F-11 with read-only PostgreSQL evidence before marking PASS.
-15. Then continue F-12 -> F-15.
-16. Keep #103 open through F-12 physical acceptance.
+2. **Do not rerun F-00 through F-12.**
+3. Do not clean, reset, rewrite, or tidy retained evidence projects, especially F-11/F-12.
+4. Verify GitHub main only if needed; do not replay old history.
+5. Confirm the installed runtime only if there is evidence it changed from `20260921132941-8cb5268c`.
+6. Resume directly at **F-13**.
+7. The first F-13 action is a **reuse-eligibility audit**, not a physical rerun.
+8. Identify the exact prior F-13 evidence/task/project/commit, then compare its owning procedure/approval/preferences/knowledge/provenance/project-scope/native-provider surfaces against current main.
+9. If every reuse rule in `docs/FINAL-VERIFICATION.md` holds, mark F-13 REUSED/PASS with exact evidence ids, commit and rationale.
+10. If reuse fails, run only the smallest fresh F-13 fixture needed for the invalidated surfaces.
+11. Do not start F-14 until F-13 is reviewed PASS/REUSED.
+12. For F-14, audit reuse first. Never reuse pre-#126 evidence to claim the #125 cross-project onboarding-path safety property.
+13. Do not start F-15 until F-14 is reviewed PASS/REUSED.
+14. F-15 is the final realistic-day integrated verdict. Do not claim production readiness or measured token savings beyond evidence.
+15. #103 requires no more physical acceptance; after this handoff merges and post-merge CI is green, close it administratively.
+16. Keep the post-finalization roadmap in section 16 held until F-15 completes.
 17. No new feature work before finalization completes.
 
-Immediate next user-visible action in the new session should be the concise F-11 project setup and execution instruction, not a history recap.
-
+Immediate next action in the new session: **F-13 reuse-eligibility audit**.
 ---
 
 # 18. One-line resume state
 
 **Current blocker:** none.
 
-**Last completed case:** F-11 PASS.
+**Last completed case:** F-12 PASS.
 
-**Next action:** create/run the fresh F-12 independent product-acceptance fixture.
+**Next action:** F-13 reuse-eligibility audit; rerun only if the reuse rules fail.
 
-**Do not redo:** F-00..F-11.
+**Do not redo:** F-00..F-12.
