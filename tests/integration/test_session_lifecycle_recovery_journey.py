@@ -7,7 +7,11 @@ pytest.importorskip("psycopg")
 from vres_os import session_end_worker
 from vres_os.db import connect
 from vres_os.repository import Repository
-from vres_os.session_lifecycle import reconcile_open_sessions, touch_session_host
+from vres_os.session_lifecycle import (
+    inherit_replaced_session_task,
+    reconcile_open_sessions,
+    touch_session_host,
+)
 
 
 def _session(project_id, sid):
@@ -172,3 +176,51 @@ def test_detached_clear_is_canonicalized_to_provider_session_replaced(pg_project
         ).fetchone()
     assert event["payload"]["reason"] == "provider_session_replaced"
     assert event["payload"]["source"] == "detached_session_end_worker"
+
+
+
+def test_clear_replacement_inherits_its_own_task_without_stealing_concurrent_focus(pg_project):
+    repo = Repository()
+    first = repo.begin_task(pg_project, "Concurrent A1", "Keep A1 isolated", "test", "chairman")
+    first_sid = "concurrent-a1-before-clear"
+    repo.open_session(pg_project, first_sid)
+    repo.bind_session(pg_project, first_sid, first)
+    assert touch_session_host(pg_project, first_sid, 7101)
+
+    second = repo.begin_task(pg_project, "Concurrent A2", "Keep A2 isolated", "test", "chairman")
+    second_sid = "concurrent-a2"
+    repo.open_session(pg_project, second_sid)
+    repo.bind_session(pg_project, second_sid, second)
+    assert touch_session_host(pg_project, second_sid, 7202)
+
+    # Native /clear closes only A1. Project focus remains on A2.
+    repo.close_session(pg_project, first_sid, "provider_session_replaced")
+
+    replacement_sid = "concurrent-a1-after-clear"
+    repo.open_session(pg_project, replacement_sid)
+    assert touch_session_host(pg_project, replacement_sid, 7101)
+
+    recovered = inherit_replaced_session_task(pg_project, replacement_sid, 7101)
+    assert recovered == first
+
+    replacement = _session(pg_project, replacement_sid)
+    live_second = _session(pg_project, second_sid)
+    with connect() as conn:
+        first_id = conn.execute("SELECT id FROM vres.tasks WHERE task_key=%s", (first,)).fetchone()["id"]
+        second_id = conn.execute("SELECT id FROM vres.tasks WHERE task_key=%s", (second,)).fetchone()["id"]
+        focus = conn.execute(
+            "SELECT task_id FROM vres.project_focus WHERE project_id=%s",
+            (pg_project,),
+        ).fetchone()
+        bound = conn.execute(
+            "SELECT payload FROM vres.task_events WHERE task_id=%s "
+            "AND event_type='SESSION_BOUND' AND session_id=%s ORDER BY id DESC LIMIT 1",
+            (first_id, replacement_sid),
+        ).fetchone()
+
+    assert replacement["task_id"] == first_id
+    assert live_second["ended_at"] is None
+    assert live_second["task_id"] == second_id
+    assert focus["task_id"] == second_id
+    assert bound["payload"]["source"] == "provider_session_replaced"
+    assert bound["payload"]["previous_session_id"] == first_sid

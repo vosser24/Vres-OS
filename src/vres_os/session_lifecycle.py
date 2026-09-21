@@ -131,6 +131,99 @@ def _metadata_host_pid(metadata) -> int | None:
     return pid if pid > 0 else None
 
 
+def inherit_replaced_session_task(
+    project_id: int,
+    provider_session_id: str | None,
+    host_pid: int | None,
+) -> str | None:
+    """Restore task binding from the same-host provider session replaced by /clear.
+
+    This runs before project-focus fallback. It never overwrites an existing binding,
+    never touches another live session, and only inherits an unfinished task from a
+    recent predecessor durably classified as provider_session_replaced.
+    """
+    if not provider_session_id or not host_pid:
+        return None
+    with connect() as conn, conn.transaction():
+        current = conn.execute(
+            """
+            SELECT id,task_id,started_at
+              FROM vres.sessions
+             WHERE provider='claude' AND provider_session_id=%s AND project_id=%s
+               AND ended_at IS NULL
+             ORDER BY started_at DESC,id DESC LIMIT 1
+             FOR UPDATE
+            """,
+            (provider_session_id, project_id),
+        ).fetchone()
+        if not current:
+            return None
+        if current.get("task_id"):
+            task = conn.execute(
+                "SELECT task_key,status FROM vres.tasks WHERE id=%s AND project_id=%s",
+                (current["task_id"], project_id),
+            ).fetchone()
+            return str(task["task_key"]) if task and task["status"] in _ACTIVE else None
+
+        predecessor = conn.execute(
+            """
+            SELECT s.id,s.provider_session_id,s.task_id,t.task_key
+              FROM vres.sessions s
+              JOIN vres.tasks t ON t.id=s.task_id
+             WHERE s.provider='claude' AND s.project_id=%s
+               AND s.provider_session_id IS DISTINCT FROM %s
+               AND s.end_reason='provider_session_replaced'
+               AND s.ended_at IS NOT NULL
+               AND (s.metadata->>'host_pid')=%s
+               AND t.project_id=%s
+               AND t.status=ANY(%s)
+               AND s.ended_at >= %s - interval '2 minutes'
+             ORDER BY s.ended_at DESC,s.id DESC
+             LIMIT 1
+            """,
+            (
+                project_id,
+                provider_session_id,
+                str(host_pid),
+                project_id,
+                list(_ACTIVE),
+                current["started_at"],
+            ),
+        ).fetchone()
+        if not predecessor:
+            return None
+
+        task_id = int(predecessor["task_id"])
+        task_key = str(predecessor["task_key"])
+        conn.execute(
+            "UPDATE vres.sessions SET task_id=%s WHERE id=%s AND task_id IS NULL",
+            (task_id, current["id"]),
+        )
+        conn.execute(
+            """
+            INSERT INTO vres.task_events(task_id,event_type,actor,payload,session_id)
+            VALUES (%s,'SESSION_BOUND','vres-lifecycle',%s::jsonb,%s)
+            """,
+            (
+                task_id,
+                json.dumps(
+                    {
+                        "source": "provider_session_replaced",
+                        "previous_session_id": str(predecessor["provider_session_id"]),
+                        "previous_task_id": task_id,
+                        "previous_task_key": task_key,
+                        "new_task_id": task_id,
+                        "new_task_key": task_key,
+                        "host_pid": host_pid,
+                    }
+                ),
+                provider_session_id,
+            ),
+        )
+        conn.execute("UPDATE vres.tasks SET updated_at=now() WHERE id=%s", (task_id,))
+        return task_key
+
+
 def reconcile_open_sessions(
     project_id: int,
     provider_session_id: str | None,
