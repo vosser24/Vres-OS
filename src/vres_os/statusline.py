@@ -57,8 +57,9 @@ def _vres_owned_status_line(value: Any) -> bool:
 
 def _status_line_command(runtime_python: Path) -> str:
     python = runtime_python.resolve(strict=True)
+    command_path = str(python).replace("\\", "/")
     return subprocess.list2cmdline(
-        [str(python), "-I", "-X", "utf8", "-m", "vres_os.statusline"]
+        [command_path, "-I", "-X", "utf8", "-m", "vres_os.statusline"]
     )
 
 
