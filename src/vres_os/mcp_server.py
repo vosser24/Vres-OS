@@ -91,7 +91,6 @@ def _guard_onboarding_root(path: str, project_id: int, project_root: Path) -> Pa
     if not target.is_dir():
         raise ValueError("onboarding root must be an existing directory")
 
-    current_root = Path(project_root).expanduser().resolve(strict=False)
     with connect() as conn:
         rows = conn.execute(
             "SELECT id,root_path FROM vres.projects WHERE id<>%s",
