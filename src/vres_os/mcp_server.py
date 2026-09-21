@@ -80,6 +80,33 @@ def _scope(company_wide: bool, project_id: int) -> int:
     return project_id
 
 
+def _guard_onboarding_root(path: str, project_id: int, project_root: Path) -> Path:
+    """Reject onboarding paths that overlap another registered Vres project."""
+    from .db import connect
+
+    target = Path(path).expanduser().resolve(strict=True)
+    if not target.is_dir():
+        raise ValueError("onboarding root must be an existing directory")
+
+    current_root = Path(project_root).expanduser().resolve(strict=False)
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT id,root_path FROM vres.projects WHERE id<>%s",
+            (project_id,),
+        ).fetchall()
+
+    for row in rows:
+        other_root = Path(str(row["root_path"])).expanduser().resolve(strict=False)
+        if target.is_relative_to(other_root) or other_root.is_relative_to(target):
+            raise ValueError(
+                "Onboarding path overlaps another registered Vres project; "
+                "run onboarding from that project's Claude session"
+            )
+
+    # Paths outside every registered project remain valid legacy-import roots.
+    return target
+
+
 @mcp.tool()
 def start_vres(project_root: str = ".") -> dict:
     """Start/initialize Vres. Use when the user naturally says 'start vres'."""
@@ -593,8 +620,9 @@ def preference_list() -> list[dict]:
 @mcp.tool()
 def onboard_folder(path: str, process_embeddings: bool = True) -> dict:
     """Mechanically onboard a legacy folder: hash/dedupe/parse/classify/chunk; semantic ambiguity stays in review queue."""
-    pid, _ = _project()
-    result = OnboardingService().inventory(Path(path), project_id=pid)
+    pid, project = _project()
+    root = _guard_onboarding_root(path, pid, project.root)
+    result = OnboardingService().inventory(root, project_id=pid)
     if process_embeddings and ConfigStore().load().embeddings_enabled and result.get("embedding_jobs_queued"):
         try:
             from .workers import launch_embedding_worker
