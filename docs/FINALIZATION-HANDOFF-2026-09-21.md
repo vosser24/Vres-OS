@@ -23,7 +23,7 @@ At this handoff:
 - **F-00 through F-12 are physically PASS.**
 - **F-13 is next; audit reuse eligibility before rerunning.**
 - F-14 is PENDING/REUSE-ELIGIBLE; F-15 is PENDING.
-- Issue **#103** has completed its physical acceptance surfaces through F-12; close it after this handoff merges and post-merge CI succeeds.
+- Issue **#103** is CLOSED as completed after F-08 through F-12 physical acceptance, PR #129 merge, and green post-merge main CI.
 - No new feature work should begin before finalization is complete.
 
 ---
@@ -1581,7 +1581,7 @@ F-14: reuse audit first; pre-#126 evidence cannot prove the #125 cross-project o
 
 F-15: final realistic-day integration only after F-13/F-14 PASS or valid REUSED. No false production-readiness or measured-token-savings claims.
 
-# 13. Issue #103 — physical acceptance COMPLETE
+# 13. Issue #103 — CLOSED (completed)
 
 Issue:
 
@@ -1595,7 +1595,7 @@ All required physical acceptance surfaces are proven:
 - F-11 multi-domain synthesis — PASS
 - F-12 independent judgmental product acceptance — PASS
 
-No critical #103 acceptance defect remains. Administrative close sequence: merge this handoff update, require post-merge main CI SUCCESS, then close #103 as completed with an F-08..F-12 evidence summary. Do not rerun those cases for issue closure.
+No critical #103 acceptance defect remains. PR #129 merged as `94f864e2315ba5060e8f2a8c71b56cf7543cd0a6`; PR CI #323 and post-merge main CI #324 both succeeded. Issue #103 was then closed as completed with an F-08..F-12 evidence summary. No further #103 action or rerun is pending.
 
 ---
 
@@ -1716,7 +1716,7 @@ When opening a fresh ChatGPT session:
 12. For F-14, audit reuse first. Never reuse pre-#126 evidence to claim the #125 cross-project onboarding-path safety property.
 13. Do not start F-15 until F-14 is reviewed PASS/REUSED.
 14. F-15 is the final realistic-day integrated verdict. Do not claim production readiness or measured token savings beyond evidence.
-15. #103 requires no more physical acceptance; after this handoff merges and post-merge CI is green, close it administratively.
+15. #103 is closed as completed; no further physical or administrative action is pending.
 16. Keep the post-finalization roadmap in section 16 held until F-15 completes.
 17. No new feature work before finalization completes.
 
