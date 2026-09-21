@@ -32,11 +32,11 @@ At this handoff:
 
 ## GitHub
 
-GitHub `main` immediately before this updated handoff commit:
+GitHub `main` immediately before this F-12 handoff update:
 
-`50dd4934115f01a8105657f9e286e215f6c353c1`
+`905a952870006d5912aa3720f6da7aab3baf62e7`
 
-That commit is the merge of PR #127, the previous finalization handoff.
+That commit is the merge of PR #128, which recorded F-11 PASS.
 
 Last behavior-changing main commit:
 
@@ -46,7 +46,7 @@ That is the #125/#126 cross-project onboarding boundary fix.
 
 The handoff update that contains this file will advance `main` again by documentation only. Do not mistake that docs commit for a behavior change.
 
-## Installed runtime used for F-06 through F-10
+## Installed runtime used for F-06 through F-12
 
 Active installed release observed during the finalization run:
 
@@ -1490,11 +1490,11 @@ Do not mark F-11 PASS from Claude prose alone.
 
 ---
 
-# 12. F-12 through F-15 pending
+# 12. F-12 PASS; F-13 through F-15 remaining
 
-## F-12 — independent judgmental product acceptance
+## F-12 — independent judgmental product acceptance — PASS
 
-F-12 is the next blocking case.
+F-12 is complete. The detailed accepted evidence is recorded below.
 
 Need one bounded write-capable slice with:
 
@@ -1581,26 +1581,21 @@ F-14: reuse audit first; pre-#126 evidence cannot prove the #125 cross-project o
 
 F-15: final realistic-day integration only after F-13/F-14 PASS or valid REUSED. No false production-readiness or measured-token-savings claims.
 
-# 13. Open issue #103
+# 13. Issue #103 — physical acceptance COMPLETE
 
 Issue:
 
 **#103 — Add first-class project agents and governed parallel execution DAG**
 
-Do not close solely because unit/integration tests exist.
-
-Physical surfaces already proven:
+All required physical acceptance surfaces are proven:
 
 - F-08 project-agent authority / gap acquisition — PASS
 - F-09 parallel fan-out / provenance / dependency join — PASS
 - F-10 retry / latest-plan / write-scope safety — PASS
 - F-11 multi-domain synthesis — PASS
+- F-12 independent judgmental product acceptance — PASS
 
-Still needed before closure:
-
-- F-12 independent product acceptance — pending; this is the final physical #103 acceptance surface
-
-Do not close #103 yet. Keep it open until F-12 passes and no critical defect remains.
+No critical #103 acceptance defect remains. Administrative close sequence: merge this handoff update, require post-merge main CI SUCCESS, then close #103 as completed with an F-08..F-12 evidence summary. Do not rerun those cases for issue closure.
 
 ---
 
@@ -1646,6 +1641,13 @@ F-10:
 F-11 (failed attempt `TASK-20260921-dd8b1517a7` and corrected rerun `TASK-20260921-1e0eea9c54`, both in one project):
 
 - `C:\Projects\Vres-F11-SEO-20260921`
+
+F-12 (task `TASK-20260921-3f4d89508a`):
+
+- `C:\Projects\Vres-F12-Acceptance-20260921`
+- preserved Plan-A artifact commit `0b9866dbbe2d3fb751d995d6261be8986f9a551c`
+- preserved Plan-B failed artifact commit `bee552142149c07f9871ec9bd1953c436734adf0`
+- current evidence state: HEAD remains the Plan-B commit and only `refund_notice.py` contains the uncommitted Plan-C remediation; do not reset, clean, or commit it merely for tidiness.
 
 These disposable repos contain physical evidence and should remain untouched until finalization is signed off.
 
@@ -1698,30 +1700,27 @@ Optional external development methodology only. Never a Vres runtime dependency.
 
 # 17. New-session resume instructions
 
-Update after F-11 acceptance: items 3 and 6-14 below, and the F-11 sentence after the list, are superseded because F-11 is PASS (section 11). Do not rerun F-00 through F-11. Resume directly at **F-12** (section 12).
-
 When opening a fresh ChatGPT session:
 
 1. Treat this handoff as authoritative.
-2. Verify GitHub `main` only if needed; do not spend a turn re-explaining old history.
-3. **Do not rerun F-00 through F-10.**
-4. Do not clean or rewrite prior disposable evidence projects.
-5. Confirm the installed runtime only if the new session has evidence it changed.
-6. Resume directly at **F-11** using `C:\Projects\Vres-F11-SEO-20260921`.
-7. Run the six-need discovery before acquiring or registering specialists.
-8. Reuse shipped capabilities; acquire only exact governor-confirmed gaps.
-9. Preserve model/effort authority in Vres routing; project agents never choose them.
-10. Require real parallel worker overlap where work is independent.
-11. Record explicit arbitration for the SEO-vs-digital facet-indexation disagreement.
-12. Require CTO to wait for all prerequisites and use every required report plus arbitration.
-13. Run the simple direct-read tail without creating another governance stack.
-14. Verify F-11 with read-only PostgreSQL evidence before marking PASS.
-15. Then continue F-12 -> F-15.
-16. Keep #103 open through F-12 physical acceptance.
+2. **Do not rerun F-00 through F-12.**
+3. Do not clean, reset, rewrite, or tidy retained evidence projects, especially F-11/F-12.
+4. Verify GitHub main only if needed; do not replay old history.
+5. Confirm the installed runtime only if there is evidence it changed from `20260921132941-8cb5268c`.
+6. Resume directly at **F-13**.
+7. The first F-13 action is a **reuse-eligibility audit**, not a physical rerun.
+8. Identify the exact prior F-13 evidence/task/project/commit, then compare its owning procedure/approval/preferences/knowledge/provenance/project-scope/native-provider surfaces against current main.
+9. If every reuse rule in `docs/FINAL-VERIFICATION.md` holds, mark F-13 REUSED/PASS with exact evidence ids, commit and rationale.
+10. If reuse fails, run only the smallest fresh F-13 fixture needed for the invalidated surfaces.
+11. Do not start F-14 until F-13 is reviewed PASS/REUSED.
+12. For F-14, audit reuse first. Never reuse pre-#126 evidence to claim the #125 cross-project onboarding-path safety property.
+13. Do not start F-15 until F-14 is reviewed PASS/REUSED.
+14. F-15 is the final realistic-day integrated verdict. Do not claim production readiness or measured token savings beyond evidence.
+15. #103 requires no more physical acceptance; after this handoff merges and post-merge CI is green, close it administratively.
+16. Keep the post-finalization roadmap in section 16 held until F-15 completes.
 17. No new feature work before finalization completes.
 
-Immediate next user-visible action in the new session should be the concise F-11 project setup and execution instruction, not a history recap.
-
+Immediate next action in the new session: **F-13 reuse-eligibility audit**.
 ---
 
 # 18. One-line resume state
