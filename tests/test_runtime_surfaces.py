@@ -114,6 +114,7 @@ def test_global_source_publication_fails_before_service_write(surface,monkeypatc
 def test_onboarding_reports_worker_failure_without_claiming_vectors(surface,monkeypatch,tmp_path):
     import vres_os.workers as workers
     service=MagicMock();service.inventory.return_value={'embedding_jobs_queued':2}
+    monkeypatch.setattr(surface,'_guard_onboarding_root',lambda path,pid,root:tmp_path)
     monkeypatch.setattr(surface,'OnboardingService',lambda:service)
     monkeypatch.setattr(surface,'ConfigStore',lambda:SimpleNamespace(load=lambda:SimpleNamespace(embeddings_enabled=True)))
     def fail(): raise OSError('worker error password=secret')
