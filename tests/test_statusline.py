@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from vres_os.statusline import (
+    _status_line_command,
     install_statusline,
     remove_statusline,
     render_bytes,
@@ -53,6 +54,19 @@ def test_statusline_malformed_or_oversized_input_fails_harmlessly():
     assert render_bytes(b"{not-json") == ""
     assert render_bytes(b"x" * (256 * 1024 + 1)) == ""
     assert render_bytes(json.dumps(["not", "an", "object"]).encode()) == ""
+
+
+def test_statusline_command_uses_forward_slashes_for_windows_runtime(monkeypatch):
+    windows_python = PureWindowsPath(
+        r"C:\\Users\\User\\App Data\\Local\\VresOS\\venv\\Scripts\\python.exe"
+    )
+    monkeypatch.setattr(Path, "resolve", lambda self, strict=False: windows_python)
+
+    command = _status_line_command(Path("python.exe"))
+
+    assert "\\\\" not in command
+    assert command.startswith('"C:/Users/User/App Data/Local/VresOS/venv/Scripts/python.exe"')
+    assert command.endswith(" -I -X utf8 -m vres_os.statusline")
 
 
 def test_statusline_settings_install_is_idempotent_and_updates_owned_runtime(tmp_path: Path):
