@@ -1,4 +1,4 @@
-# Vres-OS Finalization — Technical Handoff (2026-09-21, updated after F-12)
+# Vres-OS Finalization — Technical Handoff (2026-09-21, updated after F-13)
 
 ## Purpose
 
@@ -20,9 +20,9 @@ Historical detailed matrix:
 
 At this handoff:
 
-- **F-00 through F-12 are physically PASS.**
-- **F-13 is next; audit reuse eligibility before rerunning.**
-- F-14 is PENDING/REUSE-ELIGIBLE; F-15 is PENDING.
+- **F-00 through F-13 are physically PASS.** F-13 is a fresh physical PASS, NOT REUSED (see section 12).
+- **F-14 is next; audit reuse eligibility before any physical rerun.**
+- F-14 is NEXT / REUSE-ELIGIBLE; F-15 is PENDING.
 - Issue **#103** is CLOSED as completed after F-08 through F-12 physical acceptance, PR #129 merge, and green post-merge main CI.
 - No new feature work should begin before finalization is complete.
 
@@ -45,6 +45,12 @@ Last behavior-changing main commit:
 That is the #125/#126 cross-project onboarding boundary fix.
 
 The handoff update that contains this file will advance `main` again by documentation only. Do not mistake that docs commit for a behavior change.
+
+The F-13 PASS documentation update is based on GitHub `main`:
+
+`9ade2489f1b26c7f91a62e3eb62cd14788d621f9`
+
+That commit is the merge of PR #130 (F-12 final seal, documentation only). It is the authoritative source/main F-13 was formally reviewed against. The F-13 update changes documentation only; no runtime, schema, test or implementation behavior changes.
 
 ## Installed runtime used for F-06 through F-12
 
@@ -129,11 +135,11 @@ User working preferences:
 | F-10 | PASS | retry isolation + latest-plan + write-scope safety |
 | F-11 | PASS | SEO/ecommerce multi-domain synthesis (corrected rerun; see section 11) |
 | F-12 | PASS | independent judgmental product acceptance: PASS -> FAIL/block -> fresh remediation -> PASS |
-| F-13 | **NEXT / REUSE-ELIGIBLE** | procedure + durable knowledge reuse; audit before rerun |
-| F-14 | PENDING/REUSE-ELIGIBLE | onboarding + retrieval baseline |
+| F-13 | PASS | procedure + durable knowledge reuse with provenance/scope (fresh physical PASS, NOT REUSED; see section 12) |
+| F-14 | **NEXT / REUSE-ELIGIBLE** | onboarding + retrieval baseline; reuse audit before any physical rerun |
 | F-15 | PENDING | realistic-day integrated final verdict |
 
-Do not reopen F-00..F-12 unless a later code change touches an owning surface.
+Do not reopen F-00..F-13 unless a later code change touches an owning surface.
 
 ---
 
@@ -1490,7 +1496,7 @@ Do not mark F-11 PASS from Claude prose alone.
 
 ---
 
-# 12. F-12 PASS; F-13 through F-15 remaining
+# 12. F-12 and F-13 PASS; F-14 and F-15 remaining
 
 ## F-12 — independent judgmental product acceptance — PASS
 
@@ -1510,11 +1516,11 @@ Need one bounded write-capable slice with:
 
 This is still part of #103 physical closure.
 
-## F-13 — procedure + durable knowledge reuse
+## F-13 — procedure + durable knowledge reuse — PASS
 
-May reuse prior evidence only if all FINAL-VERIFICATION reuse rules are met and owning surfaces have not changed.
+F-13 is complete: a fresh physical PASS, NOT REUSED. The accepted evidence is recorded in "F-13 accepted physical evidence" below.
 
-Need prove:
+Contract that was proven:
 
 - exact accepted contract reused;
 - changed approved content requires new approval;
@@ -1522,7 +1528,7 @@ Need prove:
 - observation remains limited/scoped;
 - superseded knowledge remains history;
 - project scope enforced;
-- no auto-promotion from self-reported speed/token claims.
+- no auto-promotion from self-reported speed/token claims (procedure or model policy).
 
 ## F-14 — onboarding/retrieval
 
@@ -1571,15 +1577,120 @@ Durable proof: every work graph preceded its implementation start; implementers 
 
 F-12 evidence project must not be cleaned. Current preserved state at handoff: HEAD `bee552142149c07f9871ec9bd1953c436734adf0`; only `refund_notice.py` contains the uncommitted Plan-C remediation. Do not reset or commit it merely for tidiness.
 
-### F-13 resume rule
+## F-13 accepted physical evidence (2026-09-21)
 
-F-13 is REUSE-ELIGIBLE, not automatically REUSED. First compare exact prior F-13 evidence/commit(s) against current main for changes to procedure, approval, preferences, knowledge, provenance, project-scope, or relevant native/provider contracts. If every reuse rule in `docs/FINAL-VERIFICATION.md` holds, record exact reused evidence and rationale. Otherwise rerun only the invalidated smallest synthetic fixture. Do not start F-14 until F-13 is PASS/REUSED.
+Status: fresh physical PASS, NOT REUSED. Formally reviewed PASS against source/main `9ade2489f1b26c7f91a62e3eb62cd14788d621f9`. All data is synthetic acceptance-test data; none is production or customer data.
+
+Primary project:
+
+- path: `C:\Projects\Vres-F13-Reuse-20260921`
+- project id: `8123`
+- task: `TASK-20260921-f379c19fb6` — ACTIVE, not completed.
+
+Candidate/source commit: `9ade2489f1b26c7f91a62e3eb62cd14788d621f9`.
+
+### Procedure acceptance and changed-content rejection
+
+- procedure: `proc.f13.net-sales-ranking-v1`
+- preferred version: `1`
+- approval: `APPROVAL-6196f1675ee2`
+- a changed Units-ranking contract submitted with the same approval was rejected: `Approval retry changes the accepted contract; new approval required`
+
+### Reuse after native /clear
+
+- native `/clear` was performed before Day-2;
+- initial diagnostic matcher miss (intent-only `procedure_match` returned `[]`) checkpoint: `CP-20260921-90fea81e4e`;
+- successful reuse checkpoint: `CP-20260921-3b50cd1bbd`;
+- exact accepted contract was retrieved with `procedure_get` before processing Day-2;
+- Day-2 result:
+  - `001002 Beta 80`
+  - `000007 Gamma 50`
+  - `001001 Alpha 40`
+- preferred version and approval remained unchanged after the run.
+
+### Preference provenance
+
+- `pref.f13.net-sales-ranking` -> source event `1832`
+- `pref.f13.net-sales-ranking-clean` -> source event `1840`
+- project id `8123`
+- negation `do not use Units` preserved;
+- altered positive statement (`For this F-13 workflow, use Units for ranking.`) rejected with `Preference must quote the actual latest user instruction, not an inferred preference`;
+- negative probe keys `pref.f13.negation-probe` and `pref.f13.negation-probe-clean` are absent.
+
+### Limited observation
+
+- source: `SRC-baf072d280d5`
+- knowledge: `KNOW-ccc9c72d6702`
+- type `observation`, status `observed`
+- synthetic seven-day / association-only / no-causation / no-policy limitations retained;
+- unapproved canonical causal rule rejected: `Canonical rule requires a recorded user approval event`
+
+### Knowledge supersession
+
+- old: `KNOW-cf2b025e78a6`
+- new: `KNOW-e052afd17823`
+- old status `superseded`; old points to new via `superseded_by`;
+- current search (`F13THRESHOLD`) returns only threshold 12;
+- old threshold 10 remains directly retrievable as history.
+
+### Procedure promotion negative
+
+- candidate v2 exists only as `candidate`;
+- `accepted_by` null; `approval_key` null;
+- decision `requires_user`;
+- `validation_passed` false;
+- reason `candidate has not passed independent validation`;
+- preferred version remains `1`.
+
+### Model-policy negative
+
+- one synthetic run stored with `measurement_source=reported`;
+- provider `claude`, model `sonnet`, effort `medium`;
+- runtime 10 ms; input/output tokens 10/10;
+- task-family-specific active model-policy count = 0;
+- recommendation remained `claude/default/medium`, source `fallback`.
+
+### Isolation project
+
+- path: `C:\Projects\Vres-F13-Isolation-20260921`
+- project id `8328`
+- task `TASK-20260921-518b6f81d3`
+- primary procedure not matched/read/mutated;
+- primary knowledge not searched/read/promoted;
+- primary preferences absent;
+- reuse of the primary preference key rejected: `Preference key belongs to another scope`
+
+### Final checkpoint
+
+`CP-20260921-f78361d168`
+
+### Formal behavioral verdict
+
+1. exact accepted contract reused rather than prior output — PASS
+2. changed approved content requires new approval — PASS
+3. negation/source provenance preserved — PASS
+4. observations/preferences remain limited and project-scoped — PASS
+5. observation not promoted into causation/policy — PASS
+6. superseded knowledge historical, not current truth — PASS
+7. project scope enforced — PASS
+8. no automatic procedure promotion from self-reported claims — PASS
+9. no automatic model-policy promotion from self-reported telemetry — PASS
+
+### F-13 observations retained (non-blocking, not defects)
+
+- intent-only `procedure_match` missed; the intended "same again" + `task_family` retrieval succeeded;
+- the Claude host `<pasted_content>` wrapper is preserved verbatim in preference provenance (the negation and semantic statement remained intact);
+- the generic cross-project object-scope error mentions "writes" on some read attempts.
+
+Do not open defects for these observations during finalization unless later evidence makes them blocking.
+
+F-13 evidence projects must not be cleaned.
 
 ### Remaining ladder
 
-F-14: reuse audit first; pre-#126 evidence cannot prove the #125 cross-project onboarding-path boundary. If rerun is needed, use mixed-format synthetic input, duplicate, malformed/unsupported case, lexical retrieval; embeddings are NOT RUN when disabled.
+F-14: NEXT / REUSE-ELIGIBLE; reuse audit first; pre-#126 evidence cannot prove the #125 cross-project onboarding-path boundary. If rerun is needed, use mixed-format synthetic input, duplicate, malformed/unsupported case, lexical retrieval; embeddings are NOT RUN when disabled.
 
-F-15: final realistic-day integration only after F-13/F-14 PASS or valid REUSED. No false production-readiness or measured-token-savings claims.
+F-15: final realistic-day integration only after F-14 PASS or valid REUSED (F-13 is PASS). No false production-readiness or measured-token-savings claims.
 
 # 13. Issue #103 — CLOSED (completed)
 
@@ -1649,6 +1760,14 @@ F-12 (task `TASK-20260921-3f4d89508a`):
 - preserved Plan-B failed artifact commit `bee552142149c07f9871ec9bd1953c436734adf0`
 - current evidence state: HEAD remains the Plan-B commit and only `refund_notice.py` contains the uncommitted Plan-C remediation; do not reset, clean, or commit it merely for tidiness.
 
+F-13 (task `TASK-20260921-f379c19fb6`, project id `8123`):
+
+- `C:\Projects\Vres-F13-Reuse-20260921`
+
+F-13 isolation probe (task `TASK-20260921-518b6f81d3`, project id `8328`):
+
+- `C:\Projects\Vres-F13-Isolation-20260921`
+
 These disposable repos contain physical evidence and should remain untouched until finalization is signed off.
 
 ---
@@ -1703,32 +1822,32 @@ Optional external development methodology only. Never a Vres runtime dependency.
 When opening a fresh ChatGPT session:
 
 1. Treat this handoff as authoritative.
-2. **Do not rerun F-00 through F-12.**
-3. Do not clean, reset, rewrite, or tidy retained evidence projects, especially F-11/F-12.
+2. **Do not rerun F-00 through F-13.**
+3. Do not clean, reset, rewrite, or tidy retained evidence projects, especially F-11/F-12/F-13.
 4. Verify GitHub main only if needed; do not replay old history.
 5. Confirm the installed runtime only if there is evidence it changed from `20260921132941-8cb5268c`.
-6. Resume directly at **F-13**.
-7. The first F-13 action is a **reuse-eligibility audit**, not a physical rerun.
-8. Identify the exact prior F-13 evidence/task/project/commit, then compare its owning procedure/approval/preferences/knowledge/provenance/project-scope/native-provider surfaces against current main.
-9. If every reuse rule in `docs/FINAL-VERIFICATION.md` holds, mark F-13 REUSED/PASS with exact evidence ids, commit and rationale.
-10. If reuse fails, run only the smallest fresh F-13 fixture needed for the invalidated surfaces.
-11. Do not start F-14 until F-13 is reviewed PASS/REUSED.
-12. For F-14, audit reuse first. Never reuse pre-#126 evidence to claim the #125 cross-project onboarding-path safety property.
+6. Resume directly at **F-14**. The last completed case is F-13 PASS.
+7. The first F-14 action is a **reuse-eligibility audit**, not a physical rerun.
+8. Identify the exact prior F-14 evidence/task/project/commit, then compare its owning onboarding/parser/retrieval/dependency surfaces against current main.
+9. If every reuse rule in `docs/FINAL-VERIFICATION.md` holds, mark F-14 REUSED/PASS with exact evidence ids, commit and rationale.
+10. If reuse fails, run only the smallest fresh F-14 fixture needed for the invalidated surfaces.
+11. F-14 must audit reuse before any physical rerun.
+12. Never reuse pre-#126 evidence to prove the #125 cross-project onboarding-path safety property.
 13. Do not start F-15 until F-14 is reviewed PASS/REUSED.
 14. F-15 is the final realistic-day integrated verdict. Do not claim production readiness or measured token savings beyond evidence.
 15. #103 is closed as completed; no further physical or administrative action is pending.
 16. Keep the post-finalization roadmap in section 16 held until F-15 completes.
 17. No new feature work before finalization completes.
 
-Immediate next action in the new session: **F-13 reuse-eligibility audit**.
+Immediate next action in the new session: **F-14 reuse-eligibility audit**.
 ---
 
 # 18. One-line resume state
 
 **Current blocker:** none.
 
-**Last completed case:** F-12 PASS.
+**Last completed case:** F-13 PASS.
 
-**Next action:** F-13 reuse-eligibility audit; rerun only if the reuse rules fail.
+**Next action:** F-14 reuse-eligibility audit before any physical rerun; rerun only if the reuse rules fail.
 
-**Do not redo:** F-00..F-12.
+**Do not redo:** F-00..F-13.
