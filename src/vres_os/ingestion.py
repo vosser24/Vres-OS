@@ -69,11 +69,14 @@ def _json(path: Path) -> ExtractedDocument:
     if path.stat().st_size > MAX_JSON_BYTES:
         raise InputTooLarge(f"JSON exceeds {MAX_JSON_BYTES} bytes; catalogue/review instead of full parse")
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        # utf-8-sig accepts ordinary UTF-8 unchanged while stripping one leading BOM.
+        text = path.read_text(encoding="utf-8-sig")
+        raw = json.loads(text)
     except (json.JSONDecodeError, UnicodeError, OSError, RecursionError) as exc:
         raise ParserInputError(str(exc)) from exc
-    # Preserve the bounded source spelling instead of exponentially expanding indentation on nested input.
-    return ExtractedDocument(path.name, path.read_text(encoding="utf-8"), {"structured": True})
+    # Preserve the bounded source spelling after BOM-aware decoding instead of exponentially
+    # expanding indentation on nested input. The source bytes on disk are never rewritten.
+    return ExtractedDocument(path.name, text, {"structured": True})
 
 
 def _csv(path: Path) -> ExtractedDocument:
