@@ -40,3 +40,30 @@ def test_malformed_json_with_utf8_bom_still_errors(tmp_path: Path):
     p.write_bytes(b"\xef\xbb\xbf" + b'{"kind":"broken",')
     with pytest.raises(ParserInputError):
         extract(p)
+
+
+def test_plain_json_is_not_classified_as_code_by_js_substring(tmp_path: Path):
+    p = tmp_path / "plain.json"
+    p.write_text('{"kind":"plain","value":42}', encoding="utf-8")
+    doc = extract(p)
+    kind, confidence = classify_mechanically(p, doc)
+    assert kind == "document"
+    assert confidence == 0.5
+
+
+def test_real_js_file_still_classifies_as_code(tmp_path: Path):
+    p = tmp_path / "example.js"
+    p.write_text('function greet(name) { return "hello " + name; }\n', encoding="utf-8")
+    doc = extract(p)
+    kind, confidence = classify_mechanically(p, doc)
+    assert kind == "code"
+    assert confidence == 1.0
+
+
+def test_json_with_process_signal_still_classifies_as_process(tmp_path: Path):
+    p = tmp_path / "process.json"
+    p.write_text('{"kind":"process","note":"process definition"}', encoding="utf-8")
+    doc = extract(p)
+    kind, confidence = classify_mechanically(p, doc)
+    assert kind == "process"
+    assert confidence == pytest.approx(0.57)

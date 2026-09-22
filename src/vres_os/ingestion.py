@@ -328,7 +328,8 @@ def extract_isolated(path: Path, timeout: float = 30) -> ExtractedDocument | Non
 
 def classify_mechanically(path: Path, extracted: ExtractedDocument | None) -> tuple[str, float]:
     name = path.name.lower()
-    if path.suffix.lower() in {".py", ".sql", ".js", ".ts", ".tsx", ".sh", ".ps1"}:
+    suffix = path.suffix.lower()
+    if suffix in {".py", ".sql", ".js", ".ts", ".tsx", ".sh", ".ps1"}:
         return "code", 1.0
     text = extracted.text[:5000].lower() if extracted else ""
     signals = {
@@ -340,10 +341,16 @@ def classify_mechanically(path: Path, extracted: ExtractedDocument | None) -> tu
     }
     best = ("unknown", 0.2)
     for kind, needles in signals.items():
-        score = sum(1 for n in needles if n in name or n in text)
+        score = 0
+        for n in needles:
+            # Extension-like needles must match the actual filename suffix, not an
+            # arbitrary substring, so ".js" cannot match inside ".json".
+            name_hit = suffix == n if n.startswith(".") else n in name
+            if name_hit or n in text:
+                score += 1
         candidate = min(0.93, 0.45 + score * 0.12)
         if score and candidate > best[1]:
             best = (kind, candidate)
-    if best[0] == "unknown" and extracted and extracted.text.strip() and path.suffix.lower() not in {".csv", ".xlsx", ".xlsm"}:
+    if best[0] == "unknown" and extracted and extracted.text.strip() and suffix not in {".csv", ".xlsx", ".xlsm"}:
         return "document", 0.5
     return best
