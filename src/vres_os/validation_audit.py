@@ -12,6 +12,7 @@ from .redaction import redact, redact_text
 
 _REQUEST_RE = re.compile(r"\bVAL-[A-Za-z0-9_-]+\b")
 _GENERIC_NOT_FOUND = "Validator report was not found in the final assistant message or observed assistant transcript"
+_DEFERRED_REASON = "validator report not yet observable; one hook continuation requested"
 
 
 def _strip_json_fence(text: str) -> str:
@@ -151,6 +152,18 @@ def _latest_pending_for_session(conn, project_id: int, session_id: str | None):
     ).fetchone()
 
 
+def _classify_ingestion(accepted: bool, reason: str, allow_defer: bool) -> tuple[str, str]:
+    """Pure disposition/reason classification. `allow_defer` is an explicit signal
+    supplied by the caller (validator_stop(), based on the host's stop_hook_active
+    flag) -- this function does not itself infer liveness from background_tasks or
+    any other payload field."""
+    if accepted:
+        return "accepted", reason
+    if allow_defer and _GENERIC_NOT_FOUND in reason:
+        return "deferred", _DEFERRED_REASON
+    return classify_rejection(reason), reason
+
+
 def record_validation_ingestion_attempt(
     payload: dict[str, Any],
     project_id: int,
@@ -158,11 +171,12 @@ def record_validation_ingestion_attempt(
     accepted: bool,
     reason: str,
     request_key: str | None = None,
+    allow_defer: bool = False,
 ) -> dict[str, Any]:
     """Persist one observed validator-hook ingestion outcome without storing report contents."""
     key = request_key or extract_request_key(payload)
     reason = str(reason) if accepted else _specific_contract_reason(payload, str(reason))
-    disposition = "accepted" if accepted else classify_rejection(reason)
+    disposition, reason = _classify_ingestion(accepted, reason, allow_defer)
     safe_reason = redact_text(reason)[:1000] or disposition
     payload_keys = sorted(str(k) for k in payload)[:100]
     attempt_key = f"VATT-{uuid.uuid4().hex[:16]}"
