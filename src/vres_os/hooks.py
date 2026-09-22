@@ -372,19 +372,36 @@ def validator_stop() -> None:
         )
     except Exception as exc:
         # Never convert a broken reviewer hook into a passing task.
+        attempt = None
         if pid is not None:
             try:
                 from .validation_audit import record_validation_ingestion_attempt
 
-                record_validation_ingestion_attempt(
+                allow_defer = not bool(payload.get("stop_hook_active"))
+                attempt = record_validation_ingestion_attempt(
                     payload,
                     pid,
                     accepted=False,
                     reason=str(exc),
+                    allow_defer=allow_defer,
                 )
             except Exception as audit_exc:
                 _log_hook_error("SubagentStopAudit", audit_exc)
         _log_hook_error("SubagentStop", exc)
+        if attempt is not None and attempt.get("disposition") == "deferred":
+            sys.stdout.write(
+                json.dumps(
+                    {
+                        "decision": "block",
+                        "reason": (
+                            "Protected validation report is not yet observable. Finish any "
+                            "in-flight validation work and return ONLY the canonical validator "
+                            "JSON for the existing request."
+                        ),
+                    }
+                )
+            )
+            return
         detail = redact_text(str(exc))[:800]
         sys.stderr.write(
             f"Vres validator evidence was not accepted: {detail}. Task remains pending; fresh validation may be required.\n"
