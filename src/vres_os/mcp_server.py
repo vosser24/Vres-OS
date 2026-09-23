@@ -13,6 +13,7 @@ from .artifacts import ArtifactService
 from .bootstrap import start_for_project
 from .capabilities import CapabilityService
 from .codex import CodexAdapter
+from .codex_handoff import CodexHandoffService, HandoffError
 from .config import ConfigStore
 from .db import migrate
 from .embeddings import EmbeddingService
@@ -717,6 +718,63 @@ def codex_review(prompt: str) -> dict:
     _, project = _project()
     result = CodexAdapter().exec(prompt, cwd=project.root)
     return {"ok": result.ok, "returncode": result.returncode, "output": result.output}
+
+
+@mcp.tool()
+def codex_handoff_prepare(
+    task_key: str,
+    session_id: str,
+    write_scope: list[str],
+    required_changed_paths: list[str],
+    acceptance_criteria: list[str] | None = None,
+    file_postconditions: list[dict] | None = None,
+) -> dict:
+    """Freeze a governed Codex handoff contract (phase 1 of 2). Builds the Codex task
+    payload only from durable task state (active_task + active decisions), never from
+    conversation transcript. Never executes Codex; use codex_handoff_execute for that."""
+    pid, project = _project()
+    sid = _current_session(pid, session_id)
+    _require_node("task", task_key, write=True)
+    try:
+        return CodexHandoffService().prepare(
+            project_id=pid,
+            project_root=project.root,
+            task_key=task_key,
+            session_id=sid,
+            write_scope=write_scope,
+            required_changed_paths=required_changed_paths,
+            acceptance_criteria=acceptance_criteria,
+            file_postconditions=file_postconditions,
+        )
+    except HandoffError as exc:
+        return {
+            "ok": False,
+            "handoff_key": None,
+            "reason": exc.reason_category,
+            "worktree_preserved": exc.worktree_preserved,
+            "task_completed": False,
+        }
+
+
+@mcp.tool()
+def codex_handoff_execute(handoff_key: str, session_id: str) -> dict:
+    """Execute a previously prepared Codex handoff (phase 2 of 2): disposable worktree,
+    real write preflight, real Codex exec, and a verified locked promotion to the primary
+    workspace. Never marks the Vres task complete and never sets validation_status='passed'."""
+    pid, project = _project()
+    sid = _current_session(pid, session_id)
+    try:
+        return CodexHandoffService().execute(
+            project_id=pid, project_root=project.root, handoff_key=handoff_key, session_id=sid
+        )
+    except HandoffError as exc:
+        return {
+            "ok": False,
+            "handoff_key": handoff_key,
+            "reason": exc.reason_category,
+            "worktree_preserved": exc.worktree_preserved,
+            "task_completed": False,
+        }
 
 
 def main() -> None:
