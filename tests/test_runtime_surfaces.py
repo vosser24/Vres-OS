@@ -4,16 +4,17 @@ The only MCP substitution is its registration decorator. Calls below execute act
 Vres functions with isolated service doubles, so failures expose wiring/authority bugs.
 """
 from __future__ import annotations
-from contextlib import nullcontext
+
 import importlib
 import sys
+from contextlib import nullcontext
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from typer.testing import CliRunner
 from test_audit_regressions import ScriptedConnection
+from typer.testing import CliRunner
 
 
 @pytest.fixture
@@ -39,11 +40,13 @@ def surface(monkeypatch, tmp_path):
 
 
 def test_mcp_registration_has_full_contract_and_no_pass_setter(surface):
-    assert len(surface.mcp.registered) == 45
+    assert len(surface.mcp.registered) == 47
     assert 'procedure_get' in surface.mcp.registered
     assert 'artifact_get' in surface.mcp.registered
     assert 'validation_record' not in surface.mcp.registered
     assert 'optimization_gate' not in surface.mcp.registered
+    assert 'codex_handoff_prepare' in surface.mcp.registered
+    assert 'codex_handoff_execute' in surface.mcp.registered
 
 
 @pytest.mark.parametrize('owner,write,allowed', [(7,True,True),(7,False,True),(8,False,False),(None,False,True),(None,True,False)])
@@ -235,6 +238,105 @@ def test_shared_capability_catalog_cannot_be_overwritten_by_project_agent(surfac
     with pytest.raises(ValueError,match='catalog authority'):
         surface.capability_register('CAP','Expert','Unverified expertise')
     service.register.assert_not_called()
+
+
+def test_codex_handoff_prepare_uses_current_session_and_rejects_invalid(surface, monkeypatch):
+    import vres_os.db as db
+    conn = ScriptedConnection([('provider_session_id=%s', None)])
+    monkeypatch.setattr(db, 'connect', lambda: conn)
+    service = MagicMock()
+    monkeypatch.setattr(surface, 'CodexHandoffService', lambda: service)
+    with pytest.raises(ValueError, match='not registered'):
+        surface.codex_handoff_prepare('TASK-1', 'bad-session', ['a.py'], ['a.py'])
+    service.prepare.assert_not_called()
+
+
+def test_codex_handoff_prepare_success_passthrough_and_no_repair_calls(surface, monkeypatch):
+    import vres_os.db as db
+    import vres_os.relations as relations
+    conn = ScriptedConnection([('provider_session_id=%s', {'ok': 1})])
+    monkeypatch.setattr(db, 'connect', lambda: conn)
+    monkeypatch.setattr(relations, '_node', lambda *a: {'project_id': 7})
+    service = MagicMock()
+    expected = {
+        'ok': True, 'handoff_key': 'HANDOFF-x', 'task_key': 'TASK-1', 'source_sha': 'abc',
+        'write_scope': ['a.py'], 'required_changed_paths': ['a.py'], 'contract_fingerprint': 'fp',
+    }
+    service.prepare.return_value = expected
+    monkeypatch.setattr(surface, 'CodexHandoffService', lambda: service)
+    repo_factory = MagicMock()
+    monkeypatch.setattr(surface, 'Repository', repo_factory)
+    result = surface.codex_handoff_prepare('TASK-1', 'sess', ['a.py'], ['a.py'])
+    assert result == expected
+    kwargs = service.prepare.call_args.kwargs
+    assert kwargs['project_id'] == 7
+    assert kwargs['task_key'] == 'TASK-1'
+    assert kwargs['session_id'] == 'sess'
+    # The MCP wrapper itself never reaches for Repository (bind_session/resume_context
+    # live only inside the deeper service, and are never called from here either).
+    repo_factory.assert_not_called()
+
+
+def test_codex_handoff_prepare_refuses_mismatched_task_without_repair(surface, monkeypatch):
+    import vres_os.db as db
+    import vres_os.relations as relations
+    conn = ScriptedConnection([('provider_session_id=%s', {'ok': 1})])
+    monkeypatch.setattr(db, 'connect', lambda: conn)
+    monkeypatch.setattr(relations, '_node', lambda *a: {'project_id': 7})
+    from vres_os.codex_handoff import HandoffError
+    service = MagicMock()
+    service.prepare.side_effect = HandoffError('task_mismatch', 'session bound to a different task')
+    monkeypatch.setattr(surface, 'CodexHandoffService', lambda: service)
+    repo_factory = MagicMock()
+    monkeypatch.setattr(surface, 'Repository', repo_factory)
+    result = surface.codex_handoff_prepare('TASK-1', 'sess', ['a.py'], ['a.py'])
+    assert result == {
+        'ok': False, 'handoff_key': None, 'reason': 'task_mismatch',
+        'worktree_preserved': False, 'task_completed': False,
+    }
+    repo_factory.assert_not_called()
+
+
+def test_codex_handoff_execute_binding_discipline_and_fail_closed(surface, monkeypatch):
+    import vres_os.db as db
+    conn = ScriptedConnection([('provider_session_id=%s', {'ok': 1})])
+    monkeypatch.setattr(db, 'connect', lambda: conn)
+    from vres_os.codex_handoff import HandoffError
+    service = MagicMock()
+    service.execute.side_effect = HandoffError(
+        'stale_task_state', 'task state drifted', worktree_preserved=True
+    )
+    monkeypatch.setattr(surface, 'CodexHandoffService', lambda: service)
+    repo_factory = MagicMock()
+    monkeypatch.setattr(surface, 'Repository', repo_factory)
+    import vres_os.validation as validation
+    validation_service = MagicMock()
+    monkeypatch.setattr(validation, 'ValidationService', lambda: validation_service)
+    result = surface.codex_handoff_execute('HANDOFF-1', 'sess')
+    assert result == {
+        'ok': False, 'handoff_key': 'HANDOFF-1', 'reason': 'stale_task_state',
+        'worktree_preserved': True, 'task_completed': False,
+    }
+    kwargs = service.execute.call_args.kwargs
+    assert kwargs['handoff_key'] == 'HANDOFF-1' and kwargs['session_id'] == 'sess'
+    # No completion/validation authority is ever reached from this MCP layer.
+    repo_factory.assert_not_called()
+    validation_service.assert_not_called()
+
+
+def test_codex_handoff_execute_success_passthrough(surface, monkeypatch):
+    import vres_os.db as db
+    conn = ScriptedConnection([('provider_session_id=%s', {'ok': 1})])
+    monkeypatch.setattr(db, 'connect', lambda: conn)
+    service = MagicMock()
+    expected = {
+        'ok': True, 'handoff_key': 'HANDOFF-1', 'task_key': 'TASK-1', 'source_sha': 'abc',
+        'changed_paths': ['a.py'], 'postconditions_passed': True, 'validation_status': 'pending',
+        'task_completed': False, 'worktree_preserved': False, 'cleanup_warning': None,
+    }
+    service.execute.return_value = expected
+    monkeypatch.setattr(surface, 'CodexHandoffService', lambda: service)
+    assert surface.codex_handoff_execute('HANDOFF-1', 'sess') == expected
 
 
 def test_release_gate_refuses_disabled_assertions(tmp_path):
