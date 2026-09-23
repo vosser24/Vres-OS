@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import json
 import uuid
 from pathlib import Path
 
 import pytest
 
+from vres_os.db import connect
 from vres_os.orchestration import OrchestrationService, ROUTABLE_ROLES
 from vres_os.repository import Repository
 from vres_os.routing import RoutingService
+from vres_os.routing_completion import complete_routed_task
 from vres_os.validation import ValidationService
 
 
@@ -455,3 +458,304 @@ def test_protected_routed_validation_requires_decision_ready_final(pg_project, t
     prepared_validation = validation.prepare(task_key, pid, tmp_path, ["review.md"])
     assert prepared_validation["task_key"] == task_key
     assert prepared_validation["validator"] == "vres-os:validator"
+
+
+# --- #139 (F-15): protected PASS must supersede a routine route at completion ---
+
+
+def _mark_validation_passed(request_key: str, session_id: str) -> None:
+    """Simulate a host-observed canonical protected validator PASS without a real
+    validator transcript, mirroring the direct-SQL pattern already used by
+    test_validation_checkpoint_guard.py / test_validation_evidence.py for this
+    codebase's integration tests."""
+    with connect() as conn, conn.transaction():
+        conn.execute(
+            """
+            UPDATE vres.validation_requests
+               SET status='passed',observed_model='claude-fable-5-1',
+                   agent_id=%s,session_id=%s,report=%s::jsonb,completed_at=now()
+             WHERE request_key=%s
+            """,
+            (
+                f"validator-{uuid.uuid4().hex}",
+                session_id,
+                json.dumps(
+                    {
+                        "request_key": request_key,
+                        "outcome": "passed",
+                        "checks": [{"status": "passed", "evidence": "integration"}],
+                    }
+                ),
+                request_key,
+            ),
+        )
+        conn.execute(
+            "UPDATE vres.task_state s SET validation_status='passed' "
+            "FROM vres.validation_requests r WHERE r.request_key=%s AND s.task_id=r.task_id",
+            (request_key,),
+        )
+
+
+def _routine_routed_and_observed(pid: int):
+    """A legitimately routine-routed, fully governed task: one Sonnet expert,
+    decision-ready orchestration final, host-observed worker -- the same shape as
+    test_pricing_subproblem_resolves_shipped_capability_and_routine_sonnet_can_complete,
+    factored out so #139 regressions can layer a later protected validation on top."""
+    task_key, session_id = _task_and_session(pid)
+    need = "price spacing"
+    discovery, pricing = _pricing_discovery(pid, task_key, session_id, need)
+    routing = RoutingService()
+    prepared = routing.prepare(
+        project_id=pid,
+        task_key=task_key,
+        session_id=session_id,
+        discovery_key=discovery["discovery_key"],
+        risk_triggers=[],
+    )
+    recorded = routing._record_validated_decision(
+        project_id=pid,
+        request_key=prepared["request_key"],
+        report=_route_report(
+            prepared["request_key"],
+            need,
+            pricing["capability_key"],
+            tier="sonnet",
+            assurance="routine",
+        ),
+        observed_model="claude-fable-5",
+        agent_id=f"router-{uuid.uuid4().hex}",
+        session_id=session_id,
+    )
+    assert recorded["assurance"] == "routine"
+
+    plan = _plan_report_final(pid, task_key, session_id, discovery, need, pricing["capability_key"])
+    routing._record_worker_observation(
+        project_id=pid,
+        task_key=task_key,
+        plan_key=plan["plan_key"],
+        role="commercial-director",
+        execution_tier="sonnet",
+        agent_type="vres-os:sonnet-expert",
+        agent_id=f"sonnet-{uuid.uuid4().hex}",
+        session_id=session_id,
+        observed_model="claude-sonnet-5",
+    )
+    return task_key, session_id
+
+
+def test_routine_route_with_later_canonical_pass_completes_via_routing_complete(pg_project):
+    """Scenario C: a routine route that later receives a fresh canonical protected PASS
+    must complete through the protected/current-validation semantics -- no not_required
+    downgrade, validation stays passed."""
+    pid = pg_project
+    task_key, session_id = _routine_routed_and_observed(pid)
+
+    with connect() as conn:
+        state = conn.execute(
+            "SELECT s.validation_status FROM vres.task_state s JOIN vres.tasks t ON t.id=s.task_id "
+            "WHERE t.task_key=%s",
+            (task_key,),
+        ).fetchone()
+    assert state["validation_status"] == "not_required"
+
+    prepared_validation = ValidationService().prepare(task_key, pid, Path("."), [])
+    _mark_validation_passed(prepared_validation["request_key"], session_id)
+
+    result = RoutingService().complete(
+        project_id=pid,
+        task_key=task_key,
+        root=Path("."),
+        summary="Routine-routed task completed under a stronger later protected PASS.",
+        session_id=session_id,
+    )
+    assert result["completed"] is True
+    assert result["assurance"] == "protected"
+
+    with connect() as conn:
+        task = conn.execute("SELECT status FROM vres.tasks WHERE task_key=%s", (task_key,)).fetchone()
+        state = conn.execute(
+            "SELECT s.validation_status FROM vres.task_state s JOIN vres.tasks t ON t.id=s.task_id "
+            "WHERE t.task_key=%s",
+            (task_key,),
+        ).fetchone()
+    assert task["status"] == "completed"
+    assert state["validation_status"] == "passed"
+
+
+def test_routine_route_with_later_canonical_pass_completes_via_complete_routed_task(pg_project):
+    """Same as above, but through the exact task_complete_routed entry point (
+    routing_completion.complete_routed_task) named in the #139 report: it must not
+    overwrite a current PASS with not_required merely because the latest route was
+    routine."""
+    pid = pg_project
+    task_key, session_id = _routine_routed_and_observed(pid)
+
+    prepared_validation = ValidationService().prepare(task_key, pid, Path("."), [])
+    _mark_validation_passed(prepared_validation["request_key"], session_id)
+
+    result = complete_routed_task(
+        project_id=pid,
+        task_key=task_key,
+        root=Path("."),
+        summary="Routine-routed task completed via complete_routed_task under a later PASS.",
+        session_id=session_id,
+    )
+    assert result["completed"] is True
+    assert result["assurance"] == "protected"
+
+    with connect() as conn:
+        task = conn.execute("SELECT status FROM vres.tasks WHERE task_key=%s", (task_key,)).fetchone()
+        state = conn.execute(
+            "SELECT s.validation_status FROM vres.task_state s JOIN vres.tasks t ON t.id=s.task_id "
+            "WHERE t.task_key=%s",
+            (task_key,),
+        ).fetchone()
+    assert task["status"] == "completed"
+    assert state["validation_status"] == "passed"
+
+
+def test_complete_routed_task_routine_route_without_pass_still_grants_not_required(pg_project):
+    """Scenario A through complete_routed_task specifically: unchanged behavior when
+    there is no current protected PASS -- the governed not_required grant immediately
+    before completion must still happen."""
+    pid = pg_project
+    task_key, session_id = _routine_routed_and_observed(pid)
+
+    result = complete_routed_task(
+        project_id=pid,
+        task_key=task_key,
+        root=Path("."),
+        summary="Ordinary routine completion, no protected validation involved.",
+        session_id=session_id,
+    )
+    assert result["completed"] is True
+    assert result["assurance"] == "routine"
+
+    with connect() as conn:
+        task = conn.execute("SELECT status FROM vres.tasks WHERE task_key=%s", (task_key,)).fetchone()
+    assert task["status"] == "completed"
+
+
+def test_protected_route_with_valid_current_pass_completes(pg_project):
+    """Scenario B: existing protected-route completion, with a genuinely current PASS,
+    must remain unchanged (still succeeds)."""
+    pid = pg_project
+    task_key, session_id = _task_and_session(pid)
+    need = "pricing"
+    discovery, pricing = _pricing_discovery(pid, task_key, session_id, need)
+    routing = RoutingService()
+    prepared = routing.prepare(
+        project_id=pid,
+        task_key=task_key,
+        session_id=session_id,
+        discovery_key=discovery["discovery_key"],
+    )
+    routing._record_validated_decision(
+        project_id=pid,
+        request_key=prepared["request_key"],
+        report=_route_report(
+            prepared["request_key"],
+            need,
+            pricing["capability_key"],
+            tier="sonnet",
+            assurance="protected",
+        ),
+        observed_model="claude-fable-5",
+        agent_id=f"router-{uuid.uuid4().hex}",
+        session_id=session_id,
+    )
+    plan = _plan_report_final(pid, task_key, session_id, discovery, need, pricing["capability_key"])
+    routing._record_worker_observation(
+        project_id=pid,
+        task_key=task_key,
+        plan_key=plan["plan_key"],
+        role="commercial-director",
+        execution_tier="sonnet",
+        agent_type="vres-os:sonnet-expert",
+        agent_id=f"sonnet-{uuid.uuid4().hex}",
+        session_id=session_id,
+        observed_model="claude-sonnet-5",
+    )
+
+    prepared_validation = ValidationService().prepare(task_key, pid, Path("."), [])
+    _mark_validation_passed(prepared_validation["request_key"], session_id)
+
+    result = routing.complete(
+        project_id=pid,
+        task_key=task_key,
+        root=Path("."),
+        summary="Protected route completed with a genuinely current PASS.",
+        session_id=session_id,
+    )
+    assert result["completed"] is True
+    assert result["assurance"] == "protected"
+
+    with connect() as conn:
+        task = conn.execute("SELECT status FROM vres.tasks WHERE task_key=%s", (task_key,)).fetchone()
+    assert task["status"] == "completed"
+
+
+def test_routine_route_with_failed_validation_cannot_complete(pg_project):
+    """Scenario D: a routine route whose only validation attempt failed must not
+    complete -- neither the protected path (validation isn't passed) nor the routine
+    path (validation isn't not_required) accepts it."""
+    pid = pg_project
+    task_key, session_id = _routine_routed_and_observed(pid)
+
+    prepared_validation = ValidationService().prepare(task_key, pid, Path("."), [])
+    with connect() as conn, conn.transaction():
+        conn.execute(
+            "UPDATE vres.validation_requests SET status='failed',completed_at=now() WHERE request_key=%s",
+            (prepared_validation["request_key"],),
+        )
+        conn.execute(
+            "UPDATE vres.task_state s SET validation_status='failed' "
+            "FROM vres.tasks t WHERE t.task_key=%s AND s.task_id=t.id",
+            (task_key,),
+        )
+
+    with pytest.raises(ValueError, match="not_required"):
+        RoutingService().complete(
+            project_id=pid,
+            task_key=task_key,
+            root=Path("."),
+            summary="Must not complete on a failed validation.",
+            session_id=session_id,
+        )
+
+    with connect() as conn:
+        task = conn.execute("SELECT status FROM vres.tasks WHERE task_key=%s", (task_key,)).fetchone()
+    assert task["status"] != "completed"
+
+
+def test_routine_route_with_stale_passed_validation_cannot_reuse_pass_to_complete(pg_project):
+    """Scenario E: after a fresh PASS, a material reviewed-state mutation (applied only
+    through the explicit invalidation escape hatch, while leaving validation_status
+    literally 'passed' to simulate a stale/reused record) must still block completion --
+    the current PASS can never be reused once the reviewed state has moved on."""
+    pid = pg_project
+    task_key, session_id = _routine_routed_and_observed(pid)
+
+    prepared_validation = ValidationService().prepare(task_key, pid, Path("."), [])
+    _mark_validation_passed(prepared_validation["request_key"], session_id)
+
+    with connect() as conn, conn.transaction():
+        conn.execute("SELECT set_config('vres.explicit_validation_invalidation','on',true)")
+        conn.execute(
+            "UPDATE vres.task_state s SET current_step='changed after pass',updated_at=now() "
+            "FROM vres.tasks t WHERE t.task_key=%s AND s.task_id=t.id",
+            (task_key,),
+        )
+
+    with pytest.raises(ValueError, match="changed after review|revalidation required"):
+        RoutingService().complete(
+            project_id=pid,
+            task_key=task_key,
+            root=Path("."),
+            summary="Must not reuse a stale PASS whose reviewed state has moved on.",
+            session_id=session_id,
+        )
+
+    with connect() as conn:
+        task = conn.execute("SELECT status FROM vres.tasks WHERE task_key=%s", (task_key,)).fetchone()
+    assert task["status"] != "completed"

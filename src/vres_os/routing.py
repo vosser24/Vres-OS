@@ -1038,7 +1038,16 @@ class RoutingService:
         session_id: str,
     ) -> dict[str, Any]:
         contract = self._completion_contract(project_id=project_id, task_key=task_key)
-        if contract["protected"]:
+        with connect() as conn:
+            current_validation_status = conn.execute(
+                "SELECT validation_status FROM vres.task_state WHERE task_id=%s",
+                (contract["task_id"],),
+            ).fetchone()["validation_status"]
+        # A routine route may legitimately receive a stronger, later canonical protected
+        # validation. Honor that current PASS as the effective (strongest) assurance
+        # instead of only recognizing protection from the route's own declared assurance.
+        effective_protected = contract["protected"] or current_validation_status == "passed"
+        if effective_protected:
             ValidationService().assert_current(task_key, project_id, root)
             from .repository import Repository
 
