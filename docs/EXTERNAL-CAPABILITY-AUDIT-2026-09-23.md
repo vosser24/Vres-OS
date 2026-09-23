@@ -1,6 +1,6 @@
 # Phase B — External Capability Discovery & Audit
 
-Status: **IN PROGRESS**
+Status: **CLASSIFICATION COMPLETE — AWAITING INDEPENDENT VALIDATION**
 
 GitHub issue: #145
 
@@ -208,11 +208,32 @@ If present/used later, required guards include:
 
 Phase E, not Phase B, decides whether/how to use it.
 
-## 7. Physical installed-environment inventory — PENDING
+## 7. Physical installed-environment inventory — COMPLETE
 
-The repo/public audit cannot prove what is installed in the user's Claude Code environment.
+A read-only target-Windows inventory was completed on 2026-09-23 in the clean Phase-B worktree under Vres task `TASK-20260923-61212f431e`, using Claude Code 2.1.280.
 
-A fresh target-Windows Claude session must produce a **read-only, sanitized inventory**.
+The inventory reported `PHASE_B_PHYSICAL_INVENTORY = PASS` and made no configuration/authentication/install/use mutation.
+
+Observed external surface:
+
+- 7 account/session MCP/connectors;
+- 0 installed external plugins;
+- 15 account-synced skills;
+- 17 host-bundled skills;
+- 6 host-built-in agents/subagents.
+
+It also confirmed that JEV Browser and Superpowers are **not installed**.
+
+Inventory limitations were retained rather than hidden:
+
+- interactive `/mcp`, `/plugin`, `/skills`, and `/agents` UIs were not physically opened from the model turn;
+- exact versions are unavailable for most host/account-provided items;
+- provenance of some host-bundled skills is host-internal rather than file-backed;
+- unauthenticated connectors expose names/auth surfaces but not their full post-auth tool schema.
+
+The inventory nevertheless covered every capability visibly registered to the session or discoverable in the checked managed/user/project/local/plugin scopes without reading secret values.
+
+The following collection rules remain authoritative.
 
 Required categories:
 
@@ -280,30 +301,152 @@ It must not:
 
 The physical output is then brought back to the Phase-B audit and each external item is researched/classified.
 
-## 9. Audit matrix
+## 9. Final external-capability classification matrix
 
-| Capability | Installed? | Type | Evidence status | Classification | Notes |
-|---|---:|---|---|---|---|
-| Vres MCP/skills/agents | Yes | internal baseline | repo + installed Vres runtime | N/A — Vres owned | comparison baseline |
-| JEV Browser | Unknown pending physical inventory | MCP/browser | public source audited | provisional USE WITH GUARDS | Phase C candidate; do not implement in Phase B |
-| Superpowers | Unknown pending physical inventory | plugin/methodology | public source audited | provisional USE WITH GUARDS | Phase E candidate; methodology only, never runtime dependency |
-| Other installed MCPs | Pending | MCP | pending physical inventory | pending | classify individually |
-| Other installed plugins | Pending | plugin | pending physical inventory | pending | classify individually |
-| Other installed skills | Pending | skill | pending physical inventory | pending | classify individually |
-| Other installed agents | Pending | agent | pending physical inventory | pending | classify individually |
+The physical inventory found **45 installed/visible external capability items**. Every item has exactly one Phase-B classification.
+
+Classification totals:
+
+- `USE`: 3
+- `USE WITH GUARDS`: 25
+- `DEVELOPMENT REQUIRED`: 8
+- `DECLINE`: 9
+
+JEV Browser and Superpowers are excluded from those totals because the target Windows inventory confirmed that neither is installed.
+
+### 9.1 Account/session MCP and connectors
+
+| Capability | Classification | Phase-B rationale / mandatory guard |
+|---|---|---|
+| claude-in-chrome | USE WITH GUARDS | Useful browser execution surface, but can navigate/click/type/upload and act in authenticated browser sessions. Use only for an explicit Vres task/step; user approval for irreversible/external writes; browser evidence is not Vres validation/completion evidence. |
+| claude.ai Claude Docs | USE WITH GUARDS | Can create/update/delete external docs. Vres owns task/provenance; external document mutation needs explicit scope and post-action verification. |
+| claude.ai Canva | USE WITH GUARDS | Visible but unauthenticated in the inventory. Interactive connector can create/edit designs after auth. Authentication/adoption is user-authorized and external writes remain scoped. |
+| claude.ai Gmail | USE WITH GUARDS | Email read/write surface; sending/replying/forwarding is an external side effect. Require explicit task intent and native connector approval; never persist credentials. |
+| claude.ai Google Calendar | USE WITH GUARDS | Can create/update/delete/respond to events. External mutation requires explicit Vres task intent and postcondition/evidence. |
+| claude.ai Google Drive | USE WITH GUARDS | Can search/read and also upload/share/move/trash. External mutation requires explicit scope/approval and evidence; connector content is not automatically durable Vres knowledge. |
+| claude.ai Notion | USE WITH GUARDS | Remote connector with potential read/write workspace effects. Require explicit Vres task intent, least-privilege auth, and external-write verification. |
+
+Public-source basis checked 2026-09-23:
+
+- Anthropic connector documentation describes remote connectors as tools that can retrieve data **and take actions**, inheriting the connected user's service permissions.
+- Anthropic's Google Workspace connector documentation explicitly documents Gmail send/reply/forward, Calendar create/update/delete, and Drive share/move/trash/upload actions with approval controls.
+- Anthropic's Claude-in-Chrome documentation states that it can read, click, type, navigate and fill forms and explicitly warns that browser automation remains risky.
+- Anthropic's interactive-connector documentation identifies Canva as an interactive create/edit design surface.
+
+### 9.2 Account-synced skills
+
+| Skill | Classification | Phase-B rationale / mandatory guard |
+|---|---|---|
+| pdf | USE WITH GUARDS | Official/source-available document skill. Local artifact read/write is acceptable only inside the routed task's declared artifact/file scope; generated output still needs task acceptance evidence. |
+| pptx | USE WITH GUARDS | Same document-artifact guard; local scripts/subprocesses do not gain task/validation authority. |
+| xlsx | USE WITH GUARDS | Same; spreadsheet writes must remain within declared file scope and be verified mechanically where possible. |
+| docx | USE WITH GUARDS | Same; document generation/editing is artifact work, not completion evidence. |
+| docs | USE WITH GUARDS | Depends on Claude Docs external document surface; applies the connector's external-write guards. |
+| import-memory | DECLINE | Competes directly with Vres durable continuity/knowledge authority and can create a second ungoverned memory truth source. |
+| skill-creator | DEVELOPMENT REQUIRED | Potentially valuable for authoring skills, but Vres currently has no governed external-skill acquisition/registration/proof contract comparable to project-agent governance. Generated skills are candidates only until such a path exists. |
+| morning | DEVELOPMENT REQUIRED | Scheduling/recurring execution is explicitly outside current Vres runtime governance. Needs a separately authorized scheduler contract, provenance, retry/failure semantics and target-Windows validation. |
+| memory | DECLINE | Creates/maintains a competing persistent memory layer outside Vres task/knowledge governance. |
+| code-reviewer | USE WITH GUARDS | Read-only review can be useful as advisory evidence. It can never substitute for protected Vres validation, set PASS, or satisfy completion authority. |
+| prism | DECLINE | Inventory reports default/automatic loading on substantive messages. That competes with Vres routing/planning authority and adds hidden context behavior; do not adopt in governed sessions. |
+| senior-fullstack | DEVELOPMENT REQUIRED | Useful expertise candidate, but as a synced skill it can scaffold/write broadly outside Vres governed agent/work-unit provenance. Adoption requires conversion/integration into a governed capability/agent contract rather than direct autonomous use. |
+| senior-backend | DEVELOPMENT REQUIRED | Same: useful expertise, but current skill form can scaffold/migrate/test and write broadly without Vres worker provenance/write-scope ownership. |
+| vercel-react-best-practices | USE WITH GUARDS | Public Vercel reference guidance is useful inside an already authorized React/Next.js work unit. It does not get routing, write-scope, validation or completion authority. |
+| dedeman-ms | USE WITH GUARDS | Narrow user-uploaded XLSX translation/build utility. Use only on explicitly declared spreadsheet artifacts, preserve source files, and verify outputs; no authority beyond the current Vres work unit. |
+
+Public/source provenance checked where discoverable:
+
+- `pdf`, `pptx`, `xlsx`, `docx`: Anthropic public `anthropics/skills` repository; Anthropic notes the production document skills are source-available and should be tested in the target environment before critical reliance.
+- `vercel-react-best-practices`: public `vercel-labs/agent-skills`, MIT, Vercel-authored React/Next.js performance guidance.
+- `senior-backend` and `senior-fullstack`: public Borghei Claude-Skills definitions describe scaffolding, database/API/architecture and quality-analysis behavior.
+- `code-reviewer`: multiple public skills use this generic name; the installed account-backed copy's exact upstream was not provable from the inventory, so classification relies on the observed local manifest/description and read-only nature rather than falsely attributing it.
+- `memory`, `import-memory`, `morning`, `prism`, and `dedeman-ms`: exact upstream provenance was not safely recoverable from the target inventory; that uncertainty is retained.
+
+### 9.3 Host-bundled skills
+
+Host-bundled skills are treated as Claude host capabilities, not Vres-owned capabilities. Where source/behavior was not independently inspectable, Phase B uses the conservative class rather than inferring authority from the name.
+
+| Skill | Classification | Phase-B rationale / mandatory guard |
+|---|---|---|
+| update-config | DECLINE | Direct settings mutation can overwrite/undermine Vres-owned Claude configuration surfaces. Vres installation/update owns its fields and must preserve unrelated settings explicitly. |
+| keybindings-help | USE | Informational help; no material Vres authority or side-effect conflict observed. |
+| code-review | USE WITH GUARDS | Advisory review only; never protected validation or completion authority. If `--fix`/edit behavior is used, it becomes a normal scoped implementation write. |
+| simplify | USE WITH GUARDS | May change code. Only inside a routed write-capable work unit with declared scope and acceptance evidence. |
+| fewer-permission-prompts | DECLINE | Explicitly weakens/changes permission prompting and conflicts with Vres's conservative execution/safety posture. |
+| loop | DEVELOPMENT REQUIRED | Repeated/background execution needs scheduler/condition/retry/provenance governance that Vres does not currently provide. |
+| schedule | DEVELOPMENT REQUIRED | Same scheduling gap; do not treat host scheduling as Vres-governed execution until integrated. |
+| claude-api | USE | Documentation/reference capability; no competing Vres execution authority identified. |
+| workflow-authoring | DEVELOPMENT REQUIRED | Can create automation/workflow behavior that overlaps Vres orchestration/lifecycle. Needs a governed workflow-registration/execution boundary before adoption. |
+| claude-in-chrome | USE WITH GUARDS | Same browser guard as the Chrome connector: explicit step intent, user approval for irreversible actions, and no validation/completion authority. |
+| run | DEVELOPMENT REQUIRED | Inventory did not provide enough stable public/host semantics to prove its execution/side-effect boundary. Do not adopt until its exact contract is inspectable and tested. |
+| init | DECLINE | Project initialization/CLAUDE contract writes overlap Vres's deliberately bounded project CLAUDE ownership. Vres start/installer remains the owner of that contract. |
+| security-review | USE WITH GUARDS | Useful advisory security analysis, but protected Vres validation remains authoritative and must independently verify security acceptance criteria. |
+| dataviz | USE WITH GUARDS | Artifact-generation helper; keep output inside declared artifact/file scope and validate the produced artifact. |
+| artifact-design | USE WITH GUARDS | Artifact-generation methodology only; no routing/completion authority and outputs remain task-bound. |
+| artifact-diagramming | USE WITH GUARDS | Same artifact/evidence boundary. |
+| artifact-capabilities | USE WITH GUARDS | May guide artifact workflows; invoke only for an explicit artifact task and keep Vres task/provenance authority. |
+
+### 9.4 Host-built-in agents/subagents
+
+| Agent | Classification | Phase-B rationale / mandatory guard |
+|---|---|---|
+| claude | DECLINE | General host agent can execute outside Vres work-unit/model/provenance contracts. Do not use as a governed Vres worker. |
+| claude-code-guide | USE | Read-only documentation/search helper observed with bounded read/web tools; informational output only. |
+| Explore | USE WITH GUARDS | Read-only isolated exploration can assist discovery, but it is not a governed worker and cannot create worker/validation/completion evidence. |
+| general-purpose | DECLINE | Broad tool access and no Vres execution-tier/provenance contract; competes directly with governed Sonnet/Opus worker surfaces. |
+| Plan | USE WITH GUARDS | Read-only planning may be used as non-authoritative analysis only; Vres routing/orchestration remains the plan/staffing authority. |
+| statusline-setup | DECLINE | Can edit status-line configuration that Vres already manages/preserves through its installer/status-line contract. |
+
+### 9.5 External plugins
+
+No external plugin is installed.
+
+Observed plugin state:
+
+- Vres `vres-os@skills-dir`: Vres-owned baseline, not an external audit item.
+- Official marketplace catalog: present as a catalog only.
+- Account marketplace ("My Uploads"): provenance channel for synced skills, not itself an installed plugin.
+- Host-internal plugin usage keys (for example builtin agent/telemetry keys): not user-installed plugin packages and therefore not separate adoption candidates.
+
+### 9.6 Named roadmap candidates not installed
+
+| Candidate | Installed? | Classification | Roadmap handling |
+|---|---:|---|---|
+| JEV Browser | No | provisional USE WITH GUARDS | Remains Phase C. Phase B does not install or implement it. |
+| Superpowers | No | provisional USE WITH GUARDS | Remains Phase E as optional methodology only; never a Vres runtime dependency. |
+
+### 9.7 Non-capability finding: stale Claude auto-mode trust metadata
+
+The physical inventory found that user-level `settings.json` contains `autoMode.environment` metadata naming an older Vres worktree rather than the current Phase-B worktree.
+
+Phase B **does not modify it**.
+
+Why it matters:
+
+- Anthropic's auto-mode design states that the environment list defines trusted repositories/infrastructure used by the safety classifier.
+- A current public Claude Code issue reports the same multi-worktree failure mode: user-global auto-mode setup can retain an absolute trusted-repo path from the project where setup was originally run.
+
+Phase-B disposition:
+
+- retain as a configuration finding;
+- do not weaken permissions;
+- do not run auto-mode setup or mutate settings during this audit;
+- create/fix only in a separately authorized follow-up if the user reaches that work.
+
 
 ## 10. Phase-B completion gate
 
 Issue #145 may close only when:
 
-- the physical installed inventory is complete;
-- every external installed item has public/source provenance where discoverable;
-- every external installed item has exactly one classification;
-- guards/development gaps are explicit;
-- model/effort and task/validation/completion conflicts have been reviewed;
-- no secret was copied into the audit;
-- no adoption/configuration mutation was performed merely for discovery;
-- JEV Browser and Superpowers remain at their roadmap positions;
-- the final matrix is committed and reviewed.
+- [x] the physical installed inventory is complete;
+- [x] every external installed item has public/source provenance where discoverable, with unresolved provenance explicitly retained;
+- [x] every external installed item has exactly one classification;
+- [x] guards/development gaps are explicit;
+- [x] model/effort and task/validation/completion conflicts have been reviewed;
+- [x] no secret was copied into the audit;
+- [x] no adoption/configuration mutation was performed merely for discovery;
+- [x] JEV Browser and Superpowers remain at their roadmap positions;
+- [ ] the final matrix has received independent protected validation.
+
+Until the final independent validation passes, Phase C remains held.
 
 Until then, Phase C is held.
