@@ -129,6 +129,7 @@ def test_migrator_resumes_023_without_database_create(monkeypatch):
             "033_project_agent_work_units.sql",
             "034_work_unit_acceptance_contract.sql",
             "035_validation_ingestion_deferred_disposition.sql",
+            "036_protected_pass_supersedes_routine_route.sql",
         ]
         assert db.migrate() == expected
 
