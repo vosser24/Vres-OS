@@ -219,3 +219,38 @@ def test_remove_preserves_externally_modified_owned_threshold(tmp_path: Path):
     assert result["removed"] is False
     assert result["reason"] == "managed-autocompact-modified-externally"
     assert _settings(home)["env"][KEY] == "74"
+
+
+def test_install_preserves_invalid_settings_json(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
+    monkeypatch.delenv("DISABLE_AUTO_COMPACT", raising=False)
+    monkeypatch.delenv("DISABLE_COMPACT", raising=False)
+    home = tmp_path / ".claude"
+    home.mkdir()
+    path = home / "settings.json"
+    original = b"{broken-json"
+    path.write_bytes(original)
+
+    result = install_autocompact(home)
+
+    assert result["configured"] is False
+    assert result["owned"] is False
+    assert result["reason"] == "invalid-settings-json-preserved"
+    assert path.read_bytes() == original
+
+
+def test_install_preserves_nondict_env(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
+    monkeypatch.delenv("DISABLE_AUTO_COMPACT", raising=False)
+    monkeypatch.delenv("DISABLE_COMPACT", raising=False)
+    home = tmp_path / ".claude"
+    home.mkdir()
+    path = home / "settings.json"
+    path.write_text(json.dumps({"env": ["unexpected"]}), encoding="utf-8")
+
+    result = install_autocompact(home)
+
+    assert result["configured"] is False
+    assert result["owned"] is False
+    assert result["reason"] == "existing-nondict-env-preserved"
+    assert json.loads(path.read_text(encoding="utf-8")) == {"env": ["unexpected"]}
