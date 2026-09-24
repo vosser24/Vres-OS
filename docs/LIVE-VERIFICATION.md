@@ -513,9 +513,9 @@ These cases validate behavior, not a claimed token-saving percentage. Capture be
 
 ### UE-02 — Focused native compaction with durable Vres continuity
 
-**Execute:** Run a persistent engineering task with decisions, changed files, executed tests and one unresolved next step, then invoke native `/compact`.
+**Execute:** Verify the managed user setting contains `env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE="85"` and does not contain a Vres-installed `CLAUDE_CODE_AUTO_COMPACT_WINDOW`. Run a persistent engineering task with decisions, changed files, executed tests and one unresolved next step. Exercise native `/compact` once, then exercise **automatic** compaction in a disposable session. For an affordable live trigger, a temporary smaller `CLAUDE_CODE_AUTO_COMPACT_WINDOW` may be supplied only to that test process; it must not be persisted or treated as the production configuration.
 
-**Pass evidence:** Existing PreCompact/PostCompact Vres checkpoints and rehydration still work. The compacted conversation retains the objective/constraints, durable decisions, changed surfaces, actual test/evidence results, blockers/current work state and exact next action while dropping repeated/stale exploration and raw output already reduced to conclusions. No custom compaction subsystem is invoked.
+**Pass evidence:** The installed production setting means 85% **used** context (~15% remaining) against Claude's real model context window. Existing PreCompact/PostCompact Vres checkpoints and rehydration still work for both manual and auto triggers. Durable evidence records `trigger=manual|auto`. The compacted conversation retains objective/constraints, durable decisions, changed surfaces, actual test/evidence results, blockers/current work state and exact next action while dropping repeated/stale exploration and raw output already reduced to conclusions. No polling, daemon, custom summarizer, custom compactor or persisted auto-compact-window override is introduced.
 
 ### UE-03 — `/clear` replacement-session recovery
 
