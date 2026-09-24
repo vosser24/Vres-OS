@@ -131,7 +131,8 @@ def test_installer_manages_native_autocompact_conservatively_and_transactionally
     assert "autocompact_owned" in text
     assert "vres_os.autocompact install" in text
     assert "--owned-before $OwnedBeforeArg" in text
-    assert "85% used context (~15% remaining)" in text
+    assert "85% of the native auto-compact window" in text
+    assert "below ~15% remaining" in text
     assert "CLAUDE_CODE_AUTO_COMPACT_WINDOW" not in text
     assert "$ClaudeSettingsBefore" in text
     assert "[IO.File]::WriteAllBytes($ClaudeSettingsPath, $ClaudeSettingsBefore)" in text
