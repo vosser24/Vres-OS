@@ -322,3 +322,70 @@ def test_owned_threshold_is_retained_with_transient_process_window_warning(
     assert result["owned"] is True
     assert result["warning"] == "process-auto-compact-window-present"
     assert _settings(home)["env"][KEY] == "85"
+
+
+def test_dedicated_user_auto_compact_window_is_preserved(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
+    monkeypatch.delenv("DISABLE_AUTO_COMPACT", raising=False)
+    monkeypatch.delenv("DISABLE_COMPACT", raising=False)
+    home = tmp_path / ".claude"
+    home.mkdir()
+    (home / "settings.json").write_text(
+        json.dumps({"autoCompactWindow": 300000}),
+        encoding="utf-8",
+    )
+
+    result = install_autocompact(home)
+
+    assert result["configured"] is False
+    assert result["owned"] is False
+    assert result["reason"] == "existing-custom-auto-compact-window-preserved"
+    payload = _settings(home)
+    assert payload["autoCompactWindow"] == 300000
+    assert "env" not in payload
+
+
+def test_dedicated_user_auto_compact_disable_is_preserved(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
+    monkeypatch.delenv("DISABLE_AUTO_COMPACT", raising=False)
+    monkeypatch.delenv("DISABLE_COMPACT", raising=False)
+    home = tmp_path / ".claude"
+    home.mkdir()
+    (home / "settings.json").write_text(
+        json.dumps({"autoCompactEnabled": False}),
+        encoding="utf-8",
+    )
+
+    result = install_autocompact(home)
+
+    assert result["configured"] is False
+    assert result["owned"] is False
+    assert result["reason"] == "existing-auto-compact-disable-preserved"
+    payload = _settings(home)
+    assert payload["autoCompactEnabled"] is False
+    assert "env" not in payload
+
+
+def test_owned_threshold_is_removed_when_dedicated_window_is_added(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
+    monkeypatch.delenv("DISABLE_AUTO_COMPACT", raising=False)
+    monkeypatch.delenv("DISABLE_COMPACT", raising=False)
+    home = tmp_path / ".claude"
+    home.mkdir()
+    (home / "settings.json").write_text(
+        json.dumps({"autoCompactWindow": 300000, "env": {KEY: "85"}}),
+        encoding="utf-8",
+    )
+
+    result = install_autocompact(home, owned_before=True)
+
+    assert result["configured"] is False
+    assert result["owned"] is False
+    assert result["updated"] is True
+    assert result["reason"] == "existing-custom-auto-compact-window-preserved"
+    payload = _settings(home)
+    assert payload["autoCompactWindow"] == 300000
+    assert "env" not in payload
