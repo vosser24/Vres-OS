@@ -57,7 +57,12 @@ def _settings_env(settings: dict[str, Any]) -> tuple[dict[str, Any] | None, str 
     return dict(current), None
 
 
-def _settings_conflict(env: dict[str, Any]) -> str | None:
+def _settings_conflict(settings: dict[str, Any], env: dict[str, Any]) -> str | None:
+    dedicated_window = settings.get("autoCompactWindow")
+    if dedicated_window not in (None, "", "auto"):
+        return "existing-custom-auto-compact-window-preserved"
+    if settings.get("autoCompactEnabled") is False:
+        return "existing-auto-compact-disable-preserved"
     if env.get(_AUTO_COMPACT_WINDOW_KEY) not in (None, ""):
         return "existing-custom-auto-compact-window-preserved"
     if any(_truthy(env.get(key)) for key in _DISABLE_KEYS):
@@ -109,7 +114,7 @@ def install_autocompact(claude_home: Path, *, owned_before: bool = False) -> dic
         }
 
     existing = env.get(_AUTO_COMPACT_KEY)
-    settings_conflict = _settings_conflict(env)
+    settings_conflict = _settings_conflict(settings, env)
     process_conflict = _process_conflict()
 
     if owned_before:
