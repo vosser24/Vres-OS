@@ -77,7 +77,10 @@ The upstream MCP describes `browser_do(... allow_irreversible=true)` as the expl
 - Claude plugin name: `superpowers`
 - SessionStart hook matcher: `startup|clear|compact`
 
-Its `using-superpowers` bootstrap says relevant skills should be invoked before any response/action, while also explicitly stating that user instructions take precedence.
+Its SessionStart script reads the full `using-superpowers/SKILL.md` and injects that content directly as
+`hookSpecificOutput.additionalContext`. The bootstrap says relevant skills should be invoked before
+any response/action, while also explicitly stating that user instructions take precedence. Because
+this injection happens at SessionStart, it is not mediated by the later `Skill` PreToolUse guard.
 
 Relevant workflow classes:
 
@@ -238,9 +241,10 @@ The Vres universal rules now state explicitly:
 - credentials do not belong in external tool arguments when native/local auth is available;
 - Superpowers execution/worktree/subagent workflows cannot replace Vres orchestration.
 
-This rule handles instruction precedence.
+This rule handles instruction precedence for the Superpowers SessionStart injection.
 
-The PreToolUse hook remains the mechanical enforcement layer.
+The PreToolUse hook remains the mechanical enforcement layer for later Skill/Agent/JEV tool calls.
+It cannot erase or block content already injected by another plugin's SessionStart hook.
 
 ## 8. Secrets/authentication
 
@@ -310,7 +314,9 @@ Do not execute this ladder until the branch tests and protected pre-install revi
 8. Supply `TYPESAFE_API_KEY` outside chat/git.
 9. Install Superpowers only in that disposable onboarding scope and disable its optional telemetry for the acceptance run.
 10. Restart Claude so both plugin/MCP surfaces are physically loaded.
-11. Verify Vres continuity and current task binding survive the Superpowers SessionStart hook.
+11. Verify Vres continuity and current task binding survive the Superpowers SessionStart hook,
+    and verify that the injected `using-superpowers` text does not override Vres task/routing/
+    validation authority before any Skill call occurs.
 12. Run JEV acceptance against a disposable fixture:
     - browser_open;
     - browser_snapshot;
