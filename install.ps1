@@ -242,6 +242,9 @@ try {
     }
     if ($AutoCompactResult.configured) {
         Write-Host 'Claude native auto-compaction: 85% used context (~15% remaining), Vres-managed.'
+        if ($AutoCompactResult.PSObject.Properties['warning']) {
+            Write-Host ("Current installer process also has an external compaction modifier ({0}); user setting ownership was preserved." -f $AutoCompactResult.warning) -ForegroundColor Yellow
+        }
     } else {
         Write-Host ("Claude native auto-compaction: existing user/host setting preserved ({0})." -f $AutoCompactResult.reason) -ForegroundColor Yellow
     }
