@@ -174,6 +174,10 @@ $DistributionRoot = Join-Path $NewRelease 'distribution'
 $StagedPlugin = Join-Path $DistributionRoot 'vres-os'
 $PluginBackup = Join-Path $BackupRoot $ReleaseId
 $oldPointer = if (Test-Path $ActivePath) { Get-Content -Raw -Encoding UTF8 $ActivePath | ConvertFrom-Json } else { $null }
+$AutoCompactOwnedBefore = $false
+if ($oldPointer -and $oldPointer.PSObject.Properties['autocompact_owned']) {
+    $AutoCompactOwnedBefore = [bool]$oldPointer.autocompact_owned
+}
 $pluginMoved = $false
 $published = $false
 try {
@@ -204,7 +208,15 @@ try {
     Copy-Item -Force -Path (Join-Path $RepoRoot 'scripts\windows\*.ps1') -Destination $Bin
     [IO.File]::WriteAllText((Join-Path $Bin 'vres.cmd'), "@echo off`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File `"%~dp0vres-launch.ps1`" %*`r`n", [Text.Encoding]::ASCII)
     [IO.File]::WriteAllText((Join-Path $Bin 'vres-mcp.cmd'), "@echo off`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File `"%~dp0vres-mcp-launch.ps1`"`r`n", [Text.Encoding]::ASCII)
-    Write-JsonAtomic $ActivePath @{product='Vres-OS'; release=$ReleaseId; previous=$oldPointer; plugin_path=$PluginTarget; installed_at=(Get-Date -Format o)}
+    $InstalledAt = Get-Date -Format o
+    Write-JsonAtomic $ActivePath @{
+        product='Vres-OS'
+        release=$ReleaseId
+        previous=$oldPointer
+        plugin_path=$PluginTarget
+        installed_at=$InstalledAt
+        autocompact_owned=$AutoCompactOwnedBefore
+    }
     $published=$true
     Run $NewPython @(
         '-m','vres_os.claude_contract','install-global',
@@ -216,6 +228,23 @@ try {
         '--claude-home',$ClaudeHome,
         '--runtime-python',$NewPython
     )
+    $OwnedBeforeArg = if ($AutoCompactOwnedBefore) { 'true' } else { 'false' }
+    $AutoCompactOutput = & $NewPython -I -X utf8 -m vres_os.autocompact install --claude-home $ClaudeHome --owned-before $OwnedBeforeArg
+    if ($LASTEXITCODE -ne 0) { throw 'Could not configure Vres-managed native auto-compaction.' }
+    $AutoCompactResult = "$($AutoCompactOutput | Select-Object -Last 1)" | ConvertFrom-Json
+    Write-JsonAtomic $ActivePath @{
+        product='Vres-OS'
+        release=$ReleaseId
+        previous=$oldPointer
+        plugin_path=$PluginTarget
+        installed_at=$InstalledAt
+        autocompact_owned=[bool]$AutoCompactResult.owned
+    }
+    if ($AutoCompactResult.configured) {
+        Write-Host 'Claude native auto-compaction: 85% used context (~15% remaining), Vres-managed.'
+    } else {
+        Write-Host ("Claude native auto-compaction: existing user/host setting preserved ({0})." -f $AutoCompactResult.reason) -ForegroundColor Yellow
+    }
     $userPath=[Environment]::GetEnvironmentVariable('Path','User')
     $parts=@($userPath -split ';' | Where-Object { $_ })
     if ($parts -notcontains $Bin) { [Environment]::SetEnvironmentVariable('Path', (($parts+$Bin)-join ';'), 'User') }
@@ -256,7 +285,7 @@ try {
         [IO.File]::WriteAllBytes($ClaudeSettingsPath, $ClaudeSettingsBefore)
     }
     if (Test-Path (Join-Path $InstallRoot 'pending-install.json')) { Remove-Item -LiteralPath (Join-Path $InstallRoot 'pending-install.json') }
-    Write-Warning 'Installation failed. Previous runtime/plugin/global Claude contract/status-line settings restored where they existed. A failed staged release is retained for diagnosis. No database migration was performed by this installer.'
+    Write-Warning 'Installation failed. Previous runtime/plugin/global Claude contract/status-line/auto-compaction settings restored where they existed. A failed staged release is retained for diagnosis. No database migration was performed by this installer.'
     throw
 } finally {
     $installLock.Dispose()
