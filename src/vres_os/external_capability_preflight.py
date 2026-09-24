@@ -36,8 +36,9 @@ _SUPERPOWERS_EXECUTION_SKILLS = {
     "finishing-a-development-branch",
 }
 
-# Host agents classified by Phase B as advisory/read-only helpers. They may
-# inspect/plan, but never become Vres worker evidence.
+# Host agents classified by Phase B as guarded advisory helpers. They may
+# assist inspection/planning under their host-defined tool contract, but never
+# become Vres worker evidence.
 _ADVISORY_HOST_AGENTS = {"Explore", "Plan", "claude-code-guide"}
 
 # Direct JEV browser_act is intentionally narrow in V1. browser_do has its own
@@ -137,13 +138,19 @@ def evaluate_external_capability_preflight(
                 "Claude/Vres tool input."
             )
 
-        if jev_tool == "browser_do" and tool_input.get("allow_irreversible") is True:
+        if jev_tool == "browser_do" and tool_input.get("allow_irreversible") not in (None, False):
             return _deny(
-                "JEV Browser irreversible actions are held in V1. "
-                "Do not set allow_irreversible=true; use a disposable/reversible fixture."
+                "JEV Browser's explicit irreversible-action bypass is held in V1. "
+                "Do not set allow_irreversible; use a disposable/reversible fixture and "
+                "treat the external irreversible detector as fallible."
             )
 
         if jev_tool == "browser_act":
+            if tool_input.get("accept_dialog") not in (None, False):
+                return _deny(
+                    "JEV browser_act dialog acceptance is held in V1; direct actions may not "
+                    "accept confirm/prompt dialogs."
+                )
             action = str(tool_input.get("action") or "").strip().lower()
             if action not in _JEV_SAFE_DIRECT_ACTIONS:
                 return _deny(
