@@ -213,7 +213,12 @@ def compact(reason: str, payload: dict[str, Any] | None = None) -> None:
                 task.state_summary or "Automatic context checkpoint",
                 task.current_step or task.current_phase or "in progress",
                 task.next_action or "Resume from persisted task state",
-                {"automatic": True, "session_id": sid, "snapshot_captured": bool(snap)},
+                {
+                    "automatic": True,
+                    "session_id": sid,
+                    "snapshot_captured": bool(snap),
+                    "trigger": payload.get("trigger"),
+                },
                 reason,
                 "vres-lifecycle",
             )
@@ -238,7 +243,10 @@ def post_compact() -> None:
                 task.task_key,
                 "POST_COMPACT",
                 "vres-lifecycle",
-                {"compact_summary": payload.get("compact_summary") or payload.get("summary")},
+                {
+                    "trigger": payload.get("trigger"),
+                    "compact_summary": payload.get("compact_summary") or payload.get("summary"),
+                },
                 sid,
             )
     except Exception as exc:
