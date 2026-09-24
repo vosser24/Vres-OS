@@ -1,6 +1,6 @@
 # Phase B — External Capability Discovery & Audit
 
-Status: **CLASSIFICATION CORRECTED — FRESH INDEPENDENT VALIDATION REQUIRED**
+Status: **CLASSIFICATION REVISED AFTER FAILED VALIDATION — FRESH INDEPENDENT VALIDATION REQUIRED**
 
 GitHub issue: #145
 
@@ -307,8 +307,8 @@ The physical inventory found **45 installed/visible external capability items**.
 
 Classification totals:
 
-- `USE`: 3
-- `USE WITH GUARDS`: 25
+- `USE`: 2
+- `USE WITH GUARDS`: 26
 - `DEVELOPMENT REQUIRED`: 8
 - `DECLINE`: 9
 
@@ -358,7 +358,7 @@ Public/source provenance checked where discoverable:
 - `pdf`, `pptx`, `xlsx`, `docx`: Anthropic public `anthropics/skills` repository; Anthropic notes the production document skills are source-available and should be tested in the target environment before critical reliance.
 - `vercel-react-best-practices`: public `vercel-labs/agent-skills`, MIT, Vercel-authored React/Next.js performance guidance.
 - `senior-backend` and `senior-fullstack`: public Borghei Claude-Skills definitions describe scaffolding, database/API/architecture and quality-analysis behavior.
-- `code-reviewer`: multiple public skills use this generic name; the installed account-backed copy's exact upstream was not provable from the inventory, so classification relies on the observed local manifest/description and read-only nature rather than falsely attributing it.
+- `code-reviewer`: multiple public skills use this generic name; the installed account-backed copy's exact upstream was not provable from the inventory, so classification relies on the observed local manifest/description plus the explicit guard that any fix/edit behavior is scoped implementation work, rather than falsely attributing a public upstream.
 - `memory`, `import-memory`, `morning`, `prism`, and `dedeman-ms`: exact upstream provenance was not safely recoverable from the target inventory; that uncertainty is retained.
 
 ### 9.3 Host-bundled skills
@@ -368,7 +368,7 @@ Host-bundled skills are treated as Claude host capabilities, not Vres-owned capa
 | Skill | Classification | Phase-B rationale / mandatory guard |
 |---|---|---|
 | update-config | DECLINE | Direct settings mutation can overwrite/undermine Vres-owned Claude configuration surfaces. Vres installation/update owns its fields and must preserve unrelated settings explicitly. |
-| keybindings-help | USE | Informational help; no material Vres authority or side-effect conflict observed. |
+| keybindings-help | USE WITH GUARDS | Primarily informational, but it can modify Claude keybinding configuration. Use for explanation freely; any settings edit requires explicit user intent and must preserve Vres-owned/unrelated configuration. |
 | code-review | USE WITH GUARDS | Advisory review only; never protected validation or completion authority. If `--fix`/edit behavior is used, it becomes a normal scoped implementation write. |
 | simplify | USE WITH GUARDS | May change code. Only inside a routed write-capable work unit with declared scope and acceptance evidence. |
 | fewer-permission-prompts | DECLINE | Explicitly weakens/changes permission prompting and conflicts with Vres's conservative execution/safety posture. |
@@ -411,8 +411,8 @@ Observed plugin state:
 
 | Candidate | Installed? | Classification | Roadmap handling |
 |---|---:|---|---|
-| JEV Browser | No | provisional USE WITH GUARDS | The authoritative post-finalization handoff explicitly labels this **Phase C — JEV Browser Control**. Phase B does not install or implement it. |
-| Superpowers | No | provisional USE WITH GUARDS | The authoritative post-finalization handoff explicitly labels this **Phase E — Superpowers plugin**. It remains optional methodology only and never a Vres runtime dependency. |
+| JEV Browser | No | provisional USE WITH GUARDS | The repository roadmap places **JEV Browser Control** immediately after the external-capability audit and before the E-11 capstone. Phase B does not install or implement it. |
+| Superpowers | No | provisional USE WITH GUARDS | The repository roadmap places **Superpowers plugin** after the E-11 capstone. It remains optional methodology only and never a Vres runtime dependency. |
 
 ### 9.7 Non-capability finding: stale Claude auto-mode trust metadata
 
@@ -447,6 +447,4 @@ Issue #145 may close only when:
 - [x] JEV Browser and Superpowers remain at their roadmap positions;
 - [ ] the final matrix has received independent protected validation.
 
-Until the final independent validation passes, Phase C remains held.
-
-Until then, Phase C is held.
+Until the final independent validation passes, the next roadmap item (JEV Browser Control) remains held.
