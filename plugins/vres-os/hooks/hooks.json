@@ -72,7 +72,7 @@
         ]
       },
       {
-        "matcher": "^(Skill|Agent|mcp__.*)$",
+        "matcher": "^(Skill|Agent)$",
         "hooks": [
           {
             "type": "command",
