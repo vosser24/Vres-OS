@@ -114,9 +114,7 @@ def test_hook_commands_resolve_to_shipped_wrappers():
                     and wrapper_name == "vres-external-capability-preflight.ps1"
                 ):
                     matcher = group.get("matcher") or ""
-                    assert "Skill" in matcher
-                    assert "Agent" in matcher
-                    assert "mcp__" in matcher.lower()
+                    assert matcher == "^(Skill|Agent)$"
                     assert hook.get("timeout") is None
                     external_capability_preflight_wrapper_seen = True
                 elif event == "PreToolUse" and group.get("matcher") == "Agent":
