@@ -63,6 +63,7 @@ jobs:
           src/vres_os/processes.py
           src/vres_os/model_policy.py
           src/vres_os/model_experiments.py
+          src/vres_os/claude_experiment.py
           tests/test_company_authority.py
           tests/test_company_optimization_mcp.py
           tests/test_replay_attestation.py
@@ -70,6 +71,7 @@ jobs:
           tests/test_procedure_recipe.py
           tests/test_model_policy_provenance.py
           tests/test_model_experiment_evidence.py
+          tests/test_claude_experiment_producer.py
           tests/integration/test_company_authority_journey.py
           tests/integration/test_company_optimization_journey.py
           tests/integration/test_replay_attestation_journey.py

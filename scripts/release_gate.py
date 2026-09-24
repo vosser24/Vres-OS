@@ -176,6 +176,7 @@ def structure():
         ROOT / 'src/vres_os/procedure_worker.py',
         ROOT / 'src/vres_os/model_policy.py',
         ROOT / 'src/vres_os/model_experiments.py',
+        ROOT / 'src/vres_os/claude_experiment.py',
         ROOT / 'src/vres_os/mcp_entrypoint.py',
         ROOT / 'src/vres_os/task_lifecycle.py',
         ROOT / 'src/vres_os/task_decisions.py',
@@ -216,6 +217,7 @@ sys.path.insert(0, sys.argv[1])
 import vres_os, vres_os.cli, vres_os.metrics, vres_os.optimization, vres_os.company_mcp, vres_os.mcp_entrypoint, vres_os.replay
 import vres_os.executor, vres_os.procedure_recipe, vres_os.procedure_worker, vres_os.model_policy
 import vres_os.model_experiments, vres_os.task_lifecycle, vres_os.task_decisions, vres_os.statusline
+import vres_os.claude_experiment
 assert pathlib.Path(vres_os.__file__).resolve().is_relative_to(pathlib.Path(sys.argv[1]).resolve())
 assert callable(vres_os.company_mcp.main)
 assert callable(vres_os.mcp_entrypoint.main)
@@ -233,6 +235,7 @@ assert hasattr(vres_os.executor, 'ProcedureExecutorService')
 assert callable(vres_os.procedure_worker.main)
 assert hasattr(vres_os.model_policy, 'ModelPolicyService')
 assert hasattr(vres_os.model_experiments, 'ModelExperimentService')
+assert callable(vres_os.claude_experiment.run_claude_experiment)
 assert callable(vres_os.statusline.render_statusline)
 assert len(list(importlib.resources.files('vres_os').joinpath('migrations').iterdir())) >= 20
 print('installed runtime source:', vres_os.__file__)

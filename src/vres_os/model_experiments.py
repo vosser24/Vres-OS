@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,87 @@ from .validation import ValidationService
 
 _ALLOWED_PHASES = frozenset({"plan", "build", "summarize", "research", "analyze", "debug"})
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+
+# Evidence kinds. Absent/"provider_api" is the legacy provider-emitted contract and is unchanged.
+PROVIDER_API_EVIDENCE_KIND = "provider_api"
+CLAUDE_HOST_EVIDENCE_KIND = "claude_code_host"
+CLAUDE_HOST_ADAPTER = "vres-claude-code-print"
+CLAUDE_HOST_SOURCE = "claude_code_host_result"
+CLAUDE_HOST_PROVIDER_LABEL = "firstParty"
+CLAUDE_HOST_CONTRACT_VERSION = "vres-claude-print-v1"
+CLAUDE_HOST_FAMILIES = ("sonnet", "opus")
+CLAUDE_HOST_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+CLAUDE_HOST_COST_SEMANTICS = "host_list_price_estimate_not_billing_truth"
+CLAUDE_MODEL_RE = re.compile(r"^claude-(sonnet|opus)-[a-z0-9]+(?:-[a-z0-9]+)*$")
+HOST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+_COST_SCALE = Decimal("0.000001")  # numeric(14,6)
+_COST_LIMIT = Decimal("100000000")  # numeric(14,6) holds values < 10^8
+_USAGE_COUNTS = (
+    "input_tokens",
+    "output_tokens",
+    "cache_read_input_tokens",
+    "cache_creation_input_tokens",
+)
+
+
+def claude_host_invocation(family: str, effort: str) -> dict[str, Any]:
+    """The single owner of the frozen Claude Code print invocation (executable excluded)."""
+    if family not in CLAUDE_HOST_FAMILIES:
+        raise ValueError("Claude Code experiments support only the sonnet and opus families")
+    if effort not in CLAUDE_HOST_EFFORTS:
+        raise ValueError("Claude Code experiment effort must be one of " + "/".join(CLAUDE_HOST_EFFORTS))
+    return {
+        "version": CLAUDE_HOST_CONTRACT_VERSION,
+        "argv": [
+            "--safe-mode",
+            "--print",
+            "--model",
+            family,
+            "--effort",
+            effort,
+            "--output-format",
+            "json",
+            "--max-turns",
+            "1",
+            "--permission-prompts",
+            "none",
+            "--tools",
+            "",
+            "--disallowedTools",
+            "mcp__*",
+            "--no-session-persistence",
+        ],
+        "shell": False,
+        "stdin_prompt": True,
+        "cwd": "fresh_empty_temporary_directory",
+    }
+
+
+def parse_host_cost(value: Any, label: str) -> Decimal:
+    """Decimal-only cost parsing; binary floats and booleans are never accepted."""
+    if isinstance(value, bool) or not isinstance(value, (Decimal, str)):
+        raise ValueError(f"{label} must be a Decimal or decimal string")
+    try:
+        cost = Decimal(value)
+    except InvalidOperation as exc:
+        raise ValueError(f"{label} is not a decimal number") from exc
+    if not cost.is_finite() or cost < 0 or cost >= _COST_LIMIT:
+        raise ValueError(f"{label} must be finite, non-negative and within numeric(14,6)")
+    return cost
+
+
+def project_estimated_cost(value: Any) -> Decimal:
+    """The exact host value rounded half-up to the 6 decimals PostgreSQL numeric(14,6) stores."""
+    return parse_host_cost(value, "estimated_cost").quantize(_COST_SCALE, rounding=ROUND_HALF_UP)
+
+
+def normalize_phase(phase: str) -> str:
+    phase = phase.strip().lower()
+    if phase in {PROTECTED_VALIDATION_PHASE, "validation", "review", "audit"}:
+        raise ValueError("The protected validation model is not an optimization experiment target")
+    if phase not in _ALLOWED_PHASES:
+        raise ValueError("Unknown or unsupported model experiment phase")
+    return phase
 
 
 def _connect():
@@ -39,12 +121,45 @@ def _host_evidence(
     input_tokens: int,
     output_tokens: int,
     execution_evidence: dict[str, Any],
+    estimated_cost: Any = None,
 ) -> dict[str, Any]:
     if not isinstance(execution_evidence, dict) or not execution_evidence:
         raise ValueError("Host model run requires structured execution evidence")
     safe = redact(execution_evidence)
     if safe != execution_evidence:
         raise ValueError("Host model execution evidence must not contain secret-like material")
+    kind = safe.get("evidence_kind")
+    common = dict(
+        provider=provider,
+        model=model,
+        effort=effort,
+        success=success,
+        runtime_ms=runtime_ms,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        estimated_cost=estimated_cost,
+    )
+    if kind is None or kind == PROVIDER_API_EVIDENCE_KIND:
+        return _provider_api_evidence(safe, **common)
+    if kind == CLAUDE_HOST_EVIDENCE_KIND:
+        return _claude_host_evidence(safe, **common)
+    raise ValueError("Unknown host model evidence_kind")
+
+
+def _provider_api_evidence(
+    safe: dict[str, Any],
+    *,
+    provider: str,
+    model: str,
+    effort: str | None,
+    success: bool,
+    runtime_ms: int,
+    input_tokens: int,
+    output_tokens: int,
+    estimated_cost: Any,
+) -> dict[str, Any]:
+    if estimated_cost is not None:
+        raise ValueError("estimated_cost is accepted only for claude_code_host evidence")
     required_text = {
         "adapter": safe.get("adapter"),
         "provider_response_id": safe.get("provider_response_id"),
@@ -75,15 +190,99 @@ def _host_evidence(
     return safe
 
 
+def _count(value: Any, label: str, *, minimum: int = 0) -> int:
+    if type(value) is not int or value < minimum:
+        raise ValueError(f"Claude Code host evidence {label} must be an integer >= {minimum}")
+    return value
+
+
+def _claude_host_evidence(
+    safe: dict[str, Any],
+    *,
+    provider: str,
+    model: str,
+    effort: str | None,
+    success: bool,
+    runtime_ms: int,
+    input_tokens: int,
+    output_tokens: int,
+    estimated_cost: Any,
+) -> dict[str, Any]:
+    if "provider_response_id" in safe:
+        raise ValueError("Claude Code host evidence must not carry provider_response_id")
+    if estimated_cost is None:
+        raise ValueError("Claude Code host evidence requires estimated_cost")
+    if safe.get("adapter") != CLAUDE_HOST_ADAPTER:
+        raise ValueError("Claude Code host evidence has an unexpected adapter")
+    if provider != "claude" or safe.get("provider") != "claude":
+        raise ValueError("Claude Code host evidence provider must be claude")
+    matched = CLAUDE_MODEL_RE.fullmatch(model)
+    if not matched or safe.get("provider_model") != model:
+        raise ValueError("Claude Code host evidence identity must be the exact physical sonnet/opus model")
+    family = matched.group(1)
+    if safe.get("requested_model_family") != family:
+        raise ValueError("Claude Code host physical model does not match the requested family")
+    if safe.get("identity_source") != CLAUDE_HOST_SOURCE or safe.get("usage_source") != CLAUDE_HOST_SOURCE:
+        raise ValueError("Claude Code host identity and usage must come from the host result")
+    for key in ("host_result_id", "host_session_id"):
+        value = safe.get(key)
+        if not isinstance(value, str) or not HOST_ID_RE.fullmatch(value):
+            raise ValueError(f"Claude Code host evidence requires a valid {key}")
+    if effort not in CLAUDE_HOST_EFFORTS:
+        raise ValueError("Claude Code host evidence effort is not a supported effort level")
+    if safe.get("effort_source") != "adapter_request" or safe.get("requested_effort") != effort:
+        raise ValueError("Stored model effort does not match the adapter invocation request")
+    if safe.get("runtime_source") != "adapter_monotonic" or safe.get("runtime_ms") != runtime_ms:
+        raise ValueError("Stored runtime does not match the adapter monotonic measurement")
+    for key in ("host_duration_ms", "host_duration_api_ms"):
+        if safe.get(key) is not None:
+            _count(safe[key], key)
+    if success is not True or safe.get("completion_success") is not True:
+        raise ValueError("Claude Code host evidence requires a successful completion")
+    if safe.get("host_provider_label") != CLAUDE_HOST_PROVIDER_LABEL:
+        raise ValueError("Claude Code host evidence provider label must be firstParty")
+    for key in ("host_cost_basis", "claude_code_version"):
+        if not isinstance(safe.get(key), str) or not safe[key].strip():
+            raise ValueError(f"Claude Code host evidence requires {key}")
+    if safe.get("cost_semantics") != CLAUDE_HOST_COST_SEMANTICS:
+        raise ValueError("Claude Code host cost must be labelled a host list-price estimate")
+    if safe.get("invocation_contract") != claude_host_invocation(family, effort):
+        raise ValueError("Claude Code host evidence does not carry the frozen invocation contract")
+    usage = safe.get("host_usage")
+    if not isinstance(usage, dict):
+        raise ValueError("Claude Code host evidence requires host_usage")
+    counts = {key: _count(usage.get(key), key) for key in _USAGE_COUNTS}
+    _count(usage.get("context_window"), "context_window", minimum=1)
+    if usage.get("thinking_tokens") is not None:
+        _count(usage["thinking_tokens"], "thinking_tokens")
+    if counts["input_tokens"] != input_tokens or counts["output_tokens"] != output_tokens:
+        raise ValueError("Stored token metrics do not match host-emitted usage")
+    if counts["output_tokens"] <= 0 or (
+        counts["input_tokens"] + counts["cache_read_input_tokens"] + counts["cache_creation_input_tokens"] <= 0
+    ):
+        raise ValueError("Claude Code host evidence requires non-zero observed usage")
+    host_cost = parse_host_cost(safe.get("host_cost_usd"), "host_cost_usd")
+    if host_cost != parse_host_cost(safe.get("host_total_cost_usd"), "host_total_cost_usd"):
+        raise ValueError("Claude Code host per-model and total cost disagree")
+    if parse_host_cost(estimated_cost, "estimated_cost") != project_estimated_cost(host_cost):
+        raise ValueError("Stored estimated_cost is not the 6-decimal projection of the exact host cost")
+    return safe
+
+
 def _identity(row: dict[str, Any]) -> dict[str, Any]:
     evidence = row["execution_evidence"] or {}
-    return {
+    identity = {
         "provider": row["provider"],
         "model": row["model"],
         "effort": row["effort"],
         "adapter": evidence.get("adapter"),
-        "provider_response_id": evidence.get("provider_response_id"),
     }
+    if evidence.get("evidence_kind") == CLAUDE_HOST_EVIDENCE_KIND:
+        return identity | {
+            "evidence_kind": CLAUDE_HOST_EVIDENCE_KIND,
+            "host_result_id": evidence.get("host_result_id"),
+        }
+    return identity | {"provider_response_id": evidence.get("provider_response_id")}
 
 
 def _host_run(conn, run_id: int) -> dict[str, Any]:
@@ -114,6 +313,7 @@ def _host_run(conn, run_id: int) -> dict[str, Any]:
         input_tokens=int(data["input_tokens"]),
         output_tokens=int(data["output_tokens"]),
         execution_evidence=data["execution_evidence"],
+        estimated_cost=data.get("estimated_cost"),
     )
     return data
 
@@ -180,12 +380,10 @@ class ModelExperimentService:
         input_digest: str,
         output_digest: str,
         execution_evidence: dict[str, Any],
+        estimated_cost: Any = None,
+        project_id: int | None = None,
     ) -> int:
-        phase = phase.strip().lower()
-        if phase in {PROTECTED_VALIDATION_PHASE, "validation", "review", "audit"}:
-            raise ValueError("The protected validation model is not an optimization experiment target")
-        if phase not in _ALLOWED_PHASES:
-            raise ValueError("Unknown or unsupported model experiment phase")
+        phase = normalize_phase(phase)
         provider = provider.strip()
         model = model.strip()
         if not provider or not model:
@@ -210,14 +408,31 @@ class ModelExperimentService:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             execution_evidence=execution_evidence,
+            estimated_cost=estimated_cost,
         )
+        stored_cost = None if estimated_cost is None else project_estimated_cost(estimated_cost)
         with _connect() as conn, conn.transaction():
-            task = conn.execute(
-                "SELECT id,project_id,task_family,status FROM vres.tasks WHERE task_key=%s",
-                (task_key,),
-            ).fetchone()
-            if not task or task["status"] not in {"active", "blocked", "waiting_user"}:
-                raise ValueError("Host model experiment requires an unfinished persistent task")
+            task = self._require_open_task(conn, task_key, project_id)
+            if evidence.get("evidence_kind") == CLAUDE_HOST_EVIDENCE_KIND:
+                # Cooperating-writer duplicate guard without a unique index: serialize on the
+                # host result id, then look for a committed row after the lock is held.
+                host_result_id = evidence["host_result_id"]
+                conn.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
+                    (f"model-host-result:{CLAUDE_HOST_EVIDENCE_KIND}:{host_result_id}",),
+                )
+                duplicate = conn.execute(
+                    """
+                    SELECT id FROM vres.model_runs
+                     WHERE measurement_source='host'
+                       AND execution_evidence->>'evidence_kind'=%s
+                       AND execution_evidence->>'host_result_id'=%s
+                     LIMIT 1
+                    """,
+                    (CLAUDE_HOST_EVIDENCE_KIND, host_result_id),
+                ).fetchone()
+                if duplicate:
+                    raise ValueError("Claude Code host result was already recorded as a model run")
             row = conn.execute(
                 """
                 INSERT INTO vres.model_runs(
@@ -225,7 +440,7 @@ class ModelExperimentService:
                   runtime_ms,input_tokens,output_tokens,estimated_cost,retries,validator_result,
                   measurement_source,input_digest,output_digest,execution_evidence
                 ) VALUES (
-                  %s,%s,%s,%s,%s,%s,%s,NULL,%s,%s,%s,NULL,0,NULL,
+                  %s,%s,%s,%s,%s,%s,%s,NULL,%s,%s,%s,%s,0,NULL,
                   'host',%s,%s,%s::jsonb
                 ) RETURNING id
                 """,
@@ -240,12 +455,30 @@ class ModelExperimentService:
                     runtime_ms,
                     input_tokens,
                     output_tokens,
+                    stored_cost,
                     input_digest,
                     output_digest,
                     json.dumps(evidence),
                 ),
             ).fetchone()
         return int(row["id"])
+
+    @staticmethod
+    def _require_open_task(conn, task_key: str, project_id: int | None) -> dict[str, Any]:
+        task = conn.execute(
+            "SELECT id,project_id,task_family,status FROM vres.tasks WHERE task_key=%s",
+            (task_key,),
+        ).fetchone()
+        if not task or task["status"] not in {"active", "blocked", "waiting_user"}:
+            raise ValueError("Host model experiment requires an unfinished persistent task")
+        if project_id is not None and task["project_id"] != project_id:
+            raise ValueError("Host model experiment task does not belong to the current project")
+        return task
+
+    def assert_task_open(self, task_key: str, project_id: int) -> None:
+        """Fail before any paid model call when the task cannot receive the run."""
+        with _connect() as conn:
+            self._require_open_task(conn, task_key, project_id)
 
     def prepare_validation(
         self,
