@@ -64,11 +64,25 @@ _SENSITIVE_INPUT_KEYS = {
 }
 _SECRET_TEXT = re.compile(
     r"(?i)(?:^|[^a-z0-9])"
-    r"(?:typesafe[_ -]?api[_ -]?key|api[_ -]?key|password|passwd|passcode|otp|cvv|"
-    r"card[_ -]?number|access[_ -]?token|refresh[_ -]?token|token|secret|"
-    r"authorization|client[_ -]?secret)"
+    r"(?:typesafe[_ -]?api[_ -]?key|(?:[a-z0-9]+[_ -]?)*api[_ -]?key|"
+    r"password|passwd|pass|passcode|otp|pin|cvv|card(?:[_ -]?number)?|"
+    r"(?:[a-z0-9]+[_ -]?)*(?:access|refresh|id|session)[_ -]?token|token|"
+    r"secret|authorization|client[_ -]?secret|cookies?|set[_ -]?cookie|session[_ -]?id)"
     r"\s*(?:[:=]|\s+)\s*\S+"
 )
+
+_CARD_DIGITS = re.compile(r"(?<!\d)(?:\d[ -]?){12,19}(?!\d)")
+
+_JEV_KNOWN_TOOLS = {
+    "browser_open",
+    "browser_do",
+    "browser_check",
+    "browser_choose",
+    "browser_snapshot",
+    "browser_act",
+    "browser_screenshot",
+    "browser_close",
+}
 
 
 # Host agents classified by Phase B as guarded advisory helpers. They may
@@ -133,29 +147,55 @@ def _jev_tool(tool_name: str) -> str | None:
     if len(parts) != 3:
         return None
     server = parts[1].lower().replace("_", "-")
-    tool = parts[2].lower()
-    if "jev-browser" not in server or not tool.startswith("browser_"):
+    if "jev-browser" not in server:
         return None
-    return tool
+    return parts[2].lower()
 
 
 def _normalized_key(value: Any) -> str:
     return re.sub(r"[^a-z0-9]", "", str(value).lower())
 
 
+def _is_sensitive_input_key(key: Any) -> bool:
+    normalized = _normalized_key(key)
+    if normalized in _SENSITIVE_INPUT_KEYS:
+        return True
+    if normalized.endswith("apikey") or normalized.endswith("token"):
+        return True
+    if normalized.endswith("password") or normalized.endswith("passcode"):
+        return True
+    if normalized.endswith("secret") or normalized.endswith("privatekey"):
+        return True
+    if "cookie" in normalized:
+        return True
+    return normalized in {"sessionid", "idtoken"}
+
+
 def _contains_sensitive_key(value: Any, *, depth: int = 0) -> bool:
     if depth > 32:
         return True
     if isinstance(value, dict):
+        # Common form-serialization shape: [{"name": "password", "value": "..."}].
+        field_name = value.get("name")
+        if field_name is not None and _is_sensitive_input_key(field_name):
+            field_value = value.get("value")
+            if field_value not in (None, "", False):
+                return True
         for key, item in value.items():
-            if _normalized_key(key) in _SENSITIVE_INPUT_KEYS and item not in (None, "", False):
+            if _is_sensitive_input_key(key) and item not in (None, "", False):
                 return True
             if _contains_sensitive_key(item, depth=depth + 1):
                 return True
     elif isinstance(value, (list, tuple)):
         return any(_contains_sensitive_key(item, depth=depth + 1) for item in value)
-    elif isinstance(value, str) and _SECRET_TEXT.search(value):
-        return True
+    elif isinstance(value, str):
+        if _SECRET_TEXT.search(value):
+            return True
+        # Card-number-like digit runs are treated conservatively when they appear
+        # in external-browser input, even if separators are spaces/hyphens.
+        compact = re.sub(r"[ -]", "", value)
+        if _CARD_DIGITS.search(value) and compact.isdigit():
+            return True
     return False
 
 
@@ -168,11 +208,19 @@ def _contains_secret_shaped_input(value: Any) -> bool:
         return True
 
 
-def _normalized_input_value(tool_input: dict[str, Any], key: str) -> Any:
-    for raw_key, value in tool_input.items():
-        if _normalized_key(raw_key) == key:
-            return value
-    return None
+def _matching_input_values(tool_input: dict[str, Any], key: str) -> list[Any]:
+    return [
+        value
+        for raw_key, value in tool_input.items()
+        if _normalized_key(raw_key) == key
+    ]
+
+
+def _has_non_false_input_alias(tool_input: dict[str, Any], key: str) -> bool:
+    return any(
+        value not in (None, False, 0, "")
+        for value in _matching_input_values(tool_input, key)
+    )
 
 
 def evaluate_external_capability_preflight(
@@ -199,6 +247,12 @@ def evaluate_external_capability_preflight(
                 "JEV Browser is a governed external execution capability. "
                 "Start/bind an unfinished Vres task before using it."
             )
+        if jev_tool not in _JEV_KNOWN_TOOLS:
+            return _deny(
+                f"JEV Browser tool '{jev_tool}' is not in the pinned 0.1.1 onboarding contract. "
+                "Re-audit the upstream tool surface before use."
+            )
+
         tool_input = payload.get("tool_input")
         if not isinstance(tool_input, dict):
             return _deny("JEV Browser tool input is not inspectable; execution is denied.")
@@ -210,9 +264,8 @@ def evaluate_external_capability_preflight(
                 "Claude/Vres tool input."
             )
 
-        if (
-            jev_tool == "browser_do"
-            and _normalized_input_value(tool_input, "allowirreversible") not in (None, False, 0)
+        if jev_tool == "browser_do" and _has_non_false_input_alias(
+            tool_input, "allowirreversible"
         ):
             return _deny(
                 "JEV Browser's explicit irreversible-action bypass is held in V1. "
@@ -221,7 +274,7 @@ def evaluate_external_capability_preflight(
             )
 
         if jev_tool == "browser_act":
-            if _normalized_input_value(tool_input, "acceptdialog") not in (None, False, 0):
+            if _has_non_false_input_alias(tool_input, "acceptdialog"):
                 return _deny(
                     "JEV browser_act dialog acceptance is held in V1; direct actions may not "
                     "accept confirm/prompt dialogs."
