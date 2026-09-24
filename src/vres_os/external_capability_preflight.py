@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from typing import Any
 
@@ -34,7 +35,41 @@ _SUPERPOWERS_EXECUTION_SKILLS = {
     "dispatching-parallel-agents",
     "using-git-worktrees",
     "finishing-a-development-branch",
+    "writing-skills",
 }
+
+_SUPERPOWERS_PINNED_SKILLS = _SUPERPOWERS_ADVISORY_SKILLS | _SUPERPOWERS_EXECUTION_SKILLS
+
+_SENSITIVE_INPUT_KEYS = {
+    "password",
+    "passwd",
+    "pwd",
+    "pass",
+    "passcode",
+    "otp",
+    "pin",
+    "cvv",
+    "cardnumber",
+    "apikey",
+    "typesafeapikey",
+    "accesstoken",
+    "refreshtoken",
+    "token",
+    "secret",
+    "authorization",
+    "cookie",
+    "sessiontoken",
+    "clientsecret",
+    "privatekey",
+}
+_SECRET_TEXT = re.compile(
+    r"(?i)(?:^|[^a-z0-9])"
+    r"(?:typesafe[_ -]?api[_ -]?key|api[_ -]?key|password|passwd|passcode|otp|cvv|"
+    r"card[_ -]?number|access[_ -]?token|refresh[_ -]?token|token|secret|"
+    r"authorization|client[_ -]?secret)"
+    r"\s*(?:[:=]|\s+)\s*\S+"
+)
+
 
 # Host agents classified by Phase B as guarded advisory helpers. They may
 # assist inspection/planning under their host-defined tool contract, but never
@@ -72,35 +107,72 @@ def _skill_name(payload: dict[str, Any]) -> str:
 
 def _superpowers_leaf(skill_name: str) -> str | None:
     value = skill_name.strip()
+    if value.startswith("/"):
+        value = value[1:].strip()
     if not value:
         return None
-    for prefix in ("superpowers:", "superpowers/"):
-        if value.lower().startswith(prefix):
-            return value[len(prefix) :].strip().lower()
+
+    lowered = value.lower()
+    match = re.match(r"^superpowers(?:@[^:/\s]+)?[:/](.+)$", lowered)
+    if match:
+        return match.group(1).strip()
+
+    # Claude Code supports unqualified aliases for plugin skills. Because this
+    # onboarding pins Superpowers 6.4.1, recognize every skill in that frozen
+    # snapshot by its bare leaf as well as by its namespaced form.
+    if lowered in _SUPERPOWERS_PINNED_SKILLS:
+        return lowered
     return None
 
 
 def _jev_tool(tool_name: str) -> str | None:
     value = tool_name.strip()
-    if not value.startswith("mcp__"):
+    if not value.lower().startswith("mcp__"):
         return None
-    lowered = value.lower()
-    if "jev-browser" not in lowered and "jev_browser" not in lowered:
+    parts = value.split("__", 2)
+    if len(parts) != 3:
         return None
-    marker = "__browser_"
-    index = lowered.rfind(marker)
-    if index < 0:
+    server = parts[1].lower().replace("_", "-")
+    tool = parts[2].lower()
+    if "jev-browser" not in server or not tool.startswith("browser_"):
         return None
-    return "browser_" + lowered[index + len(marker) :]
+    return tool
+
+
+def _normalized_key(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(value).lower())
+
+
+def _contains_sensitive_key(value: Any, *, depth: int = 0) -> bool:
+    if depth > 32:
+        return True
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if _normalized_key(key) in _SENSITIVE_INPUT_KEYS and item not in (None, "", False):
+                return True
+            if _contains_sensitive_key(item, depth=depth + 1):
+                return True
+    elif isinstance(value, (list, tuple)):
+        return any(_contains_sensitive_key(item, depth=depth + 1) for item in value)
+    elif isinstance(value, str) and _SECRET_TEXT.search(value):
+        return True
+    return False
 
 
 def _contains_secret_shaped_input(value: Any) -> bool:
     try:
-        return redact(value) != value
+        return redact(value) != value or _contains_sensitive_key(value)
     except (TypeError, ValueError):
         # An unredactable/over-deep structure is not safe to hand to an external
         # browser capability.
         return True
+
+
+def _normalized_input_value(tool_input: dict[str, Any], key: str) -> Any:
+    for raw_key, value in tool_input.items():
+        if _normalized_key(raw_key) == key:
+            return value
+    return None
 
 
 def evaluate_external_capability_preflight(
@@ -138,7 +210,10 @@ def evaluate_external_capability_preflight(
                 "Claude/Vres tool input."
             )
 
-        if jev_tool == "browser_do" and tool_input.get("allow_irreversible") not in (None, False):
+        if (
+            jev_tool == "browser_do"
+            and _normalized_input_value(tool_input, "allowirreversible") not in (None, False, 0)
+        ):
             return _deny(
                 "JEV Browser's explicit irreversible-action bypass is held in V1. "
                 "Do not set allow_irreversible; use a disposable/reversible fixture and "
@@ -146,7 +221,7 @@ def evaluate_external_capability_preflight(
             )
 
         if jev_tool == "browser_act":
-            if tool_input.get("accept_dialog") not in (None, False):
+            if _normalized_input_value(tool_input, "acceptdialog") not in (None, False, 0):
                 return _deny(
                     "JEV browser_act dialog acceptance is held in V1; direct actions may not "
                     "accept confirm/prompt dialogs."
@@ -220,7 +295,7 @@ def _relevant_tool(payload: dict[str, Any]) -> bool:
     if payload.get("hook_event_name") != "PreToolUse":
         return False
     tool_name = str(payload.get("tool_name") or "").strip()
-    return tool_name in {"Skill", "Agent"} or _jev_tool(tool_name) is not None
+    return tool_name in {"Skill", "Agent"} or tool_name.lower().startswith("mcp__")
 
 
 def main() -> int:
