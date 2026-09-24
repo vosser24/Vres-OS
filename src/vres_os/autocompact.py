@@ -36,16 +36,12 @@ def _read_json_file(path: Path) -> tuple[dict[str, Any] | None, bool]:
         value = json.loads(body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
         return None, bom
-    if not isinstance(value, dict):
-        return None, bom
-    return value, bom
+    return (value, bom) if isinstance(value, dict) else (None, bom)
 
 
 def _write_json_file(path: Path, value: dict[str, Any], *, bom: bool) -> None:
     raw = (json.dumps(value, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
-    if bom:
-        raw = b"\xef\xbb\xbf" + raw
-    _atomic_write(path, raw)
+    _atomic_write(path, (b"\xef\xbb\xbf" + raw) if bom else raw)
 
 
 def _truthy(value: Any) -> bool:
@@ -61,21 +57,39 @@ def _settings_env(settings: dict[str, Any]) -> tuple[dict[str, Any] | None, str 
     return dict(current), None
 
 
-def _conflict_reason(env: dict[str, Any]) -> str | None:
+def _settings_conflict(env: dict[str, Any]) -> str | None:
     if env.get(_AUTO_COMPACT_WINDOW_KEY) not in (None, ""):
         return "existing-custom-auto-compact-window-preserved"
-    if os.environ.get(_AUTO_COMPACT_WINDOW_KEY):
-        return "process-auto-compact-window-preserved"
-    for key in _DISABLE_KEYS:
-        if _truthy(env.get(key)) or _truthy(os.environ.get(key)):
-            return "existing-auto-compact-disable-preserved"
+    if any(_truthy(env.get(key)) for key in _DISABLE_KEYS):
+        return "existing-auto-compact-disable-preserved"
     return None
 
 
+def _process_conflict() -> str | None:
+    if os.environ.get(_AUTO_COMPACT_WINDOW_KEY):
+        return "process-auto-compact-window-present"
+    if any(_truthy(os.environ.get(key)) for key in _DISABLE_KEYS):
+        return "process-auto-compact-disable-present"
+    return None
+
+
+def _store_env(
+    settings_path: Path,
+    settings: dict[str, Any],
+    env: dict[str, Any],
+    *,
+    bom: bool,
+) -> None:
+    if env:
+        settings["env"] = env
+    else:
+        settings.pop("env", None)
+    _write_json_file(settings_path, settings, bom=bom)
+
+
 def install_autocompact(claude_home: Path, *, owned_before: bool = False) -> dict[str, Any]:
-    """Configure native Claude auto-compaction at 85% used context conservatively."""
-    home = claude_home.resolve()
-    settings_path = home / "settings.json"
+    """Configure Claude's native auto-compaction at 85% used context conservatively."""
+    settings_path = claude_home.resolve() / "settings.json"
     settings, bom = _read_json_file(settings_path)
     if settings is None:
         return {
@@ -94,16 +108,10 @@ def install_autocompact(claude_home: Path, *, owned_before: bool = False) -> dic
             "settings_path": str(settings_path),
         }
 
-    conflict = _conflict_reason(env)
-    if conflict:
-        return {
-            "configured": False,
-            "owned": False,
-            "reason": conflict,
-            "settings_path": str(settings_path),
-        }
-
     existing = env.get(_AUTO_COMPACT_KEY)
+    settings_conflict = _settings_conflict(env)
+    process_conflict = _process_conflict()
+
     if owned_before:
         if existing is None:
             return {
@@ -119,13 +127,26 @@ def install_autocompact(claude_home: Path, *, owned_before: bool = False) -> dic
                 "reason": "managed-autocompact-modified-externally",
                 "settings_path": str(settings_path),
             }
-        return {
+        if settings_conflict:
+            env.pop(_AUTO_COMPACT_KEY, None)
+            _store_env(settings_path, settings, env, bom=bom)
+            return {
+                "configured": False,
+                "owned": False,
+                "updated": True,
+                "reason": settings_conflict,
+                "settings_path": str(settings_path),
+            }
+        result = {
             "configured": True,
             "owned": True,
             "updated": False,
             "used_percent": int(_DESIRED_USED_PERCENT),
             "settings_path": str(settings_path),
         }
+        if process_conflict:
+            result["warning"] = process_conflict
+        return result
 
     if existing is not None:
         return {
@@ -134,10 +155,17 @@ def install_autocompact(claude_home: Path, *, owned_before: bool = False) -> dic
             "reason": "existing-custom-autocompact-preserved",
             "settings_path": str(settings_path),
         }
+    conflict = settings_conflict or process_conflict
+    if conflict:
+        return {
+            "configured": False,
+            "owned": False,
+            "reason": conflict,
+            "settings_path": str(settings_path),
+        }
 
     env[_AUTO_COMPACT_KEY] = _DESIRED_USED_PERCENT
-    settings["env"] = env
-    _write_json_file(settings_path, settings, bom=bom)
+    _store_env(settings_path, settings, env, bom=bom)
     return {
         "configured": True,
         "owned": True,
@@ -149,8 +177,7 @@ def install_autocompact(claude_home: Path, *, owned_before: bool = False) -> dic
 
 def remove_autocompact(claude_home: Path, *, owned: bool) -> dict[str, Any]:
     """Remove only an 85% auto-compaction setting that Vres still owns."""
-    home = claude_home.resolve()
-    settings_path = home / "settings.json"
+    settings_path = claude_home.resolve() / "settings.json"
     if not owned:
         return {
             "removed": False,
@@ -189,11 +216,7 @@ def remove_autocompact(claude_home: Path, *, owned: bool) -> dict[str, Any]:
         }
 
     env.pop(_AUTO_COMPACT_KEY, None)
-    if env:
-        settings["env"] = env
-    else:
-        settings.pop("env", None)
-    _write_json_file(settings_path, settings, bom=bom)
+    _store_env(settings_path, settings, env, bom=bom)
     return {"removed": True, "settings_path": str(settings_path)}
 
 
@@ -222,13 +245,11 @@ def _parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _parser().parse_args()
-    if args.command == "install":
-        result = install_autocompact(
-            Path(args.claude_home),
-            owned_before=bool(args.owned_before),
-        )
-    else:
-        result = remove_autocompact(Path(args.claude_home), owned=bool(args.owned))
+    result = (
+        install_autocompact(Path(args.claude_home), owned_before=bool(args.owned_before))
+        if args.command == "install"
+        else remove_autocompact(Path(args.claude_home), owned=bool(args.owned))
+    )
     sys.stdout.write(json.dumps(result, separators=(",", ":")) + "\n")
     return 0
 
