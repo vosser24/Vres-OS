@@ -122,5 +122,25 @@ def test_static_python_probe_treats_missing_selector_as_dependency_absence():
 
 def test_static_windows_import_smoke_avoids_nested_native_quoting():
     text = (ROOT / "install.ps1").read_text()
-    assert "Run $NewPython @('-c','from vres_os.cli import app; from vres_os.mcp_server import mcp; from vres_os.db import migrate')" in text
+    assert "Run $NewPython @('-c','from vres_os.cli import app; from vres_os.mcp_server import mcp; from vres_os.db import migrate; from vres_os.autocompact import install_autocompact')" in text
     assert 'Vres import gate passed' not in text
+
+
+def test_installer_manages_native_autocompact_conservatively_and_transactionally():
+    text = (ROOT / 'install.ps1').read_text()
+    assert "autocompact_owned" in text
+    assert "vres_os.autocompact install" in text
+    assert "--owned-before $OwnedBeforeArg" in text
+    assert "85% of the native auto-compact window" in text
+    assert "below ~15% remaining" in text
+    assert "CLAUDE_CODE_AUTO_COMPACT_WINDOW" not in text
+    assert "$ClaudeSettingsBefore" in text
+    assert "[IO.File]::WriteAllBytes($ClaudeSettingsPath, $ClaudeSettingsBefore)" in text
+
+
+def test_uninstall_removes_only_recorded_vres_owned_autocompact_before_runtime_removal():
+    text = (ROOT / 'uninstall.ps1').read_text()
+    assert "$state.PSObject.Properties['autocompact_owned']" in text
+    assert "vres_os.autocompact remove" in text
+    assert "--owned $AutoCompactOwnedArg" in text
+    assert text.index("-m vres_os.autocompact remove") < text.index("Remove-Item -LiteralPath $plugin")

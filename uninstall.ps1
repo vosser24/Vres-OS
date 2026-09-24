@@ -31,6 +31,13 @@ if (Test-Path $plugin) {
 $answer=Read-Host 'Remove the Vres runtime and plugin? Config/credential are preserved unless -RemoveLocalData is supplied [y/N]'
 if ($answer -notin @('y','Y','yes','Yes')) { exit 0 }
 $python=Join-Path $root ("releases\{0}\venv\Scripts\python.exe" -f $state.release)
+$AutoCompactOwned = $false
+if ($state.PSObject.Properties['autocompact_owned']) {
+    $AutoCompactOwned = [bool]$state.autocompact_owned
+}
+$AutoCompactOwnedArg = if ($AutoCompactOwned) { 'true' } else { 'false' }
+& $python -I -X utf8 -m vres_os.autocompact remove --claude-home $ClaudeHome --owned $AutoCompactOwnedArg
+if ($LASTEXITCODE -ne 0) { throw 'Could not remove the Vres-managed Claude auto-compaction setting. Runtime retained for recovery.' }
 & $python -I -X utf8 -m vres_os.statusline remove --claude-home $ClaudeHome
 if ($LASTEXITCODE -ne 0) { throw 'Could not remove the Vres-managed Claude status line. Runtime retained for recovery.' }
 & $python -I -X utf8 -m vres_os.claude_contract remove-global --claude-home $ClaudeHome
