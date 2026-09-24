@@ -254,3 +254,71 @@ def test_install_preserves_nondict_env(tmp_path: Path, monkeypatch):
     assert result["owned"] is False
     assert result["reason"] == "existing-nondict-env-preserved"
     assert json.loads(path.read_text(encoding="utf-8")) == {"env": ["unexpected"]}
+
+
+def test_owned_threshold_is_removed_when_persistent_disable_is_added(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
+    monkeypatch.delenv("DISABLE_AUTO_COMPACT", raising=False)
+    monkeypatch.delenv("DISABLE_COMPACT", raising=False)
+    home = tmp_path / ".claude"
+    home.mkdir()
+    (home / "settings.json").write_text(
+        json.dumps({"env": {KEY: "85", "DISABLE_AUTO_COMPACT": "1"}}),
+        encoding="utf-8",
+    )
+
+    result = install_autocompact(home, owned_before=True)
+
+    assert result["configured"] is False
+    assert result["owned"] is False
+    assert result["updated"] is True
+    assert result["reason"] == "existing-auto-compact-disable-preserved"
+    assert _settings(home)["env"] == {"DISABLE_AUTO_COMPACT": "1"}
+
+
+def test_owned_threshold_is_removed_when_persistent_custom_window_is_added(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.delenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", raising=False)
+    monkeypatch.delenv("DISABLE_AUTO_COMPACT", raising=False)
+    monkeypatch.delenv("DISABLE_COMPACT", raising=False)
+    home = tmp_path / ".claude"
+    home.mkdir()
+    (home / "settings.json").write_text(
+        json.dumps({"env": {KEY: "85", "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "50000"}}),
+        encoding="utf-8",
+    )
+
+    result = install_autocompact(home, owned_before=True)
+
+    assert result["configured"] is False
+    assert result["owned"] is False
+    assert result["updated"] is True
+    assert result["reason"] == "existing-custom-auto-compact-window-preserved"
+    assert _settings(home)["env"] == {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "50000"}
+
+
+def test_owned_threshold_is_retained_with_transient_process_window_warning(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.setenv("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "50000")
+    monkeypatch.delenv("DISABLE_AUTO_COMPACT", raising=False)
+    monkeypatch.delenv("DISABLE_COMPACT", raising=False)
+    home = tmp_path / ".claude"
+    home.mkdir()
+    (home / "settings.json").write_text(
+        json.dumps({"env": {KEY: "85"}}),
+        encoding="utf-8",
+    )
+
+    result = install_autocompact(home, owned_before=True)
+
+    assert result["configured"] is True
+    assert result["owned"] is True
+    assert result["warning"] == "process-auto-compact-window-present"
+    assert _settings(home)["env"][KEY] == "85"
