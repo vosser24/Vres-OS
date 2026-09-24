@@ -295,7 +295,7 @@ def _relevant_tool(payload: dict[str, Any]) -> bool:
     if payload.get("hook_event_name") != "PreToolUse":
         return False
     tool_name = str(payload.get("tool_name") or "").strip()
-    return tool_name in {"Skill", "Agent"} or tool_name.lower().startswith("mcp__")
+    return tool_name in {"Skill", "Agent"} or _jev_tool(tool_name) is not None
 
 
 def main() -> int:
