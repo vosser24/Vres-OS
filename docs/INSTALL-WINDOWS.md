@@ -71,13 +71,13 @@ The package resolver uses declared compatibility ranges. `resolved-dependencies.
 %USERPROFILE%\.claude\
   CLAUDE.md                    user-owned; Vres owns only its import marker block
   vres-rules.md                Vres-owned universal rules
-  settings.json                user-owned; Vres adds/updates statusLine only when absent/Vres-owned
+  settings.json                user-owned; Vres conservatively manages its statusLine and native auto-compaction threshold
   skills\vres-os\
     .claude-plugin\plugin.json  user-scoped plugin, automatically discovered
     agents\ skills\ hooks\ bin\ .mcp.json
 ```
 
-`CLAUDE_CONFIG_DIR` is honored for these Claude paths. Remove a conflicting `VRES_DATA_DIR` override before using the managed Windows installer. The installer rejects unmanaged target directories, symlink/junction install roots, a legacy in-place venv, and unresolved installation journals. It does not delete other plugins or modify unrelated CLAUDE.md/settings content. If a different custom Claude `statusLine` already exists, Vres preserves it and does not take ownership.
+`CLAUDE_CONFIG_DIR` is honored for these Claude paths. Remove a conflicting `VRES_DATA_DIR` override before using the managed Windows installer. The installer rejects unmanaged target directories, symlink/junction install roots, a legacy in-place venv, and unresolved installation journals. It does not delete other plugins or modify unrelated CLAUDE.md/settings content. If a different custom Claude `statusLine` already exists, Vres preserves it and does not take ownership. For native context rollover, Vres sets `env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE="85"` only when that setting is absent or still Vres-owned. Claude reports context usage as **used percentage**, so 85% used means about 15% remains. Existing custom auto-compaction thresholds, disable flags, or `CLAUDE_CODE_AUTO_COMPACT_WINDOW` settings are preserved rather than overwritten; Vres does not install a custom auto-compact window.
 
 The source extraction directory can be removed **after** the live test confirms the installed copy works; installation does not rely on that directory. Keep the release archive/evidence elsewhere.
 
@@ -95,7 +95,7 @@ cd C:\Projects\Vres-Live-Test
 claude
 ```
 
-Inspect the plugin interface if needed: the personal plugin should appear as `vres-os@skills-dir`; Chairman should be the active agent unless another explicit host setting overrides it. When Vres owns the Claude status line, it should render the host-supplied model/effort/context and optional 5-hour/7-day usage after Claude has emitted the relevant telemetry. Missing usage fields are omitted rather than shown as 0%. Do not assume any of this is working merely because installation printed success.
+Inspect the plugin interface if needed: the personal plugin should appear as `vres-os@skills-dir`; Chairman should be the active agent unless another explicit host setting overrides it. When Vres owns the Claude status line, it should render the host-supplied model/effort/context and optional 5-hour/7-day usage after Claude has emitted the relevant telemetry. Missing usage fields are omitted rather than shown as 0%. The displayed `ctx` percentage is host-supplied **used** context, not remaining context. On a Vres-managed default install, Claude's native auto-compaction target is 85% used (~15% remaining). Do not assume any of this is working merely because installation printed success.
 
 Say:
 
