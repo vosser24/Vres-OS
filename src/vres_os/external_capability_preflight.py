@@ -65,7 +65,7 @@ _SENSITIVE_INPUT_KEYS = {
 _SECRET_TEXT = re.compile(
     r"(?i)(?:^|[^a-z0-9])"
     r"(?:typesafe[_ -]?api[_ -]?key|(?:[a-z0-9]+[_ -]?)*api[_ -]?key|"
-    r"password|passwd|pass|passcode|otp|pin|cvv|card(?:[_ -]?number)?|"
+    r"password|passwd|pass|passcode|otp|pin|cvv|card[_ -]?number|"
     r"(?:[a-z0-9]+[_ -]?)*(?:access|refresh|id|session)[_ -]?token|token|"
     r"secret|authorization|client[_ -]?secret|cookies?|set[_ -]?cookie|session[_ -]?id)"
     r"\s*(?:[:=]|\s+)\s*\S+"
@@ -193,8 +193,7 @@ def _contains_sensitive_key(value: Any, *, depth: int = 0) -> bool:
             return True
         # Card-number-like digit runs are treated conservatively when they appear
         # in external-browser input, even if separators are spaces/hyphens.
-        compact = re.sub(r"[ -]", "", value)
-        if _CARD_DIGITS.search(value) and compact.isdigit():
+        if _CARD_DIGITS.search(value):
             return True
     return False
 
