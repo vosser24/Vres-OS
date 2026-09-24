@@ -88,6 +88,9 @@ def test_active_task_lookup_returns_none_when_session_has_no_unfinished_task(mon
     [
         "mcp__jev-browser__browser_open",
         "mcp__jev_browser__browser_snapshot",
+        "mcp__plugin_jev-browser_jev-browser__browser_open",
+        "mcp__JEV-Browser__browser_open",
+        "mcp__jev-browser-mcp__browser_open",
     ],
 )
 def test_jev_requires_active_vres_task(tool_name: str):
@@ -130,13 +133,18 @@ def test_jev_read_and_reversible_paths_are_allowed_for_active_task(
     )
 
 
-@pytest.mark.parametrize("flag", [True, "true", 1])
-def test_jev_irreversible_browser_do_is_denied(flag):
+@pytest.mark.parametrize(
+    "tool_input",
+    [
+        {"goal": "Place the order", "allow_irreversible": True},
+        {"goal": "Place the order", "allow_irreversible": "true"},
+        {"goal": "Place the order", "allow_irreversible": 1},
+        {"goal": "Place the order", "allowIrreversible": True},
+    ],
+)
+def test_jev_irreversible_browser_do_is_denied(tool_input):
     decision = evaluate_external_capability_preflight(
-        _payload(
-            "mcp__jev-browser__browser_do",
-            {"goal": "Place the order", "allow_irreversible": flag},
-        ),
+        _payload("mcp__jev-browser__browser_do", tool_input),
         active_task_key="TASK-EXT",
     )
     assert "irreversible-action bypass is held in V1" in _reason(decision)
@@ -146,7 +154,14 @@ def test_jev_irreversible_browser_do_is_denied(flag):
     "tool_input",
     [
         {"goal": "Log in", "values": {"password": "dont-send-me"}},
+        {"goal": "Log in", "values": {"pass": "dont-send-me"}},
+        {"goal": "Enter code", "values": {"passcode": "123456"}},
+        {"goal": "Enter code", "values": {"otp": "123456"}},
+        {"goal": "Enter card", "values": {"cvv": "123"}},
+        {"goal": "Enter card", "values": {"card_number": "4111111111111111"}},
         {"goal": "Use token=top-secret"},
+        {"goal": "Use password hunter2"},
+        {"goal": "Use TYPESAFE_API_KEY=abc123"},
         {"url": "https://user:password@example.com/"},
     ],
 )
@@ -158,11 +173,12 @@ def test_jev_secret_shaped_inputs_are_denied(tool_input: dict):
     assert "secret-shaped material" in _reason(decision)
 
 
-def test_jev_direct_dialog_acceptance_is_denied_even_for_safe_action():
+@pytest.mark.parametrize("field", ["accept_dialog", "acceptDialog"])
+def test_jev_direct_dialog_acceptance_is_denied_even_for_safe_action(field: str):
     decision = evaluate_external_capability_preflight(
         _payload(
             "mcp__jev-browser__browser_act",
-            {"action": "hover", "accept_dialog": True},
+            {"action": "hover", field: True},
         ),
         active_task_key="TASK-EXT",
     )
@@ -196,11 +212,23 @@ def test_jev_direct_mutation_capable_actions_are_denied(action: str):
     "skill",
     [
         "superpowers:using-superpowers",
+        "/superpowers:using-superpowers",
+        "superpowers@superpowers-marketplace:using-superpowers",
+        "using-superpowers",
         "superpowers:subagent-driven-development",
+        "subagent-driven-development",
         "superpowers:executing-plans",
+        "/superpowers:executing-plans",
+        "superpowers@superpowers-marketplace:executing-plans",
+        "executing-plans",
         "superpowers:dispatching-parallel-agents",
+        "dispatching-parallel-agents",
         "superpowers:using-git-worktrees",
+        "using-git-worktrees",
         "superpowers:finishing-a-development-branch",
+        "finishing-a-development-branch",
+        "superpowers:writing-skills",
+        "writing-skills",
     ],
 )
 def test_superpowers_execution_workflows_are_denied_during_active_vres_task(skill: str):
@@ -234,9 +262,17 @@ def test_reviewed_superpowers_methodology_skills_are_advisory_allowed(skill: str
     )
 
 
-def test_unknown_superpowers_skill_is_denied_during_active_task():
+@pytest.mark.parametrize(
+    "skill",
+    [
+        "superpowers:future-autonomous-runner",
+        "/superpowers:future-autonomous-runner",
+        "superpowers@marketplace:future-autonomous-runner",
+    ],
+)
+def test_unknown_namespaced_superpowers_skill_is_denied_during_active_task(skill: str):
     decision = evaluate_external_capability_preflight(
-        _payload("Skill", {"skill": "superpowers:future-autonomous-runner"}),
+        _payload("Skill", {"skill": skill}),
         active_task_key="TASK-EXT",
     )
     assert "has not been approved" in _reason(decision)
@@ -307,8 +343,37 @@ def test_plugin_registers_external_capability_preflight():
     matcher = groups[0]["matcher"]
     assert "Skill" in matcher
     assert "Agent" in matcher
-    assert "jev" in matcher.lower()
+    assert "mcp__" in matcher.lower()
+    assert groups[0]["hooks"][0].get("timeout") is None
 
+
+
+
+def test_noncanonical_jev_server_alias_is_not_claimed_by_vres_guard():
+    # The onboarding contract pins the MCP server identity to a name containing
+    # "jev-browser". Vres does not pretend that an arbitrarily renamed MCP
+    # server can still be attributed to JEV from tool input alone.
+    assert (
+        evaluate_external_capability_preflight(
+            _payload("mcp__jev__browser_open", {"url": "https://example.com"}),
+            active_task_key="TASK-EXT",
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize("flag", [None, False, 0])
+def test_jev_false_irreversible_flags_are_allowed(flag):
+    assert (
+        evaluate_external_capability_preflight(
+            _payload(
+                "mcp__jev-browser__browser_do",
+                {"goal": "Open the pricing tab", "allowIrreversible": flag},
+            ),
+            active_task_key="TASK-EXT",
+        )
+        is None
+    )
 
 def test_windows_wrapper_calls_python_policy_fail_closed():
     wrapper = (
