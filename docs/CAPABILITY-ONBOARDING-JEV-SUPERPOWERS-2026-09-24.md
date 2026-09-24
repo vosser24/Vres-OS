@@ -174,16 +174,24 @@ It does not wrap or vendor either external project.
 For JEV tools:
 
 1. An active bound unfinished Vres task is required.
-2. Secret-shaped tool input is denied before execution using both the shared Vres redaction
-   detector and an external-browser sensitive-key/text detector covering password/pass/passcode,
-   OTP/PIN, CVV/card-number, API-key/token/authorization/cookie/private-key families.
-3. The explicit `browser_do(allow_irreversible=true)` bypass is denied in V1; the upstream Jev irreversible detector is treated as fallible, so acceptance uses a disposable fixture.
+2. Sensitive tool input is denied before execution using both the shared Vres redaction
+   detector and an external-browser heuristic detector. The detector covers password/pass/passcode,
+   OTP/PIN, CVV/card-number, API-key/token/session/authorization/cookie/private-key families,
+   including common prefixed/suffixed key spellings and name/value form serialization.
+   This detector is best-effort/heuristic, not a proof that arbitrary secret material can never
+   evade classification; native/local auth remains the primary control.
+3. The explicit irreversible-bypass field is normalized across snake/camel spellings. If duplicate
+   aliases are present, **any** non-false value causes denial. The upstream Jev irreversible detector
+   is treated as fallible, so acceptance uses a disposable fixture.
 4. Direct `browser_act` is limited to:
    - scroll
    - back
    - hover
 5. Direct click/type/select/upload/press/drag/right-click actions are denied in V1.
-6. Read/snapshot/check/choose/screenshot/close and reversible `browser_do` remain available under the active task.
+6. Duplicate dialog-acceptance aliases are also fail-closed: any non-false snake/camel value denies.
+7. Any tool exposed by the pinned `jev-browser` server that is not one of the audited 0.1.1 tools
+   is denied until the upstream surface is re-audited.
+8. Read/snapshot/check/choose/screenshot/close and reversible `browser_do` remain available under the active task.
 
 The initial acceptance run must use a disposable/non-production fixture.
 
@@ -269,11 +277,16 @@ The branch must prove:
 - denied without an active Vres task;
 - read/reversible calls allowed with an active task;
 - explicit irreversible-bypass request denied;
-- sensitive keys/text such as password/passcode/OTP/CVV/card-number/TYPESAFE_API_KEY denied;
+- sensitive keys/text such as password/pass/passcode/OTP/PIN/CVV/card-number/TYPESAFE_API_KEY,
+  prefixed API-key/token/session identifiers, cookie/set-cookie values, and name/value serialized
+  sensitive fields are denied;
+- secret detection is explicitly documented as heuristic/best-effort rather than exhaustive;
+- duplicate snake/camel irreversible/dialog aliases deny if any matching alias is non-false;
 - plugin-scoped, case-varied and `jev-browser-mcp` server forms attributed consistently;
 - a server renamed without the canonical `jev-browser` token is explicitly outside the contract;
 - direct scroll/back/hover allowed;
-- direct click/type/select/upload/etc. denied.
+- direct click/type/select/upload/etc. denied;
+- unknown future tools on the canonical pinned JEV server denied pending re-audit.
 
 ### Superpowers
 
@@ -324,7 +337,11 @@ Do not execute this ladder until the branch tests and protected pre-install revi
     - browser_screenshot;
     - one reversible browser_do;
     - prove `allow_irreversible=true` is denied and record that this blocks the explicit bypass rather than proving Jev can never misclassify an action;
-    - prove password/passcode/OTP/CVV/card-number/TYPESAFE_API_KEY-shaped values are denied;
+    - prove password/pass/passcode/OTP/PIN/CVV/card-number/TYPESAFE_API_KEY/API-key/token/
+      session/cookie-shaped values and name/value sensitive-field serialization are denied;
+    - prove mixed duplicate snake/camel irreversible/dialog aliases deny if any alias is non-false;
+    - record that secret detection is heuristic/best-effort and native/local authentication remains
+      the primary secret boundary;
     - prove unsafe direct browser_act is denied.
 13. Invoke one compatible Superpowers methodology skill.
 14. Attempt blocked Superpowers execution/worktree/capability-authoring skills using both
