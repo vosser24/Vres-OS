@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from vres_os.external_capability_preflight import (
+    active_task_key_for_session,
     evaluate_external_capability_preflight,
 )
 
@@ -27,6 +28,59 @@ def _reason(decision: dict | None) -> str:
     assert output["hookEventName"] == "PreToolUse"
     assert output["permissionDecision"] == "deny"
     return str(output["permissionDecisionReason"])
+
+
+def test_active_task_lookup_is_bound_to_open_claude_session(monkeypatch):
+    calls = []
+
+    class Result:
+        def fetchone(self):
+            return {"task_key": "TASK-EXT"}
+
+    class Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, sql, params):
+            calls.append((str(sql), params))
+            return Result()
+
+    monkeypatch.setattr(
+        "vres_os.external_capability_preflight.connect",
+        lambda: Conn(),
+    )
+
+    assert active_task_key_for_session("S-EXT-1") == "TASK-EXT"
+    assert len(calls) == 1
+    assert "s.provider='claude'" in calls[0][0]
+    assert "s.ended_at IS NULL" in calls[0][0]
+    assert calls[0][1][0] == "S-EXT-1"
+    assert set(calls[0][1][1]) == {"active", "waiting_user", "blocked"}
+
+
+def test_active_task_lookup_returns_none_when_session_has_no_unfinished_task(monkeypatch):
+    class Result:
+        def fetchone(self):
+            return None
+
+    class Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, _sql, _params):
+            return Result()
+
+    monkeypatch.setattr(
+        "vres_os.external_capability_preflight.connect",
+        lambda: Conn(),
+    )
+    assert active_task_key_for_session("S-NONE") is None
 
 
 @pytest.mark.parametrize(
