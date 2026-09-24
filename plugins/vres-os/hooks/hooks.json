@@ -72,7 +72,7 @@
         ]
       },
       {
-        "matcher": "^(Skill|Agent|mcp__(plugin_)?jev[-_]browser__browser_.*)$",
+        "matcher": "^(Skill|Agent|mcp__.*)$",
         "hooks": [
           {
             "type": "command",
@@ -83,8 +83,7 @@
               "Bypass",
               "-File",
               "${CLAUDE_PLUGIN_ROOT}/bin/vres-external-capability-preflight.ps1"
-            ],
-            "timeout": 10
+            ]
           }
         ]
       }
