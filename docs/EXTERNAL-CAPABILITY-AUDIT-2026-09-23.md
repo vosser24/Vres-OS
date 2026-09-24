@@ -1,6 +1,6 @@
 # Phase B — External Capability Discovery & Audit
 
-Status: **CLASSIFICATION COMPLETE — AWAITING INDEPENDENT VALIDATION**
+Status: **CLASSIFICATION CORRECTED — FRESH INDEPENDENT VALIDATION REQUIRED**
 
 GitHub issue: #145
 
@@ -320,11 +320,11 @@ JEV Browser and Superpowers are excluded from those totals because the target Wi
 |---|---|---|
 | claude-in-chrome | USE WITH GUARDS | Useful browser execution surface, but can navigate/click/type/upload and act in authenticated browser sessions. Use only for an explicit Vres task/step; user approval for irreversible/external writes; browser evidence is not Vres validation/completion evidence. |
 | claude.ai Claude Docs | USE WITH GUARDS | Can create/update/delete external docs. Vres owns task/provenance; external document mutation needs explicit scope and post-action verification. |
-| claude.ai Canva | USE WITH GUARDS | Visible but unauthenticated in the inventory. Interactive connector can create/edit designs after auth. Authentication/adoption is user-authorized and external writes remain scoped. |
-| claude.ai Gmail | USE WITH GUARDS | Email read/write surface; sending/replying/forwarding is an external side effect. Require explicit task intent and native connector approval; never persist credentials. |
-| claude.ai Google Calendar | USE WITH GUARDS | Can create/update/delete/respond to events. External mutation requires explicit Vres task intent and postcondition/evidence. |
-| claude.ai Google Drive | USE WITH GUARDS | Can search/read and also upload/share/move/trash. External mutation requires explicit scope/approval and evidence; connector content is not automatically durable Vres knowledge. |
-| claude.ai Notion | USE WITH GUARDS | Remote connector with potential read/write workspace effects. Require explicit Vres task intent, least-privilege auth, and external-write verification. |
+| claude.ai Canva | USE WITH GUARDS | Visible but unauthenticated at inventory time. Interactive connector can create/edit designs after auth. Authentication/adoption is user-authorized and external writes remain scoped. |
+| claude.ai Gmail | USE WITH GUARDS | Visible but unauthenticated at inventory time. Email read/write capability after auth includes sending/replying/forwarding, so any such action is an external side effect. Require explicit task intent and native connector approval; never persist credentials. |
+| claude.ai Google Calendar | USE WITH GUARDS | Visible but unauthenticated at inventory time. After auth it can create/update/delete/respond to events. External mutation requires explicit Vres task intent and postcondition/evidence. |
+| claude.ai Google Drive | USE WITH GUARDS | Visible but unauthenticated at inventory time. After auth it can search/read and also upload/share/move/trash. External mutation requires explicit scope/approval and evidence; connector content is not automatically durable Vres knowledge. |
+| claude.ai Notion | USE WITH GUARDS | Visible but unauthenticated at inventory time. After auth it is a remote workspace connector with potential read/write effects. Require explicit Vres task intent, least-privilege auth, and external-write verification. |
 
 Public-source basis checked 2026-09-23:
 
@@ -345,8 +345,8 @@ Public-source basis checked 2026-09-23:
 | import-memory | DECLINE | Competes directly with Vres durable continuity/knowledge authority and can create a second ungoverned memory truth source. |
 | skill-creator | DEVELOPMENT REQUIRED | Potentially valuable for authoring skills, but Vres currently has no governed external-skill acquisition/registration/proof contract comparable to project-agent governance. Generated skills are candidates only until such a path exists. |
 | morning | DEVELOPMENT REQUIRED | Scheduling/recurring execution is explicitly outside current Vres runtime governance. Needs a separately authorized scheduler contract, provenance, retry/failure semantics and target-Windows validation. |
-| memory | DECLINE | Creates/maintains a competing persistent memory layer outside Vres task/knowledge governance. |
-| code-reviewer | USE WITH GUARDS | Read-only review can be useful as advisory evidence. It can never substitute for protected Vres validation, set PASS, or satisfy completion authority. |
+| memory | DECLINE | Its purpose is an additional memory workflow/source outside the Vres durable task/knowledge authority. Adopting it in governed sessions would risk a second, non-Vres memory truth source, so Vres declines it rather than asserting a stronger mechanism than the inventory proved. |
+| code-reviewer | USE WITH GUARDS | Advisory review is useful, but the installed skill text also mentions automated fixes. Review-only use can provide advisory evidence; any fix/edit mode must be treated as an ordinary scoped implementation write. It can never substitute for protected Vres validation, set PASS, or satisfy completion authority. |
 | prism | DECLINE | Inventory reports default/automatic loading on substantive messages. That competes with Vres routing/planning authority and adds hidden context behavior; do not adopt in governed sessions. |
 | senior-fullstack | DEVELOPMENT REQUIRED | Useful expertise candidate, but as a synced skill it can scaffold/write broadly outside Vres governed agent/work-unit provenance. Adoption requires conversion/integration into a governed capability/agent contract rather than direct autonomous use. |
 | senior-backend | DEVELOPMENT REQUIRED | Same: useful expertise, but current skill form can scaffold/migrate/test and write broadly without Vres worker provenance/write-scope ownership. |
@@ -411,8 +411,8 @@ Observed plugin state:
 
 | Candidate | Installed? | Classification | Roadmap handling |
 |---|---:|---|---|
-| JEV Browser | No | provisional USE WITH GUARDS | Remains Phase C. Phase B does not install or implement it. |
-| Superpowers | No | provisional USE WITH GUARDS | Remains Phase E as optional methodology only; never a Vres runtime dependency. |
+| JEV Browser | No | provisional USE WITH GUARDS | The authoritative post-finalization handoff explicitly labels this **Phase C — JEV Browser Control**. Phase B does not install or implement it. |
+| Superpowers | No | provisional USE WITH GUARDS | The authoritative post-finalization handoff explicitly labels this **Phase E — Superpowers plugin**. It remains optional methodology only and never a Vres runtime dependency. |
 
 ### 9.7 Non-capability finding: stale Claude auto-mode trust metadata
 
@@ -423,7 +423,7 @@ Phase B **does not modify it**.
 Why it matters:
 
 - Anthropic's auto-mode design states that the environment list defines trusted repositories/infrastructure used by the safety classifier.
-- A current public Claude Code issue reports the same multi-worktree failure mode: user-global auto-mode setup can retain an absolute trusted-repo path from the project where setup was originally run.
+- Anthropic Claude Code issue #93405 documents the same user-global auto-mode failure mode: setup can retain an absolute trusted-repo path from the project where setup was originally run. Source: https://github.com/anthropics/claude-code/issues/93405
 
 Phase-B disposition:
 
