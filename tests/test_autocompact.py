@@ -159,7 +159,7 @@ def test_process_disable_is_preserved_and_blocks_managed_threshold(tmp_path: Pat
     result = install_autocompact(home)
 
     assert result["owned"] is False
-    assert result["reason"] == "existing-auto-compact-disable-preserved"
+    assert result["reason"] == "process-auto-compact-disable-present"
     assert not (home / "settings.json").exists()
 
 
