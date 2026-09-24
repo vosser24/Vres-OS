@@ -157,7 +157,7 @@ For JEV tools:
 
 1. An active bound unfinished Vres task is required.
 2. Secret-shaped tool input is denied before execution.
-3. `browser_do(allow_irreversible=true)` is denied in V1.
+3. The explicit `browser_do(allow_irreversible=true)` bypass is denied in V1; the upstream Jev irreversible detector is treated as fallible, so acceptance uses a disposable fixture.
 4. Direct `browser_act` is limited to:
    - scroll
    - back
@@ -225,7 +225,7 @@ The branch must prove:
 
 - denied without an active Vres task;
 - read/reversible calls allowed with an active task;
-- irreversible browser_do denied;
+- explicit irreversible-bypass request denied;
 - secret-shaped input denied;
 - direct scroll/back/hover allowed;
 - direct click/type/select/upload/etc. denied.
@@ -271,7 +271,7 @@ Do not execute this ladder until the branch tests and protected pre-install revi
     - browser_check;
     - browser_screenshot;
     - one reversible browser_do;
-    - prove allow_irreversible=true is denied;
+    - prove `allow_irreversible=true` is denied and record that this blocks the explicit bypass rather than proving Jev can never misclassify an action;
     - prove secret-shaped values are denied;
     - prove unsafe direct browser_act is denied.
 13. Invoke one compatible Superpowers methodology skill.
