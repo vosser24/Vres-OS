@@ -68,7 +68,9 @@ class CapabilityService:
                         ILIKE '%%' || %s || '%%'
                      OR to_tsvector(
                           'simple',
-                          name || ' ' || description || ' ' || COALESCE(metadata->>'aliases','')
+                          name || ' ' || description || ' ' ||
+                          COALESCE(metadata->>'aliases','') || ' ' ||
+                          COALESCE(metadata->'acquisition_evidence'->>'gap_need','')
                         ) @@ plainto_tsquery('simple',%s)
                    )
                  ORDER BY (project_id=%s) DESC NULLS LAST,proven_count DESC,score DESC,name LIMIT %s
