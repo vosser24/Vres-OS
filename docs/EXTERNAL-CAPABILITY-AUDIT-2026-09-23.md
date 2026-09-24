@@ -25,7 +25,7 @@ Installation or visibility is not authority to use a capability.
 
 No capability is installed, removed, enabled, disabled, promoted, or integrated merely because it appears in this audit.
 
-Phase C must not start until this audit is complete or the user explicitly reprioritizes.
+The next roadmap item, JEV Browser Control, must not start until this audit is complete or the user explicitly reprioritizes.
 
 ## 2. Governing Vres constraints
 
@@ -206,7 +206,7 @@ If present/used later, required guards include:
 - invocation limited to methodology/help where compatible;
 - disable optional telemetry if required by the user's privacy/network policy.
 
-Phase E, not Phase B, decides whether/how to use it.
+The later Superpowers roadmap item, not Phase B, decides whether/how to use it.
 
 ## 7. Physical installed-environment inventory — COMPLETE
 
