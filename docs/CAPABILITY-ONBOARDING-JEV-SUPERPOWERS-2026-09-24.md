@@ -49,6 +49,7 @@ These are evidence pins for this onboarding task, not permanent update pins.
 - license: MIT
 - runtime: Node >=20
 - MCP executable: `jev-browser-mcp`
+- supported Vres onboarding server identity: `jev-browser` (the physical install must use this name)
 - major dependencies: MCP SDK, Playwright, Zod
 - auth: `TYPESAFE_API_KEY` for Jev/System One decisions
 - browser profile option: `JEV_BROWSER_PROFILE`
@@ -91,7 +92,7 @@ Advisory/methodology candidates:
 - receiving-code-review
 - diagnosing-superpowers
 
-Execution/orchestration conflicts for active Vres tasks:
+Execution/orchestration/capability-authoring conflicts for active Vres tasks:
 
 - using-superpowers
 - subagent-driven-development
@@ -99,6 +100,12 @@ Execution/orchestration conflicts for active Vres tasks:
 - dispatching-parallel-agents
 - using-git-worktrees
 - finishing-a-development-branch
+- writing-skills
+
+The pinned Superpowers 6.4.1 snapshot contains 15 skills total. All 15 are explicitly
+classified by this onboarding as either advisory-allowed or execution/capability-authoring
+denied. Claude Code also supports unqualified aliases for plugin skills, so the guard
+normalizes the pinned skills' bare aliases as well as namespaced invocation forms.
 
 ## 4. Claude Code host facts used by the design
 
@@ -133,7 +140,7 @@ The onboarding uses:
 
 Installation is **not** capability proof.
 
-## 6. New hard guard
+## 6. New guard boundary
 
 Implementation module:
 
@@ -143,11 +150,19 @@ Hook wrapper:
 
 `plugins/vres-os/bin/vres-external-capability-preflight.ps1`
 
-The hook runs only for:
+The hook matcher runs for:
 
-- `Skill`
-- `Agent`
-- JEV Browser MCP tool calls
+- `Skill`;
+- `Agent`;
+- all MCP tool calls.
+
+The Python policy then applies JEV-specific controls only when the MCP server identity
+contains the canonical `jev-browser` token (case-insensitive, with underscore/hyphen and
+plugin-scoped forms normalized). This closes hook/policy matcher drift without claiming
+that an arbitrarily renamed server such as `jev` can be attributed to JEV.
+
+The physical onboarding must therefore install the MCP server as exactly `jev-browser`.
+A differently named server is outside the accepted contract and must be re-onboarded.
 
 It does not wrap or vendor either external project.
 
@@ -156,7 +171,9 @@ It does not wrap or vendor either external project.
 For JEV tools:
 
 1. An active bound unfinished Vres task is required.
-2. Secret-shaped tool input is denied before execution.
+2. Secret-shaped tool input is denied before execution using both the shared Vres redaction
+   detector and an external-browser sensitive-key/text detector covering password/pass/passcode,
+   OTP/PIN, CVV/card-number, API-key/token/authorization/cookie/private-key families.
 3. The explicit `browser_do(allow_irreversible=true)` bypass is denied in V1; the upstream Jev irreversible detector is treated as fallible, so acceptance uses a disposable fixture.
 4. Direct `browser_act` is limited to:
    - scroll
@@ -175,7 +192,10 @@ Reviewed advisory Superpowers skills may load.
 
 Execution/worktree/orchestration Superpowers skills are denied.
 
-Unknown future Superpowers skills are denied until reviewed.
+Unknown **namespaced** Superpowers skills are denied until reviewed. Every skill in the pinned
+6.4.1 snapshot is also recognized by its bare alias. A future Superpowers version is not accepted
+implicitly: its skill inventory must be re-audited and the guard updated before that upgrade is
+considered onboarded.
 
 Canonical Vres agents continue through the existing Vres agent preflight.
 
@@ -190,6 +210,23 @@ Other host/plugin/custom agents—including general-purpose execution agents—a
 This prevents Superpowers or another plugin from silently becoming a Vres worker.
 
 Outside an active Vres task, Vres does not claim authority over Superpowers workflows.
+
+
+### 6.3 Claude Code command-hook timeout limitation
+
+The enforcement wrapper exits with blocking status on internal errors and returns a structured
+deny decision for policy violations.
+
+However, current Claude Code host semantics explicitly state that a timed-out `PreToolUse`
+**command** hook does not block the tool call; normal permission flow continues. The earlier
+explicit 10-second timeout has therefore been removed so this hook uses Claude Code's normal
+long command-hook budget for PreToolUse.
+
+This reduces avoidable timeout risk but does not turn a command hook into a cryptographic or
+absolute fail-closed policy mechanism. Physical acceptance must verify the hook returns promptly,
+and the onboarding must not rely on this mechanism as the sole protection for production-risk
+actions. JEV acceptance remains limited to a disposable fixture, and Superpowers remains
+methodology-only.
 
 ## 7. Prompt-level authority rule
 
@@ -213,7 +250,9 @@ For physical onboarding:
 
 - the TypeSafe API key must be supplied through a native/local environment mechanism outside chat/git;
 - login credentials should prefer headed browser/profile login rather than `browser_do.values`;
-- Superpowers optional telemetry is disabled for the acceptance run.
+- Superpowers optional telemetry is disabled for the acceptance run;
+- usernames and other non-secret form values may be passed when necessary, but sensitive fields
+  covered by the guard are not.
 
 The exact secret provisioning step must be performed by the user outside model-visible text.
 
@@ -226,15 +265,19 @@ The branch must prove:
 - denied without an active Vres task;
 - read/reversible calls allowed with an active task;
 - explicit irreversible-bypass request denied;
-- secret-shaped input denied;
+- sensitive keys/text such as password/passcode/OTP/CVV/card-number/TYPESAFE_API_KEY denied;
+- plugin-scoped, case-varied and `jev-browser-mcp` server forms attributed consistently;
+- a server renamed without the canonical `jev-browser` token is explicitly outside the contract;
 - direct scroll/back/hover allowed;
 - direct click/type/select/upload/etc. denied.
 
 ### Superpowers
 
 - reviewed methodology skills allowed during an active task;
-- execution/worktree/orchestration skills denied;
-- unknown future Superpowers skills denied;
+- execution/worktree/orchestration/capability-authoring skills denied;
+- namespaced, marketplace-qualified, leading-slash and bare aliases of pinned 6.4.1 skills normalized;
+- unknown namespaced Superpowers skills denied;
+- future Superpowers versions require a fresh skill-inventory review before adoption;
 - outside an active Vres task, Vres does not block Superpowers solely because it is installed.
 
 ### Agents
@@ -246,7 +289,9 @@ The branch must prove:
 ### Packaging
 
 - plugin hook references the installed wrapper;
-- wrapper invokes the Python policy fail-closed;
+- wrapper exits blocking on policy/runtime errors;
+- no artificial 10-second timeout remains on the enforcement hook;
+- the documented Claude Code command-hook timeout fail-open limitation is retained explicitly;
 - no MCP registration count changes;
 - no migration.
 
@@ -260,7 +305,8 @@ Do not execute this ladder until the branch tests and protected pre-install revi
 4. Drive normal Vres discovery so the missing browser/methodology needs are explicit.
 5. Let the governor block on the missing needs.
 6. Acquire two project-scoped capabilities using the existing governed gap-acquisition path and source/provenance evidence.
-7. Install JEV only in that disposable onboarding scope.
+7. Install JEV only in that disposable onboarding scope using the exact MCP server name
+   `jev-browser`; verify the loaded MCP tool names before exercising it.
 8. Supply `TYPESAFE_API_KEY` outside chat/git.
 9. Install Superpowers only in that disposable onboarding scope and disable its optional telemetry for the acceptance run.
 10. Restart Claude so both plugin/MCP surfaces are physically loaded.
@@ -272,10 +318,11 @@ Do not execute this ladder until the branch tests and protected pre-install revi
     - browser_screenshot;
     - one reversible browser_do;
     - prove `allow_irreversible=true` is denied and record that this blocks the explicit bypass rather than proving Jev can never misclassify an action;
-    - prove secret-shaped values are denied;
+    - prove password/passcode/OTP/CVV/card-number/TYPESAFE_API_KEY-shaped values are denied;
     - prove unsafe direct browser_act is denied.
 13. Invoke one compatible Superpowers methodology skill.
-14. Attempt one blocked Superpowers execution/worktree skill.
+14. Attempt blocked Superpowers execution/worktree/capability-authoring skills using both
+    namespaced and bare aliases.
 15. Attempt one generic execution Agent path and prove it is denied.
 16. Verify canonical Vres Sonnet/Opus/validator paths still work.
 17. Run protected validation over the combined evidence.
