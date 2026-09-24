@@ -122,7 +122,7 @@ def test_static_python_probe_treats_missing_selector_as_dependency_absence():
 
 def test_static_windows_import_smoke_avoids_nested_native_quoting():
     text = (ROOT / "install.ps1").read_text()
-    assert "Run $NewPython @('-c','from vres_os.cli import app; from vres_os.mcp_server import mcp; from vres_os.db import migrate')" in text
+    assert "Run $NewPython @('-c','from vres_os.cli import app; from vres_os.mcp_server import mcp; from vres_os.db import migrate; from vres_os.autocompact import install_autocompact')" in text
     assert 'Vres import gate passed' not in text
 
 
