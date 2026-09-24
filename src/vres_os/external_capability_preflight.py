@@ -155,8 +155,9 @@ def evaluate_external_capability_preflight(
             if action not in _JEV_SAFE_DIRECT_ACTIONS:
                 return _deny(
                     "Direct JEV browser_act is restricted in V1 to scroll/back/hover. "
-                    "Mutation-capable direct actions (click/type/select/upload/dialog acceptance, etc.) "
-                    "must not bypass the guarded browser_do path."
+                    "Mutation-capable direct actions "
+                    "(click/type/select/upload/dialog acceptance, etc.) must not bypass "
+                    "the guarded browser_do path."
                 )
         return None
 
@@ -168,12 +169,14 @@ def evaluate_external_capability_preflight(
             return None
         if leaf in _SUPERPOWERS_EXECUTION_SKILLS:
             return _deny(
-                f"Superpowers skill '{leaf}' creates or controls an execution/worktree/orchestration "
-                "path that conflicts with the active Vres task. Use Vres routing/work units instead."
+                f"Superpowers skill '{leaf}' creates or controls an "
+                "execution/worktree/orchestration path that conflicts with the active "
+                "Vres task. Use Vres routing/work units instead."
             )
         return _deny(
-            f"Superpowers skill '{leaf}' has not been approved for use inside an active Vres task. "
-            "Treat Superpowers as optional methodology only until this skill is explicitly reviewed."
+            f"Superpowers skill '{leaf}' has not been approved for use inside an active "
+            "Vres task. Treat Superpowers as optional methodology only until this skill "
+            "is explicitly reviewed."
         )
 
     if tool_name == "Agent" and active_task_key:
