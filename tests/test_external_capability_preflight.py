@@ -76,15 +76,16 @@ def test_jev_read_and_reversible_paths_are_allowed_for_active_task(
     )
 
 
-def test_jev_irreversible_browser_do_is_denied():
+@pytest.mark.parametrize("flag", [True, "true", 1])
+def test_jev_irreversible_browser_do_is_denied(flag):
     decision = evaluate_external_capability_preflight(
         _payload(
             "mcp__jev-browser__browser_do",
-            {"goal": "Place the order", "allow_irreversible": True},
+            {"goal": "Place the order", "allow_irreversible": flag},
         ),
         active_task_key="TASK-EXT",
     )
-    assert "irreversible actions are held in V1" in _reason(decision)
+    assert "irreversible-action bypass is held in V1" in _reason(decision)
 
 
 @pytest.mark.parametrize(
@@ -101,6 +102,17 @@ def test_jev_secret_shaped_inputs_are_denied(tool_input: dict):
         active_task_key="TASK-EXT",
     )
     assert "secret-shaped material" in _reason(decision)
+
+
+def test_jev_direct_dialog_acceptance_is_denied_even_for_safe_action():
+    decision = evaluate_external_capability_preflight(
+        _payload(
+            "mcp__jev-browser__browser_act",
+            {"action": "hover", "accept_dialog": True},
+        ),
+        active_task_key="TASK-EXT",
+    )
+    assert "dialog acceptance is held in V1" in _reason(decision)
 
 
 @pytest.mark.parametrize("action", ["scroll", "back", "hover"])
