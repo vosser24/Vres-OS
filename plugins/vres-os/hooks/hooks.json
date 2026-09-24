@@ -70,6 +70,22 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "matcher": "^(Skill|Agent|mcp__.*)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe",
+            "args": [
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              "${CLAUDE_PLUGIN_ROOT}/bin/vres-external-capability-preflight.ps1"
+            ]
+          }
+        ]
       }
     ],
     "PostToolUse": [
