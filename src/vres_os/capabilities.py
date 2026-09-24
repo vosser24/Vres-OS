@@ -48,7 +48,9 @@ class CapabilityService:
                        ts_rank(
                          to_tsvector(
                            'simple',
-                           name || ' ' || description || ' ' || COALESCE(metadata->>'aliases','')
+                           name || ' ' || description || ' ' ||
+                           COALESCE(metadata->>'aliases','') || ' ' ||
+                           COALESCE(metadata->'acquisition_evidence'->>'gap_need','')
                          ),
                          plainto_tsquery('simple',%s)
                        ) AS score
@@ -62,6 +64,8 @@ class CapabilityService:
                      name ILIKE '%%' || %s || '%%'
                      OR description ILIKE '%%' || %s || '%%'
                      OR COALESCE(metadata->>'aliases','') ILIKE '%%' || %s || '%%'
+                     OR COALESCE(metadata->'acquisition_evidence'->>'gap_need','')
+                        ILIKE '%%' || %s || '%%'
                      OR to_tsvector(
                           'simple',
                           name || ' ' || description || ' ' || COALESCE(metadata->>'aliases','')
@@ -74,6 +78,7 @@ class CapabilityService:
                     project_id,
                     project_id,
                     project_id,
+                    query,
                     query,
                     query,
                     query,
