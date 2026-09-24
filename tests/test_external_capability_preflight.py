@@ -153,6 +153,29 @@ def test_jev_irreversible_browser_do_is_denied(tool_input):
 @pytest.mark.parametrize(
     "tool_input",
     [
+        {
+            "goal": "Place the order",
+            "allowIrreversible": False,
+            "allow_irreversible": True,
+        },
+        {
+            "goal": "Place the order",
+            "allow_irreversible": False,
+            "allowIrreversible": True,
+        },
+    ],
+)
+def test_jev_duplicate_irreversible_aliases_deny_if_any_value_is_non_false(tool_input):
+    decision = evaluate_external_capability_preflight(
+        _payload("mcp__jev-browser__browser_do", tool_input),
+        active_task_key="TASK-EXT",
+    )
+    assert "irreversible-action bypass is held in V1" in _reason(decision)
+
+
+@pytest.mark.parametrize(
+    "tool_input",
+    [
         {"goal": "Log in", "values": {"password": "dont-send-me"}},
         {"goal": "Log in", "values": {"pass": "dont-send-me"}},
         {"goal": "Enter code", "values": {"passcode": "123456"}},
@@ -162,6 +185,21 @@ def test_jev_irreversible_browser_do_is_denied(tool_input):
         {"goal": "Use token=top-secret"},
         {"goal": "Use password hunter2"},
         {"goal": "Use TYPESAFE_API_KEY=abc123"},
+        {"goal": "Use cookie: sid=abc"},
+        {"goal": "Use PIN 1234"},
+        {"goal": "Use pass hunter2"},
+        {"goal": "Enter card number 4111 1111 1111 1111"},
+        {"goal": "Enter 4111 1111 1111 1111"},
+        {"goal": "Log in", "values": {"cookies": "sid=abc"}},
+        {"goal": "Log in", "values": {"x-api-key": "abc123"}},
+        {"goal": "Log in", "values": {"MY_API_KEY": "abc123"}},
+        {"goal": "Log in", "values": {"id_token": "abc123"}},
+        {"goal": "Log in", "values": {"session_id": "abc123"}},
+        {"goal": "Log in", "values": {"set-cookie": "sid=abc"}},
+        {
+            "goal": "Log in",
+            "values": [{"name": "password", "value": "dont-send-me"}],
+        },
         {"url": "https://user:password@example.com/"},
     ],
 )
@@ -180,6 +218,21 @@ def test_jev_direct_dialog_acceptance_is_denied_even_for_safe_action(field: str)
             "mcp__jev-browser__browser_act",
             {"action": "hover", field: True},
         ),
+        active_task_key="TASK-EXT",
+    )
+    assert "dialog acceptance is held in V1" in _reason(decision)
+
+
+@pytest.mark.parametrize(
+    "tool_input",
+    [
+        {"action": "hover", "acceptDialog": False, "accept_dialog": True},
+        {"action": "hover", "accept_dialog": False, "acceptDialog": True},
+    ],
+)
+def test_jev_duplicate_dialog_aliases_deny_if_any_value_is_non_false(tool_input):
+    decision = evaluate_external_capability_preflight(
+        _payload("mcp__jev-browser__browser_act", tool_input),
         active_task_key="TASK-EXT",
     )
     assert "dialog acceptance is held in V1" in _reason(decision)
@@ -347,6 +400,34 @@ def test_plugin_registers_external_capability_preflight():
     assert groups[0]["hooks"][0].get("timeout") is None
 
 
+
+
+def test_unknown_tool_on_canonical_jev_server_is_denied():
+    decision = evaluate_external_capability_preflight(
+        _payload("mcp__jev-browser__future_browser_tool", {}),
+        active_task_key="TASK-EXT",
+    )
+    assert "not in the pinned 0.1.1 onboarding contract" in _reason(decision)
+
+
+def test_non_secret_browser_values_remain_usable():
+    assert (
+        evaluate_external_capability_preflight(
+            _payload(
+                "mcp__jev-browser__browser_do",
+                {
+                    "goal": "Fill the public demo form",
+                    "values": {
+                        "username": "demo-user",
+                        "city": "Athens",
+                        "search_query": "browser automation",
+                    },
+                },
+            ),
+            active_task_key="TASK-EXT",
+        )
+        is None
+    )
 
 
 def test_noncanonical_jev_server_alias_is_not_claimed_by_vres_guard():
