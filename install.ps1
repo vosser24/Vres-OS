@@ -188,7 +188,7 @@ try {
     $extras = if ($WithEmbeddings) { 'full,embeddings' } else { 'full' }
     Run $NewPython @('-m','pip','install',"$RepoRoot[$extras]")
     Run $NewPython @('-m','pip','check')
-    Run $NewPython @('-c','from vres_os.cli import app; from vres_os.mcp_server import mcp; from vres_os.db import migrate')
+    Run $NewPython @('-c','from vres_os.cli import app; from vres_os.mcp_server import mcp; from vres_os.db import migrate; from vres_os.autocompact import install_autocompact')
     $freeze = & $NewPython -m pip freeze --all
     if ($LASTEXITCODE -ne 0) { throw 'Dependency inventory failed.' }
     [IO.File]::WriteAllLines((Join-Path $NewRelease 'resolved-dependencies.txt'), [string[]]$freeze, (New-Object System.Text.UTF8Encoding $false))
