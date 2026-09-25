@@ -8,7 +8,7 @@ This document defines the implementation contract introduced by #163. It does **
 
 Vres credential resources are scoped to the current Windows user.
 
-- Durable credential **values** live only in Windows Credential Locker through `SecretStore`.
+- Durable credential **values** live only in Windows Credential Locker through `SecretStore`; the broker refuses its default durable backend off Windows.
 - Vres local metadata stores resource identity, field names, timestamps, pending-capture metadata and explicit project bindings. It never stores credential values.
 - PostgreSQL is not a credential vault. Credential-resource values and pending-capture values are not written to Vres PostgreSQL.
 - `.env` and other project configuration files are not durable Vres credential storage.
