@@ -418,6 +418,34 @@ def test_pending_capture_rejects_unsafe_or_incomplete_service_hints(tmp_path):
     assert not registry.exists()
 
 
+def test_pending_confirmation_rolls_back_resource_and_pending_values_on_metadata_failure(
+    monkeypatch, tmp_path
+):
+    broker, store, _registry = _broker(tmp_path)
+    secret = "SyntheticRollbackPendingPassword-112233"
+    detection = detect_high_confidence_credentials(f"password={secret}")
+    assert detection is not None
+    pending = broker.capture_detection(detection)
+    before = dict(store.values)
+
+    monkeypatch.setattr(
+        credential_broker,
+        "_write_registry",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk failure")),
+    )
+    with pytest.raises(CredentialBrokerError, match="restored"):
+        broker.confirm_pending(
+            pending.capture_id,
+            "website",
+            "https://www.example.gr",
+            "main",
+            authorized=True,
+        )
+
+    assert store.values == before
+    assert all(key.startswith("credential-pending:") for key in store.values)
+
+
 def test_pending_capture_keeps_values_out_of_metadata_and_confirm_discard_are_explicit(tmp_path):
     broker, store, registry = _broker(tmp_path)
     project = _project(tmp_path / "project", "pending")
