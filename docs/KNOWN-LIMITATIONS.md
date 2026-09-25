@@ -121,10 +121,17 @@ is not a tamper-proof ledger.
 
 Redaction covers common credential patterns, not all possible secrets. The registered JSON executor refuses
 payloads or recipe constants whose persisted redacted representation differs from the supplied value, and the
-model experiment host envelope is likewise non-secret. Never place real credentials in chat, source documents,
-transcripts, test fixtures or Git. PostgreSQL administrators and local users with filesystem/vault privileges
-remain able to access data. Vres does not encrypt all database contents itself. Use infrastructure encryption,
-access controls and backups appropriate to the deployment.
+model experiment host envelope is likewise non-secret. The #163 Credential Broker adds deterministic high-confidence
+`UserPromptSubmit` interception, current-user resource metadata, explicit project bindings, Locker-backed pending
+capture and exact-value child-output redaction. Repository tests can prove that blocked synthetic credentials do
+not enter Vres's PostgreSQL user-input ledger; they cannot prove what the installed Claude Code host has already
+written to its own transcript/debug state before or around hook execution. Windows User-A/User-B isolation and
+real host transcript/debug behavior remain mandatory #169 physical acceptance criteria.
+
+Never intentionally place real credentials in chat, source documents, transcripts, test fixtures or Git.
+PostgreSQL administrators and local users with filesystem/vault privileges remain able to access data. Vres does
+not encrypt all database contents itself. Use infrastructure encryption, access controls and backups appropriate
+to the deployment.
 
 Project filtering is an application boundary, not PostgreSQL row-level multi-tenant isolation. Knowing a
 DB password or having arbitrary local shell access can bypass it. Do not expose this MCP server to strangers.

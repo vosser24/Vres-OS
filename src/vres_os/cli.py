@@ -13,6 +13,7 @@ from rich.table import Table
 
 from .bootstrap import interactive_setup, last_setup_result, prerequisite_status, start_for_project
 from .config import ConfigStore
+from .credential_broker import CredentialBindingError, CredentialBroker, CredentialBrokerError
 from .db import DatabaseUnavailable, migrate
 from .hooks import compact, post_compact, session_end, session_start, stop, user_prompt, validator_stop
 from .local_secrets import LocalSecretError, LocalSecretManager
@@ -23,9 +24,11 @@ from .redaction import redact, redact_text
 
 app = typer.Typer(pretty_exceptions_show_locals=False, help="Vres-OS control CLI. Normal users primarily interact through the Claude Code Chairman.")
 hook_app = typer.Typer(hidden=True)
-secret_app = typer.Typer(help="Manage project-scoped local secret handles backed by the OS credential store.")
+secret_app = typer.Typer(help="Manage legacy project-scoped local secret handles backed by the OS credential store.")
+credential_app = typer.Typer(help="Manage current-user reusable credential resources without printing values.")
 app.add_typer(hook_app, name="hook")
 app.add_typer(secret_app, name="secret")
+app.add_typer(credential_app, name="credential")
 model_experiment_app = typer.Typer(
     help="Local model-calibration evidence commands. Not exposed through MCP; a single run is not policy authority."
 )
@@ -338,6 +341,225 @@ def secret_cleanup() -> None:
     except (LocalSecretError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     console.print(f"Removed {count} materialized secret file(s).")
+
+
+def _credential_project():
+    return discover_project(".")
+
+
+def _credential_broker_error(exc: Exception) -> typer.BadParameter:
+    return typer.BadParameter(str(exc))
+
+
+@credential_app.command("save")
+def credential_save(
+    service_type: str = typer.Option(..., "--service-type"),
+    origin: str = typer.Option(..., "--origin"),
+    account: str = typer.Option(..., "--account"),
+    field: list[str] = typer.Option(..., "--field", help="Credential field to capture; repeat for multiple fields."),
+    bind: bool = typer.Option(False, "--bind", help="Explicitly authorize the current project to use the resource."),
+) -> None:
+    """Capture a reusable current-user credential from hidden local-terminal input."""
+    if not field:
+        raise typer.BadParameter("at least one --field is required")
+    values: dict[str, str] = {}
+    for name in field:
+        value = getpass.getpass(f"{name}: ")
+        if not value:
+            raise typer.BadParameter(f"credential field '{name}' must not be empty")
+        values[name] = value
+    project = _credential_project() if bind else None
+    try:
+        resource = CredentialBroker().save(
+            service_type,
+            origin,
+            account,
+            values,
+            project=project,
+            bind=bind,
+            authorized=bind,
+        )
+    except (CredentialBrokerError, CredentialBindingError, ValueError) as exc:
+        raise _credential_broker_error(exc) from exc
+    console.print(
+        f"Stored credential resource [bold]{resource.resource_id}[/bold] "
+        f"for {resource.service_type} {resource.origin} account {resource.account}."
+    )
+    if bind:
+        console.print("Current project binding created.")
+
+
+@credential_app.command("list")
+def credential_list() -> None:
+    """List current-user credential metadata without reading secret values."""
+    project = _credential_project()
+    try:
+        rows = CredentialBroker().list_resources(project)
+    except (CredentialBrokerError, ValueError) as exc:
+        raise _credential_broker_error(exc) from exc
+    if not rows:
+        console.print("No current-user credential resources.")
+        return
+    for row in rows:
+        console.print(f"[bold]{row.resource_id}[/bold]")
+        console.print(f"  Service: {row.service_type}")
+        console.print(f"  Origin: {row.origin}")
+        console.print(f"  Account: {row.account}")
+        console.print(f"  Fields: {','.join(row.fields)}")
+        console.print(f"  Bound here: {'yes' if row.bound_to_project else 'no'}")
+
+
+@credential_app.command("bind")
+def credential_bind(
+    resource_id: str,
+    yes: bool = typer.Option(False, "--yes", help="Authorize without an interactive confirmation."),
+) -> None:
+    """Authorize the current project to use one current-user credential resource."""
+    if not yes and not typer.confirm(f"Bind credential resource '{resource_id}' to this project?"):
+        raise typer.Exit(1)
+    try:
+        resource = CredentialBroker().bind(resource_id, _credential_project(), authorized=True)
+    except (CredentialBrokerError, CredentialBindingError, ValueError) as exc:
+        raise _credential_broker_error(exc) from exc
+    console.print(f"Bound {resource.resource_id} to the current project.")
+
+
+@credential_app.command("unlink")
+def credential_unlink(
+    resource_id: str,
+    yes: bool = typer.Option(False, "--yes", help="Unlink without an interactive confirmation."),
+) -> None:
+    """Remove current-project authorization without deleting the credential resource."""
+    if not yes and not typer.confirm(f"Unlink credential resource '{resource_id}' from this project?"):
+        raise typer.Exit(1)
+    try:
+        changed = CredentialBroker().unlink(resource_id, _credential_project(), authorized=True)
+    except (CredentialBrokerError, CredentialBindingError, ValueError) as exc:
+        raise _credential_broker_error(exc) from exc
+    console.print("Unlinked." if changed else "No current-project binding existed.")
+
+
+@credential_app.command("delete")
+def credential_delete(
+    resource_id: str,
+    yes: bool = typer.Option(False, "--yes", help="Delete without an interactive confirmation."),
+) -> None:
+    """Delete the underlying current-user credential resource and all project bindings."""
+    if not yes and not typer.confirm(
+        f"Delete credential resource '{resource_id}' from the current-user vault and remove all bindings?"
+    ):
+        raise typer.Exit(1)
+    try:
+        changed = CredentialBroker().delete_resource(resource_id, authorized=True)
+    except (CredentialBrokerError, CredentialBindingError, ValueError) as exc:
+        raise _credential_broker_error(exc) from exc
+    console.print("Deleted." if changed else "Credential resource was not registered.")
+
+
+@credential_app.command("pending")
+def credential_pending() -> None:
+    """List blocked prompt captures by metadata only; values remain in the OS vault."""
+    try:
+        rows = CredentialBroker().list_pending()
+    except (CredentialBrokerError, ValueError) as exc:
+        raise _credential_broker_error(exc) from exc
+    if not rows:
+        console.print("No pending credential captures.")
+        return
+    for row in rows:
+        console.print(f"[bold]{row.capture_id}[/bold]")
+        console.print(f"  Fields: {','.join(row.fields)}")
+        console.print(f"  Service hint: {row.service_type_hint or ''}")
+        console.print(f"  Origin hint: {row.origin_hint or ''}")
+        console.print(f"  Created: {row.created_at}")
+
+
+@credential_app.command("confirm")
+def credential_confirm(
+    capture_id: str,
+    service_type: str = typer.Option(..., "--service-type"),
+    origin: str = typer.Option(..., "--origin"),
+    account: str = typer.Option(..., "--account"),
+    bind: bool = typer.Option(False, "--bind", help="Explicitly authorize the current project."),
+    yes: bool = typer.Option(False, "--yes", help="Confirm without an interactive prompt."),
+) -> None:
+    """Promote one pending capture into a reusable current-user credential resource."""
+    if not yes and not typer.confirm(
+        f"Confirm pending capture '{capture_id}' as {service_type} {origin} account {account}?"
+    ):
+        raise typer.Exit(1)
+    project = _credential_project() if bind else None
+    try:
+        resource = CredentialBroker().confirm_pending(
+            capture_id,
+            service_type,
+            origin,
+            account,
+            project=project,
+            bind=bind,
+            authorized=True,
+        )
+    except (CredentialBrokerError, CredentialBindingError, ValueError) as exc:
+        raise _credential_broker_error(exc) from exc
+    console.print(f"Confirmed as credential resource {resource.resource_id}.")
+
+
+@credential_app.command("discard")
+def credential_discard(
+    capture_id: str,
+    yes: bool = typer.Option(False, "--yes", help="Discard without an interactive confirmation."),
+) -> None:
+    """Delete one pending capture from the current-user OS vault."""
+    if not yes and not typer.confirm(f"Discard pending credential capture '{capture_id}'?"):
+        raise typer.Exit(1)
+    try:
+        changed = CredentialBroker().discard_pending(capture_id, authorized=True)
+    except (CredentialBrokerError, CredentialBindingError, ValueError) as exc:
+        raise _credential_broker_error(exc) from exc
+    console.print("Discarded." if changed else "Pending capture was not registered.")
+
+
+@credential_app.command("run", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def credential_run(
+    ctx: typer.Context,
+    resource_id: str,
+    env: list[str] = typer.Option([], "--env", help="Child environment mapping NAME=field. Repeat as needed."),
+) -> None:
+    """Run a child process using fields from a credential bound to the current project."""
+    command = list(ctx.args)
+    if command and command[0] == "--":
+        command = command[1:]
+    if not command:
+        raise typer.BadParameter("provide a child command after --")
+    try:
+        code = CredentialBroker().run(resource_id, _credential_project(), command, env)
+    except (CredentialBrokerError, CredentialBindingError, LocalSecretError, ValueError) as exc:
+        raise _credential_broker_error(exc) from exc
+    raise typer.Exit(code)
+
+
+@credential_app.command("materialize")
+def credential_materialize(
+    resource_id: str,
+    field: str,
+    path: Path | None = typer.Option(None, "--path", help="Path under .vres/local-secrets."),
+) -> None:
+    """Temporarily materialize one bound credential field under Vres-owned local-secret storage."""
+    try:
+        target = CredentialBroker().materialize(resource_id, _credential_project(), field, path)
+    except (CredentialBrokerError, CredentialBindingError, LocalSecretError, ValueError) as exc:
+        raise _credential_broker_error(exc) from exc
+    console.print(str(target))
+
+
+@credential_app.command("cleanup")
+def credential_cleanup() -> None:
+    """Remove Vres-owned materialized credential files for the current project."""
+    try:
+        count = CredentialBroker().cleanup_materialized(_credential_project())
+    except (CredentialBrokerError, LocalSecretError, ValueError) as exc:
+        raise _credential_broker_error(exc) from exc
+    console.print(f"Removed {count} materialized credential file(s).")
 
 
 @hook_app.command("session-start")

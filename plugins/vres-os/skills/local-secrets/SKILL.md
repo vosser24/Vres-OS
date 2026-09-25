@@ -1,83 +1,129 @@
 ---
 name: local-secrets
-description: Securely capture and reuse local CLI/API/database credentials for Vres scripts without putting secret values in chat, task memory, PostgreSQL, Git, logs, or committed config. Use whenever a local command, script, API, database, deployment, or integration needs a reusable credential.
+description: Securely capture and reuse current-user CLI/API/database credentials through Vres credential resources without putting values in chat, PostgreSQL, Git, logs, or committed config. Use whenever a local command, script, API, database, deployment, or integration needs a reusable credential.
 ---
 
-# Local secret handles
+# Current-user credentials and local secret delivery
 
-Use Vres local secret handles whenever work needs a credential that should be reusable on this machine.
+Use the Vres Credential Broker for new reusable credentials. Legacy project-scoped `vres secret` aliases remain supported for compatibility.
 
 ## Non-negotiable boundary
 
 - Never ask the user to paste a secret value into Claude chat.
-- Never put a secret value into a Vres task/checkpoint/event/decision, orchestration evidence, artifact, source file, command argument, Git commit, or PostgreSQL row.
+- Never put a secret value into a Vres task/checkpoint/event/decision, orchestration evidence, artifact, source file, command argument, Git commit, PostgreSQL row, model prompt, validation manifest, review queue or knowledge record.
 - Never print a secret value back to the user.
-- Treat a secret pasted into ordinary chat as exposed data: do not save/reuse it. Ask the user to rotate it when appropriate and capture the replacement through the local terminal workflow below.
-- Durable secret values live in the OS credential store. On supported Windows installs, `SecretStore` requires Windows Credential Locker and refuses insecure fallback backends.
-- Refer to credentials only by a project-scoped alias such as `github_token`, `openai_api_key`, or `db_password`.
+- Durable secret values live only in the OS credential store. On supported Windows installs, `SecretStore` requires Windows Credential Locker and refuses insecure fallback backends.
+- A reusable credential belongs to the current Windows user's normalized service/account identity, not to the project where it was first entered.
+- Another project may consume it only after an explicit project binding.
+- `.env` plaintext is not Vres durable credential storage.
+- Environment variables and materialized files are temporary delivery adapters.
+- Native Claude/Codex vendor login and OAuth state remains outside Vres ownership.
 
-## Capture
+## Capture a new reusable credential
 
-When a needed handle is missing, tell the user to run this in a local terminal rooted at the intended project:
-
-```powershell
-vres secret set <alias>
-```
-
-The CLI prompts for `Secret value:` with hidden input. The user may paste the credential there. Do not ask them to send the value in chat.
-
-To inspect available aliases without revealing values:
+Capture from a local terminal with hidden input:
 
 ```powershell
-vres secret list
+vres credential save --service-type website --origin https://www.example.gr --account main --field username --field password
 ```
+
+Add `--bind` only when the current project should be explicitly authorized during capture.
+
+Inspect metadata without reading values:
+
+```powershell
+vres credential list
+```
+
+There is deliberately no plaintext `credential get` command and no normal MCP surface that returns credential values.
+
+## Cross-project reuse
+
+From a different project, list the current-user resource metadata, identify the intended resource and explicitly bind it:
+
+```powershell
+vres credential list
+vres credential bind <resource-id>
+```
+
+The new project receives authorization to the same current-user resource. Vres does not copy or re-enter the secret value.
+
+To revoke only this project's authorization:
+
+```powershell
+vres credential unlink <resource-id>
+```
+
+Underlying resource deletion is a separate explicit action:
+
+```powershell
+vres credential delete <resource-id>
+```
+
+## Credential pasted into Claude
+
+`UserPromptSubmit` has a deterministic high-confidence credential guard. It runs before Vres session/task prompt persistence.
+
+When it recognizes an unambiguous bounded credential, the hook blocks normal processing and attempts to place only the value in Windows Credential Locker under a pending handle. The hook response never echoes the value. The pending metadata contains field names/timestamps/hints only.
+
+Review locally:
+
+```powershell
+vres credential pending
+vres credential confirm <capture-id> --service-type website --origin https://www.example.gr --account main
+vres credential discard <capture-id>
+```
+
+Ambiguous/conflicting detections block but are not silently captured. Placeholder/example prose is not silently promoted into a credential.
+
+This guard is defense-in-depth, not the preferred capture UX. Do not intentionally ask users to paste credentials into Claude. The exact transcript/debug behavior of the installed Claude host remains a #169 physical acceptance criterion; do not claim stronger secrecy than that evidence proves.
 
 ## Use in scripts and commands
 
-Prefer child-process environment injection:
+Prefer child-process environment injection by resource handle:
 
 ```powershell
-vres secret run --env GITHUB_TOKEN=github_token -- <command> <args...>
+vres credential run <resource-id> --env APP_PASSWORD=password -- <command> <args...>
 ```
 
-Repeat `--env NAME=alias` for multiple credentials. The value is added only to the child environment; Vres does not mutate the parent/session environment. The wrapper captures bounded output and removes exact injected secret values before printing, in addition to normal redaction.
+The project binding is checked before values are resolved. Values are added only to the child environment; the parent/session environment is not mutated. Bounded child output has every exact resolved value replaced before printing.
 
-Do not interpolate resolved secret values into shell command strings or command-line arguments. If a script needs the secret, make the script read the injected environment variable.
+Do not interpolate resolved values into shell strings or command arguments. Make the child program read its environment variable.
 
 ## Credential files
 
 Only materialize a file when the target tool genuinely requires one:
 
 ```powershell
+vres credential materialize <resource-id> password --path nested/password.txt
+vres credential cleanup
+```
+
+Materialization is restricted to `.vres/local-secrets/`, is locally Git-excluded, refuses tracked or symlinked paths, and applies restrictive permissions/ACLs. Path/Git safety checks run before the credential value is resolved. Cleanup refuses tracked/symlinked content rather than deleting it blindly.
+
+A materialized file is plaintext while it exists. Clean it up as soon as possible.
+
+## Legacy project-scoped aliases
+
+Existing callers may continue to use:
+
+```powershell
+vres secret set <alias>
+vres secret list
+vres secret run --env NAME=<alias> -- <command>
 vres secret materialize <alias>
-# or
-vres secret materialize <alias> --path nested/credentials.json
-```
-
-Relative paths are rooted under `.vres/local-secrets/`. Absolute or escaping paths are refused. Vres resolves the repository's actual Git metadata path (including linked worktrees), adds `/.vres/local-secrets/` to the local exclude file, refuses to overwrite any already tracked Git path, rejects symlinked secret roots/targets, creates restrictive local permissions/ACLs, and keeps the OS credential store as the durable source of truth.
-
-Remove materialized plaintext as soon as it is no longer needed:
-
-```powershell
 vres secret cleanup
-```
-
-Vres also performs best-effort cleanup when the last open Vres Claude session for the project ends. If another Vres session remains open, materialized files are preserved for that active session. Do not treat Git exclusion as encryption: a materialized file is plaintext while it exists.
-
-## Delete/rotate
-
-To remove a handle from the local OS vault:
-
-```powershell
 vres secret delete <alias>
 ```
 
-To rotate, run `vres secret set <alias>` again and paste the replacement. Metadata updates atomically with the vault operation; failures restore the prior value when possible. Vault/backend failures are surfaced generically without including the secret value.
+These aliases remain project-scoped. New onboarding/adoption work must use the Credential Broker resource/binding API instead of creating more project-scoped credential copies.
 
 ## Persistence model
 
-- Secret value: OS credential store only.
-- Handle metadata: local Vres user-data registry; contains alias/timestamps/project identity but never values.
-- Child environment: ephemeral for the launched process.
-- Materialized file: optional, temporary, project-local, Git-excluded, restrictive permissions, best-effort last-session cleanup.
-- PostgreSQL: never used as the credential vault.
+- Credential value: current-user OS credential store only.
+- Pending-capture value: current-user OS credential store only until confirm/discard.
+- Credential metadata/bindings: current-user local Vres registry, non-secret only.
+- PostgreSQL: never the credential vault.
+- Child environment: ephemeral copied environment for the launched process.
+- Materialized file: optional, temporary, project-local under Vres-owned Git-excluded storage.
+- Native Claude/Codex login: vendor-owned and out of Vres scope.
