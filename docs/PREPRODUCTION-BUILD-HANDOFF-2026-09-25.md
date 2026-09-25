@@ -419,7 +419,7 @@ For every issue #163–#168:
 6. implement smallest viable contract;
 7. add targeted automated tests;
 8. run PostgreSQL/integration checks where applicable;
-9. run only changed-surface live regressions;
+9. freeze the tranche's physical Windows/live criteria for #169; do not run the final live acceptance yet;
 10. checkpoint final review state;
 11. run protected Fable validation;
 12. commit;
@@ -427,15 +427,15 @@ For every issue #163–#168:
 14. exact-head CI;
 15. merge;
 16. post-merge main CI;
-17. update handoff/evidence;
-18. close issue;
+17. update handoff/evidence and #169's carried live criteria if needed;
+18. close the implementation issue without claiming deferred live PASS;
 19. stop before next dependent issue unless explicitly continuing.
 
 No dependent tranche is developed on an unmerged predecessor.
 
 ## 17. Production boundary
 
-#169 is live acceptance.
+#169 is the consolidated physical Windows live acceptance. Issues #163–#168 build and validate their implementation contracts first; their real host/Windows acceptance is intentionally deferred to #169 and run from the Visual Studio workflow.
 
 #170 is Production Readiness / Go-Live.
 
