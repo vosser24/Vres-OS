@@ -68,6 +68,13 @@ def _init_git(root: Path) -> None:
     )
 
 
+def test_default_broker_refuses_non_windows_durable_backend(monkeypatch):
+    monkeypatch.setattr(credential_broker.os, "name", "posix")
+
+    with pytest.raises(CredentialBrokerError, match="Windows Credential Locker"):
+        CredentialBroker()
+
+
 def test_service_identity_normalization_and_duplicate_resource_identity(tmp_path):
     website = normalize_service_identity(
         "web",
