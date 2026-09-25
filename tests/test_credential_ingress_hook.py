@@ -48,7 +48,8 @@ def test_high_confidence_credential_blocks_before_config_repository_or_prompt_st
     assert captured == [(("password",), {"password": secret}, project)]
     rendered = capsys.readouterr().out
     message = json.loads(rendered)
-    assert message["decision"] == "block"\n    assert message["suppressOriginalPrompt"] is True
+    assert message["decision"] == "block"
+    assert message["suppressOriginalPrompt"] is True
     assert "Credential detected" in message["reason"]
     assert "pending current-user capture" in message["reason"]
     assert secret not in rendered
@@ -91,7 +92,8 @@ def test_credential_capture_failure_still_blocks_and_logs_only_fixed_non_secret_
 
     rendered = capsys.readouterr().out
     message = json.loads(rendered)
-    assert message["decision"] == "block"\n    assert message["suppressOriginalPrompt"] is True
+    assert message["decision"] == "block"
+    assert message["suppressOriginalPrompt"] is True
     assert "capture was unavailable" in message["reason"].lower()
     assert secret not in rendered
     assert logged == [
