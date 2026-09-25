@@ -82,7 +82,8 @@ def test_blocked_credential_prompt_never_enters_postgres_user_input_ledger(
 
     rendered = capsys.readouterr().out
     message = json.loads(rendered)
-    assert message["decision"] == "block"\n    assert message["suppressOriginalPrompt"] is True
+    assert message["decision"] == "block"
+    assert message["suppressOriginalPrompt"] is True
     assert secret not in rendered
     assert int(observation["n"]) == 0
     assert secret not in json.dumps(session["metadata"], default=str)
