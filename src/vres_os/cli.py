@@ -397,23 +397,16 @@ def credential_list() -> None:
         rows = CredentialBroker().list_resources(project)
     except (CredentialBrokerError, ValueError) as exc:
         raise _credential_broker_error(exc) from exc
-    table = Table(title="Vres current-user credential resources")
-    table.add_column("Resource")
-    table.add_column("Service")
-    table.add_column("Origin")
-    table.add_column("Account")
-    table.add_column("Fields")
-    table.add_column("Bound here")
+    if not rows:
+        console.print("No current-user credential resources.")
+        return
     for row in rows:
-        table.add_row(
-            row.resource_id,
-            row.service_type,
-            row.origin,
-            row.account,
-            ",".join(row.fields),
-            "yes" if row.bound_to_project else "no",
-        )
-    console.print(table)
+        console.print(f"[bold]{row.resource_id}[/bold]")
+        console.print(f"  Service: {row.service_type}")
+        console.print(f"  Origin: {row.origin}")
+        console.print(f"  Account: {row.account}")
+        console.print(f"  Fields: {','.join(row.fields)}")
+        console.print(f"  Bound here: {'yes' if row.bound_to_project else 'no'}")
 
 
 @credential_app.command("bind")
