@@ -173,7 +173,7 @@ def _credential_ingress_guard(payload: dict[str, Any], prompt: str) -> bool:
             "but the input was ambiguous or unsafe to capture automatically, so nothing was stored. "
             "Use the local Vres credential terminal workflow and re-send the request without the credential."
         )
-    sys.stdout.write(json.dumps({"decision": "block", "reason": reason}))
+    sys.stdout.write(\n        json.dumps(\n            {\n                "decision": "block",\n                "reason": reason,\n                "suppressOriginalPrompt": True,\n            }\n        )\n    )
     return True
 
 
