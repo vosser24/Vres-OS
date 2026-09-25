@@ -252,6 +252,22 @@ def test_malformed_and_cross_user_registry_fail_closed(tmp_path):
     with pytest.raises(CredentialBrokerError, match="different current-user namespace"):
         broker.list_resources()
 
+    registry.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "user_namespace": "user-a",
+                "resources": {},
+                "bindings": {},
+                "pending_captures": {},
+                "password": "must-never-be-preserved-as-metadata",
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(CredentialBrokerError, match="malformed"):
+        broker.list_resources()
+
 
 def test_second_user_namespace_neither_reuses_metadata_nor_vault_keys(tmp_path):
     store = FakeSecretStore()
@@ -372,6 +388,34 @@ def test_conflicting_detected_values_block_but_are_not_silently_captured():
     assert detection is not None
     assert detection.capture_allowed is False
     assert detection.values == {}
+
+
+def test_pending_capture_rejects_unsafe_or_incomplete_service_hints(tmp_path):
+    broker, store, registry = _broker(tmp_path)
+
+    from vres_os.credential_broker import CredentialDetection
+
+    incomplete = CredentialDetection(
+        fields=("password",),
+        values={"password": "SyntheticPassword123456"},
+        service_type_hint="website",
+        origin_hint=None,
+    )
+    with pytest.raises(CredentialBrokerError, match="hint is incomplete"):
+        broker.capture_detection(incomplete)
+    assert store.values == {}
+    assert not registry.exists()
+
+    unsafe = CredentialDetection(
+        fields=("password",),
+        values={"password": "SyntheticPassword123456"},
+        service_type_hint="website",
+        origin_hint="https://user:secret@example.gr",
+    )
+    with pytest.raises(CredentialBrokerError, match="hint is unsafe"):
+        broker.capture_detection(unsafe)
+    assert store.values == {}
+    assert not registry.exists()
 
 
 def test_pending_capture_keeps_values_out_of_metadata_and_confirm_discard_are_explicit(tmp_path):
