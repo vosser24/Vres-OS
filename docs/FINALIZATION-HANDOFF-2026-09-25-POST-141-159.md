@@ -710,3 +710,23 @@ The next action is:
 4. otherwise move directly into the separate Production Readiness / Go-Live acceptance phase.
 
 This audit is the decision boundary between further product development and productionization.
+
+
+---
+
+## 21. Continuation supersession after the real-world case audit
+
+The real-world case audit described in sections 17–20 has now been completed.
+
+That audit found genuine product gaps and produced the bounded pre-production work ledger #163–#170.
+
+For all future continuation, use:
+
+- `docs/PREPRODUCTION-ADOPTION-BUILD-PLAN-2026-09-25.md`
+- `docs/PREPRODUCTION-BUILD-HANDOFF-2026-09-25.md`
+
+The new authoritative first implementation action is issue **#163 — Credential Broker: current-user reusable secrets and prompt ingress protection**.
+
+Do not continue using the earlier instruction to wait for additional cases before opening development work. That planning boundary has been crossed.
+
+Historical #141/#146/#159 evidence in this file remains valid and must not be rewritten or discarded.
