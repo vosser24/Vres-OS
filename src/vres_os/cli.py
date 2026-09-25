@@ -463,21 +463,15 @@ def credential_pending() -> None:
         rows = CredentialBroker().list_pending()
     except (CredentialBrokerError, ValueError) as exc:
         raise _credential_broker_error(exc) from exc
-    table = Table(title="Vres pending credential captures")
-    table.add_column("Capture")
-    table.add_column("Fields")
-    table.add_column("Service hint")
-    table.add_column("Origin hint")
-    table.add_column("Created")
+    if not rows:
+        console.print("No pending credential captures.")
+        return
     for row in rows:
-        table.add_row(
-            row.capture_id,
-            ",".join(row.fields),
-            row.service_type_hint or "",
-            row.origin_hint or "",
-            row.created_at,
-        )
-    console.print(table)
+        console.print(f"[bold]{row.capture_id}[/bold]")
+        console.print(f"  Fields: {','.join(row.fields)}")
+        console.print(f"  Service hint: {row.service_type_hint or ''}")
+        console.print(f"  Origin hint: {row.origin_hint or ''}")
+        console.print(f"  Created: {row.created_at}")
 
 
 @credential_app.command("confirm")
