@@ -223,12 +223,11 @@ Each tranche must distinguish:
 2. automated unit/contract tests;
 3. PostgreSQL integration tests where relevant;
 4. installed/runtime smoke;
-5. target-Windows physical evidence where the issue contract requires it;
-6. protected Fable validation;
-7. exact-head CI;
-8. post-merge main CI.
+5. protected Fable validation;
+6. exact-head CI;
+7. post-merge main CI.
 
-A missing physical environment is BLOCKED/DEFERRED, not PASS.
+For #163–#168, physical Windows/live criteria are frozen in each issue but are executed together in #169 from the Visual Studio workflow. Do not start the final physical acceptance early and do not mark deferred live criteria PASS during implementation.
 
 ### 4.5 Commit discipline
 
@@ -243,7 +242,10 @@ Each tranche should normally end with:
 - exact-head CI;
 - merge;
 - post-merge CI;
-- issue close only after the accepted evidence chain is durable.
+- explicit carry-forward of its deferred physical criteria into #169;
+- issue close only after the implementation evidence chain is durable.
+
+The issue close means the build tranche is complete; it does not claim the later #169 physical acceptance has already passed.
 
 Do not mix the next issue into the current PR.
 
@@ -316,7 +318,7 @@ Project unlink and resource delete are separate operations.
 
 ### 5.6 Validation
 
-The full acceptance contract is in issue #163. Treat its Windows-user isolation check as mandatory before production.
+The full acceptance contract is in issue #163. Its Windows-user isolation and prompt/transcript host checks are mandatory live criteria in #169 before production.
 
 ## 6. Issue #164 — Secret-safe onboarding
 
