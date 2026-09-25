@@ -598,31 +598,78 @@ For session lifecycle/hooks/compaction/reply-guard changes, the minimum live fam
 
 #141 has now passed all three on the accepted candidate.
 
-## 17. Next development phase
+## 17. Immediate next phase — pre-production case-coverage audit
 
-There are no open GitHub issues at handoff creation.
+There are no open GitHub issues at handoff update time.
 
-Therefore the next session must **not invent a continuation issue from stale handoff text**.
+The user has explicitly asked to review additional real-world/business cases **before** starting a new development phase or declaring production readiness. Those cases have not yet been supplied in this handoff; the next session is expected to receive them from the user.
 
-Recommended order:
+Therefore the next session must **not** immediately create a feature issue, branch or worktree. It must first audit each user-supplied case against the actual current implementation and accepted evidence.
 
-1. Fetch `origin/main --prune`.
-2. Verify the current main contains this handoff.
-3. Confirm the primary clone is clean and on main.
-4. Check current open issues/PRs.
-5. If there is still no open issue, decide the next concrete product requirement with the user.
-6. Open a dedicated issue with:
-   - exact problem statement;
-   - scope boundary;
-   - frozen acceptance contract;
-   - owning surfaces;
-   - minimum surface-triggered regression family.
-7. Create a dedicated branch/worktree from current main.
-8. Implement the smallest correct change.
-9. Run focused tests, exact-head CI/release gate, required physical acceptance, merge, post-merge main CI, then close the issue.
-10. Create another handoff only when crossing a real development boundary.
+For every case, distinguish three separate questions:
 
-Do not reopen #141, #146, or #159 merely because they are named in historical evidence. Reopen only if a real regression is newly demonstrated and the issue lifecycle intentionally requires reopening rather than a new issue.
+1. **Implementation support:** does the current product actually implement the behavior?
+2. **Automated evidence:** do current unit/integration/contract/CI tests prove the relevant behavior?
+3. **Physical/live evidence:** has the exact or materially equivalent behavior been exercised in accepted Windows/Claude/PostgreSQL live evidence?
+
+Classify each case using exactly one of these verdicts:
+
+- **COVERED + PROVEN** — current implementation serves the case and existing accepted evidence is sufficient. No new development and no duplicate test.
+- **COVERED, NEEDS PROOF** — implementation appears to serve the case, but the accepted evidence does not yet prove the exact scenario. Run the smallest targeted acceptance test; do not open a development issue merely to create proof.
+- **PARTIALLY COVERED** — an important part of the requested behavior is missing, constrained or only indirectly served. Define the smallest missing product contract before development.
+- **NOT COVERED** — current implementation does not provide the requested behavior. This is a genuine development gap.
+- **INTENTIONALLY HELD** — the capability was deliberately excluded/disabled/held (for example optional features). Keep it held unless the user explicitly brings it into scope.
+
+Rules for the audit:
+
+- Prefer existing accepted F/LV/PA/UE/CI evidence when it is materially equivalent and satisfies the documented reuse rules.
+- Do not rerun a test only because the evidence is filed under a different historical case name.
+- Do not infer coverage from design intent, docs wording or green CI alone when the concrete behavior is not implemented/proven.
+- Do not mark a case missing merely because it has not been exercised with the user's exact business nouns if the same technical contract has already been proven.
+- Preserve the distinction between code capability, automated tests and physical live proof.
+- If uncertainty remains, inspect the implementation/tests/evidence before deciding.
+- Do not reopen #141, #146 or #159 unless a newly demonstrated regression specifically warrants it.
+
+### Decision after the case audit
+
+If every user case is either:
+
+- **COVERED + PROVEN**, or
+- **COVERED, NEEDS PROOF** and can be closed by bounded acceptance testing without product changes,
+
+then **stop feature development** and move directly into a dedicated **Production Readiness / Go-Live phase**.
+
+If any case is **PARTIALLY COVERED** or **NOT COVERED**, create a new issue **only for the real missing contract**, with:
+
+- exact problem statement;
+- user/business scenario;
+- scope boundary;
+- frozen acceptance contract;
+- owning implementation surfaces;
+- evidence already reused;
+- smallest required new tests/live acceptance;
+- surface-triggered regression family.
+
+Only after that should a dedicated branch/worktree be created.
+
+### Production Readiness / Go-Live phase if the audit finds no product gaps
+
+Production readiness is a separate operational decision. Green finalization alone does not authorize customer/production use.
+
+At minimum, that phase should freeze and accept:
+
+1. exact release artifact/package and reproducible manifest/hashes;
+2. target Windows production host and installed-artifact acceptance;
+3. production PostgreSQL/database authorization and least-privilege configuration;
+4. secrets/credential/storage/logging/redaction review;
+5. backup + restore proof;
+6. update/rollback/interrupted-update recovery runbook and proof;
+7. monitoring/health/failure visibility and operator escalation;
+8. explicit enabled/held capability inventory;
+9. staged low-risk real-world pilot with bounded data/permissions;
+10. final production go-live decision based on pilot + operational/security/recovery evidence.
+
+Do not call the product production-ready until that separate phase passes.
 
 ## 18. Optional cleanup after this handoff is merged
 
@@ -641,18 +688,25 @@ Never bulk-delete historical worktrees based only on age.
 
 Use this as the first instruction in a new chat/session:
 
-> Resume Vres-OS from `docs/FINALIZATION-HANDOFF-2026-09-25-POST-141-159.md`. Fetch and verify current `origin/main` first. #146, #159, and #141 are fully complete and must not be reopened or used to mutate routing/model policies without new evidence. Auto-compaction is now 15% USED / roughly 85% free with no persisted custom window. The #141 live continuation fix is merged and F-05/F-06/F-15 plus post-merge CI are green. There are no open issues at handoff creation, so first inspect current GitHub state and identify the next real product requirement before creating a new issue/branch. Preserve historical checkpoints/evidence and follow the surface-triggered regression policy.
+> Resume Vres-OS from `docs/FINALIZATION-HANDOFF-2026-09-25-POST-141-159.md`. Fetch and verify current `origin/main` first. #146, #159 and #141 are fully complete; do not reopen them without new regression evidence. Auto-compaction is 15% USED / roughly 85% free with no persisted custom window. The repository finalization evidence is green. Before starting any new development or production-readiness work, audit the additional real-world cases I will provide. For each case, determine separately whether the behavior is implemented, automatically tested and physically/live proven, then classify it as COVERED + PROVEN, COVERED NEEDS PROOF, PARTIALLY COVERED, NOT COVERED or INTENTIONALLY HELD. Reuse materially equivalent accepted evidence instead of duplicating tests. Do not create a GitHub issue/branch for a case that is already covered. If all cases are covered/proven or need only bounded proof, stop feature development and prepare the Production Readiness / Go-Live phase covering release artifact, target production environment, security/secrets, database authorization, backup/restore, update/rollback recovery, monitoring/operator runbook, staged real-world pilot and final launch gate. Preserve historical checkpoints/evidence and follow the surface-triggered regression policy.
 
 ## 20. Closeout verdict
 
 The #141/#159 development phase is complete.
 
-The verified product baseline is:
+The verified product implementation baseline before the docs-only handoff commits is:
 
 `acd45f1262979c16b1029ca9241976098cb503e8`
 
-on `main`, with post-merge CI #391 green.
+The authoritative handoff itself was subsequently merged and verified on main. At this handoff update there is no known blocking defect from #141/#159 and no open product issue requiring immediate implementation.
 
-There is no known blocking defect from this phase, no open GitHub issue at handoff creation, and no pending required rerun from #141/#159.
+The **next action is not automatically new development**.
 
-The correct next action is a new planning/development phase from current main, not continuation of either closed issue.
+The next action is:
+
+1. receive the user's additional real-world cases;
+2. perform the implementation/test/live-evidence coverage audit described above;
+3. create development issues only for genuine product gaps;
+4. otherwise move directly into the separate Production Readiness / Go-Live acceptance phase.
+
+This audit is the decision boundary between further product development and productionization.
