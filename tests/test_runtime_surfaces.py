@@ -160,7 +160,14 @@ def test_codex_adapter_stdin_and_read_only_contract(monkeypatch,tmp_path):
     assert 'review code' not in run.call_args.args[0]
 
 
-@pytest.mark.parametrize('bad', ['', 'password=do-not-send', 'x'*262145])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        pytest.param("", id="empty"),
+        pytest.param("password=do-not-send", id="secret-like"),
+        pytest.param("x" * 262145, id="oversized"),
+    ],
+)
 def test_codex_rejects_invalid_prompt_before_executable_lookup(monkeypatch,tmp_path,bad):
     import vres_os.codex as codex
     lookup=MagicMock();monkeypatch.setattr(codex.shutil,'which',lookup)

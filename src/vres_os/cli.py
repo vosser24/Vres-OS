@@ -26,6 +26,10 @@ hook_app = typer.Typer(hidden=True)
 secret_app = typer.Typer(help="Manage project-scoped local secret handles backed by the OS credential store.")
 app.add_typer(hook_app, name="hook")
 app.add_typer(secret_app, name="secret")
+model_experiment_app = typer.Typer(
+    help="Local model-calibration evidence commands. Not exposed through MCP; a single run is not policy authority."
+)
+app.add_typer(model_experiment_app, name="model-experiment")
 console = Console()
 
 
@@ -107,6 +111,129 @@ def onboard(path: Path) -> None:
     repo = Repository()
     project_id = repo.ensure_project(project)
     console.print_json(data=OnboardingService().inventory(path, project_id=project_id))
+
+
+def _project_file(path: Path, root: Path, label: str) -> Path:
+    """Absolute, non-symlink path whose resolved location stays inside the project root."""
+    target = Path(os.path.abspath(path))
+    if target.is_symlink():
+        raise typer.BadParameter(f"{label} must not be a symbolic link")
+    real = target.resolve()
+    if not real.is_relative_to(root):
+        raise typer.BadParameter(f"{label} must stay inside the current project")
+    return real
+
+
+@model_experiment_app.command("run")
+def model_experiment_run(
+    task_key: str = typer.Option(..., "--task-key", help="Unfinished Vres task in the current project."),
+    phase: str = typer.Option(..., "--phase", help="Experiment phase (plan/build/summarize/research/analyze/debug)."),
+    family: str = typer.Option(..., "--family", help="Model family: sonnet or opus."),
+    effort: str = typer.Option(..., "--effort", help="Explicit effort: low/medium/high/xhigh/max."),
+    prompt_file: Path = typer.Option(..., "--prompt-file", help="Regular UTF-8 prompt file inside the project."),
+    output_file: Path = typer.Option(..., "--output-file", help="New result file inside the project (never overwritten)."),
+    timeout: float = typer.Option(300.0, "--timeout", min=1, max=3600, help="Seconds before the call is terminated."),
+) -> None:
+    """Run one isolated Claude Code call and record host-observed model_run evidence.
+
+    Run this from a separate terminal, not from inside Claude Code. The host cost is a
+    list-price estimate, not billing truth, and one run never changes model policy.
+    """
+    from .claude_experiment import ClaudeExperimentError, assert_not_nested, run_claude_experiment
+    from .model_experiments import (
+        CLAUDE_HOST_EFFORTS,
+        CLAUDE_HOST_FAMILIES,
+        ModelExperimentService,
+        normalize_phase,
+    )
+    from .processes import MAX_PROMPT_BYTES
+
+    family, effort = family.strip().lower(), effort.strip().lower()
+    if family not in CLAUDE_HOST_FAMILIES:
+        raise typer.BadParameter("family must be sonnet or opus", param_hint="--family")
+    if effort not in CLAUDE_HOST_EFFORTS:
+        raise typer.BadParameter("effort must be one of " + "/".join(CLAUDE_HOST_EFFORTS), param_hint="--effort")
+    try:
+        phase = normalize_phase(phase)
+        assert_not_nested()
+        project = discover_project(".")
+        root = project.root.resolve()
+        prompt_path = _project_file(prompt_file, root, "prompt-file")
+        output_path = _project_file(output_file, root, "output-file")
+        if not prompt_path.is_file():
+            raise typer.BadParameter("prompt-file must be an existing regular file")
+        if output_path.exists() or not output_path.parent.is_dir():
+            raise typer.BadParameter("output-file must be a new file in an existing directory")
+        with prompt_path.open("rb") as handle:
+            raw = handle.read(MAX_PROMPT_BYTES + 1)
+        if len(raw) > MAX_PROMPT_BYTES:
+            raise typer.BadParameter("prompt-file exceeds the prompt budget")
+        prompt = raw.decode("utf-8")
+        service = ModelExperimentService()
+        project_id = Repository().ensure_project(project)
+        service.assert_task_open(task_key, project_id)
+        observation = run_claude_experiment(prompt=prompt, family=family, effort=effort, timeout=timeout)
+        with output_path.open("xb") as handle:  # create-only; the exact result bytes
+            handle.write(observation.result_text.encode("utf-8"))
+        try:
+            run_id = service.record_host_run(
+                task_key=task_key,
+                phase=phase,
+                provider="claude",
+                model=observation.physical_model,
+                effort=effort,
+                success=True,
+                runtime_ms=observation.runtime_ms,
+                input_tokens=observation.input_tokens,
+                output_tokens=observation.output_tokens,
+                input_digest=observation.input_digest,
+                output_digest=observation.output_digest,
+                execution_evidence=observation.execution_evidence(),
+                estimated_cost=observation.estimated_cost,
+                project_id=project_id,
+            )
+        except Exception as exc:  # the paid result exists; never let recording failure hide that
+            typer.echo(
+                "The Claude call succeeded and its result was preserved at "
+                f"{output_path.relative_to(root).as_posix()}, but the model_run was NOT recorded "
+                f"({type(exc).__name__}: {redact_text(str(exc))[:200]}). Do not treat this file as "
+                "trusted experiment evidence. The paid call was not retried.",
+                err=True,
+            )
+            raise typer.Exit(1) from exc
+    except typer.BadParameter:
+        raise
+    except UnicodeDecodeError as exc:
+        raise typer.BadParameter("prompt-file must be valid UTF-8") from exc
+    except (ClaudeExperimentError, ValueError, KeyError, OSError, DatabaseUnavailable) as exc:
+        typer.echo(redact_text(str(exc))[:500], err=True)
+        raise typer.Exit(1) from exc
+    console.print_json(
+        data=redact(
+            {
+                "run_id": run_id,
+                "task_key": task_key,
+                "phase": phase,
+                "requested_family": observation.requested_family,
+                "physical_model": observation.physical_model,
+                "effort": observation.effort,
+                "input_digest": observation.input_digest,
+                "output_digest": observation.output_digest,
+                "output_file": str(output_path.relative_to(root)),
+                "runtime_ms": observation.runtime_ms,
+                "input_tokens": observation.input_tokens,
+                "output_tokens": observation.output_tokens,
+                "cache_read_input_tokens": observation.cache_read_input_tokens,
+                "cache_creation_input_tokens": observation.cache_creation_input_tokens,
+                "thinking_tokens": observation.thinking_tokens,
+                "estimated_cost": str(observation.estimated_cost),
+                "host_cost_usd": observation.host_cost_usd,
+                "cost_semantics": "host list-price estimate, not billing truth",
+                "host_result_id": observation.host_result_id,
+                "policy_mutation": "none",
+            }
+        )
+    )
 
 
 @app.command()

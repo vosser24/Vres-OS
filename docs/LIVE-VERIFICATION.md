@@ -541,6 +541,28 @@ These cases validate behavior, not a claimed token-saving percentage. Capture be
 
 **Pass evidence:** Results are recorded as observations with task/scenario context. Do not claim measured savings or change model/routing policy from one anecdotal run.
 
+## Model-calibration host evidence (#146, slice 1)
+
+Slice 1 is host-evidence plumbing only. It records what one bounded Claude Code call reported; it does not choose a model, change `model_policies`, alter routing, or touch protected Fable/high validation.
+
+### MC-01 — Live Claude Code experiment run
+
+**Execute:** From a **separate terminal outside Claude Code** (the producer refuses when `CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CODE_CHILD_SESSION` and related session variables, or `CLAUDE_EFFORT`, are set), in a project with an unfinished Vres task, save a small prompt file inside the project and run:
+
+`vres model-experiment run --task-key <TASK> --phase analyze --family sonnet --effort medium --prompt-file <prompt> --output-file <new-result-file>`
+
+Repeat with `--family opus` and the same prompt file for a pair. Use a non-existent output path each time; the command never overwrites.
+
+**Pass evidence:** The command prints a bounded JSON summary (`run_id`, `physical_model`, `requested_family`, `effort`, `input_digest`, `output_digest`, `runtime_ms`, token counts including cache read/creation, `estimated_cost`, `host_result_id`). The output file's SHA-256 equals `output_digest`; the prompt file's SHA-256 equals `input_digest`. The stored `model_runs` row has `measurement_source='host'`, the exact physical model (for example `claude-sonnet-5`, `claude-opus-5-5`), `execution_evidence.evidence_kind='claude_code_host'`, no `provider_response_id`, the frozen `invocation_contract` (safe-mode, print, one turn, no tools, no MCP, no session persistence, no `--bare`), `runtime_source='adapter_monotonic'` distinct from `host_duration_ms`/`host_duration_api_ms`, and an exact decimal `host_cost_usd` whose 6-decimal rounding equals the `estimated_cost` column. Re-running the same recorded `host_result_id` is rejected.
+
+**Limits to state in the record:**
+
+- `host_cost_usd`/`estimated_cost` is Claude Code's **list-price estimate**, not billing truth.
+- A single run, or a single Sonnet/Opus pair, is **not policy authority**. The existing `ModelExperimentService.assess` compares runtime and uncached tokens only and omits cache economics; a cost-aware paired assessment is the next slice and must exist before any model-policy change.
+- Only `sonnet` and `opus` are accepted. The protected Fable/high validator is not an experiment target.
+- No routing, `model_policies` or validation behavior changes; the command is a local CLI and is not exposed through MCP.
+- CI proves parsing, provenance and recording with synthetic envelopes only; it is not evidence that a live vendor call happened.
+
 ## Final release decision
 
 Sign the actual matrix, not this blank plan. Record remaining defects and held functions. The decision can be

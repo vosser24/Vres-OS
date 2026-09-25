@@ -20,6 +20,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 EXCLUDE = {'.git', '.pytest_cache', '__pycache__', 'build', 'dist', '.venv', 'htmlcov', '.live-test-venv'}
+PYTEST_TIMEOUT_SECONDS = 900
 
 
 def files():
@@ -33,6 +34,15 @@ def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def migration_digest(path: Path) -> str:
+    """Hash canonical migration text, independent of checkout newline style.
+
+    Path.read_text() uses universal-newline translation, matching the runtime
+    migrator's checksum semantics on LF and CRLF worktrees.
+    """
+    return digest(path.read_text(encoding="utf-8").encode("utf-8"))
+
+
 def command(args: list[str], output: Path, name: str, *, cwd: Path = ROOT, env: dict | None = None, timeout: int = 180):
     result = subprocess.run(args, cwd=cwd, env=env, capture_output=True, text=True,
                             encoding='utf-8', errors='replace', timeout=timeout, check=False)
@@ -42,6 +52,22 @@ def command(args: list[str], output: Path, name: str, *, cwd: Path = ROOT, env: 
     if result.returncode:
         raise RuntimeError(f'{name} failed with exit {result.returncode}; inspect its log')
     return result.stdout
+
+
+def pytest_gate(output: Path, env: dict):
+    return command(
+        [
+            sys.executable, '-m', 'pytest', '-o', 'addopts=', '-q', '-ra',
+            '--junitxml', str(output / 'junit.xml'),
+            '--cov=vres_os', '--cov-branch',
+            '--cov-report=term-missing',
+            '--cov-report=json:' + str(output / 'coverage.json'),
+        ],
+        output,
+        'pytest',
+        env=env,
+        timeout=PYTEST_TIMEOUT_SECONDS,
+    )
 
 
 def _tool_names(path: Path) -> list[str]:
@@ -114,7 +140,7 @@ def structure():
     assert len(migrations) >= 17
     for p in migrations:
         if p.name in baseline:
-            assert digest(p.read_bytes()) == baseline[p.name], f'Recovered migration changed: {p.name}'
+            assert migration_digest(p) == baseline[p.name], f'Recovered migration changed: {p.name}'
     assert set(baseline) <= {p.name for p in migrations}
     tables = set()
     # Inventory only: not a PostgreSQL parser or runtime dependency validator.
@@ -176,6 +202,7 @@ def structure():
         ROOT / 'src/vres_os/procedure_worker.py',
         ROOT / 'src/vres_os/model_policy.py',
         ROOT / 'src/vres_os/model_experiments.py',
+        ROOT / 'src/vres_os/claude_experiment.py',
         ROOT / 'src/vres_os/mcp_entrypoint.py',
         ROOT / 'src/vres_os/task_lifecycle.py',
         ROOT / 'src/vres_os/task_decisions.py',
@@ -184,7 +211,7 @@ def structure():
     return {'package_version': config['project']['version'], 'plugin_version': manifest['version'],
             'agents': sorted(agents), 'skills': sorted(skills), 'mcp_tools': names,
             'company_mcp_tools': company_names, 'entrypoint_mcp_tools': entrypoint_names,
-            'migrations': {p.name: digest(p.read_bytes()) for p in migrations},
+            'migrations': {p.name: migration_digest(p) for p in migrations},
             'table_inventory': sorted(tables), 'migration_proof': 'numbering/hash/inventory only; no PostgreSQL execution'}
 
 
@@ -216,6 +243,7 @@ sys.path.insert(0, sys.argv[1])
 import vres_os, vres_os.cli, vres_os.metrics, vres_os.optimization, vres_os.company_mcp, vres_os.mcp_entrypoint, vres_os.replay
 import vres_os.executor, vres_os.procedure_recipe, vres_os.procedure_worker, vres_os.model_policy
 import vres_os.model_experiments, vres_os.task_lifecycle, vres_os.task_decisions, vres_os.statusline
+import vres_os.claude_experiment
 assert pathlib.Path(vres_os.__file__).resolve().is_relative_to(pathlib.Path(sys.argv[1]).resolve())
 assert callable(vres_os.company_mcp.main)
 assert callable(vres_os.mcp_entrypoint.main)
@@ -233,6 +261,7 @@ assert hasattr(vres_os.executor, 'ProcedureExecutorService')
 assert callable(vres_os.procedure_worker.main)
 assert hasattr(vres_os.model_policy, 'ModelPolicyService')
 assert hasattr(vres_os.model_experiments, 'ModelExperimentService')
+assert callable(vres_os.claude_experiment.run_claude_experiment)
 assert callable(vres_os.statusline.render_statusline)
 assert len(list(importlib.resources.files('vres_os').joinpath('migrations').iterdir())) >= 20
 print('installed runtime source:', vres_os.__file__)
@@ -311,10 +340,7 @@ def main():
             env['SOURCE_DATE_EPOCH'] = epoch
             command(['git', 'diff', '--check'], out, 'git-diff-check')
         report['gates']['structure'] = structure()
-        command([sys.executable, '-m', 'pytest', '-o', 'addopts=', '-q', '-ra',
-                 '--junitxml', str(out / 'junit.xml'), '--cov=vres_os', '--cov-branch',
-                 '--cov-report=term-missing', '--cov-report=json:' + str(out / 'coverage.json')],
-                out, 'pytest', env=env)
+        pytest_gate(out, env)
         suites = ET.parse(out / 'junit.xml').getroot()
         cases = list(suites.iter('testcase'))
         report['gates']['tests'] = {'passed': sum(c.find('skipped') is None and c.find('failure') is None and c.find('error') is None for c in cases),
