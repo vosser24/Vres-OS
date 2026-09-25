@@ -221,15 +221,23 @@ def _empty_registry(namespace: str) -> dict:
 
 
 def _validate_registry(value: object, namespace: str) -> dict:
+    top_keys = {"version", "user_namespace", "resources", "bindings", "pending_captures"}
     if not isinstance(value, dict) or value.get("version") != _VERSION:
         raise CredentialBrokerError("Credential metadata registry has an unsupported format")
+    if set(value) != top_keys:
+        raise CredentialBrokerError("Credential metadata registry is malformed")
     if value.get("user_namespace") != namespace:
         raise CredentialBrokerError("Credential metadata belongs to a different current-user namespace")
     resources, bindings, captures = value.get("resources"), value.get("bindings"), value.get("pending_captures")
     if not all(isinstance(x, dict) for x in (resources, bindings, captures)):
         raise CredentialBrokerError("Credential metadata registry is malformed")
     try:
+        resource_keys = {"service_type", "origin", "account", "fields", "created_at", "updated_at"}
+        binding_keys = {"name", "root", "resources"}
+        capture_keys = {"fields", "created_at", "project_key", "service_type_hint", "origin_hint"}
         for rid, row in resources.items():
+            if not isinstance(row, dict) or set(row) != resource_keys:
+                raise ValueError
             identity = normalize_service_identity(row["service_type"], row["origin"], row["account"])
             fields = row["fields"]
             if rid != identity.resource_id or not fields or sorted(set(normalize_field(x) for x in fields)) != fields:
@@ -237,14 +245,26 @@ def _validate_registry(value: object, namespace: str) -> dict:
             if not isinstance(row["created_at"], str) or not isinstance(row["updated_at"], str):
                 raise ValueError
         for project_key, row in bindings.items():
-            if not isinstance(project_key, str) or not isinstance(row, dict) or not isinstance(row.get("resources"), dict):
+            if (
+                not isinstance(project_key, str)
+                or not isinstance(row, dict)
+                or set(row) != binding_keys
+                or not isinstance(row.get("resources"), dict)
+            ):
                 raise ValueError
             if not isinstance(row.get("name"), str) or not isinstance(row.get("root"), str):
                 raise ValueError
             for rid, meta in row["resources"].items():
-                if rid not in resources or not isinstance(meta, dict) or not isinstance(meta.get("bound_at"), str):
+                if (
+                    rid not in resources
+                    or not isinstance(meta, dict)
+                    or set(meta) != {"bound_at"}
+                    or not isinstance(meta.get("bound_at"), str)
+                ):
                     raise ValueError
         for capture_id, row in captures.items():
+            if not isinstance(row, dict) or set(row) != capture_keys:
+                raise ValueError
             fields = row["fields"]
             if not capture_id.startswith("capture-") or not fields or sorted(set(normalize_field(x) for x in fields)) != fields:
                 raise ValueError
@@ -595,11 +615,21 @@ class CredentialBroker:
             if field_name in normalized and normalized[field_name] != value:
                 raise CredentialBrokerError("Credential input contains conflicting field values")
             normalized[field_name] = value
+        hint_type: str | None = None
+        hint_origin: str | None = None
+        if detection.service_type_hint is not None or detection.origin_hint is not None:
+            if detection.service_type_hint is None or detection.origin_hint is None:
+                raise CredentialBrokerError("Credential service hint is incomplete")
+            try:
+                hint_type = normalize_service_type(detection.service_type_hint)
+                hint_origin = normalize_service_origin(hint_type, detection.origin_hint)
+            except ValueError as exc:
+                raise CredentialBrokerError("Credential service hint is unsafe") from exc
         capture_id = "capture-" + uuid.uuid4().hex
         fields = tuple(sorted(normalized))
         registry["pending_captures"][capture_id] = {
             "fields": list(fields), "created_at": _now(), "project_key": project.key if project else None,
-            "service_type_hint": detection.service_type_hint, "origin_hint": detection.origin_hint,
+            "service_type_hint": hint_type, "origin_hint": hint_origin,
         }
         changes = {self._pending_key(capture_id, field_name): value for field_name, value in normalized.items()}
         self._vault_change(changes, lambda: _write_registry(self.registry_path, registry), "Pending credential metadata write failed")
