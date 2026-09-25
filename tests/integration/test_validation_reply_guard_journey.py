@@ -1,9 +1,11 @@
 import json
+from types import SimpleNamespace
 
 import pytest
 
 pytest.importorskip("psycopg")
 
+from vres_os import hooks
 from vres_os.db import connect
 from vres_os.reply_guard import (
     begin_reply_turn,
@@ -12,6 +14,7 @@ from vres_os.reply_guard import (
     observe_reply_activity,
 )
 from vres_os.repository import Repository
+from vres_os.session_lifecycle import inherit_replaced_session_task, touch_session_host
 from vres_os.validation import ValidationService
 
 
@@ -192,3 +195,149 @@ def test_post_prepare_task_checkpoint_still_stales_review_and_disables_validatio
     assert request["status"] == "pending"
     assert request["observed_model"] is None
     assert request["report"] is None
+
+
+def test_passed_validation_resume_derives_live_continuation_across_compact_and_clear(
+    pg_project, tmp_path, monkeypatch
+):
+    repo = Repository()
+    task = repo.begin_task(
+        pg_project,
+        "Post-validation continuity",
+        "Do not re-promote a pre-PASS validation instruction after protected validation succeeds.",
+        "test",
+        "chairman",
+    )
+    sid = "post-validation-continuity-before-clear"
+    repo.open_session(pg_project, sid)
+    repo.bind_session(pg_project, sid, task)
+    assert touch_session_host(pg_project, sid, 9141)
+
+    checkpoint = _final_review_checkpoint(repo, task)
+    artifact = tmp_path / "synthetic-evidence.txt"
+    artifact.write_text("reviewed evidence", encoding="utf-8")
+    service = ValidationService()
+    prepared = service.prepare(task, pg_project, tmp_path, [artifact.name])
+    report = _report(prepared["request_key"])
+    result = service.record_from_hook(
+        {
+            "agent_type": "vres-os:validator",
+            "agent_id": "validator-post-validation-continuity",
+            "session_id": sid,
+            "agent_transcript_path": _validator_transcript(tmp_path, report),
+            "last_assistant_message": json.dumps(report),
+        },
+        pg_project,
+        tmp_path,
+    )
+    assert result["outcome"] == "passed"
+
+    with connect() as conn:
+        frozen_checkpoint = dict(
+            conn.execute(
+                """
+                SELECT checkpoint_key,summary,current_position,next_action,context,reason,created_by
+                  FROM vres.checkpoints
+                 WHERE checkpoint_key=%s
+                """,
+                (checkpoint,),
+            ).fetchone()
+        )
+        persisted = dict(
+            conn.execute(
+                """
+                SELECT current_step,state_summary,next_action,validation_status
+                  FROM vres.task_state
+                 WHERE task_id=(SELECT id FROM vres.tasks WHERE task_key=%s)
+                """,
+                (task,),
+            ).fetchone()
+        )
+
+    assert persisted["validation_status"] == "passed"
+    assert persisted["current_step"] == "protected validation"
+    assert persisted["next_action"] == "Wait for protected validation result."
+
+    resumed = repo.resume_context(pg_project, provider_session_id=sid)
+    assert resumed["validation_status"] == "passed"
+    assert resumed["continuation_source"] == "derived_validation_pass"
+    assert resumed["step"] == "protected validation passed"
+    assert resumed["next_action"] != "Wait for protected validation result."
+    assert "without dispatching another validation" in resumed["next_action"]
+    assert resumed["latest_checkpoint"]["checkpoint_key"] == checkpoint
+    assert resumed["latest_checkpoint"]["next_action"] == "Wait for protected validation result."
+
+    monkeypatch.setattr(
+        hooks.ConfigStore,
+        "load",
+        lambda _self: SimpleNamespace(configured=True),
+    )
+    monkeypatch.setattr(hooks, "_project_id", lambda _repo, _payload=None: pg_project)
+    monkeypatch.setattr(hooks, "_observe_session", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(hooks, "last_assistant_snapshot", lambda _payload: None)
+
+    hooks.compact(
+        "pre_compact",
+        {
+            "hook_event_name": "PreCompact",
+            "session_id": sid,
+            "trigger": "manual",
+        },
+    )
+    monkeypatch.setattr(
+        hooks,
+        "_input",
+        lambda: {
+            "hook_event_name": "PostCompact",
+            "session_id": sid,
+            "trigger": "manual",
+            "compact_summary": "native compact summary",
+        },
+    )
+    hooks.post_compact()
+    assert repo.needs_context_rehydration(task) is True
+
+    after_compact = repo.resume_context(pg_project, provider_session_id=sid)
+    assert after_compact["validation_status"] == "passed"
+    assert after_compact["continuation_source"] == "derived_validation_pass"
+    assert after_compact["step"] == "protected validation passed"
+    assert after_compact["next_action"] == resumed["next_action"]
+    assert after_compact["latest_checkpoint"]["reason"] == "pre_compact"
+    assert after_compact["latest_checkpoint"]["next_action"] == "Wait for protected validation result."
+
+    repo.close_session(pg_project, sid, "provider_session_replaced")
+    replacement_sid = "post-validation-continuity-after-clear"
+    repo.open_session(pg_project, replacement_sid)
+    assert touch_session_host(pg_project, replacement_sid, 9141)
+    assert inherit_replaced_session_task(pg_project, replacement_sid, 9141) == task
+
+    after_clear = repo.resume_context(pg_project, provider_session_id=replacement_sid)
+    assert after_clear["validation_status"] == "passed"
+    assert after_clear["continuation_source"] == "derived_validation_pass"
+    assert after_clear["step"] == "protected validation passed"
+    assert after_clear["next_action"] == resumed["next_action"]
+
+    with connect() as conn:
+        original_checkpoint_after = dict(
+            conn.execute(
+                """
+                SELECT checkpoint_key,summary,current_position,next_action,context,reason,created_by
+                  FROM vres.checkpoints
+                 WHERE checkpoint_key=%s
+                """,
+                (checkpoint,),
+            ).fetchone()
+        )
+        persisted_after = dict(
+            conn.execute(
+                """
+                SELECT current_step,state_summary,next_action,validation_status
+                  FROM vres.task_state
+                 WHERE task_id=(SELECT id FROM vres.tasks WHERE task_key=%s)
+                """,
+                (task,),
+            ).fetchone()
+        )
+
+    assert original_checkpoint_after == frozen_checkpoint
+    assert persisted_after == persisted
