@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .config import ConfigStore
+from .credential_broker import CredentialBroker, CredentialBrokerError, detect_high_confidence_credentials
 from .db import DatabaseUnavailable
 from .paths import logs_dir
 from .project import discover_project
@@ -131,11 +132,54 @@ def session_start() -> None:
     sys.stdout.write(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": context}}))
 
 
+def _credential_ingress_guard(payload: dict[str, Any], prompt: str) -> bool:
+    """Block high-confidence credential material before any Vres prompt persistence."""
+    detection = detect_high_confidence_credentials(prompt)
+    if detection is None:
+        return False
+
+    captured = False
+    if detection.capture_allowed:
+        try:
+            project = discover_project(
+                payload.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR", ".")
+            )
+            CredentialBroker().capture_detection(detection, project=project)
+            captured = True
+        except Exception:
+            # Never log the backend exception: a provider can include the secret value
+            # in its error text. A fixed diagnostic is sufficient for this fail-closed path.
+            _log_hook_error(
+                "UserPromptSubmitCredentialGuard",
+                CredentialBrokerError("secure pending capture unavailable"),
+            )
+
+    if captured:
+        reason = (
+            "Credential detected. I stopped this message before sending the credential to Claude. "
+            "The value is held in Windows Credential Locker as a pending current-user capture. "
+            "Use vres credential pending in a local terminal, then confirm or discard it. "
+            "Re-send the request without the credential."
+        )
+    elif detection.capture_allowed:
+        reason = (
+            "Credential detected. I stopped this message before sending the credential to Claude. "
+            "Secure pending capture was unavailable, so no Vres metadata was created. "
+            "Use the local Vres credential terminal workflow and re-send the request without the credential."
+        )
+    else:
+        reason = (
+            "Credential-like values were detected. I stopped this message before sending them to Claude, "
+            "but the input was ambiguous or unsafe to capture automatically, so nothing was stored. "
+            "Use the local Vres credential terminal workflow and re-send the request without the credential."
+        )
+    sys.stdout.write(json.dumps({"decision": "block", "reason": reason}))
+    return True
+
+
 def user_prompt() -> None:
     payload = _input()
     if payload.get("agent_id"):
-        return
-    if not ConfigStore().load().configured:
         return
     prompt = payload.get("prompt") or payload.get("user_prompt") or payload.get("userPrompt")
     if not isinstance(prompt, str) or not prompt:
@@ -143,7 +187,13 @@ def user_prompt() -> None:
     context = f"VRES_CURRENT_SESSION_ID={_session_id(payload) or 'UNKNOWN'}"
     if is_system_prompt_event(prompt):
         # Claude Code background-task notifications are host/system events, not user intent.
+        if not ConfigStore().load().configured:
+            return
         sys.stdout.write(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": context}}))
+        return
+    if _credential_ingress_guard(payload, prompt):
+        return
+    if not ConfigStore().load().configured:
         return
     try:
         repo = Repository()
