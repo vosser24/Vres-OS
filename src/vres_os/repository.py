@@ -499,14 +499,31 @@ class Repository:
                 """,
                 (task_id,),
             ).fetchone()
+        live_step = task.current_step
+        live_next_action = task.next_action
+        continuation_source = "persisted_task_state"
+        if task.validation_status == "passed":
+            # A canonical PASS freezes the reviewed material state. Its persisted
+            # descriptive continuation can therefore legitimately predate the PASS.
+            # Derive the live resume pointer instead of mutating reviewed state or
+            # historical checkpoints merely to refresh prose.
+            live_step = "protected validation passed"
+            live_next_action = (
+                "Protected validation is current and passed. Continue from the validated "
+                "state without dispatching another validation; explicitly invalidate "
+                "validation before any material change."
+            )
+            continuation_source = "derived_validation_pass"
+
         state = {
             "task_key": task.task_key,
             "objective": task.objective,
             "task_family": task.task_family,
             "phase": task.current_phase,
-            "step": task.current_step,
+            "step": live_step,
             "state": task.state_summary,
-            "next_action": task.next_action,
+            "next_action": live_next_action,
+            "continuation_source": continuation_source,
             "latest_user_instruction": task.latest_user_instruction,
             "open_questions": task.open_questions,
             "assumptions": task.assumptions,
