@@ -499,21 +499,48 @@ class Repository:
                 """,
                 (task_id,),
             ).fetchone()
+        live_step = task.current_step
+        live_state = task.state_summary
+        live_next_action = task.next_action
+        live_pending = task.pending_work
+        reviewed_state = None
+        reviewed_pending = None
+        continuation_source = "persisted_task_state"
+        if task.validation_status == "passed":
+            # A canonical PASS freezes the reviewed material state. Its persisted
+            # descriptive continuation can therefore legitimately predate the PASS.
+            # Preserve that reviewed snapshot explicitly, while deriving a coherent
+            # live continuation without mutating reviewed state or checkpoints.
+            reviewed_state = task.state_summary
+            reviewed_pending = task.pending_work
+            live_step = "protected validation passed"
+            live_state = "Protected validation is current and passed for the frozen reviewed state."
+            live_next_action = (
+                "Protected validation is current and passed. Continue from the validated "
+                "state without dispatching another validation; explicitly invalidate "
+                "validation before any material change."
+            )
+            live_pending = [live_next_action]
+            continuation_source = "derived_validation_pass"
+
         state = {
             "task_key": task.task_key,
             "objective": task.objective,
             "task_family": task.task_family,
             "phase": task.current_phase,
-            "step": task.current_step,
-            "state": task.state_summary,
-            "next_action": task.next_action,
+            "step": live_step,
+            "state": live_state,
+            "next_action": live_next_action,
+            "pending": live_pending,
+            "continuation_source": continuation_source,
+            "reviewed_state": reviewed_state,
+            "reviewed_pending": reviewed_pending,
             "latest_user_instruction": task.latest_user_instruction,
             "open_questions": task.open_questions,
             "assumptions": task.assumptions,
             "constraints": task.constraints,
             "decisions": task.decisions,
             "completed": task.completed_work,
-            "pending": task.pending_work,
             "relevant_objects": task.relevant_objects,
             "validation_status": task.validation_status,
             "latest_checkpoint": dict(cp) if cp else None,
