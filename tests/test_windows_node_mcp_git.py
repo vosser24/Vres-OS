@@ -28,11 +28,15 @@ def test_project_discovery_returns_under_node_libuv_mcp_stdin_pipe(tmp_path: Pat
     child.write_text(
         textwrap.dedent(
             """
+            import os
             import sys
             import threading
             from vres_os.project import discover_project
 
-            threading.Thread(target=lambda: sys.stdin.buffer.read(1), daemon=True).start()
+            threading.Thread(
+                target=lambda: os.read(sys.stdin.fileno(), 1),
+                daemon=True,
+            ).start()
             print(discover_project(sys.argv[1]).root, flush=True)
             """
         ),

@@ -297,7 +297,12 @@ def test_onboarding_ignores_secrets_generated_dirs_and_symlinks(tmp_path):
     from vres_os.onboarding import _files
     (tmp_path/'readme.txt').write_text('ok');(tmp_path/'.env').write_text('secret')
     (tmp_path/'NODE_MODULES').mkdir();(tmp_path/'NODE_MODULES'/'bad.txt').write_text('ignore')
-    (tmp_path/'link').symlink_to(tmp_path/'readme.txt')
+    try:
+        (tmp_path/'link').symlink_to(tmp_path/'readme.txt')
+    except OSError as exc:
+        if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Windows symlink privilege is unavailable on this host")
+        raise
     assert [p.name for p in _files(tmp_path)] == ['readme.txt']
 
 
@@ -410,3 +415,28 @@ def test_mcp_exposes_full_procedure_not_only_search_summary():
     text = ast.unparse(node)
     assert "_require_node" in text
     assert "ProcedureService().get" in text
+
+def test_release_gate_pytest_uses_windows_capable_finite_timeout(tmp_path):
+    import runpy
+
+    root = Path(__file__).resolve().parents[1]
+    gate = runpy.run_path(str(root / "scripts" / "release_gate.py"))
+
+    calls = []
+
+    def fake_command(args, output, name, **kwargs):
+        calls.append((args, output, name, kwargs))
+        return ""
+
+    pytest_gate = gate["pytest_gate"]
+    pytest_gate.__globals__["command"] = fake_command
+
+    pytest_gate(tmp_path, {"PYTHONUTF8": "1"})
+
+    assert len(calls) == 1
+    args, output, name, kwargs = calls[0]
+    assert output == tmp_path
+    assert name == "pytest"
+    assert args[:3] == [gate["sys"].executable, "-m", "pytest"]
+    assert kwargs["timeout"] == gate["PYTEST_TIMEOUT_SECONDS"]
+    assert 600 <= kwargs["timeout"] <= 1200

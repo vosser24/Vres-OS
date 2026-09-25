@@ -1,4 +1,6 @@
+import runpy
 from importlib import resources
+from pathlib import Path
 
 
 def _migration(name: str) -> str:
@@ -190,3 +192,19 @@ def test_initial_migration_does_not_make_pg_trgm_a_hard_requirement():
     sql = _migration("001_initial.sql")
     assert "pg_available_extensions" in sql
     assert "pg_trgm could not be enabled" in sql
+
+def test_release_gate_migration_digest_normalizes_checkout_newlines(tmp_path):
+    gate_path = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "release_gate.py"
+    )
+    gate = runpy.run_path(str(gate_path))
+
+    lf = tmp_path / "lf.sql"
+    crlf = tmp_path / "crlf.sql"
+
+    lf.write_bytes(b"SELECT 1;\nSELECT 2;\n")
+    crlf.write_bytes(b"SELECT 1;\r\nSELECT 2;\r\n")
+
+    assert gate["migration_digest"](lf) == gate["migration_digest"](crlf)
