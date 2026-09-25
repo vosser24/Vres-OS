@@ -659,15 +659,60 @@ class CredentialBroker:
         self._vault_change(changes, lambda: _write_registry(self.registry_path, registry), "Pending credential discard failed")
         return True
 
-    def confirm_pending(self, capture_id: str, service_type: str, origin: str, account: str, *, project: ProjectIdentity | None = None, bind: bool = False, authorized: bool) -> CredentialResource:
+    def confirm_pending(
+        self,
+        capture_id: str,
+        service_type: str,
+        origin: str,
+        account: str,
+        *,
+        project: ProjectIdentity | None = None,
+        bind: bool = False,
+        authorized: bool,
+    ) -> CredentialResource:
         if not authorized:
             raise CredentialBindingError("Pending credential confirmation requires explicit user authority")
-        row = self._read()["pending_captures"].get(capture_id)
+        if bind and project is None:
+            raise CredentialBindingError("Project binding requires explicit user authority")
+
+        registry = self._read()
+        row = registry["pending_captures"].get(capture_id)
         if not isinstance(row, dict):
             raise CredentialBrokerError(f"Pending credential capture '{capture_id}' was not found")
-        values = {field_name: self._get(self._pending_key(capture_id, field_name)) for field_name in row["fields"]}
+        values = {
+            field_name: self._get(self._pending_key(capture_id, field_name))
+            for field_name in row["fields"]
+        }
         if not all(values.values()):
             raise CredentialBrokerError("Pending credential capture is incomplete or unavailable")
-        resource = self.save(service_type, origin, account, values, project=project, bind=bind, authorized=True)
-        self.discard_pending(capture_id, authorized=True)
-        return resource
+
+        identity = normalize_service_identity(service_type, origin, account)
+        now = _now()
+        existing = registry["resources"].get(identity.resource_id)
+        registry["resources"][identity.resource_id] = {
+            "service_type": identity.service_type,
+            "origin": identity.origin,
+            "account": identity.account,
+            "fields": sorted(
+                set(existing.get("fields", []) if isinstance(existing, dict) else ())
+                | set(values)
+            ),
+            "created_at": existing.get("created_at", now) if isinstance(existing, dict) else now,
+            "updated_at": now,
+        }
+        if bind:
+            assert project is not None
+            self._bind_row(registry, identity.resource_id, project, now)
+        del registry["pending_captures"][capture_id]
+
+        changes: dict[str, str | None] = {}
+        for field_name, value in values.items():
+            assert value is not None
+            changes[self._vault_key(identity.resource_id, field_name)] = value
+            changes[self._pending_key(capture_id, field_name)] = None
+        self._vault_change(
+            changes,
+            lambda: _write_registry(self.registry_path, registry),
+            "Pending credential confirmation failed",
+        )
+        return self._resource(registry, identity.resource_id, project)
