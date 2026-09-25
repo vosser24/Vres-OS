@@ -115,7 +115,7 @@ def test_pending_list_and_confirm_expose_metadata_only(monkeypatch, tmp_path):
         def list_pending(self):
             return [
                 SimpleNamespace(
-                    capture_id="capture-test",
+                    capture_id="capture-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                     fields=("password",),
                     service_type_hint="website",
                     origin_hint="https://www.example.gr",
@@ -146,7 +146,7 @@ def test_pending_list_and_confirm_expose_metadata_only(monkeypatch, tmp_path):
 
     cli.credential_pending()
     cli.credential_confirm(
-        "capture-test",
+        "capture-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         service_type="website",
         origin="https://www.example.gr",
         account="main",
@@ -155,12 +155,12 @@ def test_pending_list_and_confirm_expose_metadata_only(monkeypatch, tmp_path):
     )
 
     rendered = sink.getvalue()
-    assert "capture-test" in rendered
+    assert "capture-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" in rendered
     assert "password" in rendered
     assert "credential-confirmed" in rendered
     assert calls == [
         (
-            "capture-test",
+            "capture-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "website",
             "https://www.example.gr",
             "main",
