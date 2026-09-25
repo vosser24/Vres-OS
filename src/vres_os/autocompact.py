@@ -10,7 +10,8 @@ from typing import Any
 AUTO_COMPACT_KEY = "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"
 AUTO_COMPACT_WINDOW_KEY = "CLAUDE_CODE_AUTO_COMPACT_WINDOW"
 DISABLE_KEYS = ("DISABLE_AUTO_COMPACT", "DISABLE_COMPACT")
-DESIRED_USED_PERCENT = "85"
+DESIRED_USED_PERCENT = "15"
+LEGACY_MANAGED_USED_PERCENTS = {"85"}
 
 
 def _out(path: Path, **fields: Any) -> dict[str, Any]:
@@ -85,7 +86,7 @@ def _save_env(path: Path, settings: dict[str, Any], env: dict[str, Any], *, bom:
 
 
 def install_autocompact(claude_home: Path, *, owned_before: bool = False) -> dict[str, Any]:
-    """Manage Claude native auto-compaction at 85% of its auto-compact window."""
+    """Manage Claude native auto-compaction at 15% used (~85% free) of its auto-compact window."""
     path = claude_home.resolve() / "settings.json"
     settings, bom = _read(path)
     if settings is None:
@@ -112,7 +113,12 @@ def install_autocompact(claude_home: Path, *, owned_before: bool = False) -> dic
                 owned=False,
                 reason="managed-autocompact-removed-externally",
             )
-        if str(existing) != DESIRED_USED_PERCENT:
+        existing_text = str(existing)
+        managed_value = (
+            existing_text == DESIRED_USED_PERCENT
+            or existing_text in LEGACY_MANAGED_USED_PERCENTS
+        )
+        if not managed_value:
             return _out(
                 path,
                 configured=False,
@@ -129,11 +135,15 @@ def install_autocompact(claude_home: Path, *, owned_before: bool = False) -> dic
                 updated=True,
                 reason=persistent,
             )
+        migrated = existing_text != DESIRED_USED_PERCENT
+        if migrated:
+            env[AUTO_COMPACT_KEY] = DESIRED_USED_PERCENT
+            _save_env(path, settings, env, bom=bom)
         result = _out(
             path,
             configured=True,
             owned=True,
-            updated=False,
+            updated=migrated,
             used_percent=int(DESIRED_USED_PERCENT),
         )
         if transient:
@@ -164,7 +174,7 @@ def install_autocompact(claude_home: Path, *, owned_before: bool = False) -> dic
 
 
 def remove_autocompact(claude_home: Path, *, owned: bool) -> dict[str, Any]:
-    """Remove only a still-owned Vres 85% threshold."""
+    """Remove only a still-owned Vres 15%-used threshold."""
     path = claude_home.resolve() / "settings.json"
     if not owned:
         return _out(path, removed=False, reason="not-vres-owned")
