@@ -81,7 +81,23 @@ def test_background_validator_can_cross_reply_boundary_without_staling_frozen_st
     turn_id = begin_reply_turn(pg_project, sid)
     assert turn_id
 
-    checkpoint = _final_review_checkpoint(repo, task)
+    _final_review_checkpoint(repo, task)
+    repo.update_state(
+        task,
+        state_summary="Protected validation has not run yet.",
+        current_step="protected validation",
+        next_action="Wait for protected validation result.",
+        pending_work=["protected validation", "completion"],
+    )
+    checkpoint = repo.checkpoint(
+        task,
+        "Protected validation has not run yet.",
+        "protected validation",
+        "Wait for protected validation result.",
+        {"validation_boundary": True, "stale_after_pass": True},
+        "pre_validation",
+        "chairman",
+    )
     artifact = tmp_path / "synthetic-evidence.txt"
     artifact.write_text("reviewed evidence", encoding="utf-8")
     service = ValidationService()
@@ -262,6 +278,10 @@ def test_passed_validation_resume_derives_live_continuation_across_compact_and_c
     assert resumed["validation_status"] == "passed"
     assert resumed["continuation_source"] == "derived_validation_pass"
     assert resumed["step"] == "protected validation passed"
+    assert resumed["state"] == "Protected validation is current and passed for the frozen reviewed state."
+    assert resumed["pending"] == [resumed["next_action"]]
+    assert resumed["reviewed_state"] == "Protected validation has not run yet."
+    assert resumed["reviewed_pending"] == ["protected validation", "completion"]
     assert resumed["next_action"] != "Wait for protected validation result."
     assert "without dispatching another validation" in resumed["next_action"]
     assert resumed["latest_checkpoint"]["checkpoint_key"] == checkpoint
@@ -301,6 +321,10 @@ def test_passed_validation_resume_derives_live_continuation_across_compact_and_c
     assert after_compact["validation_status"] == "passed"
     assert after_compact["continuation_source"] == "derived_validation_pass"
     assert after_compact["step"] == "protected validation passed"
+    assert after_compact["state"] == resumed["state"]
+    assert after_compact["pending"] == resumed["pending"]
+    assert after_compact["reviewed_state"] == resumed["reviewed_state"]
+    assert after_compact["reviewed_pending"] == resumed["reviewed_pending"]
     assert after_compact["next_action"] == resumed["next_action"]
     assert after_compact["latest_checkpoint"]["reason"] == "pre_compact"
     assert after_compact["latest_checkpoint"]["next_action"] == "Wait for protected validation result."
@@ -315,6 +339,10 @@ def test_passed_validation_resume_derives_live_continuation_across_compact_and_c
     assert after_clear["validation_status"] == "passed"
     assert after_clear["continuation_source"] == "derived_validation_pass"
     assert after_clear["step"] == "protected validation passed"
+    assert after_clear["state"] == resumed["state"]
+    assert after_clear["pending"] == resumed["pending"]
+    assert after_clear["reviewed_state"] == resumed["reviewed_state"]
+    assert after_clear["reviewed_pending"] == resumed["reviewed_pending"]
     assert after_clear["next_action"] == resumed["next_action"]
 
     with connect() as conn:
