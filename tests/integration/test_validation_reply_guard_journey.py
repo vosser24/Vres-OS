@@ -81,23 +81,7 @@ def test_background_validator_can_cross_reply_boundary_without_staling_frozen_st
     turn_id = begin_reply_turn(pg_project, sid)
     assert turn_id
 
-    _final_review_checkpoint(repo, task)
-    repo.update_state(
-        task,
-        state_summary="Protected validation has not run yet.",
-        current_step="protected validation",
-        next_action="Wait for protected validation result.",
-        pending_work=["protected validation", "completion"],
-    )
-    checkpoint = repo.checkpoint(
-        task,
-        "Protected validation has not run yet.",
-        "protected validation",
-        "Wait for protected validation result.",
-        {"validation_boundary": True, "stale_after_pass": True},
-        "pre_validation",
-        "chairman",
-    )
+    checkpoint = _final_review_checkpoint(repo, task)
     artifact = tmp_path / "synthetic-evidence.txt"
     artifact.write_text("reviewed evidence", encoding="utf-8")
     service = ValidationService()
@@ -229,7 +213,23 @@ def test_passed_validation_resume_derives_live_continuation_across_compact_and_c
     repo.bind_session(pg_project, sid, task)
     assert touch_session_host(pg_project, sid, 9141)
 
-    checkpoint = _final_review_checkpoint(repo, task)
+    _final_review_checkpoint(repo, task)
+    repo.update_state(
+        task,
+        state_summary="Protected validation has not run yet.",
+        current_step="protected validation",
+        next_action="Wait for protected validation result.",
+        pending_work=["protected validation", "completion"],
+    )
+    checkpoint = repo.checkpoint(
+        task,
+        "Protected validation has not run yet.",
+        "protected validation",
+        "Wait for protected validation result.",
+        {"validation_boundary": True, "stale_after_pass": True},
+        "pre_validation",
+        "chairman",
+    )
     artifact = tmp_path / "synthetic-evidence.txt"
     artifact.write_text("reviewed evidence", encoding="utf-8")
     service = ValidationService()
