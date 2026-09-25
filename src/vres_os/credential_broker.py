@@ -409,6 +409,10 @@ class CredentialBroker:
     """Current-user credential resources; values stay only in the OS credential store."""
 
     def __init__(self, *, store: SecretStore | None = None, registry_path: Path | None = None, user_namespace: str | None = None):
+        if store is None and os.name != "nt":
+            raise CredentialBrokerError(
+                "Credential Broker durable storage requires Windows Credential Locker"
+            )
         self.store = store or SecretStore()
         self.registry_path = registry_path or (data_dir() / "credential-resources.json")
         self.user_namespace = user_namespace or current_user_namespace()
