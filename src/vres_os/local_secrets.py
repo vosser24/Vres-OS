@@ -11,7 +11,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 from .paths import data_dir
 from .processes import run_bounded
@@ -283,13 +283,24 @@ class LocalSecretManager:
             values.append(value)
         return env, values
 
-    def run(self, command: list[str], mappings: Iterable[str], *, timeout: float = 3600) -> int:
-        """Run one bounded child process with selected handles only in child env."""
+    def _run_with_values(
+        self,
+        command: list[str],
+        injected: dict[str, str],
+        *,
+        timeout: float = 3600,
+    ) -> int:
+        """Run a bounded child with already-resolved values; never mutate the parent env."""
         if not command:
             raise ValueError("A child command is required")
-        injected, secret_values = self.environment(mappings)
+        normalized: dict[str, str] = {}
+        for raw_name, value in injected.items():
+            name = validate_env_name(raw_name)
+            if not isinstance(value, str) or not value:
+                raise LocalSecretError("Resolved credential value is unavailable")
+            normalized[name] = value
         child_env = os.environ.copy()
-        child_env.update(injected)
+        child_env.update(normalized)
         try:
             result = run_bounded(
                 command,
@@ -303,13 +314,18 @@ class LocalSecretManager:
             )
         except OSError as exc:
             raise LocalSecretError(f"Could not launch child command: {command[0]}") from exc
-        safe = _redact_known_values(result.output, secret_values)
+        safe = _redact_known_values(result.output, normalized.values())
         if safe:
             sys.stdout.write(safe)
             if not safe.endswith("\n"):
                 sys.stdout.write("\n")
             sys.stdout.flush()
         return int(result.returncode)
+
+    def run(self, command: list[str], mappings: Iterable[str], *, timeout: float = 3600) -> int:
+        """Run one bounded child process with selected handles only in child env."""
+        injected, _secret_values = self.environment(mappings)
+        return self._run_with_values(command, injected, timeout=timeout)
 
     def _git_metadata_path(self, relative: str) -> Path | None:
         """Resolve a Git metadata path, including linked worktrees where `.git` is a file."""
@@ -383,11 +399,16 @@ class LocalSecretManager:
             raise LocalSecretError("Local secret directory escapes the project root") from exc
         return project_root, local_root
 
-    def materialize(self, alias: str, path: Path | None = None) -> Path:
-        """Materialize a plaintext credential only under the git-excluded secret root."""
-        alias = validate_alias(alias)
-        project_root, local_root = self._local_secret_root()
-        requested = path or Path(alias)
+    def _materialize_resolved(
+        self,
+        resolver: Callable[[], str],
+        *,
+        path: Path | None = None,
+        default_name: str,
+    ) -> Path:
+        """Materialize one resolved value only after local-path and Git safety checks pass."""
+        _project_root, local_root = self._local_secret_root()
+        requested = path or Path(default_name)
         if requested.is_absolute():
             raise LocalSecretError("Materialized secret paths must be relative to .vres/local-secrets")
         candidate = local_root / requested
@@ -413,7 +434,9 @@ class LocalSecretManager:
                 if current == local_root:
                     break
                 current = current.parent
-        value = self.get(alias)
+        value = resolver()
+        if not isinstance(value, str) or not value:
+            raise LocalSecretError("Resolved credential value is unavailable")
         try:
             target.write_text(value, encoding="utf-8", newline="")
             _restrict_file(target)
@@ -422,13 +445,23 @@ class LocalSecretManager:
             raise
         return target
 
+    def materialize(self, alias: str, path: Path | None = None) -> Path:
+        """Materialize a plaintext credential only under the git-excluded secret root."""
+        alias = validate_alias(alias)
+        return self._materialize_resolved(lambda: self.get(alias), path=path, default_name=alias)
+
     def cleanup_materialized(self) -> int:
         _project_root, root = self._local_secret_root()
         if not root.exists():
             return 0
-        count = sum(1 for p in root.rglob("*") if p.is_file())
+        entries = list(root.rglob("*"))
+        if any(path.is_symlink() for path in entries):
+            raise LocalSecretError("Refusing cleanup while local secret storage contains symbolic links")
+        files = [path for path in entries if path.is_file()]
+        for path in files:
+            self._assert_not_tracked(path.resolve())
         try:
             shutil.rmtree(root)
         except OSError as exc:
             raise LocalSecretError("Could not remove materialized local secret files") from exc
-        return count
+        return len(files)
