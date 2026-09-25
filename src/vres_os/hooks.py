@@ -81,10 +81,11 @@ def _resume_message(state: dict[str, Any], *, label: str) -> str:
     return (
         f"{label}\n"
         + json.dumps(state, ensure_ascii=False, indent=2, default=str)
-        + "\nPostgreSQL task state/checkpoints are authoritative evidence. Treat top-level step/next_action "
-        "as the live continuation projection; latest_checkpoint is immutable historical evidence and may be "
-        "superseded by structured validation state. Transcript snippets are non-authoritative recovery hints. "
-        "Continue from the top-level next_action; do not reopen settled decisions without new evidence."
+        + "\nPostgreSQL task state/checkpoints are authoritative evidence. Treat top-level step/state/"
+        "next_action/pending as the live continuation projection. reviewed_state/reviewed_pending and "
+        "latest_checkpoint preserve the frozen reviewed/history view and may be superseded by structured "
+        "validation state. Transcript snippets are non-authoritative recovery hints. Continue from the top-level "
+        "next_action; do not reopen settled decisions without new evidence."
     )
 
 
