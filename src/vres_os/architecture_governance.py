@@ -324,9 +324,11 @@ def _finding(
     recommendation: str,
 ) -> ArchitectureFinding:
     rule = RULES[rule_id]
-    safe_suffix = re.sub(r"[^a-z0-9_.:/-]+", "-", suffix.casefold()).strip("-")
+    normalized_suffix = suffix.casefold()
+    safe_suffix = re.sub(r"[^a-z0-9_.:/-]+", "-", normalized_suffix).strip("-")
+    suffix_digest = hashlib.sha256(normalized_suffix.encode("utf-8")).hexdigest()[:12]
     return ArchitectureFinding(
-        finding_id=f"{rule_id}:{safe_suffix[:160]}",
+        finding_id=f"{rule_id}:{safe_suffix[:120]}:{suffix_digest}",
         rule_id=rule_id,
         severity=str(rule["severity"]),
         material=bool(rule["material"]),
