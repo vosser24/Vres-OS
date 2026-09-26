@@ -1,8 +1,20 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
 
 from .architecture_policy import CONSTITUTION_VERSION, PLAN_VERSION, PROFILES
+
+_REQUIRED_PLAN_KEYS = {
+    "version",
+    "constitution_version",
+    "audit_digest",
+    "target_profiles",
+    "non_goals",
+    "tranches",
+    "exceptions",
+}
 
 _REQUIRED_TRANCHE_KEYS = {
     "key",
