@@ -211,7 +211,8 @@ deterministic codebase inventory
 → profile selection
 → findings against this constitution
 → Chairman alignment plan
-→ protected Fable/high validation of the exact plan
+→ deterministic plan check + exact audit/plan digests
+→ protected Fable/high validation of that exact plan identity
 → user decision/authority
 → incremental reversible tranches
 → architecture/test evidence after each tranche
