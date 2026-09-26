@@ -686,6 +686,14 @@ def check_alignment_plan(
     if not _nonempty_text_list(plan.get("non_goals")):
         errors.append("plan.non_goals must contain at least one explicit non-goal")
 
+    target_profiles = plan.get("target_profiles")
+    if not _nonempty_text_list(target_profiles):
+        errors.append("plan.target_profiles must contain at least one architecture profile")
+    else:
+        for profile in target_profiles:
+            if profile not in PROFILES:
+                errors.append(f"plan.target_profiles contains unknown profile {profile}")
+
     tranches = plan.get("tranches")
     exceptions = plan.get("exceptions")
     if not isinstance(tranches, list):
