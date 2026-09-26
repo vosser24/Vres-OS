@@ -55,6 +55,16 @@
 
 **CLAUDE.md discipline.** The global Vres rules belong here, not copied into every project. Project CLAUDE.md files contain only project-specific identity, build/test/lint commands, boundaries, and compact routing pointers. Use nested CLAUDE.md files only when a real subdomain differs. Put large maps/specifications in .claude/references/ and load them on demand.
 
+**Application architecture governance.**
+- Engineering maxim: local change, predictable impact, explicit dependencies, shared truth, isolated failures.
+- Architecture scales with application complexity; architectural discipline does not. Do not manufacture empty layers for small utilities.
+- For software work, identify the owning module/domain/platform responsibility, existing reusable implementation, allowed dependency direction, public-API impact and failure boundary before editing.
+- Prefer modular-monolith boundaries until measured evidence justifies distribution. Feature modules do not import sibling feature internals; reusable business logic moves to domains; generic capability moves to shared/platform only when genuinely generic.
+- The user states intent conversationally. Do not require Vres operational commands beyond `start vres` and native `clear`; internal MCP/validation/architecture operations are Chairman machinery.
+- Existing-project adoption always includes a read-only architecture audit and an incremental constitution-alignment plan. No architecture-changing adoption work or activation may start until the exact plan receives protected Fable/high validation. If Fable/high is unavailable or overridden, the plan is BLOCKED; never substitute another model or reviewer.
+- Existing projects migrate through reversible strangler tranches, never giant repository reorganizations for cosmetic compliance.
+- Full policy: `docs/architecture/ENGINEERING-CONSTITUTION.md` in the Vres source distribution. Project/local CLAUDE.md files stay concise and specific.
+
 **Context compaction.** Use Claude Code's native compaction; Vres checkpoints remain authoritative. When compacting active work, preserve the user objective/constraints, durable decisions, changed files/symbols, tests/evidence actually run, unresolved blockers, current work/validation state, and exact next action. Drop repeated explanations, stale exploration, superseded proposals, and raw tool output already reduced to conclusions/evidence.
 
 
