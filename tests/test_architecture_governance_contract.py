@@ -83,12 +83,12 @@ def test_architecture_tools_are_registered_on_main_mcp_entrypoint():
 
 
 def test_policy_distinguishes_deterministic_contract_from_validation_authority():
-    core = (ROOT / "src" / "vres_os" / "architecture_governance.py").read_text(
+    plan = (ROOT / "src" / "vres_os" / "architecture_plan.py").read_text(
         encoding="utf-8"
     )
 
-    assert '"activation_allowed": False' in core
-    assert '"PLAN_READY_FOR_PROTECTED_VALIDATION"' in core
-    assert '"model": "fable"' in core
-    assert '"effort": "high"' in core
-    assert "Deterministic plan-contract PASS is not approval" in core
+    assert '"activation_allowed": False' in plan
+    assert '"PLAN_READY_FOR_PROTECTED_VALIDATION"' in plan
+    assert '"model": "fable"' in plan
+    assert '"effort": "high"' in plan
+    assert "Deterministic plan-contract PASS is not approval" in plan
