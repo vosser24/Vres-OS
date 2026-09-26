@@ -68,7 +68,7 @@ RULES: dict[str, dict[str, Any]] = {
     "ARCH-010": {
         "title": "established applications require an architecture alignment plan",
         "severity": "error",
-        "material": True,
+        "material": False,
     },
 }
 
