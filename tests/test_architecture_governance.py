@@ -102,6 +102,28 @@ def test_audit_never_executes_project_python(tmp_path):
     assert audit["source_file_count"] == 3
 
 
+def test_architecture_audit_skips_symlinked_source_content(tmp_path):
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.py"
+    outside.write_text("raise RuntimeError('must never be read or executed')\n", encoding="utf-8")
+    link = tmp_path / "src" / "modules" / "payments" / "linked.py"
+    link.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        link.symlink_to(outside)
+    except OSError:
+        return
+    _write(tmp_path / "src/modules/payments/a.py", "VALUE = 1\n")
+    _write(tmp_path / "src/modules/payments/b.py", "VALUE = 2\n")
+    _write(tmp_path / "src/modules/payments/c.py", "VALUE = 3\n")
+
+    audit = audit_project(tmp_path)
+
+    assert "skipped_symlink:src/modules/payments/linked.py" in audit["limitations"]
+    assert all(
+        edge["source_path"] != "src/modules/payments/linked.py"
+        for edge in audit["dependency_edges"]
+    )
+
+
 def test_unsupported_source_language_is_explicit_audit_limitation(tmp_path):
     _write(tmp_path / "go.mod", "module example.com/legacy\n")
     _write(tmp_path / "src/modules/payments/a.go", "package payments\n")
