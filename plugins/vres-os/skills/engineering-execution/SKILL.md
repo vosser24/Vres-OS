@@ -11,6 +11,14 @@ The current repository is authority. A plan is a hypothesis until code/tests pro
 
 Do not classify complexity for ceremony. Identify the actual capabilities/risk surfaces needed. State internally which stages are required and why; skip only with evidence.
 
+## Architecture ownership
+
+Apply the Engineering Architecture Constitution automatically for software work.
+
+Before editing, identify the owning responsibility, search for an existing implementation, classify new behavior as module-local vs reusable domain vs generic shared/platform, and check allowed dependency/public-API/failure-boundary impact.
+
+Use the `engineering-architecture` skill for architecture design or existing-project alignment. Do not ask the user to invoke architecture/check/build/validation commands; Chairman operates internal tools.
+
 ## Plan/design
 
 1. Convert the request into verifiable acceptance outcomes.
