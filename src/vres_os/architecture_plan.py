@@ -299,6 +299,9 @@ def check_alignment_plan(
     return {
         "contract_valid": contract_valid,
         "errors": errors,
+        "plan_digest": plan_digest,
+        "audit_digest": audit.get("audit_digest"),
+        "constitution_version": CONSTITUTION_VERSION,
         "addressed_findings": sorted(addressed),
         "deferred_or_excepted_findings": sorted(deferred),
         "material_findings": sorted(material),
