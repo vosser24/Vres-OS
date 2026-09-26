@@ -535,14 +535,19 @@ def _oversized_findings(root: Path, files: list[Path]) -> list[ArchitectureFindi
     return findings
 
 
-def _architecture_surfaces(root: Path) -> dict[str, bool]:
-    return {
+def _architecture_surfaces(root: Path, files: list[Path]) -> dict[str, bool]:
+    surfaces = {
         name: any(
             (root / prefix / name).exists()
             for prefix in ("", "src", "frontend", "backend")
         )
         for name in ("app", "modules", "domains", "shared", "platform")
     }
+    for path in files:
+        owner = _owner_for_path(path, root)
+        if owner:
+            surfaces[owner.split("/", 1)[0]] = True
+    return surfaces
 
 
 def audit_project(root: str | Path) -> dict[str, Any]:
@@ -603,7 +608,7 @@ def audit_project(root: str | Path) -> dict[str, Any]:
         "profiles": profiles,
         "source_file_count": len(source_files),
         "inventory_file_count": len(files),
-        "surfaces": _architecture_surfaces(project_root),
+        "surfaces": _architecture_surfaces(project_root, source_files),
         "dependency_edges": edge_rows,
         "findings": finding_rows,
         "limitations": sorted(set(limitations)),
