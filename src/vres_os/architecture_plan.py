@@ -93,6 +93,10 @@ def check_alignment_plan(
         errors.append(
             f"plan.constitution_version must equal {CONSTITUTION_VERSION}"
         )
+    if audit.get("constitution_version") != CONSTITUTION_VERSION:
+        errors.append(
+            "audit.constitution_version must match the active Engineering Architecture Constitution"
+        )
     if plan.get("audit_digest") != audit.get("audit_digest"):
         errors.append(
             "plan.audit_digest must match the current deterministic architecture audit"
