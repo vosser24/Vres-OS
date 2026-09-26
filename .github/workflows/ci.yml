@@ -54,6 +54,7 @@ jobs:
           python -m ruff check
           src/vres_os/architecture_policy.py
           src/vres_os/architecture_governance.py
+          src/vres_os/architecture_plan.py
           src/vres_os/architecture_mcp.py
           tests/test_architecture_governance.py
           tests/test_architecture_governance_contract.py
