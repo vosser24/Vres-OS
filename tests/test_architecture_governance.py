@@ -20,6 +20,7 @@ def _complete_plan(audit: dict) -> dict:
         "version": 1,
         "constitution_version": CONSTITUTION_VERSION,
         "audit_digest": audit["audit_digest"],
+        "target_profiles": list(audit["profiles"]),
         "non_goals": ["No giant rewrite or unrelated feature refactor."],
         "tranches": [
             {
