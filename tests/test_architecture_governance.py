@@ -318,3 +318,97 @@ def test_explicit_defer_can_cover_material_finding_but_still_requires_fable(tmp_
     assert deferred in result["deferred_or_excepted_findings"]
     assert result["protected_validation_required"] is True
     assert result["activation_allowed"] is False
+
+
+def test_small_existing_python_utility_stays_minimal_but_requires_plan(tmp_path):
+    _write(tmp_path / "pyproject.toml", "[project]\nname='tiny-existing'\nversion='1'\n")
+    _write(tmp_path / "main.py", "VALUE = 1\n")
+
+    audit = audit_project(tmp_path)
+
+    assert audit["maturity"] == "established"
+    assert audit["profiles"] == ["minimal"]
+    assert audit["requires_alignment_plan"] is True
+    assert audit["requires_protected_plan_validation"] is True
+    assert audit["activation_allowed"] is False
+
+
+def test_packaged_python_relative_imports_detect_sibling_private_coupling(tmp_path):
+    _write(tmp_path / "pyproject.toml", "[project]\nname='packaged-app'\nversion='1'\n")
+    _write(
+        tmp_path / "src/my_app/modules/payments/service.py",
+        "from ..search.private import value\nRESULT = value.VALUE\n",
+    )
+    _write(tmp_path / "src/my_app/modules/payments/model.py", "VALUE = 1\n")
+    _write(tmp_path / "src/my_app/modules/payments/view.py", "VALUE = 2\n")
+    _write(tmp_path / "src/my_app/modules/search/private/value.py", "VALUE = 3\n")
+
+    audit = audit_project(tmp_path)
+    rules = {row["rule_id"] for row in audit["findings"]}
+
+    assert "ARCH-005" in rules
+    assert "ARCH-006" in rules
+    assert audit["surfaces"]["modules"] is True
+
+
+def test_platform_cannot_import_business_domain_in_packaged_python(tmp_path):
+    _write(tmp_path / "pyproject.toml", "[project]\nname='platform-app'\nversion='1'\n")
+    _write(
+        tmp_path / "src/my_app/platform/db.py",
+        "from my_app.domains.commerce import service\nVALUE = service.VALUE\n",
+    )
+    _write(tmp_path / "src/my_app/domains/commerce/__init__.py", "from .service import VALUE\n")
+    _write(tmp_path / "src/my_app/domains/commerce/service.py", "VALUE = 1\n")
+
+    audit = audit_project(tmp_path)
+
+    finding = next(row for row in audit["findings"] if row["rule_id"] == "ARCH-011")
+    assert "platform" in finding["evidence"]
+    assert "my_app.domains.commerce" in finding["evidence"]
+
+
+def test_javascript_side_effect_import_participates_in_layer_checks(tmp_path):
+    _write(tmp_path / "package.json", "{}")
+    _write(
+        tmp_path / "src/shared/bootstrap.ts",
+        'import "../modules/payments/register"\nexport const ready = true\n',
+    )
+    _write(tmp_path / "src/modules/payments/register.ts", "export const registered = true\n")
+    _write(tmp_path / "src/modules/payments/model.ts", "export const model = true\n")
+    _write(tmp_path / "src/modules/payments/view.ts", "export const view = true\n")
+
+    audit = audit_project(tmp_path)
+
+    assert any(row["rule_id"] == "ARCH-003" for row in audit["findings"])
+
+
+def test_alignment_plan_cannot_omit_detected_architecture_profile(tmp_path):
+    _write(tmp_path / "package.json", "{}")
+    _write(tmp_path / "src/modules/payments/a.ts", "export const a = 1\n")
+    _write(tmp_path / "src/modules/payments/b.ts", "export const b = 2\n")
+    _write(tmp_path / "src/modules/payments/c.ts", "export const c = 3\n")
+    audit = audit_project(tmp_path)
+    plan = _complete_plan(audit)
+    plan["target_profiles"] = ["minimal"]
+
+    result = check_alignment_plan(plan, audit)
+
+    assert result["contract_valid"] is False
+    assert any("must include every profile detected" in error for error in result["errors"])
+    assert result["activation_allowed"] is False
+
+
+def test_alignment_plan_rejects_audit_from_old_constitution(tmp_path):
+    _write(tmp_path / "pyproject.toml", "[project]\nname='legacy'\nversion='1'\n")
+    for name in ("a.py", "b.py", "c.py"):
+        _write(tmp_path / "src/modules/payments" / name, "VALUE = 1\n")
+    audit = audit_project(tmp_path)
+    plan = _complete_plan(audit)
+    stale_audit = dict(audit)
+    stale_audit["constitution_version"] = "0.9"
+
+    result = check_alignment_plan(plan, stale_audit)
+
+    assert result["contract_valid"] is False
+    assert any("active Engineering Architecture Constitution" in error for error in result["errors"])
+    assert result["activation_allowed"] is False
