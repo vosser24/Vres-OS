@@ -70,6 +70,11 @@ RULES: dict[str, dict[str, Any]] = {
         "severity": "error",
         "material": False,
     },
+    "ARCH-011": {
+        "title": "platform infrastructure must not depend on business domains or feature modules",
+        "severity": "error",
+        "material": True,
+    },
 }
 
 PROFILES: dict[str, dict[str, Any]] = {
