@@ -19,13 +19,12 @@ from .architecture_policy import (
     MAX_FILES,
     MAX_PARSE_BYTES,
     OVERSIZED_LINES,
-    PLAN_VERSION,
-    PROFILES,
     RULES,
     SOURCE_SUFFIXES,
     STANDARD_LAYERS,
 )
-from .architecture_plan import check_alignment_plan
+from .architecture_plan import check_alignment_plan as check_alignment_plan
+
 
 def _collect_files(root: Path) -> tuple[list[Path], list[str]]:
     files: list[Path] = []
