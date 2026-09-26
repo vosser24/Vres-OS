@@ -261,9 +261,14 @@ def _dependency_edges(
     root: Path,
     limitations: list[str],
 ) -> list[DependencyEdge]:
+    file_list = list(files)
+    if any(path.suffix in JS_TS_SUFFIXES for path in file_list):
+        limitations.append("javascript_dependency_scan_lexical_only")
+    if any(path.suffix == ".py" for path in file_list):
+        limitations.append("python_custom_import_roots_not_resolved")
     output: list[DependencyEdge] = []
     seen: set[tuple[str, str, str, str]] = set()
-    for path in files:
+    for path in file_list:
         if path.suffix == ".py":
             found = _python_edges(path, root, limitations)
         elif path.suffix in JS_TS_SUFFIXES:
