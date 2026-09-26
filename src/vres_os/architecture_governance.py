@@ -449,7 +449,7 @@ def _layer_findings(edges: list[DependencyEdge]) -> list[ArchitectureFinding]:
             findings.append(
                 _finding(
                     "ARCH-002",
-                    f"{edge.source}->{edge.target}",
+                    f"{edge.source}->{edge.target}:{edge.source_path}:{edge.target_ref}",
                     f"{edge.source_path} imports {edge.target_ref}",
                     [edge.source_path],
                     "Move the dependency downward or promote the required generic capability.",
@@ -504,7 +504,7 @@ def _layer_findings(edges: list[DependencyEdge]) -> list[ArchitectureFinding]:
             findings.append(
                 _finding(
                     "ARCH-006",
-                    f"{edge.source}->{edge.target}:{edge.source_path}",
+                    f"{edge.source}->{edge.target}:{edge.source_path}:{edge.target_ref}",
                     f"{edge.source_path} imports explicit private/internal path {edge.target_ref}",
                     [edge.source_path],
                     "Consume the target public API or move the shared responsibility to the correct owner.",
