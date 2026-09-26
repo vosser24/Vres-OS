@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import ast
+from collections.abc import Iterable
 import hashlib
 import json
 import re
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from .architecture_policy import (
     ArchitectureFinding,
