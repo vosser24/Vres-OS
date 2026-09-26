@@ -107,6 +107,40 @@ def _resolve_relative_owner(source: Path, ref: str, root: Path) -> str | None:
     return _owner_for_path(candidate, root)
 
 
+def _resolve_python_import_owner(
+    source: Path,
+    *,
+    level: int,
+    module: str,
+    root: Path,
+) -> str | None:
+    parts = tuple(part for part in module.split(".") if part)
+    if level:
+        candidate = source.parent
+        for _ in range(level - 1):
+            candidate = candidate.parent
+        candidate = candidate.joinpath(*parts).resolve(strict=False)
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            return None
+        return _owner_for_path(candidate, root)
+
+    if not parts:
+        return None
+    for prefix in ((), ("src",), ("frontend",), ("backend",)):
+        candidate = root.joinpath(*prefix, *parts)
+        if (
+            candidate.exists()
+            or candidate.with_suffix(".py").exists()
+            or (candidate / "__init__.py").exists()
+        ):
+            owner = _owner_for_path(candidate, root)
+            if owner:
+                return owner
+    return None
+
+
 def _private_ref(ref: str) -> bool:
     normalized = ref.replace("\\", "/").replace(".", "/")
     return (
