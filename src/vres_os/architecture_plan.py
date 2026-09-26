@@ -108,9 +108,23 @@ def check_alignment_plan(
     if not _nonempty_text_list(target_profiles):
         errors.append("plan.target_profiles must contain at least one architecture profile")
     else:
-        for profile in target_profiles:
+        normalized_profiles = [str(profile) for profile in target_profiles]
+        if len(set(normalized_profiles)) != len(normalized_profiles):
+            errors.append("plan.target_profiles must not contain duplicates")
+        for profile in normalized_profiles:
             if profile not in PROFILES:
                 errors.append(f"plan.target_profiles contains unknown profile {profile}")
+        detected_profiles = {
+            str(profile)
+            for profile in audit.get("profiles", [])
+            if isinstance(profile, str) and profile
+        }
+        missing_profiles = sorted(detected_profiles - set(normalized_profiles))
+        if missing_profiles:
+            errors.append(
+                "plan.target_profiles must include every profile detected by the "
+                "current audit: " + ", ".join(missing_profiles)
+            )
 
     tranches = plan.get("tranches")
     exceptions = plan.get("exceptions")
