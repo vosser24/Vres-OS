@@ -412,3 +412,69 @@ def test_alignment_plan_rejects_audit_from_old_constitution(tmp_path):
     assert result["contract_valid"] is False
     assert any("active Engineering Architecture Constitution" in error for error in result["errors"])
     assert result["activation_allowed"] is False
+
+
+def test_dependency_findings_have_unique_stable_ids_per_import(tmp_path):
+    _write(tmp_path / "package.json", "{}")
+    _write(
+        tmp_path / "src/shared/a.ts",
+        'import x from "../domains/commerce/x"\nexport default x\n',
+    )
+    _write(
+        tmp_path / "src/shared/b.ts",
+        'import x from "../domains/commerce/x"\nexport default x\n',
+    )
+    _write(tmp_path / "src/domains/commerce/x.ts", "export default 1\n")
+
+    first = audit_project(tmp_path)
+    second = audit_project(tmp_path)
+    ids_first = [
+        row["finding_id"]
+        for row in first["findings"]
+        if row["rule_id"] == "ARCH-002"
+    ]
+    ids_second = [
+        row["finding_id"]
+        for row in second["findings"]
+        if row["rule_id"] == "ARCH-002"
+    ]
+
+    assert len(ids_first) == 2
+    assert len(set(ids_first)) == 2
+    assert ids_first == ids_second
+
+
+def test_alignment_plan_digest_binds_exact_plan_content(tmp_path):
+    _write(tmp_path / "pyproject.toml", "[project]\nname='legacy'\nversion='1'\n")
+    for name in ("a.py", "b.py", "c.py"):
+        _write(tmp_path / "src/modules/payments" / name, "VALUE = 1\n")
+    audit = audit_project(tmp_path)
+    plan = _complete_plan(audit)
+
+    first = check_alignment_plan(plan, audit)
+    second = check_alignment_plan(plan, audit)
+    mutated = _complete_plan(audit)
+    mutated["tranches"][0]["title"] = "Different exact reviewed plan"
+    changed = check_alignment_plan(mutated, audit)
+
+    assert first["contract_valid"] is True
+    assert first["plan_digest"]
+    assert first["plan_digest"] == second["plan_digest"]
+    assert first["plan_digest"] != changed["plan_digest"]
+    assert first["audit_digest"] == audit["audit_digest"]
+    assert first["constitution_version"] == CONSTITUTION_VERSION
+
+
+def test_alignment_plan_rejects_unknown_top_level_fields(tmp_path):
+    _write(tmp_path / "pyproject.toml", "[project]\nname='legacy'\nversion='1'\n")
+    for name in ("a.py", "b.py", "c.py"):
+        _write(tmp_path / "src/modules/payments" / name, "VALUE = 1\n")
+    audit = audit_project(tmp_path)
+    plan = _complete_plan(audit)
+    plan["approval"] = "invented"
+
+    result = check_alignment_plan(plan, audit)
+
+    assert result["contract_valid"] is False
+    assert any("exactly the required top-level fields" in error for error in result["errors"])
+    assert result["activation_allowed"] is False
