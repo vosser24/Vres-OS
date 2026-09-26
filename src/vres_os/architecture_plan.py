@@ -94,10 +94,27 @@ def check_alignment_plan(
         return {
             "contract_valid": False,
             "errors": ["plan must be an object"],
+            "plan_digest": None,
             "protected_validation_required": True,
             "activation_allowed": False,
             "required_validator": required_validator,
         }
+
+    plan_digest: str | None = None
+    if set(plan) != _REQUIRED_PLAN_KEYS:
+        errors.append("plan must contain exactly the required top-level fields")
+    try:
+        canonical_plan = json.dumps(
+            plan,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+    except (TypeError, ValueError):
+        errors.append("plan must be canonical JSON-compatible data")
+    else:
+        plan_digest = hashlib.sha256(canonical_plan.encode("utf-8")).hexdigest()
 
     if plan.get("version") != PLAN_VERSION:
         errors.append(f"plan.version must equal {PLAN_VERSION}")
