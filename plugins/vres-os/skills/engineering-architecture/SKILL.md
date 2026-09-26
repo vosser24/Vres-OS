@@ -100,6 +100,8 @@ Never perform a giant repository reorganization merely to make folders look comp
 
 ## Plan contract
 
+The plan must explicitly name the target architecture profile(s).
+
 Each tranche must identify:
 
 - stable key/title;
