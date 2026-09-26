@@ -473,6 +473,16 @@ def _layer_findings(edges: list[DependencyEdge]) -> list[ArchitectureFinding]:
                     "Move page/feature knowledge out of the domain layer.",
                 )
             )
+        if source_layer == "platform" and target_layer in {"domains", "modules"}:
+            findings.append(
+                _finding(
+                    "ARCH-011",
+                    f"{edge.source}->{edge.target}",
+                    f"{edge.source_path} imports {edge.target_ref}",
+                    [edge.source_path],
+                    "Keep platform/infrastructure below business domains and feature modules.",
+                )
+            )
         if (
             source_layer == "modules"
             and target_layer == "modules"
