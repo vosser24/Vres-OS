@@ -43,6 +43,7 @@ def test_all_skills_have_valid_frontmatter():
     assert "procedural-learning" in names
     assert "assumption-firewall" in names
     assert "local-secrets" in names
+    assert "engineering-architecture" in names
 
 
 def test_hook_commands_resolve_to_shipped_wrappers():
