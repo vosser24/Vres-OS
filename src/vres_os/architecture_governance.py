@@ -222,7 +222,7 @@ def _python_edges(path: Path, root: Path, limitations: list[str]) -> list[Depend
     return edges
 
 _JS_IMPORT = re.compile(
-    r"""(?:from\s*|import\s*\(\s*|require\s*\(\s*)["'](?P<ref>[^"']+)["']"""
+    r"""(?:from\s*|import\s*\(\s*|require\s*\(\s*|import\s*)["'](?P<ref>[^"']+)["']"""
 )
 
 
