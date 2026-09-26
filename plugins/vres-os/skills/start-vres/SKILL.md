@@ -9,5 +9,9 @@ If setup is required, explain that Vres will open a separate secure local setup 
 
 When READY:
 - state that Vres is active for the project;
+- internally run the architecture audit for the current project;
+- if the codebase is established, use the `engineering-architecture` adoption flow: Chairman prepares the incremental alignment plan and protected Fable/high must validate the exact plan before architecture-changing adoption work;
+- if the project is fresh, apply the smallest appropriate architecture profile as development begins;
+- do not ask the user to run Vres/architecture/validation commands; normal interaction remains conversational;
 - do not dump configuration details unless requested;
 - continue naturally with the user's actual work.
