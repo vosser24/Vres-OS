@@ -139,6 +139,18 @@ def test_unsupported_source_language_is_explicit_audit_limitation(tmp_path):
     )
 
 
+def test_supported_dependency_scans_report_their_analysis_limits(tmp_path):
+    _write(tmp_path / "package.json", "{}")
+    _write(tmp_path / "src/modules/payments/a.ts", "export const a = 1\n")
+    _write(tmp_path / "src/modules/payments/b.py", "VALUE = 2\n")
+    _write(tmp_path / "src/modules/payments/c.py", "VALUE = 3\n")
+
+    audit = audit_project(tmp_path)
+
+    assert "javascript_dependency_scan_lexical_only" in audit["limitations"]
+    assert "python_custom_import_roots_not_resolved" in audit["limitations"]
+
+
 def test_dependency_cycle_is_reported_without_importing_modules(tmp_path):
     _write(tmp_path / "package.json", "{}")
     _write(
