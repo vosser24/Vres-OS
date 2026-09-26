@@ -185,6 +185,42 @@ def test_large_file_is_warning_not_automatic_material_violation(tmp_path):
     assert finding["material"] is False
 
 
+def test_clean_established_project_still_requires_fable_validated_plan(tmp_path):
+    _write(tmp_path / "pyproject.toml", "[project]\nname='clean-legacy'\nversion='1'\n")
+    module = tmp_path / "src" / "domains" / "commerce"
+    _write(module / "__init__.py", "from .service import VALUE\n")
+    _write(module / "service.py", "VALUE = 1\n")
+    _write(module / "model.py", "VALUE = 2\n")
+    _write(
+        module / "CLAUDE.md",
+        "# Commerce\nOwns commerce domain rules.\n",
+    )
+    audit = audit_project(tmp_path)
+    material = [row for row in audit["findings"] if row["material"]]
+
+    assert audit["maturity"] == "established"
+    assert audit["requires_alignment_plan"] is True
+    assert any(row["rule_id"] == "ARCH-010" for row in audit["findings"])
+    assert all(row["rule_id"] != "ARCH-010" for row in material)
+
+    plan = {
+        "version": 1,
+        "constitution_version": CONSTITUTION_VERSION,
+        "audit_digest": audit["audit_digest"],
+        "target_profiles": list(audit["profiles"]),
+        "non_goals": ["No migration is needed without a material finding."],
+        "tranches": [],
+        "exceptions": [],
+    }
+    result = check_alignment_plan(plan, audit)
+
+    assert result["contract_valid"] is True
+    assert result["material_findings"] == []
+    assert result["next_state"] == "PLAN_READY_FOR_PROTECTED_VALIDATION"
+    assert result["activation_allowed"] is False
+    assert result["required_validator"]["model"] == "fable"
+
+
 def test_complete_alignment_plan_is_ready_for_fable_but_never_activates(tmp_path):
     _write(tmp_path / "pyproject.toml", "[project]\nname='legacy'\nversion='1'\n")
     for name in ("a.py", "b.py", "c.py"):
