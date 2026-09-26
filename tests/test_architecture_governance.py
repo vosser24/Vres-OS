@@ -102,6 +102,21 @@ def test_audit_never_executes_project_python(tmp_path):
     assert audit["source_file_count"] == 3
 
 
+def test_unsupported_source_language_is_explicit_audit_limitation(tmp_path):
+    _write(tmp_path / "go.mod", "module example.com/legacy\n")
+    _write(tmp_path / "src/modules/payments/a.go", "package payments\n")
+    _write(tmp_path / "src/modules/payments/b.go", "package payments\n")
+    _write(tmp_path / "src/modules/payments/c.go", "package payments\n")
+
+    audit = audit_project(tmp_path)
+
+    assert audit["maturity"] == "established"
+    assert any(
+        item.startswith("dependency_parser_unavailable:.go:")
+        for item in audit["limitations"]
+    )
+
+
 def test_dependency_cycle_is_reported_without_importing_modules(tmp_path):
     _write(tmp_path / "package.json", "{}")
     _write(
