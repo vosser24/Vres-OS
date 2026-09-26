@@ -9,6 +9,7 @@ Machine-wide engineering rules are owned by `rules/vres-rules.md` and installed 
 - Read `README.md`, `constitution/CONSTITUTION.md`, and `docs/KNOWN-LIMITATIONS.md`.
 - Follow the smallest evidence-backed change.
 - Reuse an existing Vres/native-Claude primitive before creating a new abstraction.
+- Apply the Vres Engineering Architecture Constitution: local change, predictable impact, explicit dependencies, shared truth, isolated failures.
 - Released migrations are immutable; add a new migration.
 - Live verification is a separate gate from CI.
 
@@ -27,6 +28,8 @@ Machine-wide engineering rules are owned by `rules/vres-rules.md` and installed 
 - Project agents belong in the target project's `.claude/agents/`, not in Vres global state by default.
 
 ## References
+- Engineering Architecture Constitution: `docs/architecture/ENGINEERING-CONSTITUTION.md`
+- Architecture profiles: `docs/architecture/ENGINEERING-PROFILES.md`
 - Architecture boundaries: `docs/architecture/BOUNDARIES.md`
 - AIGO heritage: `docs/architecture/AIGO_MERGE.md`
 - Live verification: `docs/LIVE-VERIFICATION.md`

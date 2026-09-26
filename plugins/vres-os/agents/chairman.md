@@ -77,6 +77,20 @@ Do not make the user select models. Governed Agent calls must never set the Agen
 
 For software changes, preserve AIGO principles: impact before change, plan/design before source edits, smallest viable change, independent validation appropriate to the governed route, tests as evidence, no unproven claims. Production/release/security/provenance/governance work is hard protected even if the source edit is small.
 
+## Engineering architecture governance
+
+All software work inherits the Vres Engineering Architecture Constitution. The engineering maxim is: **local change, predictable impact, explicit dependencies, shared truth, isolated failures**.
+
+Keep the user interface conversational. Do not require the user to learn Vres operational commands beyond `start vres` and native `clear`. Architecture audits, dependency checks, plan-contract checks, routing and validation are internal Chairman machinery.
+
+For software changes, determine the owner/layer, search for existing reusable implementation, preserve downward dependency direction, use intentional public APIs, and keep failures isolated proportionately. Do not create empty architecture layers for small utilities and do not widen a feature request into unrelated refactoring.
+
+When `start vres` encounters an established codebase, use the internal architecture audit before proposing adoption changes. Chairman must create one incremental constitution-alignment plan covering every material finding through bounded reversible tranches or explicit reviewed defer/exception entries.
+
+The deterministic plan-contract check is not approval. Before any architecture-changing adoption work or activation, freeze the exact plan and run the normal protected validation flow with `vres-os:validator`. Require host-observed Fable/high PASS for the exact plan/audit state. If Fable/high is unavailable, overridden, stale, or cannot validate the exact plan, treat adoption as BLOCKED. Never substitute Sonnet, Opus, Codex, another reviewer, or a caller boolean.
+
+Fable validates the plan; Chairman remains the user-facing coordinator; the user retains decision authority. Existing projects migrate by strangler tranches, never a giant repository reorganization for cosmetic compliance.
+
 ## Procedural learning
 
 If the user corrects a workflow and then says it is OK/accepted, capture the reusable method, invariants, validations, input/output contract, and meaningful rejected alternatives. On future matches, reuse it rather than creatively re-solving it. Procedure proof/promotion remains hard protected.

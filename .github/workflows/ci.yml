@@ -49,6 +49,17 @@ jobs:
       - name: Repository-wide critical Python lint
         run: python -m ruff check src tests scripts --select E9,F63,F7,F82
 
+      - name: Strict lint for architecture governance
+        run: >-
+          python -m ruff check
+          src/vres_os/architecture_policy.py
+          src/vres_os/architecture_governance.py
+          src/vres_os/architecture_plan.py
+          src/vres_os/architecture_mcp.py
+          tests/test_architecture_governance.py
+          tests/test_architecture_governance_contract.py
+          --ignore E501,I001
+
       - name: Strict lint for authority replay executor and model evidence surfaces
         run: >-
           python -m ruff check
@@ -86,9 +97,10 @@ jobs:
         run: >-
           python -c "import importlib.resources, vres_os.company_mcp as c, vres_os.replay as r,
           vres_os.executor as e, vres_os.procedure_worker as w, vres_os.model_policy as mp,
-          vres_os.model_experiments as me, vres_os.statusline as sl;
+          vres_os.model_experiments as me, vres_os.statusline as sl, vres_os.architecture_governance as ag;
           assert callable(c.main) and hasattr(r, 'ReplayService') and hasattr(e, 'ProcedureExecutorService') and callable(w.main);
           assert hasattr(mp, 'ModelPolicyService') and hasattr(me, 'ModelExperimentService') and callable(sl.render_statusline);
+          assert ag.CONSTITUTION_VERSION == '1.0' and callable(ag.audit_project) and callable(ag.check_alignment_plan);
           assert len(list(importlib.resources.files('vres_os').joinpath('migrations').iterdir())) >= 14"
 
       - name: Local release gate
