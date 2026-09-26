@@ -65,6 +65,15 @@ def _owner_from_parts(parts: tuple[str, ...]) -> str | None:
     if not parts:
         return None
     start = 1 if parts[0] in {"src", "frontend", "backend"} and len(parts) > 1 else 0
+    if (
+        start < len(parts)
+        and parts[start] not in STANDARD_LAYERS
+        and len(parts) > start + 1
+        and parts[start + 1] in STANDARD_LAYERS
+    ):
+        # Support conventional Python package wrappers such as
+        # src/my_app/modules/... without treating the package name as a layer.
+        start += 1
     layer = parts[start]
     if layer not in STANDARD_LAYERS:
         return None
