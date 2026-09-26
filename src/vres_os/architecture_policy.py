@@ -6,6 +6,19 @@ from typing import Any
 CONSTITUTION_VERSION = "1.0"
 PLAN_VERSION = 1
 
+IGNORED_DIRS = {
+    ".git", ".hg", ".svn", ".mypy_cache", ".pytest_cache", ".ruff_cache",
+    ".tox", ".venv", "venv", "__pycache__", "build", "coverage", "dist", "node_modules",
+}
+SOURCE_SUFFIXES = {
+    ".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".java", ".go", ".rs", ".cs",
+}
+JS_TS_SUFFIXES = {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}
+STANDARD_LAYERS = {"app", "modules", "domains", "shared", "platform"}
+MAX_FILES = 10_000
+MAX_PARSE_BYTES = 2 * 1024 * 1024
+OVERSIZED_LINES = 800
+
 RULES: dict[str, dict[str, Any]] = {
     "ARCH-001": {
         "title": "No circular architectural dependencies",
