@@ -459,7 +459,7 @@ def _layer_findings(edges: list[DependencyEdge]) -> list[ArchitectureFinding]:
             findings.append(
                 _finding(
                     "ARCH-003",
-                    f"{edge.source}->{edge.target}",
+                    f"{edge.source}->{edge.target}:{edge.source_path}:{edge.target_ref}",
                     f"{edge.source_path} imports {edge.target_ref}",
                     [edge.source_path],
                     "Remove feature knowledge from shared infrastructure.",
@@ -469,7 +469,7 @@ def _layer_findings(edges: list[DependencyEdge]) -> list[ArchitectureFinding]:
             findings.append(
                 _finding(
                     "ARCH-004",
-                    f"{edge.source}->{edge.target}",
+                    f"{edge.source}->{edge.target}:{edge.source_path}:{edge.target_ref}",
                     f"{edge.source_path} imports {edge.target_ref}",
                     [edge.source_path],
                     "Move page/feature knowledge out of the domain layer.",
@@ -479,7 +479,7 @@ def _layer_findings(edges: list[DependencyEdge]) -> list[ArchitectureFinding]:
             findings.append(
                 _finding(
                     "ARCH-011",
-                    f"{edge.source}->{edge.target}",
+                    f"{edge.source}->{edge.target}:{edge.source_path}:{edge.target_ref}",
                     f"{edge.source_path} imports {edge.target_ref}",
                     [edge.source_path],
                     "Keep platform/infrastructure below business domains and feature modules.",
@@ -493,7 +493,7 @@ def _layer_findings(edges: list[DependencyEdge]) -> list[ArchitectureFinding]:
             findings.append(
                 _finding(
                     "ARCH-005",
-                    f"{edge.source}->{edge.target}",
+                    f"{edge.source}->{edge.target}:{edge.source_path}:{edge.target_ref}",
                     f"{edge.source_path} imports {edge.target_ref}",
                     [edge.source_path],
                     "Extract shared business responsibility into a domain/shared owner "
