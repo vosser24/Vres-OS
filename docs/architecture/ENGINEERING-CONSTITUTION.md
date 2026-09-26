@@ -201,7 +201,7 @@ Before creating shared code ask: **Would this abstraction still make sense if it
 
 ## 19. Existing-project adoption
 
-Existing applications are never reorganized through one giant move.
+Existing applications are never reorganized through one giant move or giant repository reorganization.
 
 Adoption is read-first and strangler-based:
 
