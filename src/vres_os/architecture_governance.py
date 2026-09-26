@@ -4,6 +4,7 @@ import ast
 from collections.abc import Iterable
 import hashlib
 import json
+import os
 import re
 from dataclasses import asdict
 from pathlib import Path
@@ -25,33 +26,36 @@ from .architecture_policy import (
     STANDARD_LAYERS,
 )
 
-def _ignored(path: Path, root: Path) -> bool:
-    try:
-        parts = path.relative_to(root).parts
-    except ValueError:
-        return True
-    return any(part in IGNORED_DIRS for part in parts)
-
-
 def _collect_files(root: Path) -> tuple[list[Path], list[str]]:
     files: list[Path] = []
     limitations: list[str] = []
-    for path in root.rglob("*"):
-        if _ignored(path, root):
-            continue
-        if path.is_symlink():
-            limitations.append(f"skipped_symlink:{_rel(path, root)}")
-            continue
-        if not path.is_file():
-            continue
-        files.append(path)
-        if len(files) >= MAX_FILES:
-            limitations.append(
-                f"file_inventory_truncated_at_{MAX_FILES}; audit is not a complete repository inventory"
-            )
-            break
-    return files, limitations
+    for current_root, dirnames, filenames in os.walk(root, followlinks=False):
+        current = Path(current_root)
+        kept_dirs: list[str] = []
+        for name in sorted(dirnames):
+            candidate = current / name
+            if name in IGNORED_DIRS:
+                continue
+            if candidate.is_symlink():
+                limitations.append(f"skipped_symlink:{_rel(candidate, root)}")
+                continue
+            kept_dirs.append(name)
+        dirnames[:] = kept_dirs
 
+        for name in sorted(filenames):
+            path = current / name
+            if path.is_symlink():
+                limitations.append(f"skipped_symlink:{_rel(path, root)}")
+                continue
+            if not path.is_file():
+                continue
+            files.append(path)
+            if len(files) >= MAX_FILES:
+                limitations.append(
+                    f"file_inventory_truncated_at_{MAX_FILES}; audit is not a complete repository inventory"
+                )
+                return files, limitations
+    return files, limitations
 
 def _rel(path: Path, root: Path) -> str:
     return path.relative_to(root).as_posix()
