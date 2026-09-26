@@ -17,8 +17,8 @@ For an established codebase, onboarding always includes the Engineering Architec
 1. run the deterministic read-only architecture audit without executing the application;
 2. identify the proportional architecture profile(s);
 3. Chairman creates an incremental reversible alignment plan covering every material finding;
-4. mechanically check plan completeness;
-5. freeze the exact plan and require protected `vres-os:validator` Fable/high PASS before architecture-changing adoption work or activation.
+4. mechanically check plan completeness and freeze the returned audit/plan digests;
+5. require protected `vres-os:validator` Fable/high PASS over that exact audit/plan identity before architecture-changing adoption work or activation.
 
 If protected Fable/high is unavailable, overridden or stale, the plan is BLOCKED. Never substitute another model/reviewer.
 
