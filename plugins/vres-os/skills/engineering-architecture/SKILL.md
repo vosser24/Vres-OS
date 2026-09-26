@@ -64,7 +64,7 @@ Chairman then creates one incremental alignment plan that covers every material 
 - a bounded reversible migration tranche; or
 - an explicit reviewed defer/exception.
 
-Use `architecture_plan_check` to mechanically verify plan shape and coverage.
+Use `architecture_plan_check` to mechanically verify plan shape and coverage. Preserve its exact `audit_digest` and `plan_digest`.
 
 A mechanical PASS is **not** authority to implement.
 
@@ -72,11 +72,12 @@ A mechanical PASS is **not** authority to implement.
 
 Before any architecture-changing adoption work or activation:
 
-1. freeze the exact plan as the review artifact/state;
+1. freeze the exact plan together with its `audit_digest` and `plan_digest` as the review artifact/state;
 2. call the normal Vres protected validation preparation flow;
 3. delegate exactly to `vres-os:validator`;
 4. require host-observed Fable/high evidence;
-5. require PASS on the exact plan/audit state.
+5. require PASS on the exact plan/audit state;
+6. if the plan or audit changes afterward, invalidate the review and obtain a new protected PASS before activation.
 
 If Fable/high is unavailable, overridden, stale, or cannot validate the exact plan, adoption-plan state is BLOCKED.
 
