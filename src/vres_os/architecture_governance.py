@@ -191,6 +191,9 @@ def _dependency_edges(
         elif path.suffix in JS_TS_SUFFIXES:
             found = _js_edges(path, root, limitations)
         else:
+            limitations.append(
+                f"dependency_parser_unavailable:{path.suffix or '<none>'}:{_rel(path, root)}"
+            )
             found = []
         for edge in found:
             key = (edge.source, edge.target, edge.source_path, edge.target_ref)
