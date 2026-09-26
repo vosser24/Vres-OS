@@ -37,7 +37,12 @@ def _collect_files(root: Path) -> tuple[list[Path], list[str]]:
     files: list[Path] = []
     limitations: list[str] = []
     for path in root.rglob("*"):
-        if _ignored(path, root) or not path.is_file():
+        if _ignored(path, root):
+            continue
+        if path.is_symlink():
+            limitations.append(f"skipped_symlink:{_rel(path, root)}")
+            continue
+        if not path.is_file():
             continue
         files.append(path)
         if len(files) >= MAX_FILES:
