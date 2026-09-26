@@ -2,13 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from .architecture_governance import (
-    CONSTITUTION_VERSION,
-    PROFILES,
-    RULES,
-    audit_project,
-    check_alignment_plan,
-)
+from .architecture_governance import audit_project
+from .architecture_plan import check_alignment_plan
+from .architecture_policy import CONSTITUTION_VERSION, PROFILES, RULES
 from .company_mcp import mcp
 from .mcp_server import _project
 
