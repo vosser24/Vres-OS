@@ -164,36 +164,62 @@ def _python_edges(path: Path, root: Path, limitations: list[str]) -> list[Depend
     source_owner = _owner_for_path(path, root)
     if not source_owner:
         return []
+
     edges: list[DependencyEdge] = []
+
+    def append_edge(target_owner: str | None, ref: str) -> None:
+        if target_owner and target_owner != source_owner:
+            edges.append(
+                DependencyEdge(
+                    source_owner,
+                    target_owner,
+                    _rel(path, root),
+                    ref,
+                    "python",
+                    _private_ref(ref),
+                )
+            )
+
     for node in ast.walk(tree):
-        refs: list[str] = []
         if isinstance(node, ast.Import):
-            refs.extend(alias.name for alias in node.names)
+            for alias in node.names:
+                append_edge(
+                    _resolve_python_import_owner(
+                        path,
+                        level=0,
+                        module=alias.name,
+                        root=root,
+                    ),
+                    alias.name,
+                )
         elif isinstance(node, ast.ImportFrom):
             module = node.module or ""
-            if node.level:
-                refs.append("." * node.level + module.replace(".", "/"))
-            elif module:
-                refs.append(module)
-        for ref in refs:
-            target_owner = (
-                _resolve_relative_owner(path, ref, root)
-                if ref.startswith(".")
-                else _owner_for_import_ref(ref)
-            )
-            if target_owner and target_owner != source_owner:
-                edges.append(
-                    DependencyEdge(
-                        source_owner,
-                        target_owner,
-                        _rel(path, root),
-                        ref,
-                        "python",
-                        _private_ref(ref),
-                    )
+            display_ref = "." * node.level + module
+            if module:
+                append_edge(
+                    _resolve_python_import_owner(
+                        path,
+                        level=node.level,
+                        module=module,
+                        root=root,
+                    ),
+                    display_ref,
                 )
+            else:
+                for alias in node.names:
+                    if alias.name == "*":
+                        continue
+                    alias_ref = "." * node.level + alias.name
+                    append_edge(
+                        _resolve_python_import_owner(
+                            path,
+                            level=node.level,
+                            module=alias.name,
+                            root=root,
+                        ),
+                        alias_ref,
+                    )
     return edges
-
 
 _JS_IMPORT = re.compile(
     r"""(?:from\s*|import\s*\(\s*|require\s*\(\s*)["'](?P<ref>[^"']+)["']"""
