@@ -49,6 +49,8 @@ def test_project_scaffold_creates_only_when_missing(tmp_path: Path):
     assert "# Demo" in text
     assert "Build / Test / Lint" in text
     assert "Machine-wide Vres rules are inherited" in text
+    assert "Engineering Architecture Constitution" in text
+    assert "protected Fable/high validation" in text
 
     (tmp_path / "CLAUDE.md").write_text("custom\n", encoding="utf-8")
     second = ensure_project_claude(tmp_path, "Demo")
