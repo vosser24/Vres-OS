@@ -340,11 +340,19 @@ def _finding(
 def _detect_profiles(root: Path, files: list[Path]) -> list[str]:
     rels = {_rel(path, root) for path in files}
     suffixes = {path.suffix for path in files}
+    python_files = [path for path in files if path.suffix == ".py"]
     frontend = (root / "package.json").exists() and bool(suffixes & JS_TS_SUFFIXES)
-    python = (
+    python_manifest = (
         (root / "pyproject.toml").exists()
         or (root / "requirements.txt").exists()
-        or ".py" in suffixes
+    )
+    service_layout = any(
+        rel.startswith(("backend/", "api/", "server/"))
+        or Path(rel).name in {"app.py", "server.py"}
+        for rel in rels
+    )
+    python_service = bool(python_files) and python_manifest and (
+        len(python_files) >= 3 or service_layout
     )
     pipeline = any(rel.startswith(("jobs/", "pipelines/", "dags/")) for rel in rels)
     analytics = any(
@@ -352,11 +360,17 @@ def _detect_profiles(root: Path, files: list[Path]) -> list[str]:
         for rel in rels
         for marker in ("streamlit", "analytics", "notebooks/", "dbt_project.yml")
     )
-    if frontend and python:
+    cli_library = any(
+        rel.startswith(("cli/", "lib/", "library/"))
+        or Path(rel).name in {"cli.py", "__main__.py"}
+        for rel in rels
+    )
+
+    if frontend and python_service:
         profiles = ["full-stack-web"]
     elif frontend:
         profiles = ["frontend-web"]
-    elif python:
+    elif python_service:
         profiles = ["python-service"]
     else:
         profiles = ["minimal"]
@@ -364,10 +378,9 @@ def _detect_profiles(root: Path, files: list[Path]) -> list[str]:
         profiles.append("data-analytics")
     if pipeline:
         profiles.append("pipeline-jobs")
-    if any(rel.startswith(("cli/", "lib/", "library/")) for rel in rels):
+    if cli_library:
         profiles.append("cli-library")
     return list(dict.fromkeys(profiles))
-
 
 def _substantive_module_findings(
     root: Path,
