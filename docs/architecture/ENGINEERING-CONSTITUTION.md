@@ -236,7 +236,31 @@ As responsibilities become substantive, establish explicit app/module/domain/sha
 
 Substantive modules receive short local `CLAUDE.md` ownership/API/dependency/test contracts. Do not duplicate this global constitution into every module.
 
-## 21. Machine enforcement
+## 21. Enforcement before assurance
+
+A mandatory engineering standard is incomplete until its enforcement mechanism, coverage boundary, owner, failure consequence, and evidence are explicit.
+
+A control must never report success for a surface it did not actually evaluate. When a rule cannot yet be enforced mechanically, classify it explicitly as advisory or governed-review-required rather than presenting it as machine-enforced.
+
+Every mandatory control should make the following contract inspectable where practical:
+
+- principle/rule;
+- enforcement mechanism;
+- coverage boundary;
+- threshold or pass condition;
+- owner;
+- failure consequence;
+- evidence produced;
+- exception path;
+- effectiveness signal.
+
+Once a project has adopted and passes a stronger enforced standard, weakening or disabling that standard requires an explicit, owned, justified and time-bounded exception with a revisit/removal trigger. A failing build is never, by itself, authority to lower the standard.
+
+Controls themselves are subject to review. Individually correct gates can still combine into harmful delivery behavior, so control health should be measured where material: unsupported surfaces, false-green conditions, flaky checks, bypass pressure, gate latency, repeated approval invalidation, release blockage and similar system-level effects.
+
+**The governing test is not only “is the principle written down?” but “what mechanism prevents or detects its violation, what does that mechanism actually cover, and what evidence proves it ran?”**
+
+## 22. Machine enforcement
 
 Architecture is not prose only.
 
@@ -252,13 +276,13 @@ Where technically possible, CI checks:
 
 Generated dependency maps are evidence; manually maintained diagrams are not source of truth when code can regenerate them.
 
-## 22. Exceptions
+## 23. Exceptions
 
 An exception must be explicit, owned, justified and have a revisit/removal trigger.
 
 Claude/Chairman may not invent an exception to make a plan pass.
 
-## 23. Change discipline
+## 24. Change discipline
 
 Before a material software change determine internally:
 
@@ -274,7 +298,7 @@ Then implement the smallest coherent change.
 
 When an existing structure conflicts with this constitution, fix only the boundary required for safe implementation and separately surface unrelated debt.
 
-## 24. Definition of architectural success
+## 25. Definition of architectural success
 
 Architecture is healthy when:
 
