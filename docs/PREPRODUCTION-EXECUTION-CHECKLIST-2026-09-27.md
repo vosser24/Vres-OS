@@ -2,7 +2,7 @@
 
 Date: 2026-09-27  
 Repository: `vosser24/Vres-OS`  
-Planning base: `f0a69c3e471fe25c6547ee1af162019caf290d49`
+Authoritative main after #163: `7f9961b5980f1a229cece4902f9e1d709e397e22`
 
 ## Governing rule
 
@@ -31,37 +31,55 @@ If an issue changes a reviewed branch/base, its exact-head validation/CI must be
 ## Sequential checklist
 
 ### 1. #163 — Credential Broker
-Status: **IN PROGRESS — implementation built, not accepted/merged**
+Status: **DONE — merged, post-merge CI green, issue closed**
 
-Current candidate:
+Accepted implementation:
 - PR #173
 - branch: `issue-163-credential-broker`
-- head: `4baf4fadbbd402a0dd523837924e6436f74f27d1`
-- automated CI: green
+- validated head: `4baf4fadbbd402a0dd523837924e6436f74f27d1`
+- exact-head CI: run **#407** / `36158185554` — SUCCESS
+- protected validation: `VAL-52be75fc46484345` — PASS
+- host-observed protected validator: `claude-fable-5-1` under pinned Fable/high
+- required live regression family: **F-05 PASS, F-06 PASS, F-15 PASS**
+- merge commit: `7f9961b5980f1a229cece4902f9e1d709e397e22`
+- post-merge main CI: run **#438** / `36420420225` — SUCCESS
+- post-merge suite: **1056 passed, 1 skipped**
+- installed-runtime smoke: PASS
+- local release gate: `PASSED_WITH_EXPLICIT_LIVE_GATES`
+- issue #163: **closed / completed** on 2026-09-28
 
-Remaining before DONE:
-- [ ] protected `vres-os:validator` Fable/high PASS on exact candidate;
-- [ ] required Chairman / F-15 smoke for changed lifecycle surface;
-- [ ] update final handoff if acceptance state changes branch head;
-- [ ] exact-head CI green after any final doc/head change;
-- [ ] merge PR #173;
-- [ ] post-merge main CI green;
-- [ ] close #163 while explicitly preserving physical Windows criteria in #169.
+Acceptance completed:
+- [x] protected `vres-os:validator` Fable/high PASS on exact candidate;
+- [x] required lifecycle live regression family F-05 / F-06 / F-15;
+- [x] exact-head CI green;
+- [x] merge PR #173;
+- [x] post-merge main CI green;
+- [x] close #163 while explicitly preserving physical Windows criteria in #169.
 
-**Do not start #174 merge/rebase or #164 implementation until #163 is DONE.**
+Physical Windows/customer-environment criteria remain intentionally deferred to #169 and were **not** claimed by #163:
+- real Windows Credential Locker under User A;
+- Project A/B reuse without re-entry and unbound Project C denial;
+- real child-only environment delivery with parent environment remaining clean;
+- actual Claude transcript/debug interception behavior;
+- second Windows-user isolation;
+- uninstall/reinstall preserving native Claude/Codex authentication.
+
+**#174 is now the first and only allowed implementation/acceptance item.**
 
 ---
 
 ### 2. #174 — Engineering Architecture Governance
-Status: **BUILT IN PARALLEL / HELD — not merged**
+Status: **ACTIVE NEXT — built on old base, must be refreshed before acceptance**
 
-Current candidate:
+Current held candidate:
 - PR #175
 - branch: `issue-174-engineering-architecture-governance`
-- head: `d0b59289e443dab14dd658411a0ee1d3d61d23c7`
-- automated CI: green
+- held head: `d0b59289e443dab14dd658411a0ee1d3d61d23c7`
+- old base: `f0a69c3e471fe25c6547ee1af162019caf290d49`
+- new authoritative main: `7f9961b5980f1a229cece4902f9e1d709e397e22`
+- prior automated CI on held head: green
 
-Required after #163 DONE:
+Required now:
 - [ ] update/rebase #174 onto new authoritative main;
 - [ ] resolve any integration drift;
 - [ ] exact-head full CI green;
@@ -255,4 +273,4 @@ At the beginning of every future implementation session:
 
 ## Current next action
 
-**#163 protected Fable/high validation is the only allowed implementation/acceptance next step.**
+**#174 refresh onto authoritative main is the only allowed implementation/acceptance next step. Verify PR #175/head/base first, update it onto `7f9961b5980f1a229cece4902f9e1d709e397e22`, resolve integration drift, then rerun exact-head CI and protected Fable/high before merge.**
