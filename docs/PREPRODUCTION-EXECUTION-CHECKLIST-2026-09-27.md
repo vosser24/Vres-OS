@@ -74,10 +74,10 @@ Status: **ACTIVE NEXT — built on old base, must be refreshed before acceptance
 Current held candidate:
 - PR #175
 - branch: `issue-174-engineering-architecture-governance`
-- held head: `d0b59289e443dab14dd658411a0ee1d3d61d23c7`
+- held head: `9756b44d4ae953db327b10072e70003e51df9404`
 - old base: `f0a69c3e471fe25c6547ee1af162019caf290d49`
 - new authoritative main: `7f9961b5980f1a229cece4902f9e1d709e397e22`
-- prior automated CI on held head: green
+- prior exact-head CI on held head: run **#437** / `36349196127` — SUCCESS
 
 Required now:
 - [ ] update/rebase #174 onto new authoritative main;
