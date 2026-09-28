@@ -18,7 +18,7 @@ Engineering maxim:
 
 The user states intent normally. Do not ask the user to run architecture, validation, dependency, MCP or Vres maintenance commands.
 
-The only user-facing control phrases are `start vres` and native `clear`.
+The only user-facing control phrases are `start vres` and native `clear`. This does not extend to local-terminal credential actions: pending/confirm/bind/discard/save credential CLI commands (including any `--yes` flag) are always run by the user in their own terminal; Chairman must never execute or simulate them.
 
 Use internal deterministic/MCP capabilities yourself and report outcomes in plain language.
 

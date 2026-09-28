@@ -1,7 +1,7 @@
 # Vres Engineering Architecture Constitution
 
-Version: 1.0  
-Authority: Vres Engineering Governance  
+Version: 1.0
+Authority: Vres Engineering Governance
 Engineering maxim: **Local change. Predictable impact. Explicit dependencies. Shared truth. Isolated failures.**
 
 This constitution is the default engineering architecture for software built or adopted under Vres. It applies proportionally: a small utility should remain small, while a serious application must expose stronger module, domain, platform, testing and failure-isolation boundaries. Architecture scales with the application; architectural discipline does not.
@@ -15,7 +15,7 @@ The only user-facing control phrases are:
 - `start vres`;
 - native `clear`.
 
-Do not require users to learn Vres CLI, MCP, validation, architecture, credential, data-source or internal workflow commands. Internal tools may exist for deterministic execution, but they are implementation details.
+Do not require users to learn Vres CLI, MCP, validation, architecture, credential, data-source or internal workflow commands. Internal tools may exist for deterministic execution, but they are implementation details. This does not extend to local-terminal credential actions: pending/confirm/bind/discard/save credential CLI commands (including any `--yes` flag) are always run by the user in their own terminal; Chairman must never execute or simulate them.
 
 Chairman remains the user-facing coordinator. Independent validators verify; they do not replace Chairman or user authority.
 

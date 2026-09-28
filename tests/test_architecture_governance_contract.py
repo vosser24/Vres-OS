@@ -25,6 +25,60 @@ def test_architecture_governance_is_chairman_only_not_user_command_surface():
     assert 'name="architecture"' not in cli
 
 
+def test_c7_control_phrase_language_present_in_all_three_governing_files():
+    """Part A of C7: the 'start vres' / native `clear` control-phrase surface is
+    documented in every one of the three files that carry the identical
+    local-terminal credential carve-out sentence (rules, constitution, skill).
+    """
+    rules = (ROOT / "rules" / "vres-rules.md").read_text(encoding="utf-8")
+    constitution = (
+        ROOT / "docs" / "architecture" / "ENGINEERING-CONSTITUTION.md"
+    ).read_text(encoding="utf-8")
+    skill = (
+        ROOT
+        / "plugins"
+        / "vres-os"
+        / "skills"
+        / "engineering-architecture"
+        / "SKILL.md"
+    ).read_text(encoding="utf-8")
+
+    assert "start vres" in rules
+    assert "native `clear`" in rules
+    assert "start vres" in constitution
+    assert "native `clear`" in constitution
+    assert "start vres" in skill and "native `clear`" in skill
+
+
+def test_c7_credential_local_terminal_carve_out_present_in_all_three_files():
+    """Part B of C7: the credential local-terminal-authority carve-out sentence
+    exists verbatim-in-substance in rules/vres-rules.md,
+    docs/architecture/ENGINEERING-CONSTITUTION.md, and
+    plugins/vres-os/skills/engineering-architecture/SKILL.md. This test asserts
+    stable substrings only (robust to minor rewording) and must fail if the
+    carve-out or its 'Chairman must never execute or simulate them' guarantee
+    is ever removed. Wording itself must never be altered to satisfy this test.
+    """
+    rules = (ROOT / "rules" / "vres-rules.md").read_text(encoding="utf-8")
+    constitution = (
+        ROOT / "docs" / "architecture" / "ENGINEERING-CONSTITUTION.md"
+    ).read_text(encoding="utf-8")
+    skill = (
+        ROOT
+        / "plugins"
+        / "vres-os"
+        / "skills"
+        / "engineering-architecture"
+        / "SKILL.md"
+    ).read_text(encoding="utf-8")
+
+    for text in (rules, constitution, skill):
+        assert "local-terminal credential actions" in text
+        assert "Chairman must never execute or simulate them" in text
+        assert "--yes" in text
+        assert "pending/confirm/bind/discard/save credential CLI commands" in text
+
+
 def test_existing_project_alignment_plan_is_always_protected_fable_validated():
     chairman = (
         ROOT / "plugins" / "vres-os" / "agents" / "chairman.md"

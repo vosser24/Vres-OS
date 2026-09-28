@@ -87,6 +87,29 @@ Open a new terminal, run `claude`, and complete its native login. Optional Codex
 
 Account access to the protected Fable validator is required for completion. Unavailable entitlement is an explicit blocker; Vres must not silently choose a cheaper validator.
 
+### Current-user credential resources
+
+Vres Credential Broker resources are separate from native Claude/Codex login state. New reusable application/API/database credentials are captured from hidden local-terminal input and stored durably only in Windows Credential Locker:
+
+```powershell
+vres credential save --service-type website --origin https://www.example.gr --account main --field username --field password
+vres credential list
+```
+
+A resource is owned by the current Windows user and is identified by normalized service/account metadata. Another project can reuse the same resource only after an explicit binding:
+
+```powershell
+vres credential bind <resource-id>
+```
+
+There is no plaintext `credential get` command. Prefer bound child-process delivery with `vres credential run`; use `vres credential materialize` only when a target tool genuinely requires a temporary file under `.vres/local-secrets/`.
+
+The `UserPromptSubmit` hook contains a deterministic high-confidence credential guard. It blocks detected credentials before Vres prompt persistence and can create a pending Locker capture without echoing the value. Review pending captures only from a local terminal with `vres credential pending`, then confirm or discard them. Do not intentionally paste credentials into Claude; the guard is defense-in-depth.
+
+#163 repository tests do not prove the installed host's transcript/debug behavior or Windows-user isolation. Those physical checks are deliberately deferred to #169 and must be run from the integrated Visual Studio workflow before production claims.
+
+See [architecture/CREDENTIAL-BROKER.md](architecture/CREDENTIAL-BROKER.md).
+
 ## 5. Enter a disposable project
 
 ```powershell

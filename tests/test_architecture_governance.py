@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 from vres_os.architecture_governance import (
     CONSTITUTION_VERSION,
@@ -454,6 +455,59 @@ def test_dependency_findings_have_unique_stable_ids_per_import(tmp_path):
     assert len(ids_first) == 2
     assert len(set(ids_first)) == 2
     assert ids_first == ids_second
+
+
+def test_audit_never_reads_vres_local_secrets_materialized_files(tmp_path):
+    _write(tmp_path / "pyproject.toml", "[project]\nname='vres-owned-app'\nversion='1'\n")
+    _write(tmp_path / "src/modules/payments/a.py", "VALUE = 1\n")
+    _write(tmp_path / "src/modules/payments/b.py", "VALUE = 2\n")
+    _write(tmp_path / "src/modules/payments/c.py", "VALUE = 3\n")
+    forbidden = tmp_path / ".vres" / "local-secrets" / "danger.py"
+    _write(
+        forbidden,
+        "raise RuntimeError('architecture audit must never read materialized credential state')\n",
+    )
+
+    real_read_text = Path.read_text
+    forbidden_resolved = forbidden.resolve()
+
+    def spying_read_text(self, *args, **kwargs):
+        assert self.resolve() != forbidden_resolved, (
+            f"Path.read_text invoked on excluded .vres/local-secrets path: {self}"
+        )
+        return real_read_text(self, *args, **kwargs)
+
+    with patch.object(Path, "read_text", spying_read_text):
+        audit = audit_project(tmp_path)
+
+    assert audit["maturity"] == "established"
+    assert all(".vres" not in edge["source_path"] for edge in audit["dependency_edges"])
+
+
+def test_vres_local_secrets_tree_has_zero_effect_on_audit_inventory_or_digest(tmp_path):
+    def build(root: Path) -> None:
+        _write(root / "pyproject.toml", "[project]\nname='vres-owned-app'\nversion='1'\n")
+        _write(root / "src/modules/payments/a.py", "VALUE = 1\n")
+        _write(root / "src/modules/payments/b.py", "VALUE = 2\n")
+        _write(root / "src/modules/payments/c.py", "VALUE = 3\n")
+
+    baseline_root = tmp_path / "baseline"
+    variant_root = tmp_path / "variant"
+    build(baseline_root)
+    build(variant_root)
+    _write(
+        variant_root / ".vres" / "local-secrets" / "extra_credential_material.py",
+        "from src.modules.payments.a import VALUE\nSECRET = VALUE\n",
+    )
+
+    baseline_audit = audit_project(baseline_root)
+    variant_audit = audit_project(variant_root)
+
+    assert baseline_audit["source_file_count"] == variant_audit["source_file_count"]
+    assert baseline_audit["inventory_file_count"] == variant_audit["inventory_file_count"]
+    assert baseline_audit["dependency_edges"] == variant_audit["dependency_edges"]
+    assert baseline_audit["findings"] == variant_audit["findings"]
+    assert baseline_audit["audit_digest"] == variant_audit["audit_digest"]
 
 
 def test_alignment_plan_digest_binds_exact_plan_content(tmp_path):

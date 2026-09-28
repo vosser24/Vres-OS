@@ -9,6 +9,7 @@ PLAN_VERSION = 1
 IGNORED_DIRS = {
     ".git", ".hg", ".svn", ".mypy_cache", ".pytest_cache", ".ruff_cache",
     ".tox", ".venv", "venv", "__pycache__", "build", "coverage", "dist", "node_modules",
+    ".vres",
 }
 SOURCE_SUFFIXES = {
     ".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".java", ".go", ".rs", ".cs",
