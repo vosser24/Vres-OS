@@ -934,16 +934,33 @@ class ExperienceService:
                     "Work-unit report_key has no matching durable expert report"
                 )
 
-        terminal = _latest_event(
-            conn,
-            task_id,
+        if unit.get("started_at") is None:
+            raise UnsafeExperienceEvidence(
+                "Terminal work-unit experience lacks durable attempt start time"
+            )
+        terminal_row = conn.execute(
+            """
+            SELECT id,event_type,payload,created_at
+              FROM vres.task_events
+             WHERE task_id=%s
+               AND event_type=ANY(%s)
+               AND payload->>'work_unit_key'=%s
+               AND created_at >= %s
+             ORDER BY id ASC LIMIT 1
+            """,
             (
-                "ORCHESTRATION_WORK_UNIT_PASSED",
-                "ORCHESTRATION_WORK_UNIT_ACCEPTANCE_FAILED",
-                "ORCHESTRATION_WORKER_ATTEMPT_REJECTED",
+                task_id,
+                [
+                    "ORCHESTRATION_WORK_UNIT_PASSED",
+                    "ORCHESTRATION_WORK_UNIT_FAILED",
+                    "ORCHESTRATION_WORK_UNIT_ACCEPTANCE_FAILED",
+                    "ORCHESTRATION_WORKER_ATTEMPT_REJECTED",
+                ],
+                work_unit_key,
+                unit["started_at"],
             ),
-            work_unit_key=work_unit_key,
-        )
+        ).fetchone()
+        terminal = dict(terminal_row) if terminal_row else None
         if not terminal:
             raise UnsafeExperienceEvidence(
                 "Terminal work-unit experience lacks terminal event provenance"
