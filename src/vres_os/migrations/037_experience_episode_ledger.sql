@@ -35,11 +35,11 @@ $vres$;
 CREATE OR REPLACE FUNCTION vres.protect_experience_policy_immutability()
 RETURNS trigger
 LANGUAGE plpgsql
-AS $
+AS $vres_policy$
 BEGIN
     RAISE EXCEPTION 'experience_policy_versions are immutable; publish a new policy version instead';
 END
-$;
+$vres_policy$;
 
 DROP TRIGGER IF EXISTS trg_protect_experience_policy_update ON vres.experience_policy_versions;
 CREATE TRIGGER trg_protect_experience_policy_update
