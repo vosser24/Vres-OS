@@ -1,6 +1,12 @@
 import pytest
 
-from vres_os.experience import POLICY, POLICY_DIGEST, _prepare_payload, _sha256
+from vres_os.experience import (
+    POLICY,
+    POLICY_DIGEST,
+    _prepare_payload,
+    _prepare_source_evidence,
+    _sha256,
+)
 from vres_os.sensitive_policy import SENSITIVE_SANITIZED
 
 
@@ -57,3 +63,16 @@ def test_episode_payload_redacts_structured_secret_keys():
     assert disposition == SENSITIVE_SANITIZED
     assert payload["context"]["DATABASE_PASSWORD"] == "[REDACTED]"
     assert "synthetic-structured-secret" not in str(payload)
+
+
+def test_source_evidence_digest_keeps_material_beyond_payload_projection_window():
+    original = {"items": [f"item-{i}" for i in range(50)] + ["tail-a"]}
+    changed = {"items": [f"item-{i}" for i in range(50)] + ["tail-b"]}
+
+    source_a, _ = _prepare_source_evidence(original)
+    source_b, _ = _prepare_source_evidence(changed)
+    payload_a, _ = _prepare_payload(source_a)
+    payload_b, _ = _prepare_payload(source_b)
+
+    assert payload_a == payload_b
+    assert _sha256(source_a) != _sha256(source_b)

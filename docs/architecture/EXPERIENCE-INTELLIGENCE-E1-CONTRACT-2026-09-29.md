@@ -21,7 +21,7 @@ Existing truth owners remain authoritative:
 ## Durable objects
 
 ### experience_policy_versions
-A versioned, immutable description of the episode schema/security contract. E1 ships one active policy version and its SHA-256 digest.
+A versioned, immutable description of the episode schema/security contract. E1 ships one active policy version and its SHA-256 digest. Update/delete is blocked at the database boundary; a future policy change must publish a new version.
 
 ### experience_episodes
 One immutable bounded snapshot for a completed task or terminal material work unit. The episode is derived from mechanically known Vres state only.
@@ -92,8 +92,9 @@ Participation is explicit:
 E1 capture from Vres task/work-unit state is `participated`.
 
 Trust is derived, not caller-selected:
-- `validated_runtime` when the captured terminal state has a passed validation request;
-- otherwise `trusted_project_source`.
+- `validated_runtime` only for a completed task episode whose current task validation state is passed and whose latest terminal validation request is passed;
+- E1 work-unit episodes do **not** inherit task-level validation authority; without a direct work-unit validation truth owner they remain `trusted_project_source`;
+- cancelled/unvalidated task episodes remain `trusted_project_source`.
 
 E1 does not create `user_authoritative` or company-canonical authority.
 
@@ -120,9 +121,9 @@ Relation creation must enforce project/scope compatibility. No separate generic 
 
 ## Digests
 
-`source_digest` is SHA-256 over the canonical, mechanically sourced evidence identity and content before episode projection, after sanitization.
+`source_digest` is SHA-256 over the canonical, mechanically sourced evidence identity and complete accepted source content before compact episode projection, after sanitization. Source evidence has explicit fail-closed size/count budgets; it is not silently truncated for the digest. Therefore a material change outside the compact payload window still changes the source digest.
 
-`payload_digest` is SHA-256 over the canonical persisted episode payload plus immutable provenance fields.
+`payload_digest` is SHA-256 over the canonical persisted compact episode payload plus immutable provenance fields.
 
 Canonical JSON uses sorted keys, UTF-8, and deterministic separators.
 

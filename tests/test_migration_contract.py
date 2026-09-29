@@ -222,4 +222,5 @@ def test_experience_episode_migration_is_bounded_immutable_and_versioned():
     assert "uq_experience_episode_task" in sql
     assert "uq_experience_episode_work_unit" in sql
     assert "protect_experience_episode_immutability" in sql
+    assert "protect_experience_policy_immutability" in sql
     assert "allow_experience_ledger_delete" in sql

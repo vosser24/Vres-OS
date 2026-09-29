@@ -58,6 +58,7 @@ def test_episode_work_unit_capture_is_immutable_idempotent_concurrent_and_secret
     assert episodes[0]["episode_key"] == episodes[1]["episode_key"]
     episode = episodes[0]
     assert episode["outcome_status"] == "failed"
+    assert episode["trust_class"] == "trusted_project_source"
     assert episode["payload"]["failure_classification"] == "failure"
     assert episode["security_disposition"] == "sensitive_sanitized"
     assert "synthetic-value-1" not in json.dumps(episode["payload"])
@@ -139,3 +140,70 @@ def test_task_episode_requires_terminal_task_and_work_unit_requires_terminal_sta
         )
     with pytest.raises(ValueError, match="terminal passed/failed"):
         ExperienceEpisodeService().capture(task_key, work_unit_key="WU-E1-PENDING")
+
+
+def test_policy_version_is_immutable_and_work_unit_does_not_inherit_task_validation(pg_project):
+    repo = Repository()
+    task_key = repo.begin_task(
+        pg_project,
+        "Experience E1 trust boundary",
+        "Do not overstate task validation as work-unit validation",
+        "experience-test",
+        "chairman",
+    )
+    work_unit_key = "WU-E1-TRUST"
+    _add_terminal_work_unit(task_key, work_unit_key=work_unit_key)
+
+    with connect() as conn, conn.transaction():
+        task_id = conn.execute("SELECT id FROM vres.tasks WHERE task_key=%s", (task_key,)).fetchone()["id"]
+        conn.execute(
+            """
+            INSERT INTO vres.validation_requests(
+              request_key,task_id,state_digest,status,observed_model,agent_id,completed_at
+            ) VALUES ('VAL-E1-TASK-PASS',%s,%s,'passed','claude-fable-test','vres-os:validator',now())
+            """,
+            (task_id, "0" * 64),
+        )
+
+    episode = ExperienceEpisodeService().capture(task_key, work_unit_key=work_unit_key)
+    assert episode["trust_class"] == "trusted_project_source"
+    assert episode["payload"]["validation"] is None
+    assert not any(link["target_kind"] == "validation" for link in episode["relations"])
+
+    with connect() as conn:
+        with pytest.raises(Exception, match="experience_policy_versions are immutable"):
+            with conn.transaction():
+                conn.execute(
+                    """
+                    UPDATE vres.experience_policy_versions
+                       SET policy_digest=%s
+                     WHERE policy_version='176.e1.v1'
+                    """,
+                    ("0" * 64,),
+                )
+
+
+def test_source_digest_detects_drift_outside_truncated_episode_payload(pg_project):
+    repo = Repository()
+    task_key = repo.begin_task(
+        pg_project,
+        "Experience E1 source digest",
+        "Detect source drift outside the compact payload projection",
+        "experience-test",
+        "chairman",
+    )
+    work_unit_key = "WU-E1-DIGEST"
+    _add_terminal_work_unit(task_key, work_unit_key=work_unit_key)
+    first_constraints = [f"constraint-{i}" for i in range(50)] + ["tail-a"]
+    repo.update_state(task_key, constraints=first_constraints)
+
+    service = ExperienceEpisodeService()
+    episode = service.capture(task_key, work_unit_key=work_unit_key)
+    serialized = json.dumps(episode["payload"])
+    assert "tail-a" not in serialized
+    assert episode["payload"]["constraints"][-1] == {"truncated_items": 1}
+
+    second_constraints = [f"constraint-{i}" for i in range(50)] + ["tail-b"]
+    repo.update_state(task_key, constraints=second_constraints)
+    with pytest.raises(ValueError, match="changed source evidence"):
+        service.capture(task_key, work_unit_key=work_unit_key)

@@ -26,6 +26,10 @@ _MAX_TEXT = 4000
 _MAX_LIST = 50
 _MAX_DICT = 80
 _MAX_DEPTH = 16
+_SOURCE_MAX_TEXT = 100_000
+_SOURCE_MAX_LIST = 200
+_SOURCE_MAX_DICT = 200
+_SOURCE_MAX_BYTES = 2 * 1024 * 1024
 _HIDDEN_REASONING_KEYS = {
     "chainofthought",
     "cot",
@@ -66,6 +70,55 @@ POLICY_DIGEST = _sha256(POLICY)
 
 def _normalize_key(key: Any) -> str:
     return _KEY_NORMALIZER.sub("", str(key).lower())
+
+
+def _prepare_source_evidence(
+    value: Any, *, _depth: int = 0, _sensitive: list[bool] | None = None
+) -> tuple[Any, str]:
+    """Sanitize complete source evidence for digesting, or fail closed when it exceeds E1 bounds."""
+    sensitive = _sensitive if _sensitive is not None else [False]
+    if _depth > _MAX_DEPTH:
+        raise ValueError("Experience source evidence nesting exceeds persistence safety limit")
+    if isinstance(value, str):
+        disposition = sanitize_extracted_text(value)
+        if disposition.status == SENSITIVE_REVIEW_REQUIRED:
+            raise ValueError("Experience capture blocked: sensitive-looking content requires review")
+        if disposition.status == SENSITIVE_SANITIZED:
+            sensitive[0] = True
+            value = disposition.text
+        if len(value) > _SOURCE_MAX_TEXT:
+            raise ValueError("Experience source evidence text exceeds the E1 digest budget")
+        return value, SENSITIVE_SANITIZED if sensitive[0] else "sanitized"
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc).isoformat(), SENSITIVE_SANITIZED if sensitive[0] else "sanitized"
+    if isinstance(value, (list, tuple)):
+        if len(value) > _SOURCE_MAX_LIST:
+            raise ValueError("Experience source evidence list exceeds the E1 digest budget")
+        out = []
+        for item in value:
+            prepared, _ = _prepare_source_evidence(item, _depth=_depth + 1, _sensitive=sensitive)
+            out.append(prepared)
+        return out, SENSITIVE_SANITIZED if sensitive[0] else "sanitized"
+    if isinstance(value, dict):
+        items = list(value.items())
+        if len(items) > _SOURCE_MAX_DICT:
+            raise ValueError("Experience source evidence object exceeds the E1 digest budget")
+        out: dict[str, Any] = {}
+        for key, item in items:
+            normalized = _normalize_key(key)
+            if normalized in _HIDDEN_REASONING_KEYS:
+                raise ValueError(f"Experience source evidence contains prohibited private-reasoning field {key!r}")
+            if normalized == "authorization" or normalized.endswith(_SECRET_KEY_SUFFIXES):
+                sensitive[0] = True
+                out[str(key)] = "[REDACTED]"
+                continue
+            prepared, _ = _prepare_source_evidence(item, _depth=_depth + 1, _sensitive=sensitive)
+            out[str(key)] = prepared
+        return out, SENSITIVE_SANITIZED if sensitive[0] else "sanitized"
+    if value is None or isinstance(value, (bool, int, float)):
+        return value, SENSITIVE_SANITIZED if sensitive[0] else "sanitized"
+    prepared, _ = _prepare_source_evidence(str(value), _depth=_depth + 1, _sensitive=sensitive)
+    return prepared, SENSITIVE_SANITIZED if sensitive[0] else "sanitized"
 
 
 def _prepare_payload(value: Any, *, _depth: int = 0, _sensitive: list[bool] | None = None) -> tuple[Any, str]:
@@ -153,7 +206,7 @@ class ExperienceEpisodeService:
             task = conn.execute(
                 """
                 SELECT t.id,t.task_key,t.project_id,t.task_family,t.objective,t.status,t.completed_at,t.updated_at,
-                       s.constraints
+                       s.constraints,s.validation_status
                   FROM vres.tasks t
                   JOIN vres.task_state s ON s.task_id=t.id
                  WHERE t.task_key=%s
@@ -215,16 +268,18 @@ class ExperienceEpisodeService:
             if len(procedure_rows) > 50:
                 raise ValueError("Experience capture exceeds the procedure reference budget")
 
-            validation = conn.execute(
-                """
-                SELECT request_key,status,state_digest,observed_model,agent_id,created_at,completed_at
-                  FROM vres.validation_requests
-                 WHERE task_id=%s AND status IN ('passed','failed')
-                 ORDER BY COALESCE(completed_at,created_at) DESC,id DESC
-                 LIMIT 1
-                """,
-                (task["id"],),
-            ).fetchone()
+            validation = None
+            if work_unit_key is None:
+                validation = conn.execute(
+                    """
+                    SELECT request_key,status,state_digest,observed_model,agent_id,created_at,completed_at
+                      FROM vres.validation_requests
+                     WHERE task_id=%s AND status IN ('passed','failed')
+                     ORDER BY COALESCE(completed_at,created_at) DESC,id DESC
+                     LIMIT 1
+                    """,
+                    (task["id"],),
+                ).fetchone()
 
             artifact_rows = conn.execute(
                 """
@@ -286,11 +341,27 @@ class ExperienceEpisodeService:
                     "failure" if outcome_status in {"failed", "cancelled"} else "success"
                 ),
             }
-            payload, security_disposition = _prepare_payload(payload_source)
+            safe_source, source_security_disposition = _prepare_source_evidence(payload_source)
+            canonical_source = _canonical(safe_source)
+            if len(canonical_source.encode("utf-8")) > _SOURCE_MAX_BYTES:
+                raise ValueError("Experience source evidence exceeds the E1 digest byte budget")
+            payload, payload_security_disposition = _prepare_payload(safe_source)
+            security_disposition = (
+                SENSITIVE_SANITIZED
+                if source_security_disposition == SENSITIVE_SANITIZED
+                or payload_security_disposition == SENSITIVE_SANITIZED
+                else "sanitized"
+            )
 
             trust_class = (
                 "validated_runtime"
-                if validation and validation["status"] == "passed"
+                if (
+                    work_unit_key is None
+                    and outcome_status == "completed"
+                    and task["validation_status"] == "passed"
+                    and validation
+                    and validation["status"] == "passed"
+                )
                 else "trusted_project_source"
             )
             source_material = {
@@ -299,7 +370,7 @@ class ExperienceEpisodeService:
                 "project_id": task["project_id"],
                 "task_family": task["task_family"],
                 "observed_at": observed_at,
-                "payload": payload,
+                "evidence": safe_source,
             }
             source_digest = _sha256(source_material)
             immutable_provenance = {

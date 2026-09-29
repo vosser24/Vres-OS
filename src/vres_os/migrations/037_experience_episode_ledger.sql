@@ -32,6 +32,25 @@ BEGIN
 END
 $vres$;
 
+CREATE OR REPLACE FUNCTION vres.protect_experience_policy_immutability()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $
+BEGIN
+    RAISE EXCEPTION 'experience_policy_versions are immutable; publish a new policy version instead';
+END
+$;
+
+DROP TRIGGER IF EXISTS trg_protect_experience_policy_update ON vres.experience_policy_versions;
+CREATE TRIGGER trg_protect_experience_policy_update
+BEFORE UPDATE ON vres.experience_policy_versions
+FOR EACH ROW EXECUTE FUNCTION vres.protect_experience_policy_immutability();
+
+DROP TRIGGER IF EXISTS trg_protect_experience_policy_delete ON vres.experience_policy_versions;
+CREATE TRIGGER trg_protect_experience_policy_delete
+BEFORE DELETE ON vres.experience_policy_versions
+FOR EACH ROW EXECUTE FUNCTION vres.protect_experience_policy_immutability();
+
 CREATE TABLE IF NOT EXISTS vres.experience_episodes (
     id bigserial PRIMARY KEY,
     episode_key text NOT NULL UNIQUE,
