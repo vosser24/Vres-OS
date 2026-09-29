@@ -4,7 +4,7 @@ Date: 2026-09-29
 Repository: `vosser24/Vres-OS`  
 Canonical checklist: `docs/PREPRODUCTION-EXECUTION-CHECKLIST-2026-09-27.md`
 
-This is the canonical detailed continuation record after completing #174. A fresh session should be able to resume from this file and the checklist without relying on chat memory.
+This is the canonical detailed continuation record after completing #164. A fresh session should be able to resume from this file and the checklist without relying on chat memory.
 
 The operating rule remains strict:
 
@@ -14,8 +14,9 @@ At this handoff boundary:
 
 - **#163 is DONE.**
 - **#174 is DONE.**
-- **#164 is the first and only allowed next implementation/acceptance item.**
-- #176 and everything after it remain blocked by sequence.
+- **#164 is DONE.**
+- **#176 is the first and only allowed next implementation/acceptance item.**
+- #165 and everything after #176 remain blocked by sequence.
 
 ---
 
@@ -23,47 +24,48 @@ At this handoff boundary:
 
 Authoritative `main`:
 
-`11591b72b3d396a370e315313925e19b8bcb45ec`
+`fe31e30e593a44b8b5ab565fa0db859bbefec0c6`
 
-This is the merge commit of PR #175 / issue #174, integrating the accepted #174 architecture-governance candidate on top of the already-completed #163 Credential Broker main.
+This is the merge commit of PR #177 / issue #164, on top of the already-completed #163 Credential Broker and #174 Engineering Architecture Governance foundations.
 
-Final #174 candidate:
+Final #164 candidate:
 
-- branch: `issue-174-engineering-architecture-governance`
-- exact reviewed head: `7ded3c16e5e85f5715fb052f403907eec3750628`
-- exact authoritative base: `7f9961b5980f1a229cece4902f9e1d709e397e22`
-- exact-head CI: **#439** / `36455460478` — SUCCESS
-- final protected validation: `VAL-aa05bb6018e941cc`
-- host-observed model: `claude-fable-5-1`
-- result: **PASS**
+- branch: `issue-164-secret-safe-onboarding`
+- exact reviewed head: `eddfa35d5418e23d6bac8792df0a6d1877d880a8`
+- exact authoritative base: `11591b72b3d396a370e315313925e19b8bcb45ec`
+- governed engineering final: `ORCHFINAL-20260929-9bf6f3cc85` — `decision_ready=true`
+- local isolated PostgreSQL suite: **1164 passed / 3 skipped / 0 failed / 0 errors**
+- exact-head CI: **#441** / `36542621233` — SUCCESS
+- protected validation: `VAL-f8d685ab3575430c`
+- host-observed protected model: `claude-fable-5-1`
+- protected result: **PASS**
 
 Post-merge main CI:
 
 - workflow: Vres-OS CI
-- run: **#440**
-- run ID: `36530581547`
+- run: **#442**
+- run ID: `36544341349`
 - event: push
-- head: `11591b72b3d396a370e315313925e19b8bcb45ec`
+- head: `fe31e30e593a44b8b5ab565fa0db859bbefec0c6`
 - status: **completed / success**
 - PostgreSQL-backed suite: PASS
-- repository critical lint: PASS
-- strict architecture-governance lint: PASS
-- strict protected-surface lint: PASS
-- installed-runtime import smoke: PASS
+- installed-runtime smoke: PASS
 - local release gate: PASS
-- release-gate artifact: `11016787086`
-- artifact digest: `sha256:59e506706a168648057860d8e683816940973a512440c09c253228296d5abedf`
+- evidence artifact: `11021203984`
+- artifact digest: `sha256:8ab24e44232efa860f2d05e4aec8c2014704dc963920fbe98207326051a7fdc6`
 
-Issue #174:
+Issue #164:
 
 - state: **closed**
 - reason: **completed**
 - closed: 2026-09-29
-- PR #175: merged
+- PR #177: merged
 
-#163 remains DONE. Its physical Windows/customer-environment criteria remain owned by #169.
+#163, #174 and #164 are DONE.
 
-The first and only implementation item now allowed by the frozen sequence is **#164 — Secret-safe onboarding**.
+The first and only implementation item now allowed by the frozen sequence is **#176 — Experience Intelligence / Governed Agent Learning**.
+
+Physical/live acceptance deliberately still owned by #169 includes the real first-run optional embedding model acquisition and sanitized wizzard_9 legacy-project proof.
 
 ---
 
@@ -73,8 +75,8 @@ The order remains:
 
 1. **#163 — Credential Broker — DONE**
 2. **#174 — Engineering Architecture Governance — DONE**
-3. **#164 — Secret-safe onboarding — ACTIVE NEXT / IMPLEMENTATION NOT STARTED**
-4. **#176 — Experience Intelligence / Governed Agent Learning — PLAN COMPLETE, IMPLEMENTATION NOT STARTED**
+3. **#164 — Secret-safe onboarding — DONE**
+4. **#176 — Experience Intelligence / Governed Agent Learning — ACTIVE NEXT / PLAN COMPLETE / IMPLEMENTATION NOT STARTED**
 5. **#165 — Chairman model policy — NOT STARTED**
 6. **#166 — Global Claude adoption — NOT STARTED**
 7. **#167 — Current-user Data Source Registry — NOT STARTED**
@@ -82,7 +84,7 @@ The order remains:
 9. **#169 — Integrated Windows / Visual Studio live acceptance — NOT STARTED**
 10. **#170 — Production Readiness / Go-Live — NOT STARTED**
 
-Do not begin #176 until #164 is fully DONE.
+Do not begin #165 until #176 is fully DONE.
 
 ---
 
@@ -707,45 +709,45 @@ Preserve those boundaries.
 
 ---
 
-# 15. Exact #164 resume methodology
+# 15. Final #164 secret-safe onboarding evidence
 
-A fresh session must work only #164.
+#164 closed the legacy-project secret-ingestion gap without reducing required onboarding functionality.
 
-Start with read-only verification:
+Final product/security contract:
 
-1. read this handoff and the canonical checklist;
-2. fetch `origin/main`;
-3. verify authoritative main is still `11591b72b3d396a370e315313925e19b8bcb45ec` or record any legitimate advancement before proceeding;
-4. read issue #164 in full;
-5. inspect the merged Credential Broker, onboarding ingestion, document/source acquisition, persistence and model-context boundaries before editing;
-6. inspect any existing #164 branch/PR state before creating new work;
-7. verify all unrelated worktrees remain untouched.
+- known sensitive paths are classified before ordinary hash/extraction;
+- excluded files retain only bounded non-secret provenance;
+- useful mixed documents are sanitized before classification, persistence, chunking, embeddings or model-facing review;
+- suspicious residual credential forms fail closed to `sensitive_review_required`;
+- raw secret spans/values are not persisted;
+- sanitized records do not persist the raw-file SHA-256;
+- existing Credential Broker remains the only durable secret architecture;
+- semantic embeddings remain available when enabled;
+- configured embedding model identity comes only from trusted Vres configuration;
+- local cache is preferred and the same configured model may be acquired when absent;
+- `trust_remote_code=False`;
+- legacy/project content cannot select a model or authorize arbitrary network activity;
+- only sanitized persisted chunks reach local embedding inference;
+- source files remain untouched.
 
-Freeze the smallest security contract before source edits. #164 owns secret-safe onboarding, including:
+Final validation identity:
 
-- deterministic exclusion of known secret-bearing paths/files;
-- pre-model and pre-persistence sanitization;
-- fail-closed behavior when sensitivity is uncertain and cannot be safely reduced;
-- Credential Broker reuse instead of ingesting durable secret values;
-- synthetic secret fixtures and security regressions;
-- onboarding regressions proving useful non-secret data still flows correctly;
-- explicit non-goals so #164 does not absorb #168 adoption lifecycle or #169 physical acceptance.
+- task: `TASK-20260929-03eade4905`;
+- candidate: `eddfa35d5418e23d6bac8792df0a6d1877d880a8`;
+- governed final: `ORCHFINAL-20260929-9bf6f3cc85` / `decision_ready=true`;
+- exact-head CI: #441 / `36542621233` SUCCESS;
+- protected validation: `VAL-f8d685ab3575430c` PASS;
+- observed validator: `claude-fable-5-1`;
+- merge/main: `fe31e30e593a44b8b5ab565fa0db859bbefec0c6`;
+- post-merge CI: #442 / `36544341349` SUCCESS.
 
-After implementation:
+Deferred live criteria:
 
-1. run focused security/onboarding tests;
-2. run relevant #163 credential regressions;
-3. run the full PostgreSQL-backed suite as applicable;
-4. run installed-runtime/release-gate validation;
-5. update issue-specific and canonical handoffs;
-6. push the exact candidate;
-7. require exact-head CI green;
-8. run canonical protected `vres-os:validator` Fable/high on the exact head;
-9. merge only after all gates;
-10. require post-merge main CI green;
-11. close #164 while carrying physical Windows/customer-environment criteria into #169;
-12. update this checklist/handoff;
-13. only then start #176.
+- real first-run SentenceTransformer acquisition with actual optional dependencies;
+- sanitized wizzard_9 project live onboarding;
+- target Windows/Visual Studio integrated proof.
+
+Those are not implementation blockers for #176 and remain owned by #169 / the corresponding live runtime case.
 
 ---
 
@@ -771,27 +773,48 @@ This is the authoritative #174 closure identity.
 
 ---
 
-# 17. Active next item — #164 Secret-safe onboarding
+# 17. Active next item — #176 Experience Intelligence
 
-#164 is now the only allowed implementation item.
+#176 is now the only allowed implementation item.
 
-Its purpose is to ensure onboarding/acquisition paths cannot place secret-bearing material into model context, Vres persistence, generated project context, logs or reusable knowledge by accident.
+Issue:
 
-The implementation should consume the merged #163 Credential Broker rather than inventing a parallel secret store, and must preserve #174 architecture boundaries.
+**#176 — Experience Intelligence: governed agent learning, episodic memory and evidence-based experience reuse**
 
-Do not start #176 until #164 is fully:
+Frozen principles:
 
-- implemented;
-- security-tested;
-- regression-tested;
-- protected-validated;
-- documented;
-- exact-head CI green;
-- merged;
-- post-merge main CI green;
-- closed.
+> **Models are replaceable workers. Vres owns the experience.**
 
-After #164 comes #176 Experience Intelligence, then #165, #166, #167, #168, #169, #170.
+> **Store evidence richly. Retrieve context sparsely. Promote authority conservatively.**
+
+Prerequisites are now satisfied:
+
+- #163 Credential Broker — DONE;
+- #164 secret-safe onboarding / pre-model sanitization — DONE;
+- #174 Engineering Architecture Governance — DONE.
+
+The implementation must consume those foundations rather than creating parallel authority/security/architecture systems.
+
+Start sequentially with **E1 — contracts + episode ledger**. Do not begin E2 until E1 has its bounded implementation/tests/evidence. Preserve the broader #176 tranche order E1 through E8, with E9 physical proof deferred to #169.
+
+Critical invariants from issue #176:
+
+- no private agent/model self-training or prompt/policy mutation;
+- no second generic memory database;
+- execution state remains distinct from long-term experience;
+- no raw hidden chain-of-thought persistence;
+- every reusable experience item retains source/scope/trust/digest provenance;
+- untrusted/external content cannot become privileged instruction or authority;
+- project/user scope cannot leak;
+- failed trajectories cannot silently become positive procedures;
+- retrieval scores are relevance signals, not truth probabilities;
+- source revocation must invalidate derived influence;
+- bounded retrieval and materiality/recurrence discipline prevent “reflect on everything”;
+- consequential governance/security changes retain protected Fable/high acceptance.
+
+After #176 comes #165, then #166, #167, #168, #169 and #170.
+
+Do not start #165 until #176 is fully implemented, tested, protected-validated as required, exact-head-CI green, merged, post-merge-CI green, documented and closed.
 
 ---
 
@@ -886,7 +909,7 @@ Do not merge this documentation branch blindly into product main without first c
 
 A fresh session should begin with this internal mission:
 
-> Resume Vres preproduction from the canonical checklist and current handoff. #163 and #174 are DONE and must not be reopened without a new regression. Work only #164 Secret-safe onboarding. Verify authoritative main `11591b72b3d396a370e315313925e19b8bcb45ec`, read issue #164 in full, inspect the existing Credential Broker and onboarding/acquisition boundaries, freeze the smallest security contract, implement deterministic sensitive-path exclusion plus pre-model/pre-persistence sanitization and fail-closed uncertain-sensitive handling, reuse Credential Broker resources instead of persisting secret values, add synthetic-secret and onboarding regressions, run targeted/full/security validation, update docs, require exact-head CI, run protected Fable/high on the exact candidate, merge, verify post-merge CI, close #164, and only then start #176.
+> Resume Vres preproduction from the canonical checklist and current handoff. #163, #174 and #164 are DONE and must not be reopened without a new regression. Work only #176 Experience Intelligence. Verify authoritative main `fe31e30e593a44b8b5ab565fa0db859bbefec0c6`, read issue #176 plus `docs/architecture/EXPERIENCE-INTELLIGENCE-PLAN-2026-09-27.md` in full, verify the durable plan commit `34f45afa0fb8d5a6a90bef53dec58d9ecef1093d`, then begin only E1 contracts + episode ledger. Reuse existing Vres truth owners, preserve #163/#164 secret/security boundaries and #174 architecture governance, persist no hidden chain-of-thought, and do not begin #165 or later work until #176 is fully DONE.
 
 This is the exact continuation point.
 
