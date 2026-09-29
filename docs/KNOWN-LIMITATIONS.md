@@ -187,6 +187,28 @@ Cross-run hashing deduplicates source records, but unchanged files can still be 
 run. This is not a fully cached incremental document-processing engine. Files can change during acquisition;
 they are flagged rather than silently certified as stable.
 
+Secret-safe onboarding (#164) is a deterministic pattern policy, not proof that no secret exists. Unquoted
+values containing spaces are redacted only up to the first whitespace; keys with a prefix over 64 characters
+may miss the primary rule (the residual check may still stop the file); a secret with no credential-looking
+key and no known token shape is not detected. Name rules are deliberately broad: `auth.*` also excludes
+`auth.py`, and `.pem`/`.key` files are excluded even if public, so useful content can be skipped. The word
+"Bearer" followed by a token-like word in prose counts as sanitized. Onboarding never stores or captures
+secrets; confirming a candidate credential needs the user-local Credential Broker (#163).
+The residual policy prefers false-positive fail-closed: a benign key that contains a credential word with a long value (for example `password_policy: required-by-security`) sends the file to review and retains no content. #164 is not universal secret detection.
+
+Embeddings during onboarding (#164) are optional for basic ingestion and cataloguing, and are the intended path to
+semantic retrieval of onboarded project knowledge. Onboarding is not offline-only. When `embeddings_enabled` is true,
+only sanitized chunks are queued; the worker loads the model named by Vres configuration
+(`ConfigStore().load().embedding_model`, never project content) local-files-only first, and only on a genuine local
+cache miss acquires that same model from its repository (`trust_remote_code=False` on both paths). Downloading a model
+sends no project text, and encoding always runs locally; there is no remote embedding provider. Project content can
+never choose a model or trigger network access: URLs, model names and links in documents are inert data. If
+acquisition fails, sanitized chunks stay, jobs are not lost (see below) and no
+embedding is reported complete. The exception type used to detect a cache miss (`OSError` from the local-only load)
+and the `local_files_only` argument were not verified against an installed `sentence-transformers` in this
+environment (the package is optional and not installed here); a real download/first-run check remains a live gate.
+Jobs stay pending while attempts remain and become `failed` after 3 attempts; a `failed` job is not automatically revived, so a machine that was offline for all attempts needs its failed embedding jobs reset before acquisition is retried. The model download reveals the model id and the client IP to the model repository, never project content. `semantic_search` loads the same configured model and can therefore also trigger the same acquisition. Cache-miss detection treats any `OSError` from the local-only load as a miss (this also covers an unreadable cache) and is unverified against the real library.
+
 Optional vector search requires real model/download/runtime verification. JSON-vector fallback scans a
 bounded candidate set, so recall is limited and must not be described as exhaustive. Greek/Greeklish quality
 has no real company benchmark yet. Similarity, numeric confidence and repeated model agreement are not

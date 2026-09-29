@@ -303,7 +303,9 @@ def test_onboarding_ignores_secrets_generated_dirs_and_symlinks(tmp_path):
         if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
             pytest.skip("Windows symlink privilege is unavailable on this host")
         raise
-    assert [p.name for p in _files(tmp_path)] == ['readme.txt']
+    # #164: sensitive files are now yielded so inventory can record them as sensitive_excluded
+    # (never hashed/parsed); pruning of generated dirs and symlinks is unchanged.
+    assert sorted(p.name for p in _files(tmp_path)) == ['.env', 'readme.txt']
 
 
 def test_worker_does_not_import_project_shadow_package(monkeypatch, tmp_path):
