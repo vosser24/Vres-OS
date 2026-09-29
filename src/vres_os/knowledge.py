@@ -59,6 +59,34 @@ class KnowledgeService:
         metadata: dict[str, Any] | None = None,
         approval_key: str | None = None,
     ) -> str:
+        prepared = self._prepare_proposal(
+            key=key, knowledge_type=knowledge_type, title=title, statement=statement, status=status,
+            scope=scope, confidence=confidence, source_owner=source_owner, project_id=project_id,
+            review_after=review_after, metadata=metadata, approval_key=approval_key,
+        )
+        with _connect() as conn, conn.transaction():
+            return self._insert_prepared(conn, prepared)
+
+    def propose_in_conn(self, conn, **proposal: Any) -> str:
+        """Same validation, redaction and insert path as propose(), inside the caller's transaction."""
+        return self._insert_prepared(conn, self._prepare_proposal(**proposal))
+
+    @staticmethod
+    def _prepare_proposal(
+        *,
+        key: str,
+        knowledge_type: str,
+        title: str,
+        statement: str,
+        status: str = "proposed",
+        scope: dict[str, Any] | None = None,
+        confidence: float | None = None,
+        source_owner: str | None = None,
+        project_id: int | None = None,
+        review_after: datetime | None = None,
+        metadata: dict[str, Any] | None = None,
+        approval_key: str | None = None,
+    ) -> dict[str, Any]:
         key = key.strip()
         knowledge_type = knowledge_type.strip().lower()
         if knowledge_type not in _EVIDENCE_REQUIRED_TYPES | _APPROVAL_REQUIRED_TYPES:
@@ -88,34 +116,44 @@ class KnowledgeService:
             "review_after": review_after.isoformat() if review_after else None,
             "metadata": safe_meta,
         }
-        with _connect() as conn, conn.transaction():
-            if conn.execute("SELECT 1 FROM vres.knowledge_items WHERE knowledge_key=%s", (key,)).fetchone():
-                raise ValueError(f"Knowledge key {key} already exists; use update/supersede, never overwrite")
-            scope_approval_id = None
-            approval_id = None
-            if project_id is None:
-                scope_approval_id = require_company_approval(
-                    conn, approval_key, "knowledge_publish", company_subject
-                )
-                if knowledge_type in _APPROVAL_REQUIRED_TYPES and status == "canonical":
-                    approval_id = scope_approval_id
-            else:
-                approval_id = _approval_id(conn, approval_key, project_id, key)
-            if knowledge_type in _APPROVAL_REQUIRED_TYPES and status == "canonical" and not approval_id:
-                raise ValueError(f"Canonical {knowledge_type} requires a recorded user approval event")
-            conn.execute(
-                """
-                INSERT INTO vres.knowledge_items(
-                  knowledge_key,project_id,knowledge_type,title,statement,status,scope,confidence,
-                  source_owner,review_after,metadata,approval_event_id,scope_approval_event_id
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s::jsonb,%s,%s)
-                """,
-                (
-                    key, project_id, knowledge_type, safe_title, safe_statement, status,
-                    json.dumps(safe_scope), confidence, source_owner, review_after, json.dumps(safe_meta),
-                    approval_id, scope_approval_id,
-                ),
+        return {
+            "key": key, "knowledge_type": knowledge_type, "status": status, "confidence": confidence,
+            "source_owner": source_owner, "project_id": project_id, "review_after": review_after,
+            "approval_key": approval_key, "safe_title": safe_title, "safe_statement": safe_statement,
+            "safe_scope": safe_scope, "safe_meta": safe_meta, "company_subject": company_subject,
+        }
+
+    @staticmethod
+    def _insert_prepared(conn, p: dict[str, Any]) -> str:
+        key, knowledge_type, status, project_id = p["key"], p["knowledge_type"], p["status"], p["project_id"]
+        approval_key = p["approval_key"]
+        if conn.execute("SELECT 1 FROM vres.knowledge_items WHERE knowledge_key=%s", (key,)).fetchone():
+            raise ValueError(f"Knowledge key {key} already exists; use update/supersede, never overwrite")
+        scope_approval_id = None
+        approval_id = None
+        if project_id is None:
+            scope_approval_id = require_company_approval(
+                conn, approval_key, "knowledge_publish", p["company_subject"]
             )
+            if knowledge_type in _APPROVAL_REQUIRED_TYPES and status == "canonical":
+                approval_id = scope_approval_id
+        else:
+            approval_id = _approval_id(conn, approval_key, project_id, key)
+        if knowledge_type in _APPROVAL_REQUIRED_TYPES and status == "canonical" and not approval_id:
+            raise ValueError(f"Canonical {knowledge_type} requires a recorded user approval event")
+        conn.execute(
+            """
+            INSERT INTO vres.knowledge_items(
+              knowledge_key,project_id,knowledge_type,title,statement,status,scope,confidence,
+              source_owner,review_after,metadata,approval_event_id,scope_approval_event_id
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s::jsonb,%s,%s)
+            """,
+            (
+                key, project_id, knowledge_type, p["safe_title"], p["safe_statement"], status,
+                json.dumps(p["safe_scope"]), p["confidence"], p["source_owner"], p["review_after"],
+                json.dumps(p["safe_meta"]), approval_id, scope_approval_id,
+            ),
+        )
         return key
 
     def get(self, knowledge_key: str) -> dict[str, Any]:

@@ -224,3 +224,19 @@ def test_experience_episode_migration_is_bounded_immutable_and_versioned():
     assert "protect_experience_episode_immutability" in sql
     assert "protect_experience_policy_immutability" in sql
     assert "allow_experience_ledger_delete" in sql
+
+
+def test_experience_transition_migration_is_append_only_versioned_and_idempotent_by_candidate():
+    from vres_os.experience_consolidation import POLICY, POLICY_DIGEST, POLICY_VERSION, _canonical
+
+    sql = _migration("038_experience_transitions.sql")
+    assert "CREATE TABLE IF NOT EXISTS vres.experience_transitions" in sql
+    assert POLICY_VERSION == "176.e2.v1" and "'176.e2.v1'" in sql
+    assert sql.count(POLICY_DIGEST) == 2
+    assert _canonical(POLICY) in sql
+    assert "UNIQUE (project_id, candidate_digest)" in sql
+    assert "verdict IN ('accepted','deduplicated','quarantined')" in sql
+    assert "protect_experience_transition_immutability" in sql
+    assert "allow_experience_ledger_delete" in sql
+    assert "RETURN NEW;" not in sql
+    assert "176.e1.v1" not in sql
