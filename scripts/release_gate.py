@@ -243,7 +243,9 @@ sys.path.insert(0, sys.argv[1])
 import vres_os, vres_os.cli, vres_os.metrics, vres_os.optimization, vres_os.company_mcp, vres_os.mcp_entrypoint, vres_os.replay
 import vres_os.executor, vres_os.procedure_recipe, vres_os.procedure_worker, vres_os.model_policy
 import vres_os.model_experiments, vres_os.task_lifecycle, vres_os.task_decisions, vres_os.statusline
-import vres_os.claude_experiment
+import vres_os.claude_experiment, vres_os.sensitive_policy
+assert vres_os.sensitive_policy.sensitive_path_reason(pathlib.Path('.env')) == 'env_file'
+assert vres_os.sensitive_policy.sanitize_extracted_text('DB_PASSWORD=synthetic-smoke-value-1').status == 'sensitive_sanitized'
 assert pathlib.Path(vres_os.__file__).resolve().is_relative_to(pathlib.Path(sys.argv[1]).resolve())
 assert callable(vres_os.company_mcp.main)
 assert callable(vres_os.mcp_entrypoint.main)

@@ -66,10 +66,22 @@ def _load_model(model_name: str):
         raise EmbeddingUnavailable(
             "Local embedding dependencies are not installed. Re-run install.ps1 with -WithEmbeddings."
         ) from exc
+    # model_name is ONLY ConfigStore().load().embedding_model (trusted Vres config); never project content.
+    # Local-first: use the cache without network. Only a genuine local-cache miss (OSError) permits the
+    # controlled acquisition of that SAME configured model. trust_remote_code stays False on both paths.
+    # Downloading a model sends no project/document text; encode() always runs locally afterwards.
     try:
-        return SentenceTransformer(model_name, trust_remote_code=False)
+        return SentenceTransformer(model_name, trust_remote_code=False, local_files_only=True)
+    except OSError:
+        pass
     except Exception as exc:
         raise EmbeddingUnavailable(f"Could not load local embedding model {model_name}: {redact_text(str(exc))}") from exc
+    try:
+        return SentenceTransformer(model_name, trust_remote_code=False, local_files_only=False)
+    except Exception as exc:
+        raise EmbeddingUnavailable(
+            f"Could not acquire embedding model {model_name}: {redact_text(str(exc))[:500]}"
+        ) from exc
 
 
 class EmbeddingService:
