@@ -2,7 +2,7 @@
 
 Date: 2026-09-29  
 Repository: `vosser24/Vres-OS`  
-Authoritative main after #174: `11591b72b3d396a370e315313925e19b8bcb45ec`
+Authoritative main after #164: `fe31e30e593a44b8b5ab565fa0db859bbefec0c6`
 
 ## Governing rule
 
@@ -64,7 +64,7 @@ Physical Windows/customer-environment criteria remain intentionally deferred to 
 - second Windows-user isolation;
 - uninstall/reinstall preserving native Claude/Codex authentication.
 
-**#164 is now the first and only allowed implementation/acceptance item.**
+**#176 is now the first and only allowed implementation/acceptance item.**
 
 ---
 
@@ -105,33 +105,60 @@ Acceptance completed:
 
 Phase 5 initially exposed protected-validation sequencing mistakes, not a #174 code defect. Durable VATT evidence confirmed the existing #42 contract remains correct: freeze/checkpoint before `validation_prepare`, do not mutate task state while validation is in flight, and use `task_reply_gate(advances_state=false)` with `mode=validation_in_flight` for interim status replies. The clean Phase 5B run followed that protocol and produced the authoritative host-attested PASS above.
 
-**#164 is now the first and only allowed implementation/acceptance item.**
+**#176 is now the first and only allowed implementation/acceptance item.**
 
 ---
 
 ### 3. #164 — Secret-safe onboarding
-Status: **ACTIVE NEXT — implementation not started**
+Status: **DONE — protected exact-head PASS, merged, post-merge CI green, issue closed**
 
-Required:
-- [ ] implement secret-bearing path exclusion;
-- [ ] pre-model/pre-persistence sanitization;
-- [ ] fail-closed uncertain-sensitive handling;
-- [ ] Credential Broker reuse;
-- [ ] synthetic secret fixture/security tests;
-- [ ] relevant onboarding regressions;
-- [ ] protected Fable/high validation;
-- [ ] docs/handoff;
-- [ ] exact-head CI green;
-- [ ] merge;
-- [ ] post-merge main CI green;
-- [ ] close #164, carrying physical criteria to #169.
+Accepted implementation:
+- PR #177
+- branch: `issue-164-secret-safe-onboarding`
+- validated head: `eddfa35d5418e23d6bac8792df0a6d1877d880a8`
+- authoritative base: `11591b72b3d396a370e315313925e19b8bcb45ec`
+- governed engineering final: `ORCHFINAL-20260929-9bf6f3cc85` — `decision_ready=true`
+- local isolated PostgreSQL suite: **1164 passed / 3 skipped / 0 failed / 0 errors**
+- exact-head CI: run **#441** / `36542621233` — SUCCESS
+- exact-head evidence artifact: `11021550195`
+- exact-head artifact digest: `sha256:0c9409eb517bf70a99949bf45d6a768fabe2a72b1ed3c1ba34f83f99009bf1c6`
+- final protected validation: `VAL-f8d685ab3575430c` — PASS
+- host-observed protected validator: `claude-fable-5-1`
+- merge commit / authoritative main: `fe31e30e593a44b8b5ab565fa0db859bbefec0c6`
+- post-merge main CI: run **#442** / `36544341349` — SUCCESS
+- post-merge evidence artifact: `11021203984`
+- post-merge artifact digest: `sha256:8ab24e44232efa860f2d05e4aec8c2014704dc963920fbe98207326051a7fdc6`
+- issue #164: **closed / completed** on 2026-09-29
 
-**Do not start #176 implementation until #164 is DONE.**
+Acceptance completed:
+- [x] deterministic secret-bearing path preflight before ordinary hash/extraction;
+- [x] explicit `sensitive_excluded`, `sensitive_sanitized`, `sensitive_review_required` dispositions;
+- [x] canonical pre-model/pre-persistence sanitization for mixed useful documents;
+- [x] fail-closed uncertain-sensitive handling with value-free review metadata;
+- [x] sanitized content does not persist raw secret values or raw-file hashes;
+- [x] Credential Broker authority preserved; no second vault / no auto-confirm-bind-save;
+- [x] semantic embedding functionality preserved with trusted configured-model local-first acquisition;
+- [x] project content cannot choose a model or authorize arbitrary network activity;
+- [x] installed-wheel smoke green;
+- [x] exact-head CI #441 green;
+- [x] protected Fable/high PASS on exact candidate;
+- [x] guarded merge of PR #177;
+- [x] post-merge main CI #442 green;
+- [x] close #164.
+
+Physical/live criteria intentionally remain deferred:
+- real first-run SentenceTransformer acquisition with the actual optional runtime;
+- sanitized wizzard_9 legacy-project acceptance;
+- target Windows/Visual Studio integrated proof.
+
+Those belong to #169 / the applicable live embedding-runtime acceptance and were not falsely claimed by #164.
+
+**#176 is now the first and only allowed implementation/acceptance item.**
 
 ---
 
 ### 4. #176 — Experience Intelligence / Governed Agent Learning
-Status: **PLAN COMPLETE / IMPLEMENTATION NOT STARTED**
+Status: **ACTIVE NEXT — plan complete, implementation not started**
 
 Durable plan:
 - issue #176;
@@ -290,4 +317,4 @@ At the beginning of every future implementation session:
 
 ## Current next action
 
-**#164 Secret-safe onboarding is the only allowed implementation next step. Start from authoritative main `11591b72b3d396a370e315313925e19b8bcb45ec`. Read issue #164 in full, inspect the merged Credential Broker and onboarding ingestion paths, freeze the smallest security contract, then implement deterministic sensitive-path exclusion, pre-model/pre-persistence sanitization, fail-closed uncertain-sensitive handling, Credential Broker reuse, synthetic-secret regression coverage, protected Fable/high validation, exact-head CI, merge and post-merge CI. Do not start #176 until #164 is DONE.**
+**#176 Experience Intelligence / Governed Agent Learning is the only allowed implementation next step. Start from authoritative main `fe31e30e593a44b8b5ab565fa0db859bbefec0c6`. Read issue #176 and the frozen Experience Intelligence plan in full before source edits. Implement sequentially from E1 contracts + episode ledger, preserving existing truth owners, #163/#164 security boundaries, #174 architecture governance, no private model self-training, and no hidden chain-of-thought persistence. Do not start #165 until #176 is fully DONE.**
