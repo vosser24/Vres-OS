@@ -133,10 +133,13 @@ def project_scaffold_text(name: str) -> str:
         "- Test (single file): TODO\n"
         "- Lint / format: TODO\n"
         "- Run the app: TODO\n\n"
-        "## Project scope\n"
-        "- Keep this file specific to this project.\n"
-        "- Put large maps/specifications in .claude/references/ and load them on demand.\n"
-        "- Add nested CLAUDE.md files only when a real subdomain has different rules/tooling.\n"
+        "## Architecture / project scope\n"
+        "- The Vres Engineering Architecture Constitution is inherited through the global Vres rules.\n"
+        "- Keep this file specific to this project's identity, tooling, boundaries and exceptions.\n"
+        "- Do not create empty architecture layers; use the smallest profile appropriate to real responsibilities.\n"
+        "- Established-project adoption requires a codebase architecture audit, incremental alignment plan, and protected Fable/high validation before architecture-changing activation.\n"
+        "- Put large generated maps/specifications in .claude/references/ and load them on demand.\n"
+        "- Add nested CLAUDE.md files only for substantive modules/subdomains with local ownership/API/dependency/test rules.\n"
         "- Keep new specialist agents project-local under .claude/agents/ until cross-project reuse is proven.\n"
     )
 
