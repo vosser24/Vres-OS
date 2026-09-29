@@ -172,8 +172,8 @@ def test_conflicting_polarity_is_preserved_not_merged(pg_project):
 
 
 def test_recurrence_candidate_is_quarantined_until_threshold_is_calibrated(pg_project):
-    first = _episode(pg_project, outcome="completed", error="Deploy succeeded after port cleanup")
-    second = _episode(pg_project, outcome="completed", error="Deploy succeeded after port cleanup")
+    first = _episode(pg_project, outcome="completed", error="Deploy succeeded after port 80 cleanup")
+    second = _episode(pg_project, outcome="completed", error="Deploy succeeded after port 80 cleanup")
     transition = ExperienceConsolidationService().consolidate(
         _candidate(
             pg_project,
