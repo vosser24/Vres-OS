@@ -114,7 +114,10 @@ BEGIN
       FROM vres.tasks
      WHERE id=NEW.task_id;
 
-    IF t.id IS NULL OR t.project_id IS DISTINCT FROM NEW.project_id THEN
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'experience episode task is missing';
+    END IF;
+    IF t.project_id IS DISTINCT FROM NEW.project_id THEN
         RAISE EXCEPTION 'experience episode task/project scope mismatch';
     END IF;
 
@@ -131,7 +134,10 @@ BEGIN
           FROM vres.orchestration_work_units
          WHERE work_unit_key=NEW.work_unit_key;
 
-        IF w.task_id IS NULL OR w.task_id IS DISTINCT FROM NEW.task_id THEN
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'work-unit experience source is missing';
+        END IF;
+        IF w.task_id IS DISTINCT FROM NEW.task_id THEN
             RAISE EXCEPTION 'work-unit experience scope mismatch';
         END IF;
         IF w.status NOT IN ('passed','failed') OR w.status IS DISTINCT FROM NEW.outcome_status THEN
@@ -153,7 +159,7 @@ BEGIN
           INTO v
           FROM vres.validation_requests
          WHERE request_key=NEW.validation_request_key;
-        IF v.task_id IS NULL
+        IF NOT FOUND
            OR v.task_id IS DISTINCT FROM NEW.task_id
            OR v.status IS DISTINCT FROM 'passed' THEN
             RAISE EXCEPTION 'experience validation reference must be a passed request for the same task';
