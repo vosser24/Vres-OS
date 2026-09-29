@@ -4,7 +4,7 @@ Date: 2026-09-29
 Repository: `vosser24/Vres-OS`  
 Canonical checklist: `docs/PREPRODUCTION-EXECUTION-CHECKLIST-2026-09-27.md`
 
-This is the canonical detailed continuation record after completing #176 E1. A fresh session should be able to resume from this file and the checklist without relying on chat memory.
+This is the canonical detailed continuation record after completing #176 E2. A fresh session should be able to resume from this file and the checklist without relying on chat memory.
 
 The operating rule remains strict:
 
@@ -15,7 +15,7 @@ At this handoff boundary:
 - **#163 is DONE.**
 - **#174 is DONE.**
 - **#164 is DONE.**
-- **#176 remains active; E1 is DONE and E2 is the only allowed next implementation tranche.**
+- **#176 remains active; E1 and E2 are DONE and E3 is the only allowed next implementation tranche.**
 - #165 and everything after #176 remain blocked by sequence.
 
 ---
@@ -24,51 +24,54 @@ At this handoff boundary:
 
 Authoritative `main`:
 
-`407c4a323f4f65c8f28c422789508bb7ce128682`
+`74c6445228a922db2622806f27e3c49a6c3454a7`
 
-This is the merge commit of PR #177 / issue #164, on top of the already-completed #163 Credential Broker and #174 Engineering Architecture Governance foundations.
+This is the merge commit of PR #180, completing #176 E2 on top of the already accepted E1 foundation.
 
-Final #164 candidate:
+#176 tranche status:
 
-- branch: `issue-164-secret-safe-onboarding`
-- exact reviewed head: `eddfa35d5418e23d6bac8792df0a6d1877d880a8`
-- exact authoritative base: `11591b72b3d396a370e315313925e19b8bcb45ec`
-- governed engineering final: `ORCHFINAL-20260929-9bf6f3cc85` — `decision_ready=true`
-- local isolated PostgreSQL suite: **1164 passed / 3 skipped / 0 failed / 0 errors**
-- exact-head CI: **#441** / `36542621233` — SUCCESS
-- protected validation: `VAL-f8d685ab3575430c`
-- host-observed protected model: `claude-fable-5-1`
-- protected result: **PASS**
+- E1 — contracts + immutable episode ledger: **DONE**;
+- E2 — transition verifier + safe consolidation: **DONE**;
+- E3 — unified experience retrieval: **NEXT / NOT STARTED**;
+- E4–E8: **NOT STARTED**;
+- E9 remains physical acceptance in #169.
 
-Post-merge main CI:
+Final E2 acceptance identity:
 
-- workflow: Vres-OS CI
-- run: **#442**
-- run ID: `36544341349`
-- event: push
-- head: `fe31e30e593a44b8b5ab565fa0db859bbefec0c6`
-- status: **completed / success**
-- PostgreSQL-backed suite: PASS
-- installed-runtime smoke: PASS
-- local release gate: PASS
-- evidence artifact: `11021203984`
-- artifact digest: `sha256:8ab24e44232efa860f2d05e4aec8c2014704dc963920fbe98207326051a7fdc6`
+- issue: #176, tranche E2 only;
+- branch: `issue-176-e2-consolidation`;
+- PR: #180;
+- E2 task: `TASK-20260929-9fdfbe76eb`;
+- historical failed protected request: `VAL-84afc8fa56a245bf` — FAILED and preserved;
+- final protected request: `VAL-58bb131a10b54abd` — PASS;
+- host-observed protected validator/model: `vres-os:validator` / `claude-fable-5-1`;
+- exact protected-reviewed head: `c1dccfa800381b1f5b01fd054cb3819720600e2a`;
+- E2 base: `407c4a323f4f65c8f28c422789508bb7ce128682`;
+- exact-head CI: #461 / `36585887143` — SUCCESS;
+- exact-head artifact: `11042340684`;
+- exact-head artifact digest: `sha256:afb432d024f1647586b0d0d2e239c34fda2845344f1549ab973ce8996d82eaa8`;
+- merge/main: `74c6445228a922db2622806f27e3c49a6c3454a7`;
+- post-merge main CI: #462 / `36589408835` — SUCCESS;
+- post-merge PostgreSQL integration: PASS;
+- post-merge installed-runtime smoke: PASS;
+- post-merge release gate: PASS;
+- post-merge artifact: `11042962873`;
+- post-merge artifact digest: `sha256:082fdc00743b212dd7f3fb30c9de451b943274e755d8f6b81bc4624a3e0a1ab6`.
 
-Issue #164:
+The failed first protected review was productive and remains part of the evidence trail. It led to bounded corrections for:
+- participation/trust per-check labeling;
+- removal of the undisclosed recurrence-acceptance escape hatch;
+- exact frozen-plan Git identity in the E2 contract;
+- the specific F541 SQL-string nit;
+- cleaner evidence handling for isolated CI versus contaminated local provenance configuration.
 
-- state: **closed**
-- reason: **completed**
-- closed: 2026-09-29
-- PR #177: merged
+E2 shipped no E3 retrieval behavior and no #165+ scope.
 
-#163, #174 and #164 are DONE.
+#163, #174 and #164 remain DONE. #176 remains the only active implementation issue.
 
-The first and only implementation item now allowed by the frozen sequence is **#176 — Experience Intelligence / Governed Agent Learning**.
-
-Physical/live acceptance deliberately still owned by #169 includes the real first-run optional embedding model acquisition and sanitized wizzard_9 legacy-project proof.
+The first and only implementation tranche now allowed is **#176 E3 — unified experience retrieval**.
 
 ---
-
 # 2. Canonical sequential execution order
 
 The order remains:
@@ -76,7 +79,7 @@ The order remains:
 1. **#163 — Credential Broker — DONE**
 2. **#174 — Engineering Architecture Governance — DONE**
 3. **#164 — Secret-safe onboarding — DONE**
-4. **#176 — Experience Intelligence / Governed Agent Learning — ACTIVE / E1 DONE / E2 NEXT**
+4. **#176 — Experience Intelligence / Governed Agent Learning — ACTIVE / E1 DONE / E2 DONE / E3 NEXT**
 5. **#165 — Chairman model policy — NOT STARTED**
 6. **#166 — Global Claude adoption — NOT STARTED**
 7. **#167 — Current-user Data Source Registry — NOT STARTED**
@@ -773,48 +776,58 @@ This is the authoritative #174 closure identity.
 
 ---
 
-# 17. Active next item — #176 Experience Intelligence
+# 17. Active next item — #176 E3 unified experience retrieval
 
-#176 is now the only allowed implementation item.
+#176 remains the only allowed implementation issue.
 
-Issue:
-
-**#176 — Experience Intelligence: governed agent learning, episodic memory and evidence-based experience reuse**
-
-Frozen principles:
-
-> **Models are replaceable workers. Vres owns the experience.**
-
-> **Store evidence richly. Retrieve context sparsely. Promote authority conservatively.**
-
-Prerequisites are now satisfied:
+Completed foundations:
 
 - #163 Credential Broker — DONE;
 - #164 secret-safe onboarding / pre-model sanitization — DONE;
-- #174 Engineering Architecture Governance — DONE.
+- #174 Engineering Architecture Governance — DONE;
+- #176 E1 contracts + episode ledger — DONE;
+- #176 E2 transition verifier + safe consolidation — DONE.
 
-The implementation must consume those foundations rather than creating parallel authority/security/architecture systems.
+The next and only allowed tranche is **E3 — unified experience retrieval**.
 
-Start sequentially with **E1 — contracts + episode ledger**. Do not begin E2 until E1 has its bounded implementation/tests/evidence. Preserve the broader #176 tranche order E1 through E8, with E9 physical proof deferred to #169.
+E3 must consume the existing truth owners rather than introduce another memory authority:
 
-Critical invariants from issue #176:
+- task decisions / current rules;
+- existing `knowledge_items`, including only lifecycle-eligible E2 proposed lessons according to the retrieval contract;
+- accepted procedures;
+- E1 episodes where specific precedent adds value;
+- relations/evidence links;
+- source/artifact/raw archive only through bounded fallback.
 
-- no private agent/model self-training or prompt/policy mutation;
-- no second generic memory database;
-- execution state remains distinct from long-term experience;
-- no raw hidden chain-of-thought persistence;
-- every reusable experience item retains source/scope/trust/digest provenance;
-- untrusted/external content cannot become privileged instruction or authority;
-- project/user scope cannot leak;
-- failed trajectories cannot silently become positive procedures;
-- retrieval scores are relevance signals, not truth probabilities;
-- source revocation must invalidate derived influence;
-- bounded retrieval and materiality/recurrence discipline prevent “reflect on everything”;
-- consequential governance/security changes retain protected Fable/high acceptance.
+Frozen E3 design requirements from issue #176:
 
-After #176 comes #165, then #166, #167, #168, #169 and #170.
+1. determine current project/task/capability/domain/scope and temporal intent;
+2. apply hard scope/authority/security filters **before** semantic retrieval;
+3. retrieve current decisions/rules;
+4. retrieve matching accepted procedures;
+5. retrieve relevant semantic lessons/gotchas/premise warnings;
+6. retrieve only a small number of relevant episodes when concrete precedent helps;
+7. detect conflicts, stale assumptions and premise mismatch;
+8. use bounded raw-evidence/archive search only when structured memory is insufficient;
+9. compose one compact experience pack.
 
-Do not start #165 until #176 is fully implemented, tested, protected-validated as required, exact-head-CI green, merged, post-merge-CI green, documented and closed.
+Hybrid retrieval may use:
+- exact/structured filters;
+- lexical search;
+- optional embedding similarity;
+- relations/graph links;
+- temporal validity/recency;
+- applicability/task-family/capability match;
+- evidence/authority status;
+- diversity / duplicate suppression.
+
+A retrieval score is never a probability of truth or authority.
+
+Retrieval must not silently rewrite, promote, supersede or otherwise mutate the memory it consumes. Retrieval-triggered challenge/reverification/consolidation proposals belong to later governed lifecycle behavior, not hidden E3 side effects.
+
+Do not begin E4 until E3 is bounded, implemented, tested, evidenced, protected-reviewed where required, merged and post-merge green.
+
+Do not begin #165 until all of #176 is DONE.
 
 ---
 
@@ -834,7 +847,7 @@ Core principles:
 
 > **Store evidence richly. Retrieve context sparsely. Promote authority conservatively.**
 
-Implementation begins only with **E1 — contracts + episode ledger**. The broader E1→E8 order remains frozen; E9 physical acceptance stays in #169.
+E1 and E2 are now complete. Implementation continues only with **E3 — unified experience retrieval**. The broader E3→E8 order remains frozen; E9 physical acceptance stays in #169.
 
 ---
 
@@ -908,7 +921,7 @@ These documentation changes are direct Git commits on the documentation branch. 
 
 A fresh implementation session should begin with this internal mission:
 
-> Resume Vres preproduction from the canonical checklist and current handoff. #163, #174 and #164 are DONE. #176 E1 is also DONE: protected-reviewed head `bc03707c9cef77967cc1abd2ffe0733d4393b42c`, protected request `VAL-b7d08edab1c74e98` PASS with host-observed `claude-fable-5-1`, merge/main `407c4a323f4f65c8f28c422789508bb7ce128682`, and post-merge CI #455 PASS. Work only #176 E2 — transition verifier + safe consolidation. Verify authoritative main `407c4a323f4f65c8f28c422789508bb7ce128682`, read issue #176 plus `docs/architecture/EXPERIENCE-INTELLIGENCE-PLAN-2026-09-27.md` and the merged E1 contract in full, inspect existing truth owners and E1 ledger semantics, then freeze E2's smallest bounded contract before source edits. Preserve #163/#164 security boundaries, #174 architecture governance, E1 provenance/trust/failure semantics, no private model self-training and no hidden chain-of-thought persistence. Do not begin E3 until E2 is complete and evidenced. Do not begin #165 or later issues until #176 is fully DONE.
+> Resume Vres preproduction from the canonical checklist and current handoff. #163, #174 and #164 are DONE. #176 E1 and E2 are DONE. Authoritative main is `74c6445228a922db2622806f27e3c49a6c3454a7`. Final E2 protected request `VAL-58bb131a10b54abd` passed with host-observed `claude-fable-5-1`; PR #180 merged; post-merge CI #462 passed. Work only #176 E3 — unified experience retrieval. Read issue #176, the frozen Experience Intelligence plan at `34f45afa0fb8d5a6a90bef53dec58d9ecef1093d`, the merged E1 contract/episode ledger, the merged E2 contract/consolidation semantics, and current knowledge/procedure/decision/relation/retrieval owners. Freeze E3's smallest bounded retrieval contract before source edits. Build scope-first, trust-aware, staged retrieval with compact experience packs, conflict/staleness/premise output and bounded raw-evidence fallback. Do not treat relevance as truth, do not mutate durable memory during retrieval, do not create a second truth store, and do not begin E4 until E3 is complete and evidenced. Do not begin #165 or later issues until #176 is fully DONE.
 
 This is the exact continuation point.
 
@@ -1073,3 +1086,111 @@ Before E2 source edits:
 11. require exact-head CI, guarded merge and post-merge main CI before E3.
 
 #165 and later issues remain blocked until all of #176 is DONE.
+
+
+---
+
+# 26. 2026-09-29 #176 E2 closure / E3 continuation seal
+
+This is the newest authoritative session boundary and supersedes older E1/E2 start instructions elsewhere in this historical handoff.
+
+## Authoritative repository state
+
+- repository: `vosser24/Vres-OS`;
+- authoritative main: `74c6445228a922db2622806f27e3c49a6c3454a7`;
+- PR #180: merged;
+- issue #176: open;
+- E1: DONE;
+- E2: DONE;
+- E3: NEXT / NOT STARTED;
+- #165+ remain blocked until #176 is fully DONE.
+
+## Final E2 validation and merge evidence
+
+Final protected candidate:
+`c1dccfa800381b1f5b01fd054cb3819720600e2a`
+
+Historical protected failure:
+`VAL-84afc8fa56a245bf` — FAILED, preserved.
+
+Final protected acceptance:
+- request: `VAL-58bb131a10b54abd`;
+- validator: `vres-os:validator`;
+- host-observed model: `claude-fable-5-1`;
+- result: PASS.
+
+Exact-head CI:
+- #461 / `36585887143`;
+- candidate: `c1dccfa800381b1f5b01fd054cb3819720600e2a`;
+- status: SUCCESS;
+- artifact: `11042340684`;
+- digest: `sha256:afb432d024f1647586b0d0d2e239c34fda2845344f1549ab973ce8996d82eaa8`.
+
+Merge:
+- expected-head guarded merge of PR #180;
+- main merge commit: `74c6445228a922db2622806f27e3c49a6c3454a7`.
+
+Post-merge:
+- CI #462 / `36589408835`;
+- event: push to main;
+- exact main SHA: `74c6445228a922db2622806f27e3c49a6c3454a7`;
+- status: SUCCESS;
+- PostgreSQL integration: PASS;
+- installed-runtime smoke: PASS;
+- release gate: PASS;
+- artifact: `11042962873`;
+- digest: `sha256:082fdc00743b212dd7f3fb30c9de451b943274e755d8f6b81bc4624a3e0a1ab6`.
+
+## E2 accepted product boundary
+
+E2 owns:
+- deterministic transition verification from E1 evidence;
+- exact source/payload digest checks;
+- RFC 6901 pointer + literal quote support checks;
+- failure-integrity rules;
+- participation/trust quarantine;
+- recurrence quarantine until later replay calibration;
+- proposed/project-local lesson creation only;
+- dedupe and conflict preservation;
+- immutable append-only transition audit;
+- atomicity/idempotency/concurrency/rollback.
+
+E2 does not own:
+- retrieval or ranking;
+- experience packs;
+- revocation/supersession lifecycle;
+- capability/procedure integration;
+- retrieval observations;
+- benchmark program;
+- Chairman automatic memory injection.
+
+Those remain E3–E8.
+
+## E2 task housekeeping
+
+E2 Vres task:
+`TASK-20260929-9fdfbe76eb`
+
+The repository tranche is closed. If the local Vres task is still active, complete only that historical E2 task using its current accepted protected validation; do not reuse it as the E3 task. Do not add a new checkpoint merely to narrate GitHub closure unless Vres lifecycle itself requires one.
+
+## Exact E3 start
+
+Create a new E3 task/branch/worktree from authoritative main `74c6445228a922db2622806f27e3c49a6c3454a7`.
+
+Recommended worktree:
+`C:\Projects\Vres-Issue-176-E3-20260929`
+
+Before implementation:
+1. read issue #176 and frozen plan completely;
+2. read merged E1 and E2 contracts/services/tests;
+3. inspect current `KnowledgeService`, procedure matching, task decisions, relations, existing `KnowledgeService.hybrid_search` / embedding behavior and raw-source search;
+4. freeze the E3 retrieval contract before code;
+5. define authority/scope/temporal/premise/conflict filters before ranking;
+6. define a bounded experience-pack budget and evidence-key output;
+7. specify abstention / no-useful-precedent behavior;
+8. specify deterministic ordering/tie-breaks where deterministic;
+9. specify no-write/no-reconsolidation side effect during E3 retrieval;
+10. define targeted and PostgreSQL retrieval tests before E4.
+
+Do not start E4 until E3 is fully closed.
+Do not start #165 until #176 is fully closed.
