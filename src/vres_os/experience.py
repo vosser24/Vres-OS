@@ -37,6 +37,18 @@ _HIDDEN_REASONING_KEYS = {
     "internalreasoning",
     "thoughtprocess",
 }
+_SECRET_KEY_SUFFIXES = (
+    "password",
+    "passwd",
+    "pwd",
+    "apikey",
+    "accesstoken",
+    "refreshtoken",
+    "token",
+    "secret",
+    "clientsecret",
+    "privatekey",
+)
 _KEY_NORMALIZER = re.compile(r"[^a-z0-9]+")
 
 
@@ -89,8 +101,13 @@ def _prepare_payload(value: Any, *, _depth: int = 0, _sensitive: list[bool] | No
         out: dict[str, Any] = {}
         items = list(value.items())
         for key, item in items[:_MAX_DICT]:
-            if _normalize_key(key) in _HIDDEN_REASONING_KEYS:
+            normalized = _normalize_key(key)
+            if normalized in _HIDDEN_REASONING_KEYS:
                 raise ValueError(f"Experience payload contains prohibited private-reasoning field {key!r}")
+            if normalized == "authorization" or normalized.endswith(_SECRET_KEY_SUFFIXES):
+                sensitive[0] = True
+                out[str(key)] = "[REDACTED]"
+                continue
             prepared, _ = _prepare_payload(item, _depth=_depth + 1, _sensitive=sensitive)
             out[str(key)] = prepared
         if len(items) > _MAX_DICT:
@@ -118,6 +135,20 @@ class ExperienceEpisodeService:
         with connect() as conn, conn.transaction():
             lock_identity = f"experience:{task_key}:{work_unit_key or 'task'}"
             conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", (lock_identity,))
+            policy = conn.execute(
+                """
+                SELECT schema_version,policy_digest
+                  FROM vres.experience_policy_versions
+                 WHERE policy_version=%s
+                """,
+                (POLICY_VERSION,),
+            ).fetchone()
+            if (
+                not policy
+                or int(policy["schema_version"]) != POLICY_SCHEMA_VERSION
+                or str(policy["policy_digest"]) != POLICY_DIGEST
+            ):
+                raise RuntimeError("Experience policy version/digest does not match the E1 runtime contract")
 
             task = conn.execute(
                 """
