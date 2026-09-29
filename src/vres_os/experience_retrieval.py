@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .experience import _HIDDEN_REASONING_KEYS, _canonical, _normalize_key
-from .experience_consolidation import _INJECTION, episode_payload_digest, statement_digest
+from .experience_consolidation import episode_payload_digest, statement_digest
 from .redaction import redact_text
 from .sensitive_policy import sanitize_extracted_text
 
@@ -54,6 +54,18 @@ POLICY = {
     "max_items": MAX_ITEMS,
     "max_pack_bytes": MAX_PACK_BYTES,
 }
+# Read-time trust handling is separate from E2's write-time quarantine (_INJECTION there is deliberately broad:
+# it holds a *proposal* back for review). At read time, ordinary words such as "policy"/"approved" must not hide
+# otherwise eligible evidence; authority is structural (role/tier), never derived from text. This narrow heuristic
+# only omits non-authoritative text that is shaped like a command aimed at the reader/agent.
+_INSTRUCTION_SHAPED = re.compile(
+    r"(?i)\b(?:(?:ignore|disregard|forget)\s+(?:all\s+|any\s+|the\s+|your\s+)?(?:previous|prior|above|earlier|system)?\s*"
+    r"(?:instructions?|rules|prompts?|polic(?:y|ies))|"
+    r"(?:override|bypass)\s+(?:the\s+|all\s+)?(?:polic(?:y|ies)|guard\w*|approvals?|rules|instructions?|safety)|"
+    r"you\s+(?:must|should|will)\s+(?:always|never|now)|always\s+allow|system\s+prompt|"
+    r"(?:reveal|print|send|leak|exfiltrate)\s+(?:the\s+|your\s+|all\s+)?(?:credentials?|passwords?|api[ _-]?keys?|secrets?|tokens?))\b"
+)
+
 _TIER_CURRENT_DECISION, _TIER_PROCEDURE, _TIER_VALIDATED, _TIER_CANDIDATE, _TIER_LOW_TRUST = 0, 1, 2, 3, 4
 _REQUEST_KEYS = {
     "project_id", "query", "task_key", "task_family", "capability_keys", "temporal_intent", "as_of",
@@ -318,7 +330,7 @@ def knowledge_item(row: dict[str, Any], req: dict[str, Any], now: datetime) -> t
             flags.add("stale")
     text = f"{row['title']}: {row['statement']}"
     authoritative = validated and not external
-    if not authoritative and _INJECTION.search(text):
+    if not authoritative and _INSTRUCTION_SHAPED.search(text):
         return None, "quarantined_injection"
     return _item(
         section=section, memory_key=row["knowledge_key"], memory_class=cls, scope=scope,
@@ -357,7 +369,7 @@ def decision_item(row: dict[str, Any], req: dict[str, Any], now: datetime) -> tu
     if not eligible:
         return None, None
     authoritative = row["source_kind"] in {"chairman", "user_instruction"}
-    if not authoritative and _INJECTION.search(row["text"]):
+    if not authoritative and _INSTRUCTION_SHAPED.search(row["text"]):
         return None, "quarantined_injection"
     why, flags = [], {"historical"} if hist else set()
     if hist:
@@ -408,7 +420,7 @@ def episode_item(row: dict[str, Any], req: dict[str, Any], now: datetime) -> tup
     classification = payload.get("failure_classification")
     classification = classification if classification in {"failure", "success"} else None
     text = ("Past failure, not a recipe. " if failed else "Precedent. ") + f"Objective: {objective}. Outcome: {row['outcome_status']}."
-    if _INJECTION.search(text):
+    if _INSTRUCTION_SHAPED.search(text):
         return None, "quarantined_injection"
     family = row.get("task_family") or (payload.get("applicability") or {}).get("task_family")
     family = _clean(family, 80) if isinstance(family, str) else None
