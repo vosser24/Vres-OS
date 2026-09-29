@@ -4,7 +4,10 @@ from typing import Any
 
 from .redaction import redact_text
 
-_ALLOWED_KINDS = {"knowledge", "registry", "procedure", "source", "artifact", "task"}
+_ALLOWED_KINDS = {
+    "knowledge", "registry", "procedure", "source", "artifact", "task",
+    "episode", "decision", "capability", "validation",
+}
 _ALLOWED_RELATIONS = {
     "depends_on", "uses", "produces", "consumes", "affects", "governed_by", "implements",
     "supersedes", "superseded_by", "informs", "derived_from", "related_to", "owned_by",
@@ -30,11 +33,101 @@ def _node(conn, kind: str, key: str) -> dict[str, Any]:
         row = conn.execute("SELECT id,project_id FROM vres.artifacts WHERE artifact_key=%s", (key,)).fetchone()
     elif kind == "task":
         row = conn.execute("SELECT id,project_id FROM vres.tasks WHERE task_key=%s", (key,)).fetchone()
+    elif kind == "episode":
+        row = conn.execute(
+            "SELECT id,project_id FROM vres.experience_episodes WHERE episode_key=%s",
+            (key,),
+        ).fetchone()
+    elif kind == "decision":
+        row = conn.execute(
+            """
+            SELECT d.id,t.project_id
+              FROM vres.task_decisions d
+              JOIN vres.tasks t ON t.id=d.task_id
+             WHERE d.decision_key=%s
+            """,
+            (key,),
+        ).fetchone()
+    elif kind == "capability":
+        row = conn.execute(
+            "SELECT id,project_id FROM vres.capabilities WHERE capability_key=%s",
+            (key,),
+        ).fetchone()
+    elif kind == "validation":
+        row = conn.execute(
+            """
+            SELECT v.id,t.project_id
+              FROM vres.validation_requests v
+              JOIN vres.tasks t ON t.id=v.task_id
+             WHERE v.request_key=%s
+            """,
+            (key,),
+        ).fetchone()
     else:
         raise ValueError(f"Unsupported relation node kind {kind}")
     if not row:
         raise KeyError(f"Unknown {kind} node {key}")
     return dict(row)
+
+
+def relate_in_conn(
+    conn,
+    source_kind: str,
+    source_key: str,
+    relation: str,
+    target_kind: str,
+    target_key: str,
+    *,
+    provenance: str,
+    confidence: float | None = None,
+) -> None:
+    """Persist a typed relation inside an existing governed transaction."""
+    source_kind = source_kind.strip().lower()
+    target_kind = target_kind.strip().lower()
+    relation = relation.strip().lower()
+    if source_kind not in _ALLOWED_KINDS or target_kind not in _ALLOWED_KINDS:
+        raise ValueError("Unsupported relation node kind")
+    if relation not in _ALLOWED_RELATIONS:
+        raise ValueError(f"Unsupported relation type {relation}")
+    if not provenance.strip():
+        raise ValueError("Semantic relations require provenance")
+    if confidence is not None and not 0 <= confidence <= 1:
+        raise ValueError("relation confidence must be between 0 and 1")
+    source = _node(conn, source_kind, source_key)
+    target = _node(conn, target_kind, target_key)
+    if (
+        source["project_id"] is not None
+        and target["project_id"] is not None
+        and source["project_id"] != target["project_id"]
+    ):
+        raise ValueError("Cannot create a semantic relation across two different project-local objects")
+    edge = conn.execute(
+        """
+        INSERT INTO vres.relations(
+          source_kind,source_key,relation_type,target_kind,target_key,provenance,confidence
+        )
+        VALUES (%s,%s,%s,%s,%s,%s,%s)
+        ON CONFLICT(source_kind,source_key,relation_type,target_kind,target_key)
+        DO UPDATE SET id=vres.relations.id RETURNING id
+        """,
+        (
+            source_kind,
+            source_key,
+            relation,
+            target_kind,
+            target_key,
+            redact_text(provenance),
+            confidence,
+        ),
+    ).fetchone()
+    conn.execute(
+        """
+        INSERT INTO vres.relation_evidence(relation_id,provenance,confidence)
+        VALUES (%s,%s,%s)
+        ON CONFLICT(relation_id,provenance) DO NOTHING
+        """,
+        (edge["id"], redact_text(provenance), confidence),
+    )
 
 
 def relate(
@@ -47,51 +140,42 @@ def relate(
     provenance: str,
     confidence: float | None = None,
 ) -> None:
-    source_kind = source_kind.strip().lower()
-    target_kind = target_kind.strip().lower()
-    relation = relation.strip().lower()
-    if source_kind not in _ALLOWED_KINDS or target_kind not in _ALLOWED_KINDS:
-        raise ValueError("Unsupported relation node kind")
-    if relation not in _ALLOWED_RELATIONS:
-        raise ValueError(f"Unsupported relation type {relation}")
-    if not provenance.strip():
-        raise ValueError("Semantic relations require provenance")
-    if confidence is not None and not 0 <= confidence <= 1:
-        raise ValueError("relation confidence must be between 0 and 1")
     with _connect() as conn, conn.transaction():
-        source = _node(conn, source_kind, source_key)
-        target = _node(conn, target_kind, target_key)
-        if source["project_id"] is not None and target["project_id"] is not None and source["project_id"] != target["project_id"]:
-            raise ValueError("Cannot create a semantic relation across two different project-local objects")
-        edge = conn.execute(
-            """
-            INSERT INTO vres.relations(source_kind,source_key,relation_type,target_kind,target_key,provenance,confidence)
-            VALUES (%s,%s,%s,%s,%s,%s,%s)
-            ON CONFLICT(source_kind,source_key,relation_type,target_kind,target_key)
-            DO UPDATE SET id=vres.relations.id RETURNING id
-            """,
-            (source_kind, source_key, relation, target_kind, target_key, redact_text(provenance), confidence),
-        ).fetchone()
-        conn.execute(
-            "INSERT INTO vres.relation_evidence(relation_id,provenance,confidence) VALUES (%s,%s,%s) "
-            "ON CONFLICT(relation_id,provenance) DO NOTHING",
-            (edge["id"], redact_text(provenance), confidence),
+        relate_in_conn(
+            conn,
+            source_kind,
+            source_key,
+            relation,
+            target_kind,
+            target_key,
+            provenance=provenance,
+            confidence=confidence,
         )
 
 
-_NODE_TABLES = {
-    "knowledge": ("knowledge_items", "knowledge_key"),
-    "registry": ("registry_objects", "object_key"),
-    "procedure": ("procedures", "procedure_key"),
-    "source": ("sources", "source_key"),
-    "artifact": ("artifacts", "artifact_key"),
-    "task": ("tasks", "task_key"),
-}
-# Only constant identifiers enter this SQL, never user-supplied identifiers.
-_NODE_UNION = " UNION ALL ".join(
-    f"SELECT '{kind}'::text AS kind,{key} AS key,project_id FROM vres.{table}"
-    for kind, (table, key) in sorted(_NODE_TABLES.items())
-)
+_NODE_UNION = """
+SELECT 'knowledge'::text AS kind,knowledge_key AS key,project_id FROM vres.knowledge_items
+UNION ALL
+SELECT 'registry'::text AS kind,object_key AS key,project_id FROM vres.registry_objects
+UNION ALL
+SELECT 'procedure'::text AS kind,procedure_key AS key,project_id FROM vres.procedures
+UNION ALL
+SELECT 'source'::text AS kind,source_key AS key,project_id FROM vres.sources
+UNION ALL
+SELECT 'artifact'::text AS kind,artifact_key AS key,project_id FROM vres.artifacts
+UNION ALL
+SELECT 'task'::text AS kind,task_key AS key,project_id FROM vres.tasks
+UNION ALL
+SELECT 'episode'::text AS kind,episode_key AS key,project_id FROM vres.experience_episodes
+UNION ALL
+SELECT 'decision'::text AS kind,d.decision_key AS key,t.project_id
+  FROM vres.task_decisions d JOIN vres.tasks t ON t.id=d.task_id
+UNION ALL
+SELECT 'capability'::text AS kind,capability_key AS key,project_id FROM vres.capabilities
+UNION ALL
+SELECT 'validation'::text AS kind,v.request_key AS key,t.project_id
+  FROM vres.validation_requests v JOIN vres.tasks t ON t.id=v.task_id
+"""
 
 
 def impact(object_key: str, *, object_kind: str | None = None, project_id: int | None = None,
