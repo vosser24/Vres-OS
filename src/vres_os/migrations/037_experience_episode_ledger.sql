@@ -18,6 +18,19 @@ VALUES (
 )
 ON CONFLICT(policy_version) DO NOTHING;
 
+DO $
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+          FROM vres.experience_policy_versions
+         WHERE policy_version='176.e1.v1'
+           AND schema_version=1
+           AND policy_digest='49e5d6eb17940baf5e1d9c239f9355dd8a65bab60e62e30c81787334ddda519a'
+    ) THEN
+        RAISE EXCEPTION 'Experience E1 policy version/digest mismatch';
+    END IF;
+END $;
+
 CREATE TABLE IF NOT EXISTS vres.experience_episodes (
     id bigserial PRIMARY KEY,
     episode_key text NOT NULL UNIQUE,
