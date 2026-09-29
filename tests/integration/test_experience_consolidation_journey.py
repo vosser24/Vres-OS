@@ -147,11 +147,20 @@ def test_duplicate_statement_deduplicates_and_keeps_existing_authority(pg_projec
 def test_conflicting_polarity_is_preserved_not_merged(pg_project):
     service = ExperienceConsolidationService()
     negative = service.consolidate(_candidate(pg_project, [_episode(pg_project)]))
-    e1 = _episode(pg_project, outcome="completed", error="Deploy fine after freeing port 80")
-    e2 = _episode(pg_project, outcome="completed", error="Deploy fine after freeing port 80")
+    success = _episode(
+        pg_project,
+        outcome="completed",
+        trust="validated_runtime",
+        error="Deploy fine after freeing port 80",
+    )
     positive = service.consolidate(
-        _candidate(pg_project, [e1, e2], polarity="positive", trigger="recurrence",
-                   statement="Deploys succeed after the port is freed.")
+        _candidate(
+            pg_project,
+            [success],
+            polarity="positive",
+            trigger="validated_novel",
+            statement="Deploys succeed after the port is freed.",
+        )
     )
     assert positive["verdict"] == "accepted"
     assert positive["conflicts"] == [negative["knowledge_key"]]
@@ -160,6 +169,46 @@ def test_conflicting_polarity_is_preserved_not_merged(pg_project):
     assert _counts(pg_project) == (2, 2)
     for key in (negative["knowledge_key"], positive["knowledge_key"]):
         assert KnowledgeService().get(key)["status"] == "proposed"
+
+
+def test_recurrence_candidate_is_quarantined_until_threshold_is_calibrated(pg_project):
+    first = _episode(pg_project, outcome="completed", error="Deploy succeeded after port cleanup")
+    second = _episode(pg_project, outcome="completed", error="Deploy succeeded after port cleanup")
+    transition = ExperienceConsolidationService().consolidate(
+        _candidate(
+            pg_project,
+            [first, second],
+            polarity="positive",
+            trigger="recurrence",
+            statement="Deploy succeeds after port cleanup.",
+        )
+    )
+    assert transition["verdict"] == "quarantined"
+    assert transition["knowledge_key"] is None
+    assert "recurrence_threshold_uncalibrated" in transition["reason_codes"]
+    assert _counts(pg_project) == (0, 1)
+
+
+def test_same_statement_opposite_polarity_is_quarantined_as_conflict(pg_project):
+    service = ExperienceConsolidationService()
+    negative = service.consolidate(_candidate(pg_project, [_episode(pg_project)]))
+    success = _episode(pg_project, outcome="completed", trust="validated_runtime")
+    opposite = service.consolidate(
+        _candidate(
+            pg_project,
+            [success],
+            polarity="positive",
+            trigger="validated_novel",
+            title="Opposite classification",
+            statement="Deploys fail when port 80 is already bound.",
+            evidence=[{"episode_key": success, "pointer": "/objective", "quote": "Deploy"}],
+        )
+    )
+    assert opposite["verdict"] == "quarantined"
+    assert opposite["knowledge_key"] is None
+    assert "same_statement_opposite_polarity" in opposite["reason_codes"]
+    assert opposite["conflicts"] == [negative["knowledge_key"]]
+    assert _counts(pg_project) == (1, 2)
 
 
 @pytest.mark.parametrize(
@@ -178,15 +227,28 @@ def test_untrusted_or_injection_shaped_candidates_are_quarantined_without_knowle
     assert _counts(pg_project) == (0, 1)
 
 
-def test_flood_cap_quarantines_over_limit(pg_project, monkeypatch):
+def test_flood_cap_quarantines_only_new_lessons_not_deduplication(pg_project, monkeypatch):
     monkeypatch.setattr(ec, "MAX_OPEN_PROPOSED", 1)
     service = ExperienceConsolidationService()
-    assert service.consolidate(_candidate(pg_project, [_episode(pg_project)]))["verdict"] == "accepted"
+    first = service.consolidate(_candidate(pg_project, [_episode(pg_project)]))
+    assert first["verdict"] == "accepted"
+
+    duplicate = service.consolidate(
+        _candidate(
+            pg_project,
+            [_episode(pg_project, error="Worker failed: port 80 busy again")],
+            title="Duplicate evidence",
+            statement="deploys fail  when port 80 is ALREADY bound.",
+        )
+    )
+    assert duplicate["verdict"] == "deduplicated"
+    assert duplicate["knowledge_key"] == first["knowledge_key"]
+
     over = service.consolidate(
         _candidate(pg_project, [_episode(pg_project)], subject_key="deploy.other", statement="A different lesson.")
     )
     assert over["verdict"] == "quarantined" and "flood_cap_exceeded" in over["reason_codes"]
-    assert _counts(pg_project) == (1, 2)
+    assert _counts(pg_project) == (1, 3)
 
 
 def test_failure_after_knowledge_insert_rolls_back_everything(pg_project, monkeypatch):
@@ -262,6 +324,13 @@ def test_transitions_are_immutable_and_candidate_unique(pg_project):
             with pytest.raises(Exception, match="immutable"):
                 with conn.transaction():
                     conn.execute(sql, (transition["transition_key"],))
+        with pytest.raises(Exception, match="immutable"):
+            with conn.transaction():
+                conn.execute(_LEDGER_BYPASS)
+                conn.execute(
+                    "UPDATE vres.experience_transitions SET reason_codes='[]'::jsonb WHERE transition_key=%s",
+                    (transition["transition_key"],),
+                )
         with pytest.raises(Exception, match="uq_experience_transition_candidate"):
             with conn.transaction():
                 conn.execute(

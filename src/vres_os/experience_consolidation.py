@@ -11,15 +11,16 @@ from .sensitive_policy import SENSITIVE_REVIEW_REQUIRED, SENSITIVE_SANITIZED, sa
 
 POLICY_VERSION = "176.e2.v1"
 POLICY_SCHEMA_VERSION = 1
-MIN_RECURRENCE = 2  # provisional; calibration deferred to replay evidence (E7)
-MAX_OPEN_PROPOSED = 20  # provisional per-project flood cap on open experience-derived proposed lessons
+RECURRENCE_MIN_TASKS: int | None = None  # must be replay-calibrated before recurrence can accept
+MAX_OPEN_PROPOSED = 20  # safety-only denial cap; not a recurrence/materiality calibration claim
 POLICY = {
     "policy_version": POLICY_VERSION,
     "schema_version": POLICY_SCHEMA_VERSION,
     "verifier": "deterministic_literal_support_fail_closed",
     "consolidation": "proposed_project_local_lesson_only",
     "triggers": ["failure_gotcha", "validated_novel", "recurrence"],
-    "min_recurrence": MIN_RECURRENCE,
+    "recurrence_min_tasks": RECURRENCE_MIN_TASKS,
+    "recurrence_calibration": "required_before_acceptance",
     "max_open_proposed": MAX_OPEN_PROPOSED,
     "conflicts": "preserved_related_to_no_merge",
     "authority": "no_promotion",
@@ -161,7 +162,10 @@ def statement_digest(statement: str) -> str:
 
 
 def verify_transition(
-    candidate: dict[str, Any], episodes: dict[str, dict[str, Any]], *, min_recurrence: int = MIN_RECURRENCE
+    candidate: dict[str, Any],
+    episodes: dict[str, dict[str, Any]],
+    *,
+    min_recurrence: int | None = RECURRENCE_MIN_TASKS,
 ) -> dict[str, Any]:
     """Deterministic verifier. Raises on any integrity/support/rule failure; otherwise returns
     quarantine reasons (empty means acceptable) and per-check results. Persists nothing."""
@@ -191,18 +195,27 @@ def verify_transition(
         raise ValueError("Failure integrity: failed/cancelled evidence cannot support a positive lesson")
     checks["polarity_outcome"] = "pass"
 
+    reasons = []
     trigger = candidate["trigger"]
     if trigger == "failure_gotcha":
         if candidate["polarity"] != "negative" or not outcomes & _FAILURE:
             raise ValueError("failure_gotcha requires negative polarity and a failed/cancelled episode")
+        checks["trigger"] = "pass"
     elif trigger == "validated_novel":
         if any(e["trust_class"] != "validated_runtime" or e["outcome_status"] != "completed" for e in rows):
             raise ValueError("validated_novel requires every episode to be validated_runtime and completed")
-    elif len({e["task_id"] for e in rows}) < min_recurrence:
-        raise ValueError(f"recurrence requires episodes from at least {min_recurrence} distinct tasks")
-    checks["trigger"] = "pass"
+        checks["trigger"] = "pass"
+    else:
+        if min_recurrence is None:
+            reasons.append("recurrence_threshold_uncalibrated")
+            checks["trigger"] = "fail"
+        else:
+            if isinstance(min_recurrence, bool) or not isinstance(min_recurrence, int) or min_recurrence < 2:
+                raise ValueError("recurrence calibration must require at least 2 distinct tasks")
+            if len({e["task_id"] for e in rows}) < min_recurrence:
+                raise ValueError(f"recurrence requires episodes from at least {min_recurrence} distinct tasks")
+            checks["trigger"] = "pass"
 
-    reasons = []
     if any(
         e["participation_class"] != "participated" or e["trust_class"] == "external_untrusted_observation"
         for e in rows
@@ -271,33 +284,50 @@ class ExperienceConsolidationService:
             rows = [episodes[k] for k in sorted(episodes)]
             snapshots = [_snapshot(e) for e in rows]
 
-            open_count = conn.execute(
-                "SELECT count(*) AS n FROM vres.knowledge_items WHERE project_id=%s AND knowledge_type='lesson' "
-                "AND status='proposed' AND metadata->>'experience_transition_key' IS NOT NULL",
-                (project_id,),
-            ).fetchone()["n"]
-            if open_count >= MAX_OPEN_PROPOSED:
-                reasons.append("flood_cap_exceeded")
-                checks["flood_cap"] = "fail"
-            else:
-                checks["flood_cap"] = "pass"
-
             derived = self._derived_items(conn, project_id)
-            conflicts = sorted(
+            same_statement = next(
+                (i for i in derived if i["metadata"].get("statement_digest") == statement_hash),
+                None,
+            )
+            duplicate = (
+                same_statement
+                if same_statement
+                and same_statement["metadata"].get("polarity") == normalized["polarity"]
+                else None
+            )
+            same_statement_conflict = (
+                same_statement
+                if same_statement
+                and same_statement["metadata"].get("polarity") != normalized["polarity"]
+                else None
+            )
+            conflict_keys = {
                 i["knowledge_key"]
                 for i in derived
                 if i["metadata"].get("subject_key") == normalized["subject_key"]
                 and i["metadata"].get("polarity") != normalized["polarity"]
-            )
-            duplicate = next(
-                (
-                    i
-                    for i in derived
-                    if i["metadata"].get("statement_digest") == statement_hash
-                    and i["metadata"].get("polarity") == normalized["polarity"]
-                ),
-                None,
-            )
+            }
+            if same_statement_conflict:
+                conflict_keys.add(same_statement_conflict["knowledge_key"])
+                reasons.append("same_statement_opposite_polarity")
+                checks["statement_polarity"] = "fail"
+            else:
+                checks["statement_polarity"] = "pass"
+            conflicts = sorted(conflict_keys)
+
+            if duplicate is not None or reasons:
+                checks["flood_cap"] = "not_applicable"
+            else:
+                open_count = conn.execute(
+                    "SELECT count(*) AS n FROM vres.knowledge_items WHERE project_id=%s AND knowledge_type='lesson' "
+                    "AND status='proposed' AND metadata->>'experience_transition_key' IS NOT NULL",
+                    (project_id,),
+                ).fetchone()["n"]
+                if open_count >= MAX_OPEN_PROPOSED:
+                    reasons.append("flood_cap_exceeded")
+                    checks["flood_cap"] = "fail"
+                else:
+                    checks["flood_cap"] = "pass"
 
             transition_key = f"EXPT-{digest[:24]}"
             knowledge_key = None

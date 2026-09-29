@@ -238,5 +238,6 @@ def test_experience_transition_migration_is_append_only_versioned_and_idempotent
     assert "verdict IN ('accepted','deduplicated','quarantined')" in sql
     assert "protect_experience_transition_immutability" in sql
     assert "allow_experience_ledger_delete" in sql
+    assert "RETURN NEW;" not in sql
     assert "176.e1.v1" not in sql
 

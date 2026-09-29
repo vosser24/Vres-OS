@@ -5,8 +5,8 @@ INSERT INTO vres.experience_policy_versions(policy_version,schema_version,policy
 VALUES (
     '176.e2.v1',
     1,
-    'f03c3d3030e70b6b864cb7eb961ce4bd484c626ee566e76c04bd9629367701d5',
-    '{"authority":"no_promotion","conflicts":"preserved_related_to_no_merge","consolidation":"proposed_project_local_lesson_only","max_open_proposed":20,"min_recurrence":2,"policy_version":"176.e2.v1","schema_version":1,"triggers":["failure_gotcha","validated_novel","recurrence"],"verifier":"deterministic_literal_support_fail_closed"}'::jsonb
+    '619b101c46ea19a7e32396f6cab8b5d503671790af1310f7a1379e3d5535a6f8',
+    '{"authority":"no_promotion","conflicts":"preserved_related_to_no_merge","consolidation":"proposed_project_local_lesson_only","max_open_proposed":20,"policy_version":"176.e2.v1","recurrence_calibration":"required_before_acceptance","recurrence_min_tasks":null,"schema_version":1,"triggers":["failure_gotcha","validated_novel","recurrence"],"verifier":"deterministic_literal_support_fail_closed"}'::jsonb
 )
 ON CONFLICT(policy_version) DO NOTHING;
 
@@ -17,7 +17,7 @@ BEGIN
           FROM vres.experience_policy_versions
          WHERE policy_version='176.e2.v1'
            AND schema_version=1
-           AND policy_digest='f03c3d3030e70b6b864cb7eb961ce4bd484c626ee566e76c04bd9629367701d5'
+           AND policy_digest='619b101c46ea19a7e32396f6cab8b5d503671790af1310f7a1379e3d5535a6f8'
     ) THEN
         RAISE EXCEPTION 'Experience E2 policy version/digest mismatch';
     END IF;
@@ -58,17 +58,15 @@ CREATE INDEX IF NOT EXISTS idx_experience_transitions_project
 CREATE OR REPLACE FUNCTION vres.protect_experience_transition_immutability()
 RETURNS trigger
 LANGUAGE plpgsql
-AS $$
+AS $vres_transition$
 BEGIN
-    IF current_setting('vres.allow_experience_ledger_delete', true) = 'on' THEN
-        IF TG_OP = 'DELETE' THEN
-            RETURN OLD;
-        END IF;
-        RETURN NEW;
+    IF TG_OP = 'DELETE'
+       AND current_setting('vres.allow_experience_ledger_delete', true) = 'on' THEN
+        RETURN OLD;
     END IF;
     RAISE EXCEPTION 'experience_transitions are immutable; append a new transition instead of modifying history';
 END
-$$;
+$vres_transition$;
 
 DROP TRIGGER IF EXISTS trg_protect_experience_transition_update ON vres.experience_transitions;
 CREATE TRIGGER trg_protect_experience_transition_update

@@ -52,22 +52,22 @@ Structural / integrity failures **raise and persist nothing**:
 Rules:
 
 - **Failure integrity.** `positive` polarity requires every cited episode outcome in `{completed, passed}`. Failed/cancelled evidence may only support `negative` lessons. Failure never becomes a positive lesson.
-- **Triggers** (materiality; thresholds are provisional and recorded in the policy, not claimed as calibrated):
+- **Triggers**:
   - `failure_gotcha`: polarity negative, at least one failed/cancelled episode;
   - `validated_novel`: every episode `validated_runtime` and completed;
-  - `recurrence`: at least `min_recurrence` (provisional 2) episodes from distinct tasks. Recurrence never raises authority.
+  - `recurrence`: the frozen Experience Intelligence plan requires replay calibration before a recurrence/materiality threshold may authorize acceptance. E2 v1 therefore ships with no accepting recurrence threshold. A recurrence candidate is recorded as **quarantined** with `recurrence_threshold_uncalibrated` until a later governed policy version supplies a replay-calibrated distinct-task threshold. Recurrence never raises authority.
 - **Participation/trust.** Only `participated` episodes with trust other than `external_untrusted_observation` may support an accepted lesson. Observed/untrusted evidence yields a **quarantined** transition, never a knowledge item.
 - **Injection heuristics.** Instruction/authority-shaped candidate text (approval, permission, policy, "ignore previous", credential requests, etc.) is **quarantined**. This is a heuristic on top of, not instead of, the structural rule below.
-- **Flood control.** A per-project cap on open experience-derived proposed lessons; over the cap ⇒ **quarantined**, not consolidated.
+- **Flood control.** A conservative per-project safety cap on creation of new open experience-derived proposed lessons; over the cap ⇒ **quarantined**. This is a denial/safety bound, not a materiality calibration claim, and it does not block deduplication into an existing lesson.
 
 Verdicts persisted in `experience_transitions`: `accepted`, `deduplicated`, `quarantined`.
 
 ## Consolidation outcome
 
 - `accepted`: one `knowledge_items` row, `knowledge_type='lesson'`, **`status='proposed'` always** (never validated/canonical), project-local, deterministic key from the candidate digest; `derived_from` relations to every source episode; metadata carries lineage (transition key, policy version/digest, source episode keys with source/payload digests, derived trust class, polarity, subject).
-- `deduplicated`: an existing experience-derived item for the same project has the same normalized statement digest; no new item, new episodes are linked as additional evidence; existing status/authority unchanged.
-- `quarantined`: audit row only; no knowledge item.
-- **Conflicts are preserved.** An existing experience-derived item with the same subject and opposite polarity is recorded in the transition (`conflicts_with`) and linked with `related_to` provenance; both items remain. No merge, no overwrite, no supersession (E4).
+- `deduplicated`: an existing experience-derived item for the same project has the same normalized statement digest **and the same polarity**; no new item, new episodes are linked as additional evidence; existing status/authority unchanged.
+- `quarantined`: audit row only; no knowledge item. An exact same-statement candidate with the opposite polarity is quarantined as `same_statement_opposite_polarity` rather than creating two identical lesson texts with contradictory classification.
+- **Conflicts are preserved.** An existing experience-derived item with the same subject and opposite polarity is recorded in the transition (`conflicts`) and linked with `related_to` provenance when a new distinct lesson is accepted; exact-statement/opposite-polarity conflicts are preserved in the quarantined transition. No merge, no overwrite, no supersession (E4).
 - Derived trust class: `model_inferred_from_validated_evidence` when every source episode is `validated_runtime`; otherwise `trusted_project_source`. Derived knowledge never gains authority; status stays `proposed`.
 
 ## Transition audit
@@ -94,4 +94,14 @@ Not DONE until: targeted unit tests; migration contract; PostgreSQL integration;
 
 - The verifier proves *provenance and literal support* (episode integrity, pointer resolution, quote containment, polarity/outcome/trust rules). It cannot prove semantic entailment of the statement; accepted output is therefore only a **proposed** lesson requiring later governed promotion.
 - Injection-shape detection is heuristic. The structural defence is that E2 output can never exceed `proposed` and never becomes approval/permission/policy.
-- Recurrence/materiality thresholds are provisional; calibration is deferred to replay evidence (E7).
+- Recurrence acceptance is deliberately disabled in E2 v1 until a threshold is calibrated from replay evidence, as required by the frozen plan. The flood cap (20) is a provisional safety-only denial bound, not a claim of calibrated materiality.
+
+
+## Post-freeze alignment note
+
+After the initial contract commit `3a6a3fd`, isolated CI and semantic review found two contract-level ambiguities before protected validation. This additive correction does not broaden E2 scope:
+
+- the frozen Experience Intelligence plan explicitly forbids inventing an uncalibrated recurrence/materiality threshold, so E2 v1 now quarantines recurrence until replay calibration exists;
+- same-statement/opposite-polarity candidates are now fail-safe quarantined rather than creating duplicate lesson text with contradictory classification.
+
+The original contract commit remains durable history; this note records the bounded correction rather than rewriting it.

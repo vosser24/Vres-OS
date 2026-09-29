@@ -57,7 +57,7 @@ def _verify(candidate=None, episodes=None, **kw):
 
 def test_e2_policy_digest_is_canonical_and_stable():
     assert POLICY_DIGEST == _sha256(POLICY)
-    assert POLICY_DIGEST == "f03c3d3030e70b6b864cb7eb961ce4bd484c626ee566e76c04bd9629367701d5"
+    assert POLICY_DIGEST == "619b101c46ea19a7e32396f6cab8b5d503671790af1310f7a1379e3d5535a6f8"
     assert POLICY_DIGEST != E1_DIGEST
 
 
@@ -208,20 +208,26 @@ def test_validated_novel_requires_validated_completed_episodes():
         _verify(candidate, {"EXP-1": _episode("EXP-1", outcome="passed", trust="validated_runtime")})
 
 
-def test_recurrence_requires_distinct_tasks():
+def test_recurrence_requires_replay_calibration_and_distinct_tasks():
     candidate = _candidate(polarity="positive", trigger="recurrence", evidence=[
         {"episode_key": "EXP-1", "pointer": "/objective", "quote": "Deploy"},
         {"episode_key": "EXP-2", "pointer": "/objective", "quote": "Deploy"},
     ])
+    two_tasks = {"EXP-1": _episode("EXP-1", outcome="completed", task_id=1),
+                 "EXP-2": _episode("EXP-2", outcome="completed", task_id=2)}
+    uncalibrated = _verify(candidate, two_tasks)
+    assert uncalibrated["quarantine_reasons"] == ["recurrence_threshold_uncalibrated"]
+    assert uncalibrated["checks"]["trigger"] == "fail"
+
     same_task = {"EXP-1": _episode("EXP-1", outcome="completed", task_id=1),
                  "EXP-2": _episode("EXP-2", outcome="completed", task_id=1)}
     with pytest.raises(ValueError, match="recurrence"):
-        _verify(candidate, same_task)
-    two_tasks = {"EXP-1": _episode("EXP-1", outcome="completed", task_id=1),
-                 "EXP-2": _episode("EXP-2", outcome="completed", task_id=2)}
-    assert _verify(candidate, two_tasks)["quarantine_reasons"] == []
+        _verify(candidate, same_task, min_recurrence=2)
+    assert _verify(candidate, two_tasks, min_recurrence=2)["quarantine_reasons"] == []
     with pytest.raises(ValueError, match="recurrence"):
         _verify(candidate, two_tasks, min_recurrence=3)
+    with pytest.raises(ValueError, match="calibration"):
+        _verify(candidate, two_tasks, min_recurrence=1)
 
 
 @pytest.mark.parametrize(
