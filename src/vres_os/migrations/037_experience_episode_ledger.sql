@@ -18,7 +18,7 @@ VALUES (
 )
 ON CONFLICT(policy_version) DO NOTHING;
 
-DO $
+DO $vres$
 BEGIN
     IF NOT EXISTS (
         SELECT 1
@@ -29,7 +29,8 @@ BEGIN
     ) THEN
         RAISE EXCEPTION 'Experience E1 policy version/digest mismatch';
     END IF;
-END $;
+END
+$vres$;
 
 CREATE TABLE IF NOT EXISTS vres.experience_episodes (
     id bigserial PRIMARY KEY,
