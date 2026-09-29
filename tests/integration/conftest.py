@@ -35,6 +35,8 @@ def pg_project(monkeypatch, tmp_path):
         # database uses an explicit transaction-local bypass only for synthetic fixture cleanup.
         with connect() as conn, conn.transaction():
             conn.execute("SELECT set_config('vres.allow_decision_ledger_delete','on',true)")
+            conn.execute("SELECT set_config('vres.allow_experience_ledger_delete','on',true)")
+            conn.execute("DELETE FROM vres.experience_episodes WHERE project_id=%s", (pid,))
             conn.execute("DELETE FROM vres.validation_ingestion_attempts WHERE project_id=%s", (pid,))
             conn.execute("DELETE FROM vres.artifacts WHERE project_id=%s", (pid,))
             conn.execute(
