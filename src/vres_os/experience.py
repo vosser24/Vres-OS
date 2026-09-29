@@ -240,36 +240,39 @@ class ExperienceEpisodeService:
                 outcome_status = str(task["status"])
                 observed_at = task["completed_at"] or task["updated_at"]
 
-            decisions = conn.execute(
-                """
-                SELECT decision_key,source_kind,text,rationale,status,decided_at,recorded_at
-                  FROM vres.task_decisions
-                 WHERE task_id=%s AND status='active'
-                 ORDER BY id
-                 LIMIT 51
-                """,
-                (task["id"],),
-            ).fetchall()
-            if len(decisions) > 50:
-                raise ValueError("Experience capture exceeds the decision reference budget")
-
-            procedure_rows = conn.execute(
-                """
-                SELECT p.procedure_key,pv.version_no,pr.accepted
-                  FROM vres.procedure_runs pr
-                  JOIN vres.procedure_versions pv ON pv.id=pr.procedure_version_id
-                  JOIN vres.procedures p ON p.id=pv.procedure_id
-                 WHERE pr.task_id=%s
-                 ORDER BY pr.id
-                 LIMIT 51
-                """,
-                (task["id"],),
-            ).fetchall()
-            if len(procedure_rows) > 50:
-                raise ValueError("Experience capture exceeds the procedure reference budget")
-
+            decisions = []
+            procedure_rows = []
             validation = None
+            artifact_rows = []
             if work_unit_key is None:
+                decisions = conn.execute(
+                    """
+                    SELECT decision_key,source_kind,text,rationale,status,decided_at,recorded_at
+                      FROM vres.task_decisions
+                     WHERE task_id=%s AND status='active'
+                     ORDER BY id
+                     LIMIT 51
+                    """,
+                    (task["id"],),
+                ).fetchall()
+                if len(decisions) > 50:
+                    raise ValueError("Experience capture exceeds the decision reference budget")
+
+                procedure_rows = conn.execute(
+                    """
+                    SELECT p.procedure_key,pv.version_no,pr.accepted
+                      FROM vres.procedure_runs pr
+                      JOIN vres.procedure_versions pv ON pv.id=pr.procedure_version_id
+                      JOIN vres.procedures p ON p.id=pv.procedure_id
+                     WHERE pr.task_id=%s
+                     ORDER BY pr.id
+                     LIMIT 51
+                    """,
+                    (task["id"],),
+                ).fetchall()
+                if len(procedure_rows) > 50:
+                    raise ValueError("Experience capture exceeds the procedure reference budget")
+
                 validation = conn.execute(
                     """
                     SELECT request_key,status,state_digest,observed_model,agent_id,created_at,completed_at
@@ -281,19 +284,19 @@ class ExperienceEpisodeService:
                     (task["id"],),
                 ).fetchone()
 
-            artifact_rows = conn.execute(
-                """
-                SELECT a.artifact_key,a.artifact_type,a.content_hash,s.source_key
-                  FROM vres.artifacts a
-                  LEFT JOIN vres.sources s ON s.id=a.source_id
-                 WHERE a.task_id=%s
-                 ORDER BY a.id
-                 LIMIT 51
-                """,
-                (task["id"],),
-            ).fetchall()
-            if len(artifact_rows) > 50:
-                raise ValueError("Experience capture exceeds the artifact reference budget")
+                artifact_rows = conn.execute(
+                    """
+                    SELECT a.artifact_key,a.artifact_type,a.content_hash,s.source_key
+                      FROM vres.artifacts a
+                      LEFT JOIN vres.sources s ON s.id=a.source_id
+                     WHERE a.task_id=%s
+                     ORDER BY a.id
+                     LIMIT 51
+                    """,
+                    (task["id"],),
+                ).fetchall()
+                if len(artifact_rows) > 50:
+                    raise ValueError("Experience capture exceeds the artifact reference budget")
 
             if work_unit:
                 work_units = [dict(work_unit)]
@@ -324,7 +327,7 @@ class ExperienceEpisodeService:
             source_keys = [str(row["source_key"]) for row in artifact_rows if row["source_key"]]
             payload_source = {
                 "objective": task["objective"],
-                "constraints": task["constraints"] or [],
+                "constraints": (task["constraints"] or []) if work_unit_key is None else [],
                 "outcome_status": outcome_status,
                 "work_units": work_units,
                 "decisions": [dict(row) for row in decisions],

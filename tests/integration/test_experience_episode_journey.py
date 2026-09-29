@@ -10,7 +10,13 @@ from vres_os.experience import ExperienceEpisodeService
 from vres_os.repository import Repository
 
 
-def _add_terminal_work_unit(task_key: str, *, work_unit_key: str, last_error: str | None = None) -> None:
+def _add_terminal_work_unit(
+    task_key: str,
+    *,
+    work_unit_key: str,
+    last_error: str | None = None,
+    acceptance_criteria=None,
+) -> None:
     with connect() as conn, conn.transaction():
         task_id = conn.execute("SELECT id FROM vres.tasks WHERE task_key=%s", (task_key,)).fetchone()["id"]
         conn.execute(
@@ -24,7 +30,9 @@ def _add_terminal_work_unit(task_key: str, *, work_unit_key: str, last_error: st
                 work_unit_key,
                 task_id,
                 f"PLAN-{work_unit_key}",
-                json.dumps(["must preserve failure"]),
+                json.dumps(
+                    ["must preserve failure"] if acceptance_criteria is None else acceptance_criteria
+                ),
                 json.dumps(["failure_semantics"]),
                 last_error,
             ),
@@ -93,12 +101,12 @@ def test_episode_capture_rolls_back_when_private_reasoning_shape_is_present(pg_p
         "experience-test",
         "chairman",
     )
-    repo.update_state(
-        task_key,
-        constraints=[{"chain_of_thought": "private material that must never persist"}],
-    )
     work_unit_key = "WU-E1-COT-BLOCK"
-    _add_terminal_work_unit(task_key, work_unit_key=work_unit_key)
+    _add_terminal_work_unit(
+        task_key,
+        work_unit_key=work_unit_key,
+        acceptance_criteria=[{"chain_of_thought": "private material that must never persist"}],
+    )
 
     with pytest.raises(ValueError, match="private-reasoning"):
         ExperienceEpisodeService().capture(task_key, work_unit_key=work_unit_key)
@@ -165,10 +173,35 @@ def test_policy_version_is_immutable_and_work_unit_does_not_inherit_task_validat
             (task_id, "0" * 64),
         )
 
+    with connect() as conn, conn.transaction():
+        task_id = conn.execute("SELECT id FROM vres.tasks WHERE task_key=%s", (task_key,)).fetchone()["id"]
+        source = conn.execute(
+            """
+            INSERT INTO vres.sources(source_key,source_type,title,project_id)
+            VALUES ('SRC-E1-TASK-WIDE','test','Task-wide evidence',%s)
+            RETURNING id
+            """,
+            (pg_project,),
+        ).fetchone()
+        conn.execute(
+            """
+            INSERT INTO vres.artifacts(
+              artifact_key,project_id,task_id,source_id,artifact_type,title
+            ) VALUES ('ART-E1-TASK-WIDE',%s,%s,%s,'test','Task-wide artifact')
+            """,
+            (pg_project, task_id, source["id"]),
+        )
+
     episode = ExperienceEpisodeService().capture(task_key, work_unit_key=work_unit_key)
     assert episode["trust_class"] == "trusted_project_source"
+    assert episode["payload"]["constraints"] == []
     assert episode["payload"]["validation"] is None
-    assert not any(link["target_kind"] == "validation" for link in episode["relations"])
+    assert episode["payload"]["artifacts"] == []
+    assert episode["payload"]["source_keys"] == []
+    assert not any(
+        link["target_kind"] in {"validation", "artifact", "source", "decision", "procedure"}
+        for link in episode["relations"]
+    )
 
     with connect() as conn:
         with pytest.raises(Exception, match="experience_policy_versions are immutable"):
@@ -188,22 +221,34 @@ def test_source_digest_detects_drift_outside_truncated_episode_payload(pg_projec
     task_key = repo.begin_task(
         pg_project,
         "Experience E1 source digest",
-        "Detect source drift outside the compact payload projection",
+        "Detect direct work-unit source drift outside the compact payload projection",
         "experience-test",
         "chairman",
     )
     work_unit_key = "WU-E1-DIGEST"
-    _add_terminal_work_unit(task_key, work_unit_key=work_unit_key)
-    first_constraints = [f"constraint-{i}" for i in range(50)] + ["tail-a"]
-    repo.update_state(task_key, constraints=first_constraints)
+    first_criteria = [f"criterion-{i}" for i in range(50)] + ["tail-a"]
+    _add_terminal_work_unit(
+        task_key,
+        work_unit_key=work_unit_key,
+        acceptance_criteria=first_criteria,
+    )
 
     service = ExperienceEpisodeService()
     episode = service.capture(task_key, work_unit_key=work_unit_key)
     serialized = json.dumps(episode["payload"])
     assert "tail-a" not in serialized
-    assert episode["payload"]["constraints"][-1] == {"truncated_items": 1}
+    criteria = episode["payload"]["work_units"][0]["acceptance_criteria"]
+    assert criteria[-1] == {"truncated_items": 1}
 
-    second_constraints = [f"constraint-{i}" for i in range(50)] + ["tail-b"]
-    repo.update_state(task_key, constraints=second_constraints)
+    second_criteria = [f"criterion-{i}" for i in range(50)] + ["tail-b"]
+    with connect() as conn, conn.transaction():
+        conn.execute(
+            """
+            UPDATE vres.orchestration_work_units
+               SET acceptance_criteria=%s::jsonb
+             WHERE work_unit_key=%s
+            """,
+            (json.dumps(second_criteria), work_unit_key),
+        )
     with pytest.raises(ValueError, match="changed source evidence"):
         service.capture(task_key, work_unit_key=work_unit_key)

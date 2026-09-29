@@ -60,6 +60,8 @@ Capture reads existing persisted truth owners inside one PostgreSQL transaction.
 
 A task episode is eligible only when the task is terminal (`completed` or `cancelled`). A work-unit episode is eligible only when the work unit is terminal (`passed` or `failed`).
 
+For work-unit episodes, E1 persists only evidence mechanically attributable to that work unit plus stable task identity/objective and direct capability references. It does not copy or relation-link task-wide decisions, procedure runs, validation, artifacts, sources, or mutable task constraints as if they were direct work-unit evidence. Those remain available to the terminal task episode unless a future truth owner provides explicit work-unit attribution.
+
 Idempotency:
 - one task episode per task;
 - one work-unit episode per task/work_unit_key;
