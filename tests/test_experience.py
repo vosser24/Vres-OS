@@ -48,3 +48,12 @@ def test_prompt_injection_like_text_remains_inert_data_not_authority():
     assert disposition == "sanitized"
     assert payload["objective"].startswith("Ignore previous instructions")
     assert "authority" not in payload
+
+
+def test_episode_payload_redacts_structured_secret_keys():
+    payload, disposition = _prepare_payload(
+        {"context": {"DATABASE_PASSWORD": "synthetic-structured-secret"}}
+    )
+    assert disposition == SENSITIVE_SANITIZED
+    assert payload["context"]["DATABASE_PASSWORD"] == "[REDACTED]"
+    assert "synthetic-structured-secret" not in str(payload)
