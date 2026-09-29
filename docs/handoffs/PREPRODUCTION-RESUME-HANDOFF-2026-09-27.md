@@ -4,7 +4,7 @@ Date: 2026-09-29
 Repository: `vosser24/Vres-OS`  
 Canonical checklist: `docs/PREPRODUCTION-EXECUTION-CHECKLIST-2026-09-27.md`
 
-This is the canonical detailed continuation record after completing #176 E2. A fresh session should be able to resume from this file and the checklist without relying on chat memory.
+This is the canonical detailed continuation record after completing #176 E2 and entering #176 E3. E3 contract/discovery and Chunk 1 are committed locally; the current live step is bounded Chunk 1 hardening before Chunk 2. A fresh session should be able to resume from this file and the checklist without relying on chat memory.
 
 The operating rule remains strict:
 
@@ -15,7 +15,7 @@ At this handoff boundary:
 - **#163 is DONE.**
 - **#174 is DONE.**
 - **#164 is DONE.**
-- **#176 remains active; E1 and E2 are DONE and E3 is the only allowed next implementation tranche.**
+- **#176 remains active; E1 and E2 are DONE; E3 is ACTIVE; Chunk 1 hardening is the only allowed next implementation work.**
 - #165 and everything after #176 remain blocked by sequence.
 
 ---
@@ -919,9 +919,11 @@ These documentation changes are direct Git commits on the documentation branch. 
 
 # 22. Exact next-session mission
 
-A fresh implementation session should begin with this internal mission:
+A fresh ChatGPT continuation session must begin from the latest seal in section 27, not from the older E1/E2 start text preserved for history.
 
-> Resume Vres preproduction from the canonical checklist and current handoff. #163, #174 and #164 are DONE. #176 E1 and E2 are DONE. Authoritative main is `74c6445228a922db2622806f27e3c49a6c3454a7`. Final E2 protected request `VAL-58bb131a10b54abd` passed with host-observed `claude-fable-5-1`; PR #180 merged; post-merge CI #462 passed. Work only #176 E3 — unified experience retrieval. Read issue #176, the frozen Experience Intelligence plan at `34f45afa0fb8d5a6a90bef53dec58d9ecef1093d`, the merged E1 contract/episode ledger, the merged E2 contract/consolidation semantics, and current knowledge/procedure/decision/relation/retrieval owners. Freeze E3's smallest bounded retrieval contract before source edits. Build scope-first, trust-aware, staged retrieval with compact experience packs, conflict/staleness/premise output and bounded raw-evidence fallback. Do not treat relevance as truth, do not mutate durable memory during retrieval, do not create a second truth store, and do not begin E4 until E3 is complete and evidenced. Do not begin #165 or later issues until #176 is fully DONE.
+Current mission:
+
+> Resume Vres preproduction at #176 E3. E1 and E2 are DONE. Product main remains `74c6445228a922db2622806f27e3c49a6c3454a7`. The E3 Windows worktree is `C:\Projects\Vres-Issue-176-E3-20260929`, branch `issue-176-e3-unified-experience-retrieval`, task `TASK-20260929-9c9d52b7e5`. The frozen E3 contract is local commit `c03b2c269c4118d47b39c4c3236fc106412b4d3b`; Chunk 1 is local commit `ff025a8a738062c3453d34cb045c5abf005db7f3`. Neither commit has been pushed and GitHub currently has no remote E3 branch. The already-dispatched next step is **Chunk 1 hardening**, not Chunk 2. Review the current Claude result when it returns. Close the broad read-time `_INJECTION` misuse, confirm procedure-query ownership, account for all Chunk 1 tests 1–20, rerun the accepted isolated PostgreSQL/no-write methodology, and require a separate hardening commit. Only after that passes may E3 Chunk 2 begin. Do not start E4. Do not start #165+ until #176 is fully DONE. New unrelated requests go after #170 unless they are current-tranche blockers.
 
 This is the exact continuation point.
 
@@ -1194,3 +1196,218 @@ Before implementation:
 
 Do not start E4 until E3 is fully closed.
 Do not start #165 until #176 is fully closed.
+
+
+---
+
+# 27. 2026-09-29 #176 E3 contract + Chunk 1 / hardening continuation seal
+
+This is the newest authoritative session boundary. It supersedes older E3-start instructions elsewhere in this historical handoff.
+
+## A. Authoritative product/repository state
+
+- repository: `vosser24/Vres-OS`;
+- authoritative product `main`: `74c6445228a922db2622806f27e3c49a6c3454a7`;
+- issue #176: open;
+- E1: DONE;
+- E2: DONE;
+- E3: ACTIVE;
+- E4–E8: NOT STARTED;
+- #165+ remain blocked until #176 is fully DONE;
+- canonical docs branch: `docs-execution-checklist-20260927`.
+
+## B. Current E3 local worktree identity
+
+Windows worktree:
+
+`C:\Projects\Vres-Issue-176-E3-20260929`
+
+Branch:
+
+`issue-176-e3-unified-experience-retrieval`
+
+E3 task:
+
+`TASK-20260929-9c9d52b7e5`
+
+Authoritative base:
+
+`74c6445228a922db2622806f27e3c49a6c3454a7`
+
+Frozen plan source:
+- branch: `docs-176-experience-intelligence-plan-20260927`;
+- commit: `34f45afa0fb8d5a6a90bef53dec58d9ecef1093d`;
+- file: `docs/architecture/EXPERIENCE-INTELLIGENCE-PLAN-2026-09-27.md`.
+
+The local Claude environment did not have `gh.exe`; it used the frozen Git plan. The connected GitHub review outside that local session independently checked live issue #176 and found no material E3 requirement missing from the frozen plan. Do not treat lack of local `gh.exe` as permission to guess current issue state.
+
+## C. E3 contract/discovery completed
+
+Frozen E3 contract:
+
+`docs/architecture/EXPERIENCE-INTELLIGENCE-E3-CONTRACT-2026-09-29.md`
+
+Local contract commit:
+
+`c03b2c269c4118d47b39c4c3236fc106412b4d3b`
+
+Status:
+- discovery/contract: PASS;
+- no missing schema primitive found;
+- no migration planned;
+- no second memory/vector store;
+- commit is **local only**;
+- no remote E3 branch exists yet;
+- no PR exists yet.
+
+The contract owns staged, scope-first, trust-aware unified retrieval over existing decisions, knowledge, procedures and E1 episodes; bounded experience packs; explicit conflict/staleness/premise handling; optional semantic/graph/time signals; bounded raw-evidence fallback; no truth-probability interpretation of relevance; no retrieval-time memory mutation.
+
+## D. E3 Chunk 1 implementation checkpoint
+
+Chunk 1 local commit:
+
+`ff025a8a738062c3453d34cb045c5abf005db7f3`
+
+New files:
+- `src/vres_os/experience_retrieval.py`;
+- `tests/test_experience_retrieval.py`;
+- `tests/integration/test_experience_retrieval_journey.py`.
+
+Routing/orchestration:
+- governed route recorded;
+- one worker only;
+- routed specialist role: `cto`;
+- execution tier: Sonnet;
+- visible executor shell: `vres-os:sonnet-expert`;
+- assurance: routine;
+- no work graph;
+- no `work_unit_key` was therefore supplied; the worker report's empty criteria list is not by itself a Chunk 1 defect;
+- Chairman independently reran the worker's tests before committing.
+
+Chunk 1 evidence already obtained:
+- targeted unit + regression suite: **97 passed** = 39 new + 58 existing regression tests;
+- fresh disposable PostgreSQL 18 E3 journey: **14 passed**;
+- existing E1/E2 integration journeys on the fresh DB: **19 passed**;
+- repository-critical lint for changed surface: PASS;
+- `git diff --check`: PASS;
+- migration added: NO;
+- no-write proof: row counts + md5 digests for 11 relevant tables unchanged before/after retrieval;
+- retrieval transaction is read-only and attempted INSERT/UPDATE fail with `ReadOnlySqlTransaction`;
+- retrieval-observation rows are not written in E3 Chunk 1.
+
+## E. Current Chunk 1 open findings
+
+The next step is **not Chunk 2 yet**.
+
+Current bounded defect requiring hardening:
+
+1. E3 reused E2's broad write-time `experience_consolidation._INJECTION` regex during retrieval. That regex deliberately catches broad authority/instruction words such as `policy` and `approved`; using it as a read-time suppression rule can hide legitimate benign historical/business memory. E3 must preserve trust/instruction boundaries without treating ordinary vocabulary as sufficient reason to drop otherwise eligible evidence.
+
+Additional hardening review items:
+
+2. Procedures currently use one E3 scoped read query instead of `ProcedureService.find_matches`; the reason reported is that `find_matches` opens its own connection and lacks the E3 scope gate. Preserve the procedure lifecycle owner and avoid semantic fork/duplication.
+3. Map every original Chunk 1 requirement 1–20 to exact unit/integration tests. Do not add redundant integration tests purely for numbering, but no requirement may remain genuinely untested.
+4. Features intentionally deferred beyond Chunk 1 are not defects: challenged/conflict output, premise evaluation, semantic/embedding signal, raw-chunk fallback, MCP tool, and Chairman integration.
+
+A bounded Chunk 1 hardening prompt has already been dispatched in the live Claude session. Await and review that result. The hardening prompt requires a separate commit after `ff025a8...` and explicitly forbids starting Chunk 2 automatically.
+
+## F. Accepted testing methodology — preserve exactly
+
+These rules are now part of the continuation contract because earlier sessions exposed avoidable tooling/syntax mistakes.
+
+### Windows PowerShell execution
+
+- Assume **Windows PowerShell 5.1** unless the user explicitly says otherwise.
+- Prefer **one PowerShell block per stage** and **one Claude/Chairman prompt per stage**.
+- Wrap multi-step pasted blocks in `& { ... }` so a `throw` terminates the whole pasted block. Do not print a later false `PASS` after an earlier STOP.
+- After any STOP, inspect the actual partial state and continue from it. Do not blindly rerun an idempotency-sensitive patch.
+- Avoid fragile inline `python -c` quoting from PowerShell for nontrivial probes. Use a temporary UTF-8 `.py` file and, when importing unmerged source, set `PYTHONPATH` explicitly to the worktree `src` directory; restore the environment afterward.
+- Do not infer a sandbox/local path that was not actually established.
+
+### Git hygiene
+
+- Verify branch, local HEAD, remote HEAD/main and clean/expected change surface before mutation.
+- Use race guards before push/merge.
+- Never force-push this workflow.
+- Run `git diff --check` before candidate freeze/commit. Trailing whitespace and blank-line-at-EOF findings are real candidate hygiene defects and must be fixed before protected validation.
+- If a command providing evidence fails, STOP. Do not continue to print a success banner.
+- A new commit, including documentation-only cleanup, changes candidate identity; exact-head CI/validation evidence on the previous SHA becomes historical.
+
+### Lint discipline
+
+- Do not suddenly enforce unrelated repo-wide style debt while fixing one lint finding.
+- Current CI-critical Ruff contract is `E9,F63,F7,F82` plus any specifically relevant bounded rule such as `F541` or `I001` when that rule is the defect under review.
+- Do not turn existing E501/formatting debt into unrelated source churn unless the current tranche explicitly owns that cleanup.
+
+### PostgreSQL integration
+
+- Use a **fresh disposable PostgreSQL database** and an empty/isolated `VRES_DATA_DIR` for acceptance journeys.
+- Do not use the historically contaminated shared test DB as an acceptance baseline when its migration checksum/policy/provenance state differs from the candidate.
+- Where relevant, clear/avoid inherited `VRES_DATABASE_URL`, `VRES_PROVENANCE_WRITER_DATABASE_URL` and `VRES_MIGRATION_DATABASE_URL` before an isolated validator-side broad-suite rerun.
+- Preserve real DB/test exit codes; do not pipe away the exit code of commands used as evidence.
+- For read-only retrieval, prove no-write structurally and with before/after durable-state evidence, not only by code inspection.
+
+### Test/evidence interpretation
+
+- A targeted suite PASS proves only its named surface. Do not call the whole tranche complete from targeted tests.
+- Map requested acceptance criteria to concrete tests before closing a chunk.
+- Separate unit evidence, PostgreSQL journey evidence, full-suite evidence, installed-runtime smoke, release gate, protected validation and physical/live acceptance.
+- Do not repeat already-green expensive suites without a changed candidate or a specific evidence gap.
+
+### Exact-head CI and merge
+
+- Before final protected acceptance, require fresh CI on the exact candidate SHA.
+- Capture run number/id, exact head, event, conclusion, required step status, artifact id and digest.
+- If the protected validator cannot reach GitHub, create a bounded local evidence file by directly querying GitHub's public REST API **before the final freeze**, verify exact run/head/steps/artifact/digest, and give that read-only evidence file to the validator. Do not rely only on relayed prose.
+- Merge with an expected-head SHA guard only after exact-head CI and required protected validation PASS.
+- After merge, require a new `push` CI run on the exact merge/main SHA before marking the tranche DONE.
+
+### Protected validation #42 lifecycle
+
+- Make exactly one final material checkpoint **before** `validation_prepare`.
+- Freeze exact artifact list + exact reviewed Git SHA.
+- After `validation_prepare`, do not mutate task/checkpoint/decision/orchestration state while validation is in flight.
+- Interim status reply only through `task_reply_gate(... advances_state=false)` and only if it returns `mode=validation_in_flight`.
+- Delegate exactly `vres-os:validator`; do not manually override the protected model.
+- Read host evidence first after validator completion: fresh VAL id, terminal status/report/completed_at, host-observed Fable-family model, exact reviewed head/hashes, task validation status.
+- Validator prose alone is insufficient.
+- If stale/rejected/wrong model/wrong SHA/non-terminal/failed, STOP and report durable evidence. Do **not** retry automatically.
+
+## G. Role/executor identity clarification discovered during E3
+
+Do not confuse organizational role with executor shell/model tier.
+
+Current Chunk 1 identity:
+- routed role = `cto`;
+- execution tier = Sonnet;
+- canonical executor shell = `vres-os:sonnet-expert`.
+
+Vres already persists role separately from execution tier/model. The generic Sonnet/Opus shell name leaking into visible status is a later UX/organizational-observability concern, not an E3 blocker.
+
+## H. New-request sequencing rule / queued post-#170 work
+
+User rule:
+
+> New requests discovered during the active frozen pipeline are appended to the end unless they are a genuine blocker/defect in the current tranche.
+
+Therefore do not insert the following into #176 or #165–#170:
+
+**Post-#170 Organizational Architecture & Specialist Intelligence audit.**
+
+That future audit must recover the **original Agent Board from the earliest project conversation/design artifacts**, not infer the target organization from the current repo's reduced executive roster. The user specifically recalls that every key Director had a fuller departmental structure and Technology/IT was a full software organization with product-owner/product-design and specialist engineering roles. The future audit must reconstruct the original department -> Director -> role -> specialist hierarchy, compare it with current implementation, identify lost vs intentionally consolidated roles, improve specialist display identity, and add role/capability/department performance attribution without fabricating quality scores.
+
+This queued item is after #170 and must not interrupt the current pipeline.
+
+## I. Fresh-chat first action
+
+When the current Chunk 1 hardening result arrives, paste that exact Claude output into the new ChatGPT session.
+
+The new session must:
+1. read this section 27 first;
+2. verify authoritative Git/GitHub state before claiming anything remote;
+3. remember that `c03b2c...` and `ff025a8...` are local-only unless the user subsequently pushed them;
+4. review the hardening report against the bounded defect/test matrix;
+5. if hardening PASS is real, record the hardening commit and then design/authorize E3 Chunk 2;
+6. if hardening finds a defect, stay in Chunk 1 and fix only that defect;
+7. do not recreate the E3 task, contract or Chunk 1;
+8. do not start E4 or any later issue.
