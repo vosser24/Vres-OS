@@ -1,10 +1,10 @@
 # Vres-OS — Preproduction Resume Handoff
 
-Date: 2026-09-28  
+Date: 2026-09-29  
 Repository: `vosser24/Vres-OS`  
 Canonical checklist: `docs/PREPRODUCTION-EXECUTION-CHECKLIST-2026-09-27.md`
 
-This is the canonical detailed continuation record after completing #163. A fresh session should be able to resume from this file and the checklist without relying on chat memory.
+This is the canonical detailed continuation record after completing #174. A fresh session should be able to resume from this file and the checklist without relying on chat memory.
 
 The operating rule remains strict:
 
@@ -13,8 +13,9 @@ The operating rule remains strict:
 At this handoff boundary:
 
 - **#163 is DONE.**
-- **#174 is the first and only allowed next implementation/acceptance item.**
-- #164 and everything after it remain blocked by sequence.
+- **#174 is DONE.**
+- **#164 is the first and only allowed next implementation/acceptance item.**
+- #176 and everything after it remain blocked by sequence.
 
 ---
 
@@ -22,31 +23,47 @@ At this handoff boundary:
 
 Authoritative `main`:
 
-`7f9961b5980f1a229cece4902f9e1d709e397e22`
+`11591b72b3d396a370e315313925e19b8bcb45ec`
 
-This is the merge commit of PR #173 / issue #163.
+This is the merge commit of PR #175 / issue #174, integrating the accepted #174 architecture-governance candidate on top of the already-completed #163 Credential Broker main.
+
+Final #174 candidate:
+
+- branch: `issue-174-engineering-architecture-governance`
+- exact reviewed head: `7ded3c16e5e85f5715fb052f403907eec3750628`
+- exact authoritative base: `7f9961b5980f1a229cece4902f9e1d709e397e22`
+- exact-head CI: **#439** / `36455460478` — SUCCESS
+- final protected validation: `VAL-aa05bb6018e941cc`
+- host-observed model: `claude-fable-5-1`
+- result: **PASS**
 
 Post-merge main CI:
 
 - workflow: Vres-OS CI
-- run: **#438**
-- run ID: `36420420225`
-- head: `7f9961b5980f1a229cece4902f9e1d709e397e22`
+- run: **#440**
+- run ID: `36530581547`
+- event: push
+- head: `11591b72b3d396a370e315313925e19b8bcb45ec`
 - status: **completed / success**
-- PostgreSQL-backed suite: **1056 passed, 1 skipped**
+- PostgreSQL-backed suite: PASS
 - repository critical lint: PASS
+- strict architecture-governance lint: PASS
 - strict protected-surface lint: PASS
 - installed-runtime import smoke: PASS
-- local release gate: `PASSED_WITH_EXPLICIT_LIVE_GATES`
+- local release gate: PASS
+- release-gate artifact: `11016787086`
+- artifact digest: `sha256:59e506706a168648057860d8e683816940973a512440c09c253228296d5abedf`
 
-Issue #163:
+Issue #174:
 
 - state: **closed**
 - reason: **completed**
-- closed: 2026-09-28
-- PR #173: merged
+- closed: 2026-09-29
+- PR #175: merged
 
-Physical Windows/customer-environment acceptance was explicitly **not** claimed by #163 and remains owned by #169.
+#163 remains DONE. Its physical Windows/customer-environment criteria remain owned by #169.
+
+The first and only implementation item now allowed by the frozen sequence is **#164 — Secret-safe onboarding**.
 
 ---
 
@@ -55,8 +72,8 @@ Physical Windows/customer-environment acceptance was explicitly **not** claimed 
 The order remains:
 
 1. **#163 — Credential Broker — DONE**
-2. **#174 — Engineering Architecture Governance — ACTIVE NEXT**
-3. **#164 — Secret-safe onboarding — NOT STARTED**
+2. **#174 — Engineering Architecture Governance — DONE**
+3. **#164 — Secret-safe onboarding — ACTIVE NEXT / IMPLEMENTATION NOT STARTED**
 4. **#176 — Experience Intelligence / Governed Agent Learning — PLAN COMPLETE, IMPLEMENTATION NOT STARTED**
 5. **#165 — Chairman model policy — NOT STARTED**
 6. **#166 — Global Claude adoption — NOT STARTED**
@@ -65,7 +82,7 @@ The order remains:
 9. **#169 — Integrated Windows / Visual Studio live acceptance — NOT STARTED**
 10. **#170 — Production Readiness / Go-Live — NOT STARTED**
 
-Do not begin #164 until #174 is fully DONE.
+Do not begin #176 until #164 is fully DONE.
 
 ---
 
@@ -589,7 +606,7 @@ The #163 product candidate itself was kept untouched during the live acceptance 
 
 ---
 
-# 13. Active next item — #174 Engineering Architecture Governance
+# 13. Final #174 Engineering Architecture Governance evidence
 
 Issue:
 
@@ -599,48 +616,71 @@ PR:
 
 **#175**
 
-Branch:
+Accepted integration identity:
 
-`issue-174-engineering-architecture-governance`
+- original held head: `9756b44d4ae953db327b10072e70003e51df9404`
+- integrated exact candidate: `7ded3c16e5e85f5715fb052f403907eec3750628`
+- integrated base/main: `7f9961b5980f1a229cece4902f9e1d709e397e22`
+- merge commit / current main: `11591b72b3d396a370e315313925e19b8bcb45ec`
 
-Current live PR head as of this handoff:
+Integration was history-preserving and retained the exact #174 21-path scope. #163 runtime/security files remained behaviorally unchanged.
 
-`9756b44d4ae953db327b10072e70003e51df9404`
+Important bounded integration corrections completed before acceptance:
 
-Important correction versus older handoff text:
+- the architecture audit excludes Vres-owned `.vres` state entirely, including `.vres/local-secrets`;
+- regression coverage proves source-looking files under `.vres/local-secrets` are not read and cannot affect inventory/dependency/findings/audit digest;
+- the C7 security carve-out is explicit: normal Vres/architecture UX remains Chairman-led/conversational, while credential capture/confirm/bind/discard/save actions requiring hidden local input or explicit authority remain user-run local-terminal safety-boundary operations; Chairman must not auto-authorize them or automatically pass `--yes`;
+- inherited Markdown trailing whitespace was cleaned rather than weakening `git diff --check`.
 
-- older recorded held head: `d0b59289e443dab14dd658411a0ee1d3d61d23c7`
-- current head: `9756b44d4ae953db327b10072e70003e51df9404`
-- current head is **2 commits ahead** of `d0b59289...`
-- those two commits harden the constitution/handoff:
-  - `c42b2fb4269ae85a9e7770fd376d2ad8faa07768` — enforcement-before-assurance constitution rule
-  - `9756b44d4ae953db327b10072e70003e51df9404` — record enforcement-governance hardening
+Local Phase 3 final evidence:
 
-Current #174 exact-head CI:
+- targeted architecture/#163 integration family: **67 passed / 0 skipped / 0 failed**;
+- lint gates: PASS;
+- CI-equivalent isolated full PostgreSQL suite: **1087 passed / 3 skipped / 0 failed / 0 errors**;
+- installed-runtime smoke: PASS;
+- release gate: `PASSED_WITH_EXPLICIT_LIVE_GATES`.
 
-- run: **#437**
-- run ID: `36349196127`
-- conclusion: **success**
+The reusable local test DSN remains stored by handle:
 
-However #174 is **not merge-ready now** because #163 advanced authoritative main.
+`pg_issue163_test_dsn`
 
-Current relationship to main:
+Do not print or export its value.
 
-- authoritative main: `7f9961b5980f1a229cece4902f9e1d709e397e22`
-- #174 head: `9756b44d4ae953db327b10072e70003e51df9404`
-- merge base: `f0a69c3e471fe25c6547ee1af162019caf290d49`
-- #174 head is **68 commits ahead** of current main from the merge base;
-- #174 head is **30 commits behind** current main.
+Exact-head CI:
 
-This means the next session must integrate current main before accepting #174.
+- run #439 / `36455460478`;
+- exact head `7ded3c16e5e85f5715fb052f403907eec3750628`;
+- conclusion: **success**.
 
-Do not treat old CI #437 as sufficient after that integration.
+Final canonical protected acceptance:
+
+- request: `VAL-aa05bb6018e941cc`;
+- validator: `vres-os:validator`;
+- pinned assurance: Fable/high;
+- host-observed model: `claude-fable-5-1`;
+- exact reviewed head: `7ded3c16e5e85f5715fb052f403907eec3750628`;
+- result: **PASS**.
+
+Phase 5 forensics also reconfirmed the previously accepted #42 protected-validation protocol. Earlier stale/superseded validation attempts were caused by post-`validation_prepare` Chairman task mutations. The authoritative Phase 5B run followed the correct sequence: final checkpoint before preparation, no task-state mutation while validation was in flight, interim reply only through `task_reply_gate(advances_state=false)` with `mode=validation_in_flight`, then read-only host-attestation verification. No #174 code defect was found in that lifecycle surface.
+
+PR #175 was merged with expected-head protection.
+
+Post-merge main CI:
+
+- run #440 / `36530581547`;
+- head `11591b72b3d396a370e315313925e19b8bcb45ec`;
+- conclusion: **success**;
+- PostgreSQL suite, installed-runtime smoke, release gate and evidence upload all PASS;
+- artifact `11016787086`;
+- digest `sha256:59e506706a168648057860d8e683816940973a512440c09c253228296d5abedf`.
+
+Issue #174 is DONE and must not be reopened without a genuinely new regression.
 
 ---
 
-# 14. What #174 already builds
+# 14. Final #174 shipped architecture foundation
 
-The held branch contains:
+Authoritative main now contains:
 
 - versioned Engineering Architecture Constitution;
 - proportional architecture profiles;
@@ -667,86 +707,89 @@ Preserve those boundaries.
 
 ---
 
-# 15. Exact #174 resume methodology
+# 15. Exact #164 resume methodology
 
-A fresh session must work only #174.
+A fresh session must work only #164.
 
 Start with read-only verification:
 
 1. read this handoff and the canonical checklist;
 2. fetch `origin/main`;
-3. verify main is still `7f9961b5980f1a229cece4902f9e1d709e397e22` or record any legitimate advancement;
-4. fetch PR #175;
-5. verify current #174 head before making any change;
-6. inspect branch/worktree cleanliness;
-7. compare #174 against authoritative main;
-8. inspect integration overlap before merging histories.
+3. verify authoritative main is still `11591b72b3d396a370e315313925e19b8bcb45ec` or record any legitimate advancement before proceeding;
+4. read issue #164 in full;
+5. inspect the merged Credential Broker, onboarding ingestion, document/source acquisition, persistence and model-context boundaries before editing;
+6. inspect any existing #164 branch/PR state before creating new work;
+7. verify all unrelated worktrees remain untouched.
 
-Because #174 already has a long reviewed history, prefer a history-preserving update of the branch with current main rather than casually rewriting dozens of commits. A normal merge of current main into the #174 branch is acceptable as the “update/rebase” step if it produces the smallest auditable integration and avoids a force push.
+Freeze the smallest security contract before source edits. #164 owns secret-safe onboarding, including:
 
-Do not blindly resolve conflicts.
+- deterministic exclusion of known secret-bearing paths/files;
+- pre-model and pre-persistence sanitization;
+- fail-closed behavior when sensitivity is uncertain and cannot be safely reduced;
+- Credential Broker reuse instead of ingesting durable secret values;
+- synthetic secret fixtures and security regressions;
+- onboarding regressions proving useful non-secret data still flows correctly;
+- explicit non-goals so #164 does not absorb #168 adoption lifecycle or #169 physical acceptance.
 
-Pay special attention to any overlap involving:
+After implementation:
 
-- Claude contract/scaffold behavior;
-- MCP entrypoint/registration;
-- Chairman rules;
-- onboarding/start-vres skills;
-- CI workflow;
-- any lifecycle/security surface introduced by #163.
-
-After integration:
-
-1. inspect exact diff against new main;
-2. resolve only real integration drift;
-3. run targeted architecture-governance tests;
-4. run the full PostgreSQL-backed suite as applicable;
-5. push the exact new head;
-6. require exact-head GitHub CI green;
-7. run protected `vres-os:validator` with pinned Fable/high on that exact head;
-8. do not substitute another model if Fable/high is unavailable;
-9. update #174 handoff/docs if the head/evidence changed;
-10. merge PR #175 only after all gates;
-11. verify post-merge main CI green;
-12. close #174;
-13. update this checklist/handoff;
-14. only then start #164.
-
-Do not reuse old #174 Fable/CI evidence as acceptance for the integrated head.
+1. run focused security/onboarding tests;
+2. run relevant #163 credential regressions;
+3. run the full PostgreSQL-backed suite as applicable;
+4. run installed-runtime/release-gate validation;
+5. update issue-specific and canonical handoffs;
+6. push the exact candidate;
+7. require exact-head CI green;
+8. run canonical protected `vres-os:validator` Fable/high on the exact head;
+9. merge only after all gates;
+10. require post-merge main CI green;
+11. close #164 while carrying physical Windows/customer-environment criteria into #169;
+12. update this checklist/handoff;
+13. only then start #176.
 
 ---
 
-# 16. #174 prior evidence is baseline only
+# 16. #174 closure evidence is final
 
-Prior held-head CI is useful regression context:
+Do not reuse pre-integration #174 evidence as if it were the final acceptance record.
 
-- head: `9756b44d4ae953db327b10072e70003e51df9404`
-- CI #437 / `36349196127`: SUCCESS
+Superseded baseline only:
 
-Older handoff evidence may mention CI #436 and head `d0b59289...`; those are superseded by the current held head and #437.
+- held head `9756b44d4ae953db327b10072e70003e51df9404`;
+- old CI #437 / `36349196127`.
 
-After main integration, a fresh exact-head CI run is mandatory.
+Final accepted evidence:
 
-Protected Fable/high must also be rerun on the fresh exact head because base/integration state changes.
+- integrated head `7ded3c16e5e85f5715fb052f403907eec3750628`;
+- exact-head CI #439 / `36455460478` SUCCESS;
+- protected validation `VAL-aa05bb6018e941cc` PASS;
+- host-observed `claude-fable-5-1`;
+- merge/main `11591b72b3d396a370e315313925e19b8bcb45ec`;
+- post-merge CI #440 / `36530581547` SUCCESS.
+
+This is the authoritative #174 closure identity.
 
 ---
 
-# 17. After #174
+# 17. Active next item — #164 Secret-safe onboarding
 
-Next is #164 — Secret-safe onboarding.
+#164 is now the only allowed implementation item.
 
-Do not start #164 until #174 is fully:
+Its purpose is to ensure onboarding/acquisition paths cannot place secret-bearing material into model context, Vres persistence, generated project context, logs or reusable knowledge by accident.
 
-- integrated with authoritative main;
-- tested;
+The implementation should consume the merged #163 Credential Broker rather than inventing a parallel secret store, and must preserve #174 architecture boundaries.
+
+Do not start #176 until #164 is fully:
+
+- implemented;
+- security-tested;
+- regression-tested;
 - protected-validated;
+- documented;
 - exact-head CI green;
 - merged;
-- post-merge CI green;
-- closed;
-- documented.
-
-#164 must then build deterministic sensitive-path exclusion, pre-model/pre-persistence sanitization, fail-closed uncertain-sensitive handling and Credential Broker reuse.
+- post-merge main CI green;
+- closed.
 
 After #164 comes #176 Experience Intelligence, then #165, #166, #167, #168, #169, #170.
 
@@ -826,11 +869,12 @@ Canonical checklist/handoff branch:
 
 `docs-execution-checklist-20260927`
 
-During the 2026-09-28 closeout:
+During the 2026-09-29 closeout:
 
-- checklist was updated to mark #163 DONE and activate #174;
-- a stale #174 held-head reference was corrected to `9756b44d4ae953db327b10072e70003e51df9404`;
-- this handoff was rewritten to the current continuation boundary.
+- checklist was updated to mark #174 DONE and activate #164;
+- authoritative main was advanced to `11591b72b3d396a370e315313925e19b8bcb45ec`;
+- final #174 exact-head CI/protected validation/merge/post-merge CI evidence was recorded;
+- this handoff was rewritten to the #164 continuation boundary.
 
 These docs changes are direct Git commits on the documentation branch; there is no uncommitted remote edit state from these updates.
 
@@ -842,7 +886,7 @@ Do not merge this documentation branch blindly into product main without first c
 
 A fresh session should begin with this internal mission:
 
-> Resume Vres preproduction from the canonical checklist and 2026-09-28 handoff. #163 is DONE and must not be reopened without a new regression. Work only #174. Verify authoritative main `7f9961b5980f1a229cece4902f9e1d709e397e22`, then verify live PR #175 head (currently `9756b44d4ae953db327b10072e70003e51df9404`). Integrate current main into #174 with an auditable history-preserving update, resolve only real drift, run targeted/full tests, require exact-head CI, run protected Fable/high on the exact integrated head, merge, verify post-merge main CI, close #174 and update docs. Do not start #164 until #174 is DONE.
+> Resume Vres preproduction from the canonical checklist and current handoff. #163 and #174 are DONE and must not be reopened without a new regression. Work only #164 Secret-safe onboarding. Verify authoritative main `11591b72b3d396a370e315313925e19b8bcb45ec`, read issue #164 in full, inspect the existing Credential Broker and onboarding/acquisition boundaries, freeze the smallest security contract, implement deterministic sensitive-path exclusion plus pre-model/pre-persistence sanitization and fail-closed uncertain-sensitive handling, reuse Credential Broker resources instead of persisting secret values, add synthetic-secret and onboarding regressions, run targeted/full/security validation, update docs, require exact-head CI, run protected Fable/high on the exact candidate, merge, verify post-merge CI, close #164, and only then start #176.
 
 This is the exact continuation point.
 
