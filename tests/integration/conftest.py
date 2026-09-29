@@ -36,6 +36,29 @@ def pg_project(monkeypatch, tmp_path):
         with connect() as conn, conn.transaction():
             conn.execute("SELECT set_config('vres.allow_decision_ledger_delete','on',true)")
             conn.execute("SELECT set_config('vres.allow_experience_ledger_delete','on',true)")
+            conn.execute(
+                """
+                DELETE FROM vres.relation_evidence
+                 WHERE relation_id IN (
+                   SELECT r.id
+                     FROM vres.relations r
+                     JOIN vres.experience_episodes e
+                       ON r.source_kind='episode' AND r.source_key=e.episode_key
+                    WHERE e.project_id=%s
+                 )
+                """,
+                (pid,),
+            )
+            conn.execute(
+                """
+                DELETE FROM vres.relations
+                 WHERE source_kind='episode'
+                   AND source_key IN (
+                     SELECT episode_key FROM vres.experience_episodes WHERE project_id=%s
+                   )
+                """,
+                (pid,),
+            )
             conn.execute("DELETE FROM vres.experience_episodes WHERE project_id=%s", (pid,))
             conn.execute("DELETE FROM vres.validation_ingestion_attempts WHERE project_id=%s", (pid,))
             conn.execute("DELETE FROM vres.artifacts WHERE project_id=%s", (pid,))
