@@ -2,7 +2,7 @@
 
 Date: 2026-09-29  
 Repository: `vosser24/Vres-OS`  
-Authoritative main after #164: `fe31e30e593a44b8b5ab565fa0db859bbefec0c6`
+Authoritative main after #176 E1: `407c4a323f4f65c8f28c422789508bb7ce128682`
 
 ## Governing rule
 
@@ -64,7 +64,7 @@ Physical Windows/customer-environment criteria remain intentionally deferred to 
 - second Windows-user isolation;
 - uninstall/reinstall preserving native Claude/Codex authentication.
 
-**#176 is now the first and only allowed implementation/acceptance item.**
+**#176 remains the only allowed implementation issue; within #176, E1 is DONE and E2 is the next allowed tranche.**
 
 ---
 
@@ -105,7 +105,7 @@ Acceptance completed:
 
 Phase 5 initially exposed protected-validation sequencing mistakes, not a #174 code defect. Durable VATT evidence confirmed the existing #42 contract remains correct: freeze/checkpoint before `validation_prepare`, do not mutate task state while validation is in flight, and use `task_reply_gate(advances_state=false)` with `mode=validation_in_flight` for interim status replies. The clean Phase 5B run followed that protocol and produced the authoritative host-attested PASS above.
 
-**#176 is now the first and only allowed implementation/acceptance item.**
+**#176 remains the only allowed implementation issue; within #176, E1 is DONE and E2 is the next allowed tranche.**
 
 ---
 
@@ -153,12 +153,12 @@ Physical/live criteria intentionally remain deferred:
 
 Those belong to #169 / the applicable live embedding-runtime acceptance and were not falsely claimed by #164.
 
-**#176 is now the first and only allowed implementation/acceptance item.**
+**#176 remains the only allowed implementation issue; within #176, E1 is DONE and E2 is the next allowed tranche.**
 
 ---
 
 ### 4. #176 — Experience Intelligence / Governed Agent Learning
-Status: **ACTIVE NEXT — plan complete, implementation not started**
+Status: **ACTIVE — E1 DONE; E2 NEXT**
 
 Durable plan:
 - issue #176;
@@ -166,8 +166,45 @@ Durable plan:
 - plan commit: `34f45afa0fb8d5a6a90bef53dec58d9ecef1093d`;
 - file: `docs/architecture/EXPERIENCE-INTELLIGENCE-PLAN-2026-09-27.md`.
 
+Accepted E1 implementation:
+- PR #179;
+- branch: `issue-176-e1-experience-ledger`;
+- exact protected-reviewed head: `bc03707c9cef77967cc1abd2ffe0733d4393b42c`;
+- E1 acceptance task: `TASK-20260929-7e344a1e68`;
+- freeze checkpoint: `CP-20260929-7c91c106e4`;
+- protected validation: `VAL-b7d08edab1c74e98` — PASS;
+- host-observed protected validator/model: `vres-os:validator` / `claude-fable-5-1` under Fable/high;
+- exact-head CI: run **#454** / `36557839748` — SUCCESS;
+- exact-head PostgreSQL-backed suite: **1186 passed / 1 skipped**;
+- exact-head installed-runtime smoke: PASS;
+- exact-head release gate: `PASSED_WITH_EXPLICIT_LIVE_GATES`;
+- exact-head evidence artifact: `11029410541`;
+- exact-head artifact digest: `sha256:8d74efb2fd4cf9e0b72e639448c50c7b447eb3576ceac4b151717b26d26b8ac8`;
+- merge commit / authoritative main: `407c4a323f4f65c8f28c422789508bb7ce128682`;
+- post-merge main CI: run **#455** / `36560731741` — SUCCESS;
+- post-merge PostgreSQL-backed suite: **1186 passed / 1 skipped**;
+- post-merge installed-runtime smoke: PASS;
+- post-merge release gate: `PASSED_WITH_EXPLICIT_LIVE_GATES`;
+- post-merge evidence artifact: `11028544812`;
+- post-merge artifact digest: `sha256:047cbd0fa0ed34c38ab14e98f44fa07f0a7ca22d4039ff265a07340405f841a0`.
+
+E1 acceptance completed:
+- [x] E1 contract frozen before implementation;
+- [x] immutable bounded episode ledger and versioned policy;
+- [x] existing truth owners reused instead of creating a second generic memory authority;
+- [x] #164 secret-safe sanitization/fail-closed behavior preserved;
+- [x] hidden/private reasoning persistence rejected;
+- [x] project/scope, provenance/digest, idempotency/concurrency and rollback evidence;
+- [x] work-unit provenance narrowed to directly attributable evidence;
+- [x] failure trajectories remain failures;
+- [x] exact-head CI #454 green;
+- [x] canonical protected `vres-os:validator` Fable/high PASS on the exact candidate;
+- [x] guarded merge of PR #179 with expected-head protection;
+- [x] post-merge main CI #455 green;
+- [x] durable E1 closure evidence posted to #176 and #179.
+
 Implementation tranches:
-- [ ] E1 contracts + episode ledger;
+- [x] E1 contracts + episode ledger;
 - [ ] E2 transition verifier + safe consolidation;
 - [ ] E3 unified experience retrieval;
 - [ ] E4 temporal lifecycle + revocation;
@@ -176,14 +213,13 @@ Implementation tranches:
 - [ ] E7 benchmark + security ladder;
 - [ ] E8 Chairman integration + protected acceptance;
 - [ ] carry E9 physical acceptance into #169;
-- [ ] protected Fable/high as required per governance/security tranche;
-- [ ] exact-head CI green;
-- [ ] merge;
-- [ ] post-merge main CI green;
-- [ ] close #176.
+- [ ] protected Fable/high as required for each consequential governance/security tranche;
+- [ ] final #176 exact-head CI/merge/post-merge sequence after the remaining tranches;
+- [ ] close #176 only after all required E2–E8 acceptance and E9 carry-forward are complete.
+
+**E2 is now the only allowed implementation tranche inside #176. Do not begin E3 until E2 is bounded, implemented, tested and evidenced.**
 
 **Do not start #165 implementation until #176 is DONE.**
-
 ---
 
 ### 5. #165 — Chairman model policy
@@ -317,4 +353,4 @@ At the beginning of every future implementation session:
 
 ## Current next action
 
-**#176 Experience Intelligence / Governed Agent Learning is the only allowed implementation next step. Start from authoritative main `fe31e30e593a44b8b5ab565fa0db859bbefec0c6`. Read issue #176 and the frozen Experience Intelligence plan in full before source edits. Implement sequentially from E1 contracts + episode ledger, preserving existing truth owners, #163/#164 security boundaries, #174 architecture governance, no private model self-training, and no hidden chain-of-thought persistence. Do not start #165 until #176 is fully DONE.**
+**#176 E2 — transition verifier + safe consolidation is the only allowed implementation next step. Start from authoritative main `407c4a323f4f65c8f28c422789508bb7ce128682`. Read issue #176 and the frozen Experience Intelligence plan in full, inspect the merged E1 contract/ledger and existing truth owners, then freeze E2's smallest bounded contract before source edits. E2 must verify experience transitions and perform safe consolidation without creating a second authority system, without promoting untrusted/external content, without hidden chain-of-thought persistence, and without weakening #163/#164/#174 or E1 provenance/security invariants. Do not begin E3 until E2 implementation/tests/evidence are complete. Do not start #165 until #176 is fully DONE.**

@@ -4,7 +4,7 @@ Date: 2026-09-29
 Repository: `vosser24/Vres-OS`  
 Canonical checklist: `docs/PREPRODUCTION-EXECUTION-CHECKLIST-2026-09-27.md`
 
-This is the canonical detailed continuation record after completing #164. A fresh session should be able to resume from this file and the checklist without relying on chat memory.
+This is the canonical detailed continuation record after completing #176 E1. A fresh session should be able to resume from this file and the checklist without relying on chat memory.
 
 The operating rule remains strict:
 
@@ -15,7 +15,7 @@ At this handoff boundary:
 - **#163 is DONE.**
 - **#174 is DONE.**
 - **#164 is DONE.**
-- **#176 is the first and only allowed next implementation/acceptance item.**
+- **#176 remains active; E1 is DONE and E2 is the only allowed next implementation tranche.**
 - #165 and everything after #176 remain blocked by sequence.
 
 ---
@@ -24,7 +24,7 @@ At this handoff boundary:
 
 Authoritative `main`:
 
-`fe31e30e593a44b8b5ab565fa0db859bbefec0c6`
+`407c4a323f4f65c8f28c422789508bb7ce128682`
 
 This is the merge commit of PR #177 / issue #164, on top of the already-completed #163 Credential Broker and #174 Engineering Architecture Governance foundations.
 
@@ -76,7 +76,7 @@ The order remains:
 1. **#163 — Credential Broker — DONE**
 2. **#174 — Engineering Architecture Governance — DONE**
 3. **#164 — Secret-safe onboarding — DONE**
-4. **#176 — Experience Intelligence / Governed Agent Learning — ACTIVE NEXT / PLAN COMPLETE / IMPLEMENTATION NOT STARTED**
+4. **#176 — Experience Intelligence / Governed Agent Learning — ACTIVE / E1 DONE / E2 NEXT**
 5. **#165 — Chairman model policy — NOT STARTED**
 6. **#166 — Global Claude adoption — NOT STARTED**
 7. **#167 — Current-user Data Source Registry — NOT STARTED**
@@ -906,13 +906,11 @@ These documentation changes are direct Git commits on the documentation branch. 
 
 # 22. Exact next-session mission
 
-A fresh session should begin with this internal mission:
+A fresh implementation session should begin with this internal mission:
 
-> Resume Vres preproduction from the canonical checklist and current handoff. #163, #174 and #164 are DONE and must not be reopened without a new regression. Work only #176 Experience Intelligence. Verify authoritative main `fe31e30e593a44b8b5ab565fa0db859bbefec0c6`, read issue #176 plus `docs/architecture/EXPERIENCE-INTELLIGENCE-PLAN-2026-09-27.md` in full, verify the durable plan commit `34f45afa0fb8d5a6a90bef53dec58d9ecef1093d`, then begin only E1 contracts + episode ledger. Reuse existing Vres truth owners, preserve #163/#164 secret/security boundaries and #174 architecture governance, persist no hidden chain-of-thought, and do not begin #165 or later work until #176 is fully DONE.
+> Resume Vres preproduction from the canonical checklist and current handoff. #163, #174 and #164 are DONE. #176 E1 is also DONE: protected-reviewed head `bc03707c9cef77967cc1abd2ffe0733d4393b42c`, protected request `VAL-b7d08edab1c74e98` PASS with host-observed `claude-fable-5-1`, merge/main `407c4a323f4f65c8f28c422789508bb7ce128682`, and post-merge CI #455 PASS. Work only #176 E2 — transition verifier + safe consolidation. Verify authoritative main `407c4a323f4f65c8f28c422789508bb7ce128682`, read issue #176 plus `docs/architecture/EXPERIENCE-INTELLIGENCE-PLAN-2026-09-27.md` and the merged E1 contract in full, inspect existing truth owners and E1 ledger semantics, then freeze E2's smallest bounded contract before source edits. Preserve #163/#164 security boundaries, #174 architecture governance, E1 provenance/trust/failure semantics, no private model self-training and no hidden chain-of-thought persistence. Do not begin E3 until E2 is complete and evidenced. Do not begin #165 or later issues until #176 is fully DONE.
 
 This is the exact continuation point.
-
----
 
 # 23. Handoff integrity
 
@@ -1017,3 +1015,61 @@ Do not lose these carried criteria:
 
 Use the exact mission in section 22, with this session-seal section as the most recent operational clarification.
 
+
+
+---
+
+# 25. 2026-09-29 #176 E1 closure / E2 continuation seal
+
+This section supersedes older E1-start instructions elsewhere in this historical handoff.
+
+## Authoritative repository state
+
+- authoritative main: `407c4a323f4f65c8f28c422789508bb7ce128682`;
+- PR #179: merged;
+- E1 protected-reviewed head: `bc03707c9cef77967cc1abd2ffe0733d4393b42c`;
+- E1 task: `TASK-20260929-7e344a1e68`;
+- freeze checkpoint: `CP-20260929-7c91c106e4`;
+- protected validation: `VAL-b7d08edab1c74e98` — PASS;
+- validator/model: `vres-os:validator` / host-observed `claude-fable-5-1`;
+- exact-head CI #454 / `36557839748`: SUCCESS;
+- merge commit: `407c4a323f4f65c8f28c422789508bb7ce128682`;
+- post-merge main CI #455 / `36560731741`: SUCCESS;
+- post-merge suite: **1186 passed / 1 skipped**;
+- installed-runtime smoke: PASS;
+- release gate: `PASSED_WITH_EXPLICIT_LIVE_GATES`;
+- post-merge artifact: `11028544812`;
+- post-merge artifact digest: `sha256:047cbd0fa0ed34c38ab14e98f44fa07f0a7ca22d4039ff265a07340405f841a0`.
+
+## E1 status
+
+E1 contracts + immutable episode ledger: **DONE**.
+
+Accepted E1 additionally proves:
+- versioned experience policy is database-immutable;
+- complete accepted source evidence is sanitized/digested before compact projection;
+- work-unit episodes do not inherit task-wide validation authority;
+- work-unit episodes retain only directly attributable evidence plus stable task identity/objective and direct capabilities;
+- project/scope isolation, provenance, failure integrity, concurrency/idempotency and relation evidence remain bounded;
+- no E2+ behavior was smuggled into E1.
+
+Issue #176 remains open because E2–E8 remain.
+
+## Exact next implementation tranche
+
+**E2 — transition verifier + safe consolidation.**
+
+Before E2 source edits:
+1. verify `origin/main` exactly equals `407c4a323f4f65c8f28c422789508bb7ce128682`;
+2. read the canonical checklist, this section, issue #176, the frozen plan and merged E1 contract;
+3. inspect E1 tables/service plus knowledge/procedure/capability/decision/relation truth owners;
+4. create a dedicated E2 branch/worktree from authoritative main;
+5. freeze E2's bounded contract before implementation;
+6. implement only transition verification + safe consolidation;
+7. no E3 retrieval implementation yet;
+8. keep untrusted/external observations non-authoritative;
+9. preserve source/scope/trust/digest/failure provenance and revocation compatibility;
+10. use protected Fable/high when the E2 governance/security boundary requires it;
+11. require exact-head CI, guarded merge and post-merge main CI before E3.
+
+#165 and later issues remain blocked until all of #176 is DONE.
