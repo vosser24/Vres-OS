@@ -208,3 +208,19 @@ def test_release_gate_migration_digest_normalizes_checkout_newlines(tmp_path):
     crlf.write_bytes(b"SELECT 1;\r\nSELECT 2;\r\n")
 
     assert gate["migration_digest"](lf) == gate["migration_digest"](crlf)
+
+
+def test_experience_episode_migration_is_bounded_immutable_and_versioned():
+    sql = _migration("037_experience_episode_ledger.sql")
+    assert "CREATE TABLE IF NOT EXISTS vres.experience_policy_versions" in sql
+    assert "CREATE TABLE IF NOT EXISTS vres.experience_episodes" in sql
+    assert "176.e1.v1" in sql
+    assert "policy_digest" in sql
+    assert "source_digest" in sql and "payload_digest" in sql
+    assert "participation_class" in sql and "trust_class" in sql
+    assert "security_disposition" in sql
+    assert "uq_experience_episode_task" in sql
+    assert "uq_experience_episode_work_unit" in sql
+    assert "protect_experience_episode_immutability" in sql
+    assert "protect_experience_policy_immutability" in sql
+    assert "allow_experience_ledger_delete" in sql
