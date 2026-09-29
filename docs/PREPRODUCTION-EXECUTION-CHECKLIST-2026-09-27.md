@@ -158,7 +158,7 @@ Those belong to #169 / the applicable live embedding-runtime acceptance and were
 ---
 
 ### 4. #176 — Experience Intelligence / Governed Agent Learning
-Status: **ACTIVE — E1 DONE; E2 DONE; E3 NEXT**
+Status: **ACTIVE — E1 DONE; E2 DONE; E3 ACTIVE (contract + Chunk 1 committed locally; Chunk 1 hardening pending)**
 
 Durable plan:
 - issue #176;
@@ -242,6 +242,29 @@ E2 acceptance completed:
 - [x] guarded merge of PR #180 with expected-head protection;
 - [x] post-merge main CI #462 green;
 - [x] durable E2 closure evidence posted to issue #176 and PR #180.
+
+Current E3 checkpoint (local Windows worktree; not yet pushed):
+- worktree: `C:\Projects\Vres-Issue-176-E3-20260929`;
+- branch: `issue-176-e3-unified-experience-retrieval`;
+- E3 task: `TASK-20260929-9c9d52b7e5`;
+- authoritative base: `74c6445228a922db2622806f27e3c49a6c3454a7`;
+- frozen E3 contract commit: `c03b2c269c4118d47b39c4c3236fc106412b4d3b` (local only);
+- Chunk 1 implementation commit: `ff025a8a738062c3453d34cb045c5abf005db7f3` (local only);
+- remote E3 branch: **not created / not pushed yet**;
+- routing for Chunk 1: one Sonnet worker executing routed role `cto`, routine assurance, no work graph;
+- Chunk 1 files: new `src/vres_os/experience_retrieval.py`, `tests/test_experience_retrieval.py`, `tests/integration/test_experience_retrieval_journey.py`;
+- targeted unit/regression rerun: **97 passed** (39 new + 58 regression);
+- fresh isolated PostgreSQL E3 journey: **14 passed**;
+- existing E1/E2 integration journeys in the same fresh DB: **19 passed**;
+- repository-critical lint for the changed surface: PASS;
+- `git diff --check`: PASS;
+- no migration added;
+- no-write proof: 11-table row-count + md5-digest snapshot unchanged before/after retrieval, and attempted INSERT/UPDATE on the retrieval connection fail under read-only transaction semantics;
+- current bounded defect: E3 reused E2's broad write-time `_INJECTION` regex at read time, so benign words such as `policy` / `approved` may suppress legitimate memory. This must be hardened before Chunk 2;
+- procedure retrieval currently uses one scoped read query because `ProcedureService.find_matches` opens its own connection and lacks the required E3 scope gate; review for semantic duplication during hardening;
+- remaining E3 features intentionally deferred to later chunks: challenged/conflict surfacing, premise evaluation, semantic/embedding signal, raw-chunk fallback, MCP surface and Chairman integration.
+
+**Immediate E3 action: finish the already-dispatched Chunk 1 hardening prompt, review its exact test/commit report, and do not begin Chunk 2 until the read-time injection/trust behavior is closed and the 1–20 Chunk 1 test matrix is accounted for.**
 
 Implementation tranches:
 - [x] E1 contracts + episode ledger;
@@ -393,4 +416,27 @@ At the beginning of every future implementation session:
 
 ## Current next action
 
-**#176 E3 — unified experience retrieval is the only allowed implementation next step. Start from authoritative main `74c6445228a922db2622806f27e3c49a6c3454a7`. Read issue #176 and the frozen Experience Intelligence plan in full, inspect merged E1 episode semantics and merged E2 proposed-lesson / transition-audit semantics, then freeze E3's smallest bounded retrieval contract before source edits. E3 must build staged, scope-first, trust-aware retrieval across existing decisions/knowledge/procedures plus episodes, using structured/lexical/optional semantic/graph/time signals, explicit conflict/staleness/premise output and bounded raw-evidence fallback. It must not create a second truth store, must not treat relevance as truth/authority, must not mutate memory during retrieval, and must preserve #163/#164/#174/E1/E2 boundaries. Do not begin E4 until E3 implementation/tests/evidence are complete. Do not start #165 until #176 is fully DONE.**
+**#176 E3 is active. Resume the existing local E3 worktree/task; do not recreate the contract or Chunk 1. First finish and review the already-dispatched Chunk 1 hardening pass against contract `c03b2c269c4118d47b39c4c3236fc106412b4d3b` and Chunk 1 `ff025a8a738062c3453d34cb045c5abf005db7f3`. The immediate defect is the inappropriate reuse of E2's broad write-time `_INJECTION` regex as an E3 read-time suppression rule. Close that bounded defect, confirm procedure-query ownership, map all Chunk 1 requirements 1–20 to concrete tests, rerun the accepted isolated PostgreSQL/no-write methodology, and commit the hardening separately. Only then may E3 Chunk 2 begin. Do not push/open PR until the E3 tranche reaches the intended candidate gate. Do not begin E4 until E3 is fully accepted. Do not start #165 until #176 is fully DONE.**
+
+---
+
+### 11. Post-#170 queued backlog — Organizational Architecture & Specialist Intelligence
+Status: **QUEUED — DO NOT INTERRUPT CURRENT PIPELINE**
+
+Sequencing rule: new product requests discovered during the active frozen program are appended after #170 unless they are a defect/blocker in the current tranche.
+
+After #170, perform a forensic restoration/audit of the original Vres Agent Board design against the implemented organization. Do **not** infer the target board from the current agent files alone.
+
+Required backlog scope:
+- recover the original project-conversation/design artifacts for the complete department -> Director -> role -> specialist hierarchy;
+- specifically recover the original full Technology/IT/software organization, including software design/architecture, product-owner/product roles, database, backend/frontend, security, DevOps/platform, QA/reliability and other originally defined specialists;
+- compare original design vs current shipped executive roster vs dynamic project-agent/capability model;
+- identify intentionally consolidated roles vs accidentally lost roles;
+- formalize department_key -> role_key -> capability_key hierarchy;
+- keep organizational role identity distinct from execution tier and physical model;
+- surface human-facing specialist names (e.g. Database Engineer) instead of generic `vres-os:sonnet-expert` / `vres-os:opus-expert` as the primary worker identity;
+- add role/department/capability usage and performance attribution using only mechanically supported metrics: run counts, host-observed model, task family, validated outcome, rework/reroute/repair counts, runtime/tokens/cache/cost where trustworthy;
+- do not fabricate quality scores or auto-promote/demote roles/models from telemetry;
+- define when a recurring project specialist may be proposed for stable product-role graduation under explicit governance.
+
+This backlog item is **after #170** and must not alter #176/#165/#166/#167/#168/#169/#170 sequencing.
