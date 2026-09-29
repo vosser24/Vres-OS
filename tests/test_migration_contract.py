@@ -240,4 +240,3 @@ def test_experience_transition_migration_is_append_only_versioned_and_idempotent
     assert "allow_experience_ledger_delete" in sql
     assert "RETURN NEW;" not in sql
     assert "176.e1.v1" not in sql
-

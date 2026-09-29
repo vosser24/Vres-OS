@@ -1,9 +1,9 @@
 # Experience Intelligence E2 Contract — Transition Verifier + Safe Consolidation
 
-Date: 2026-09-29  
-Issue: #176  
-Base: `407c4a323f4f65c8f28c422789508bb7ce128682` (E1 merged, PR #179)  
-Branch: `issue-176-e2-consolidation`  
+Date: 2026-09-29
+Issue: #176
+Base: `407c4a323f4f65c8f28c422789508bb7ce128682` (E1 merged, PR #179)
+Branch: `issue-176-e2-consolidation`
 Plan: `docs/architecture/EXPERIENCE-INTELLIGENCE-PLAN-2026-09-27.md` (tranche E2)
 
 ## Scope
