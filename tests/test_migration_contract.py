@@ -188,6 +188,19 @@ def test_work_unit_acceptance_migration_extends_existing_dag_without_new_subsyst
     assert "test_case" not in sql.lower()
 
 
+def test_experience_episode_migration_is_immutable_and_provenance_bound():
+    sql = _migration("037_experience_episode_ledger.sql")
+    assert "CREATE TABLE IF NOT EXISTS vres.experience_episodes" in sql
+    assert "origin_kind IN ('task','work_unit')" in sql
+    assert "work_unit_attempt" in sql
+    assert "source_digest" in sql and "payload_digest" in sql
+    assert "security_disposition" in sql and "security_flags" in sql
+    assert "validate_experience_episode_insert" in sql
+    assert "protect_experience_episode_history" in sql
+    assert "allow_experience_ledger_delete" in sql
+    assert "ON DELETE RESTRICT" in sql
+
+
 def test_initial_migration_does_not_make_pg_trgm_a_hard_requirement():
     sql = _migration("001_initial.sql")
     assert "pg_available_extensions" in sql

@@ -418,7 +418,16 @@ class Repository:
     def complete_task(self, task_key: str, summary: str) -> None:
         with connect() as conn, conn.transaction():
             task_id = self._task_id(conn, task_key)
-            state = conn.execute("SELECT validation_status FROM vres.task_state WHERE task_id=%s FOR UPDATE", (task_id,)).fetchone()
+            task = conn.execute(
+                "SELECT project_id,status FROM vres.tasks WHERE id=%s FOR UPDATE",
+                (task_id,),
+            ).fetchone()
+            if not task or task["project_id"] is None:
+                raise ValueError("Task completion requires project provenance")
+            state = conn.execute(
+                "SELECT validation_status FROM vres.task_state WHERE task_id=%s FOR UPDATE",
+                (task_id,),
+            ).fetchone()
             if not state or state["validation_status"] != "passed":
                 raise ValueError("Task cannot complete while validation is pending or failed")
             conn.execute(
@@ -429,7 +438,17 @@ class Repository:
                 "INSERT INTO vres.task_events(task_id,event_type,actor,payload) VALUES (%s,'TASK_COMPLETED','chairman',%s::jsonb)",
                 (task_id, json.dumps({"summary": redact(summary)})),
             )
-            conn.execute("UPDATE vres.project_focus SET task_id=NULL,updated_at=now() WHERE task_id=%s", (task_id,))
+            conn.execute(
+                "UPDATE vres.project_focus SET task_id=NULL,updated_at=now() WHERE task_id=%s",
+                (task_id,),
+            )
+            from .experience import ExperienceService
+
+            ExperienceService.capture_task_in_conn(
+                conn,
+                project_id=int(task["project_id"]),
+                task_key=task_key,
+            )
 
     def latest_event(self, task_key: str, event_type: str) -> dict[str, Any] | None:
         with connect() as conn:

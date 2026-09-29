@@ -682,6 +682,13 @@ class RoutingService:
                     session_id or None,
                 ),
             )
+            from .experience import ExperienceService
+
+            ExperienceService.capture_work_unit_in_conn(
+                conn,
+                project_id=project_id,
+                work_unit_key=str(unit["work_unit_key"]),
+            )
         return {
             "recorded": True,
             "accepted": False,
@@ -900,6 +907,13 @@ class RoutingService:
                             session_id or None,
                         ),
                     )
+                from .experience import ExperienceService
+
+                ExperienceService.capture_work_unit_in_conn(
+                    conn,
+                    project_id=project_id,
+                    work_unit_key=work_unit_key,
+                )
         return {
             "recorded": True,
             "task_key": task_key,
@@ -1097,6 +1111,13 @@ class RoutingService:
             conn.execute(
                 "UPDATE vres.project_focus SET task_id=NULL,updated_at=now() WHERE task_id=%s",
                 (task["id"],),
+            )
+            from .experience import ExperienceService
+
+            ExperienceService.capture_task_in_conn(
+                conn,
+                project_id=project_id,
+                task_key=task_key,
             )
         return {
             "completed": True,
