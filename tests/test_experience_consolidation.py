@@ -1,8 +1,10 @@
 import copy
+import inspect
 
 import pytest
 
-from vres_os.experience import POLICY_DIGEST as E1_DIGEST, POLICY_VERSION as E1_VERSION
+from vres_os.experience import POLICY_DIGEST as E1_DIGEST
+from vres_os.experience import POLICY_VERSION as E1_VERSION
 from vres_os.experience_consolidation import (
     POLICY,
     POLICY_DIGEST,
@@ -208,26 +210,35 @@ def test_validated_novel_requires_validated_completed_episodes():
         _verify(candidate, {"EXP-1": _episode("EXP-1", outcome="passed", trust="validated_runtime")})
 
 
-def test_recurrence_requires_replay_calibration_and_distinct_tasks():
+def test_recurrence_is_unconditionally_quarantined_until_replay_calibration():
     candidate = _candidate(polarity="positive", trigger="recurrence", evidence=[
         {"episode_key": "EXP-1", "pointer": "/objective", "quote": "Deploy"},
         {"episode_key": "EXP-2", "pointer": "/objective", "quote": "Deploy"},
     ])
-    two_tasks = {"EXP-1": _episode("EXP-1", outcome="completed", task_id=1),
-                 "EXP-2": _episode("EXP-2", outcome="completed", task_id=2)}
-    uncalibrated = _verify(candidate, two_tasks)
-    assert uncalibrated["quarantine_reasons"] == ["recurrence_threshold_uncalibrated"]
-    assert uncalibrated["checks"]["trigger"] == "fail"
 
-    same_task = {"EXP-1": _episode("EXP-1", outcome="completed", task_id=1),
-                 "EXP-2": _episode("EXP-2", outcome="completed", task_id=1)}
-    with pytest.raises(ValueError, match="recurrence"):
-        _verify(candidate, same_task, min_recurrence=2)
-    assert _verify(candidate, two_tasks, min_recurrence=2)["quarantine_reasons"] == []
-    with pytest.raises(ValueError, match="recurrence"):
-        _verify(candidate, two_tasks, min_recurrence=3)
-    with pytest.raises(ValueError, match="calibration"):
-        _verify(candidate, two_tasks, min_recurrence=1)
+    two_tasks = {
+        "EXP-1": _episode("EXP-1", outcome="completed", task_id=1),
+        "EXP-2": _episode("EXP-2", outcome="completed", task_id=2),
+    }
+    result = _verify(candidate, two_tasks)
+
+    assert result["quarantine_reasons"] == ["recurrence_threshold_uncalibrated"]
+    assert result["checks"]["trigger"] == "fail"
+    assert result["checks"]["participation_trust"] == "pass"
+
+    same_task = {
+        "EXP-1": _episode("EXP-1", outcome="completed", task_id=1),
+        "EXP-2": _episode("EXP-2", outcome="completed", task_id=1),
+    }
+    same_task_result = _verify(candidate, same_task)
+
+    assert same_task_result["quarantine_reasons"] == [
+        "recurrence_threshold_uncalibrated"
+    ]
+    assert same_task_result["checks"]["participation_trust"] == "pass"
+
+    # E2 v1 has no direct-call escape hatch that can activate recurrence.
+    assert "min_recurrence" not in inspect.signature(verify_transition).parameters
 
 
 @pytest.mark.parametrize(

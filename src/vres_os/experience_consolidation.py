@@ -7,7 +7,11 @@ from .db import connect
 from .experience import _HIDDEN_REASONING_KEYS, _canonical, _normalize_key, _sha256
 from .knowledge import KnowledgeService
 from .relations import relate_in_conn
-from .sensitive_policy import SENSITIVE_REVIEW_REQUIRED, SENSITIVE_SANITIZED, sanitize_extracted_text
+from .sensitive_policy import (
+    SENSITIVE_REVIEW_REQUIRED,
+    SENSITIVE_SANITIZED,
+    sanitize_extracted_text,
+)
 
 POLICY_VERSION = "176.e2.v1"
 POLICY_SCHEMA_VERSION = 1
@@ -164,8 +168,6 @@ def statement_digest(statement: str) -> str:
 def verify_transition(
     candidate: dict[str, Any],
     episodes: dict[str, dict[str, Any]],
-    *,
-    min_recurrence: int | None = RECURRENCE_MIN_TASKS,
 ) -> dict[str, Any]:
     """Deterministic verifier. Raises on any integrity/support/rule failure; otherwise returns
     quarantine reasons (empty means acceptable) and per-check results. Persists nothing."""
@@ -206,22 +208,16 @@ def verify_transition(
             raise ValueError("validated_novel requires every episode to be validated_runtime and completed")
         checks["trigger"] = "pass"
     else:
-        if min_recurrence is None:
-            reasons.append("recurrence_threshold_uncalibrated")
-            checks["trigger"] = "fail"
-        else:
-            if isinstance(min_recurrence, bool) or not isinstance(min_recurrence, int) or min_recurrence < 2:
-                raise ValueError("recurrence calibration must require at least 2 distinct tasks")
-            if len({e["task_id"] for e in rows}) < min_recurrence:
-                raise ValueError(f"recurrence requires episodes from at least {min_recurrence} distinct tasks")
-            checks["trigger"] = "pass"
+        reasons.append("recurrence_threshold_uncalibrated")
+        checks["trigger"] = "fail"
 
-    if any(
+    participation_trust_failed = any(
         e["participation_class"] != "participated" or e["trust_class"] == "external_untrusted_observation"
         for e in rows
-    ):
+    )
+    if participation_trust_failed:
         reasons.append("untrusted_or_observed_evidence")
-    checks["participation_trust"] = "fail" if reasons else "pass"
+    checks["participation_trust"] = "fail" if participation_trust_failed else "pass"
     if _INJECTION.search(candidate["title"] + "\n" + candidate["statement"]):
         reasons.append("instruction_shaped_text")
         checks["injection_heuristic"] = "fail"
@@ -389,7 +385,7 @@ class ExperienceConsolidationService:
                 reasons.append("literal_support_verified")
 
             conn.execute(
-                f"""
+                """
                 INSERT INTO vres.experience_transitions(
                   transition_key,project_id,policy_version,policy_digest,kind,polarity,trigger,subject_key,verdict,
                   reason_codes,candidate,candidate_digest,before_digest,after_digest,source_episodes,knowledge_key,
