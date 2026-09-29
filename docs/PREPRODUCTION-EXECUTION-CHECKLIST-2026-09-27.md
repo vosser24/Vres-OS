@@ -1,8 +1,8 @@
 # Vres Preproduction Execution Checklist
 
-Date: 2026-09-27  
+Date: 2026-09-29  
 Repository: `vosser24/Vres-OS`  
-Authoritative main after #163: `7f9961b5980f1a229cece4902f9e1d709e397e22`
+Authoritative main after #174: `11591b72b3d396a370e315313925e19b8bcb45ec`
 
 ## Governing rule
 
@@ -64,36 +64,53 @@ Physical Windows/customer-environment criteria remain intentionally deferred to 
 - second Windows-user isolation;
 - uninstall/reinstall preserving native Claude/Codex authentication.
 
-**#174 is now the first and only allowed implementation/acceptance item.**
+**#164 is now the first and only allowed implementation/acceptance item.**
 
 ---
 
 ### 2. #174 — Engineering Architecture Governance
-Status: **ACTIVE NEXT — built on old base, must be refreshed before acceptance**
+Status: **DONE — protected exact-head PASS, merged, post-merge CI green, issue closed**
 
-Current held candidate:
+Accepted implementation:
 - PR #175
 - branch: `issue-174-engineering-architecture-governance`
-- held head: `9756b44d4ae953db327b10072e70003e51df9404`
-- old base: `f0a69c3e471fe25c6547ee1af162019caf290d49`
-- new authoritative main: `7f9961b5980f1a229cece4902f9e1d709e397e22`
-- prior exact-head CI on held head: run **#437** / `36349196127` — SUCCESS
+- original held head: `9756b44d4ae953db327b10072e70003e51df9404`
+- integrated/validated head: `7ded3c16e5e85f5715fb052f403907eec3750628`
+- authoritative integration base: `7f9961b5980f1a229cece4902f9e1d709e397e22`
+- exact-head CI: run **#439** / `36455460478` — SUCCESS
+- final protected validation: `VAL-aa05bb6018e941cc` — PASS
+- host-observed protected validator: `claude-fable-5-1` under pinned Fable/high
+- merge commit / new authoritative main: `11591b72b3d396a370e315313925e19b8bcb45ec`
+- post-merge main CI: run **#440** / `36530581547` — SUCCESS
+- post-merge PostgreSQL-backed suite: PASS
+- post-merge installed-runtime smoke: PASS
+- post-merge local release gate: PASS
+- post-merge evidence artifact: `11016787086`
+- artifact digest: `sha256:59e506706a168648057860d8e683816940973a512440c09c253228296d5abedf`
+- issue #174: **closed / completed** on 2026-09-29
 
-Required now:
-- [ ] update/rebase #174 onto new authoritative main;
-- [ ] resolve any integration drift;
-- [ ] exact-head full CI green;
-- [ ] protected Fable/high validation on the new exact head;
-- [ ] merge PR #175;
-- [ ] post-merge main CI green;
-- [ ] close #174.
+Acceptance completed:
+- [x] history-preserving integration of current main;
+- [x] integration/security audit with #163 behavior preserved;
+- [x] deterministic architecture audit excludes Vres-owned `.vres`, including `.vres/local-secrets`;
+- [x] C7 local-terminal credential authority carve-out locked by regression coverage;
+- [x] targeted architecture/#163 integration tests green;
+- [x] isolated full PostgreSQL-backed local suite green;
+- [x] release gate green;
+- [x] exact-head CI #439 green;
+- [x] canonical protected `vres-os:validator` Fable/high PASS on exact head;
+- [x] merge PR #175 with expected-head protection;
+- [x] post-merge main CI #440 green;
+- [x] close #174.
 
-**Do not start #164 implementation until #174 is DONE.**
+Phase 5 initially exposed protected-validation sequencing mistakes, not a #174 code defect. Durable VATT evidence confirmed the existing #42 contract remains correct: freeze/checkpoint before `validation_prepare`, do not mutate task state while validation is in flight, and use `task_reply_gate(advances_state=false)` with `mode=validation_in_flight` for interim status replies. The clean Phase 5B run followed that protocol and produced the authoritative host-attested PASS above.
+
+**#164 is now the first and only allowed implementation/acceptance item.**
 
 ---
 
 ### 3. #164 — Secret-safe onboarding
-Status: **NOT STARTED**
+Status: **ACTIVE NEXT — implementation not started**
 
 Required:
 - [ ] implement secret-bearing path exclusion;
@@ -273,4 +290,4 @@ At the beginning of every future implementation session:
 
 ## Current next action
 
-**#174 refresh onto authoritative main is the only allowed implementation/acceptance next step. Verify PR #175/head/base first, update it onto `7f9961b5980f1a229cece4902f9e1d709e397e22`, resolve integration drift, then rerun exact-head CI and protected Fable/high before merge.**
+**#164 Secret-safe onboarding is the only allowed implementation next step. Start from authoritative main `11591b72b3d396a370e315313925e19b8bcb45ec`. Read issue #164 in full, inspect the merged Credential Broker and onboarding ingestion paths, freeze the smallest security contract, then implement deterministic sensitive-path exclusion, pre-model/pre-persistence sanitization, fail-closed uncertain-sensitive handling, Credential Broker reuse, synthetic-secret regression coverage, protected Fable/high validation, exact-head CI, merge and post-merge CI. Do not start #176 until #164 is DONE.**
