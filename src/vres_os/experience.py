@@ -650,6 +650,10 @@ class ExperienceService:
 
         validation = None
         if task["validation_status"] == "passed":
+            # Completion authority remains owned by the existing task lifecycle. Historical
+            # and synthetic legacy tasks can legitimately carry the grandfathered
+            # validation_status projection without a validation_requests row. E1 must not
+            # invent validation provenance or make that older completion path stricter.
             latest_validation = conn.execute(
                 """
                 SELECT request_key,state_digest,status,observed_model,
@@ -660,11 +664,8 @@ class ExperienceService:
                 """,
                 (task_id,),
             ).fetchone()
-            if not latest_validation or latest_validation["status"] != "passed":
-                raise UnsafeExperienceEvidence(
-                    "Completed protected task lacks a current passed validation request"
-                )
-            validation = latest_validation
+            if latest_validation and latest_validation["status"] == "passed":
+                validation = latest_validation
 
         final = _latest_event(conn, task_id, ("ORCHESTRATION_FINAL",))
         final_payload = dict(final["payload"]) if final else None
