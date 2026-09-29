@@ -818,25 +818,23 @@ Do not start #165 until #176 is fully implemented, tested, protected-validated a
 
 ---
 
-# 18. Experience Intelligence plan remains frozen
+# 18. Experience Intelligence plan is frozen and now active
 
-Issue #176 implementation is not yet allowed.
+Issue #176 implementation is now allowed because all prerequisites are DONE.
 
 Durable plan:
 
-- branch: `docs-176-experience-intelligence-plan-20260927`
-- commit: `34f45afa0fb8d5a6a90bef53dec58d9ecef1093d`
-- file: `docs/architecture/EXPERIENCE-INTELLIGENCE-PLAN-2026-09-27.md`
+- branch: `docs-176-experience-intelligence-plan-20260927`;
+- commit / branch head: `34f45afa0fb8d5a6a90bef53dec58d9ecef1093d`;
+- file: `docs/architecture/EXPERIENCE-INTELLIGENCE-PLAN-2026-09-27.md`.
 
-Core principle:
+Core principles:
 
 > **Models are replaceable workers. Vres owns the experience.**
 
-and:
-
 > **Store evidence richly. Retrieve context sparsely. Promote authority conservatively.**
 
-Do not implement #176 before #163, #174 and #164 prerequisites are DONE.
+Implementation begins only with **E1 — contracts + episode ledger**. The broader E1→E8 order remains frozen; E9 physical acceptance stays in #169.
 
 ---
 
@@ -892,16 +890,17 @@ Canonical checklist/handoff branch:
 
 `docs-execution-checklist-20260927`
 
-During the 2026-09-29 closeout:
+During the 2026-09-29 #164 closeout:
 
-- checklist was updated to mark #174 DONE and activate #164;
-- authoritative main was advanced to `11591b72b3d396a370e315313925e19b8bcb45ec`;
-- final #174 exact-head CI/protected validation/merge/post-merge CI evidence was recorded;
-- this handoff was rewritten to the #164 continuation boundary.
+- #164 candidate `eddfa35d5418e23d6bac8792df0a6d1877d880a8` passed exact-head CI #441;
+- protected validation `VAL-f8d685ab3575430c` passed with host-observed `claude-fable-5-1`;
+- PR #177 merged as `fe31e30e593a44b8b5ab565fa0db859bbefec0c6`;
+- post-merge main CI #442 passed;
+- issue #164 was closed completed;
+- checklist was updated to mark #164 DONE and activate #176;
+- this handoff was rewritten to the #176 continuation boundary.
 
-These docs changes are direct Git commits on the documentation branch; there is no uncommitted remote edit state from these updates.
-
-Do not merge this documentation branch blindly into product main without first considering the chosen #174 integration flow. The next session should treat the branch as durable planning evidence and decide the cleanest docs/main integration as part of #174 bookkeeping without weakening exact-head acceptance.
+These documentation changes are direct Git commits on the documentation branch. Product main is authoritative for runtime code; this branch is the durable execution ledger/handoff and must not be merged blindly merely to copy planning text.
 
 ---
 
@@ -928,4 +927,93 @@ Authoritative hierarchy:
 5. historical handoffs/chat summaries.
 
 When an issue becomes DONE, update the checklist and handoff again before moving on.
+
+
+---
+
+# 24. 2026-09-29 session seal
+
+This section is the final chat/session boundary after #164 closeout.
+
+## Authoritative repository state
+
+- repository: `vosser24/Vres-OS`;
+- authoritative `origin/main`: `fe31e30e593a44b8b5ab565fa0db859bbefec0c6`;
+- PR #177: merged;
+- issue #164: closed / completed;
+- post-merge CI #442 / `36544341349`: SUCCESS;
+- next open implementation issue: #176;
+- #176 frozen plan branch/head: `docs-176-experience-intelligence-plan-20260927` @ `34f45afa0fb8d5a6a90bef53dec58d9ecef1093d`.
+
+## #164 local task housekeeping
+
+The #164 implementation task is:
+
+`TASK-20260929-03eade4905`
+
+The chat contains authoritative protected PASS and repository closure evidence, but it does **not** contain a confirmed final read-back showing that `task_complete` was actually executed after the external merge/post-merge closeout.
+
+Therefore a future operator should **not guess**:
+
+1. in the old #164 worktree/session, read the task status first;
+2. if it is already completed, do nothing;
+3. if it is still active and the original exact candidate worktree remains at the reviewed head with the accepted validation current, complete only that historical task without reopening #164 product work;
+4. do not checkpoint or mutate the old task merely to narrate closure;
+5. do not use that historical task as the #176 task.
+
+This housekeeping does not block #176 repository work because #164 product acceptance, merge, post-merge CI and issue closure are already complete.
+
+## Fresh #176 session start
+
+Preferred clean worktree:
+
+`C:\Projects\Vres-Issue-176-Experience-Intelligence-20260929`
+
+Start from exact authoritative main:
+
+`fe31e30e593a44b8b5ab565fa0db859bbefec0c6`
+
+Before source edits:
+
+1. fetch/prune origin and verify `origin/main` exact SHA;
+2. read the canonical checklist and this handoff;
+3. read issue #176 in full;
+4. read the frozen plan at commit `34f45afa0fb8d5a6a90bef53dec58d9ecef1093d`;
+5. inspect current Vres truth owners before adding schema/services;
+6. create a dedicated #176 branch/worktree from authoritative main;
+7. begin only **E1 — contracts + episode ledger**;
+8. freeze E1's smallest bounded contract before editing;
+9. do not begin E2 until E1 implementation/tests/evidence are complete;
+10. do not start #165 or any later issue.
+
+## E1 non-negotiable boundaries
+
+E1 must:
+
+- add only missing experience-specific primitives;
+- reuse task/checkpoint state, decisions, knowledge, procedures, capabilities, relations, sources, artifacts, work reports and validation as existing truth owners;
+- keep execution state separate from long-term experience;
+- persist no raw hidden chain-of-thought;
+- derive episodes only from mechanically known/sanitized evidence;
+- retain project/scope/trust/source/digest provenance;
+- capture meaningful failures as failures, never silently as positive procedures;
+- preserve #163 Credential Broker and #164 secret-safe ingestion boundaries;
+- preserve #174 architecture/governance rules;
+- add PostgreSQL migration only when required by the E1 data contract;
+- include malformed/corrupt payload fail-closed tests, scope isolation, provenance/digest checks, secret/injection negative proofs and rollback/idempotency appropriate to durable writes.
+
+## Deferred live evidence still owned by #169
+
+Do not lose these carried criteria:
+
+- real Windows Credential Locker/current-user isolation;
+- real first-run SentenceTransformer configured-model acquisition;
+- sanitized wizzard_9 legacy-project onboarding;
+- target Windows/Visual Studio integrated project adoption;
+- Experience Intelligence E9 live proof after E1–E8 are merged;
+- final production/go-live evidence remains #170.
+
+## Fresh-session resume prompt
+
+Use the exact mission in section 22, with this session-seal section as the most recent operational clarification.
 
