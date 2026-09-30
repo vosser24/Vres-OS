@@ -202,26 +202,24 @@ def test_foreign_keys_and_uniqueness_are_enforced(pg_project):
     _rejects(uq, pg_project, "retire", aid, idempotency_key="a" * 64)
 
 
-def test_update_always_rejected_and_delete_only_with_guc(pg_project):
+def test_update_and_delete_always_rejected_even_with_legacy_guc(pg_project):
     _, aid = _approval(pg_project)
     with connect() as conn, conn.transaction():
         rid = _insert(conn, _row(pg_project, "retire", aid))
-    for guc in (False, True):
-        with pytest.raises(pgerr.RaiseException):
-            with connect() as conn, conn.transaction():
-                if guc:
-                    conn.execute("SELECT set_config('vres.allow_experience_ledger_delete','on',true)")
-                conn.execute(f"UPDATE vres.{TABLE} SET reason='changed' WHERE id=%s", (rid,))
-    with pytest.raises(pgerr.RaiseException):
-        with connect() as conn, conn.transaction():
-            conn.execute(f"DELETE FROM vres.{TABLE} WHERE id=%s", (rid,))
+    statements = (f"UPDATE vres.{TABLE} SET reason='changed' WHERE id=%s", f"DELETE FROM vres.{TABLE} WHERE id=%s")
+    for stmt in statements:
+        for guc in (False, True):
+            with pytest.raises(pgerr.RaiseException, match="immutable"):
+                with connect() as conn, conn.transaction():
+                    if guc:
+                        conn.execute("SELECT set_config('vres.allow_experience_ledger_delete','on',true)")
+                    conn.execute(stmt, (rid,))
     with connect() as conn:
-        assert conn.execute(f"SELECT reason FROM vres.{TABLE} WHERE id=%s", (rid,)).fetchone()["reason"] == "because"
-    with connect() as conn, conn.transaction():
-        conn.execute("SELECT set_config('vres.allow_experience_ledger_delete','on',true)")
-        conn.execute(f"DELETE FROM vres.{TABLE} WHERE id=%s", (rid,))
-    with connect() as conn:
-        assert conn.execute(f"SELECT count(*) AS n FROM vres.{TABLE} WHERE id=%s", (rid,)).fetchone()["n"] == 0
+        row = conn.execute(f"SELECT reason FROM vres.{TABLE} WHERE id=%s", (rid,)).fetchone()
+        assert row is not None and row["reason"] == "because"
+        src = conn.execute(
+            "SELECT prosrc FROM pg_proc WHERE proname='protect_experience_lifecycle_immutability'").fetchone()["prosrc"]
+        assert "current_setting" not in src and "RETURN" not in src
 
 
 def test_knowledge_status_accepts_nine_values_and_rejects_unknown(pg_project):

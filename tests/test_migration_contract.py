@@ -250,11 +250,11 @@ def test_experience_lifecycle_ledger_migration_is_append_only_bounded_and_additi
     assert "BEFORE UPDATE ON vres.experience_lifecycle_events" in sql
     assert "BEFORE DELETE ON vres.experience_lifecycle_events" in sql
     assert "DROP TRIGGER IF EXISTS" in sql
-    # DELETE-only cleanup bypass, identical to 038; UPDATE always raises.
-    assert "TG_OP = 'DELETE'" in sql
-    assert "vres.allow_experience_ledger_delete" in sql
-    assert "RETURN OLD;" in sql
-    assert "RETURN NEW;" not in sql
+    # No bypass: UPDATE and DELETE always raise (test cleanup disables the trigger as table owner).
+    assert "allow_experience_ledger_delete" not in sql
+    assert "current_setting" not in sql
+    assert "RETURN OLD" not in sql
+    assert "RETURN NEW" not in sql
     assert "TRUNCATE" not in sql
     assert "policy_version = '176.e4.v1'" in sql
     # nine-value knowledge status vocabulary, drop/re-add without a data rewrite

@@ -57,10 +57,7 @@ RETURNS trigger
 LANGUAGE plpgsql
 AS $vres_lifecycle$
 BEGIN
-    IF TG_OP = 'DELETE'
-       AND current_setting('vres.allow_experience_ledger_delete', true) = 'on' THEN
-        RETURN OLD;
-    END IF;
+    -- Append-only with no bypass setting: UPDATE and DELETE always raise.
     RAISE EXCEPTION 'experience_lifecycle_events are immutable; append a new event instead of modifying history';
 END
 $vres_lifecycle$;
