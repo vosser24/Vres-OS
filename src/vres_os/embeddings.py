@@ -6,10 +6,12 @@ from functools import lru_cache
 from typing import Any
 
 from .config import ConfigStore
+from .knowledge_status import exclude_non_use_sql
 from .redaction import redact_text
 
 MAX_ATTEMPTS = 3
 STALE_MINUTES = 20
+_K_USABLE = exclude_non_use_sql("k.status")
 
 
 class EmbeddingUnavailable(RuntimeError):
@@ -225,7 +227,7 @@ class EmbeddingService:
             if vector_enabled:
                 literal = "[" + ",".join(f"{x:.9g}" for x in q) + "]"
                 rows = conn.execute(
-                    """
+                    f"""
                     SELECT c.chunk_key,c.source_id,c.knowledge_id,c.section,c.content,s.source_key,s.title AS source_title,
                            1 - (c.embedding_vector <=> %s::vector) AS score
                       FROM vres.knowledge_chunks c
@@ -234,6 +236,7 @@ class EmbeddingService:
                      WHERE c.embedding_vector IS NOT NULL AND c.embedding_model=%s AND c.embedding_dimensions=%s
                        AND (s.id IS NULL OR s.status='active')
                        AND (k.id IS NULL OR k.status NOT IN ('rejected','superseded','challenged'))
+                       AND (k.id IS NULL OR {_K_USABLE})
                        AND (
                          %s IS NULL
                          OR (k.id IS NOT NULL AND (k.project_id=%s OR k.project_id IS NULL))
@@ -246,7 +249,7 @@ class EmbeddingService:
                 ).fetchall()
                 return [dict(r) for r in rows]
             rows = conn.execute(
-                """
+                f"""
                 SELECT c.chunk_key,c.source_id,c.knowledge_id,c.section,c.content,c.embedding,c.embedding_dimensions,
                        s.source_key,s.title AS source_title
                   FROM vres.knowledge_chunks c
@@ -255,6 +258,7 @@ class EmbeddingService:
                  WHERE c.embedding IS NOT NULL AND c.embedding_model=%s AND c.embedding_dimensions=%s
                    AND (s.id IS NULL OR s.status='active')
                    AND (k.id IS NULL OR k.status NOT IN ('rejected','superseded','challenged'))
+                   AND (k.id IS NULL OR {_K_USABLE})
                    AND (
                      %s IS NULL
                      OR (k.id IS NOT NULL AND (k.project_id=%s OR k.project_id IS NULL))

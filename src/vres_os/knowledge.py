@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any
 
 from .approvals import require_approval, require_company_approval
+from .knowledge_status import NON_USE_STATUSES, exclude_non_use_sql
 from .redaction import redact, redact_text
 from .relations import relate as persist_relation
 
@@ -23,6 +24,8 @@ _TRANSITIONS = {
     "superseded": set(),
 }
 _RANK = {"proposed": 0, "observed": 1, "challenged": 1, "validated": 2, "canonical": 3}
+_USABLE = exclude_non_use_sql("status")
+_K_USABLE = exclude_non_use_sql("k.status")
 
 
 def _connect():
@@ -40,6 +43,50 @@ def _approval_id(conn, approval_key: str | None, project_id: int | None, knowled
     if not approval_key:
         return None
     return require_approval(conn, approval_key, project_id, "knowledge_publish", knowledge_key)
+
+
+def lock_knowledge_rows(conn, keys) -> dict[str, dict[str, Any]]:
+    """Lock the named knowledge rows FOR UPDATE in ascending id order, so concurrent writers cannot deadlock."""
+    rows = conn.execute(
+        "SELECT id,knowledge_key,project_id,knowledge_type,status,valid_to,review_after FROM vres.knowledge_items "
+        "WHERE knowledge_key=ANY(%s) ORDER BY id FOR UPDATE",
+        (list(keys),),
+    ).fetchall()
+    return {r["knowledge_key"]: r for r in rows}
+
+
+def check_supersession(old: dict[str, Any], new: dict[str, Any]) -> None:
+    """Supersession rules shared by the legacy and the E4 lifecycle path; both rows must already be locked."""
+    if old["knowledge_key"] == new["knowledge_key"]:
+        raise ValueError("Knowledge item cannot supersede itself")
+    if old["knowledge_type"] != new["knowledge_type"]:
+        raise ValueError("Replacement knowledge must have the same knowledge_type")
+    if old["project_id"] != new["project_id"]:
+        raise ValueError("Replacement knowledge must have the same project/company scope")
+    if old["status"] == "superseded":
+        raise ValueError(f"{old['knowledge_key']} is already superseded")
+    for row in (old, new):
+        if row["status"] in NON_USE_STATUSES:
+            raise ValueError(f"{row['knowledge_key']} is {row['status']} and not usable for supersession")
+    if _RANK.get(new["status"], 0) < _RANK.get(old["status"], 0):
+        raise ValueError("Replacement cannot be less mature than the knowledge it supersedes")
+
+
+def write_supersession(conn, old_key: str, new_key: str, *, valid_to: datetime | None = None) -> None:
+    """Mark old superseded by new (valid_to is set only when given and still NULL) and record the relation."""
+    conn.execute(
+        "UPDATE vres.knowledge_items SET status='superseded',superseded_by=%s,"
+        "valid_to=COALESCE(valid_to,%s::timestamptz),updated_at=now() WHERE knowledge_key=%s",
+        (new_key, valid_to, old_key),
+    )
+    conn.execute(
+        """
+        INSERT INTO vres.relations(source_kind,source_key,relation_type,target_kind,target_key,provenance,confidence)
+        VALUES ('knowledge',%s,'superseded_by','knowledge',%s,'knowledge lifecycle',1.0)
+        ON CONFLICT(source_kind,source_key,relation_type,target_kind,target_key) DO NOTHING
+        """,
+        (old_key, new_key),
+    )
 
 
 class KnowledgeService:
@@ -206,6 +253,10 @@ class KnowledgeService:
             ).fetchone()
             if not row:
                 raise KeyError(knowledge_key)
+            if row["status"] in NON_USE_STATUSES:
+                raise ValueError(
+                    f"{knowledge_key} is {row['status']} and not usable; change it only through the E4 lifecycle service"
+                )
             if status is not None and status != row["status"] and status not in _TRANSITIONS[row["status"]]:
                 raise ValueError(f"Invalid knowledge transition {row['status']} -> {status}")
             target = status or row["status"]
@@ -257,40 +308,12 @@ class KnowledgeService:
 
     def supersede(self, old_key: str, new_key: str) -> None:
         with _connect() as conn, conn.transaction():
-            old = conn.execute(
-                "SELECT id,project_id,knowledge_type,status FROM vres.knowledge_items WHERE knowledge_key=%s",
-                (old_key,),
-            ).fetchone()
-            new = conn.execute(
-                "SELECT id,project_id,knowledge_type,status FROM vres.knowledge_items WHERE knowledge_key=%s",
-                (new_key,),
-            ).fetchone()
+            rows = lock_knowledge_rows(conn, (old_key, new_key))
+            old, new = rows.get(old_key), rows.get(new_key)
             if not old or not new:
                 raise KeyError(old_key if not old else new_key)
-            if old_key == new_key:
-                raise ValueError("Knowledge item cannot supersede itself")
-            if old["knowledge_type"] != new["knowledge_type"]:
-                raise ValueError("Replacement knowledge must have the same knowledge_type")
-            if old["project_id"] != new["project_id"]:
-                raise ValueError("Replacement knowledge must have the same project/company scope")
-            if old["status"] == "superseded":
-                raise ValueError(f"{old_key} is already superseded")
-            old_rank = _RANK.get(old["status"], 0)
-            new_rank = _RANK.get(new["status"], 0)
-            if new_rank < old_rank:
-                raise ValueError("Replacement cannot be less mature than the knowledge it supersedes")
-            conn.execute(
-                "UPDATE vres.knowledge_items SET status='superseded',superseded_by=%s,updated_at=now() WHERE knowledge_key=%s",
-                (new_key, old_key),
-            )
-            conn.execute(
-                """
-                INSERT INTO vres.relations(source_kind,source_key,relation_type,target_kind,target_key,provenance,confidence)
-                VALUES ('knowledge',%s,'superseded_by','knowledge',%s,'knowledge lifecycle',1.0)
-                ON CONFLICT(source_kind,source_key,relation_type,target_kind,target_key) DO NOTHING
-                """,
-                (old_key, new_key),
-            )
+            check_supersession(old, new)
+            write_supersession(conn, old_key, new_key)
 
     def search(self, query: str, limit: int = 8, project_id: int | None = None) -> list[dict[str, Any]]:
         query = query.strip()
@@ -299,13 +322,14 @@ class KnowledgeService:
         limit = max(1, min(int(limit), 50))
         with _connect() as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT knowledge_key,knowledge_type,title,statement,status,scope,confidence,
                        last_verified_at,review_after,
                        ts_rank(search_vector, plainto_tsquery('simple', %s)) AS rank
                   FROM vres.knowledge_items
                  WHERE (%s IS NULL OR project_id=%s OR project_id IS NULL)
                    AND status NOT IN ('rejected','superseded')
+                   AND {_USABLE}
                    AND (search_vector @@ plainto_tsquery('simple', %s)
                         OR title ILIKE '%%' || %s || '%%' OR statement ILIKE '%%' || %s || '%%')
                  ORDER BY ts_rank(search_vector, plainto_tsquery('simple', %s)) DESC,
@@ -323,7 +347,7 @@ class KnowledgeService:
         limit = max(1, min(int(limit), 50))
         with _connect() as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT c.chunk_key,c.source_id,c.knowledge_id,c.section,c.content,
                        ts_rank(c.search_vector,plainto_tsquery('simple',%s)) AS rank,
                        s.source_key,s.title AS source_title,s.source_type,s.path_or_uri
@@ -332,6 +356,7 @@ class KnowledgeService:
                   LEFT JOIN vres.knowledge_items k ON k.id=c.knowledge_id
                  WHERE c.search_vector @@ plainto_tsquery('simple',%s)
                    AND (k.id IS NULL OR k.status NOT IN ('rejected','superseded','challenged'))
+                   AND (k.id IS NULL OR {_K_USABLE})
                    AND (s.id IS NULL OR s.status='active')
                    AND (
                      %s IS NULL

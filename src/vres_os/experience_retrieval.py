@@ -21,10 +21,16 @@ import psycopg
 from .embeddings import EmbeddingUnavailable
 from .experience import _HIDDEN_REASONING_KEYS, _canonical, _normalize_key
 from .experience_consolidation import episode_payload_digest, statement_digest
+from .knowledge_status import exclude_non_use_sql
 from .redaction import redact_text
 from .sensitive_policy import SENSITIVE_SANITIZED, sanitize_extracted_text
 
 SCHEMA_VERSION = "176.e3.v1"
+# Statuses this reader knows how to classify; any other (E4 `retired`/`revoked`, or unknown) fails closed.
+_CLASSIFIED_KNOWLEDGE_STATUSES = frozenset(
+    {"proposed", "observed", "validated", "canonical", "challenged", "superseded", "rejected"}
+)
+_K_USABLE = exclude_non_use_sql("k.status")
 E2_SOURCE_OWNER = "experience:176.e2.v1"
 SECTIONS = (
     "current_decisions",
@@ -398,7 +404,7 @@ def knowledge_item(row: dict[str, Any], req: dict[str, Any], now: datetime) -> t
     if scope == "unapproved_company":
         return None, "excluded_unapproved_company"
     status = row["status"]
-    if status == "rejected":
+    if status == "rejected" or status not in _CLASSIFIED_KNOWLEDGE_STATUSES:
         return None, None
     challenged = status == "challenged"
     eligible, hist = _temporal(row.get("valid_from"), row.get("valid_to"), status == "superseded", req, now)
@@ -1110,7 +1116,8 @@ class ExperienceRetrievalService:
         match, rank = _lexical("k.search_vector", "k.title||' '||k.statement", tokens)
         diag["excluded_unapproved_company"] += conn.execute(
             f"SELECT count(*) AS n FROM vres.knowledge_items k WHERE k.project_id IS NULL "
-            f"AND k.scope_approval_event_id IS NULL AND k.status<>'rejected' AND ({match} OR k.id=ANY(%(sem_ids)s))", params,
+            f"AND k.scope_approval_event_id IS NULL AND k.status<>'rejected' AND {_K_USABLE} "
+            f"AND ({match} OR k.id=ANY(%(sem_ids)s))", params,
         ).fetchone()["n"]
         return conn.execute(
             f"""
@@ -1119,7 +1126,7 @@ class ExperienceRetrievalService:
                    (k.scope_approval_event_id IS NOT NULL) AS approved,{rank} AS rank,({match}) AS lex
               FROM vres.knowledge_items k
              WHERE (k.project_id=%(pid)s OR (k.project_id IS NULL AND k.scope_approval_event_id IS NOT NULL))
-               AND k.status<>'rejected' AND (k.status<>'superseded' OR %(hist)s)
+               AND k.status<>'rejected' AND (k.status<>'superseded' OR %(hist)s) AND {_K_USABLE}
                AND ({match} OR k.id=ANY(%(sem_ids)s))
              ORDER BY (k.id=ANY(%(sem_ids)s)) DESC,rank DESC,k.knowledge_key LIMIT 200
             """,
@@ -1168,7 +1175,7 @@ class ExperienceRetrievalService:
                    AND (NOT %(hist)s OR s.ingested_at<={ref})))
               AND (c.knowledge_id IS NULL OR (
                        (k.project_id=%(pid)s OR k.project_id IS NULL)
-                   AND k.status NOT IN ('rejected','challenged')
+                   AND k.status NOT IN ('rejected','challenged') AND {_K_USABLE}
                    AND (k.status<>'superseded' OR %(hist)s)
                    AND (k.valid_from IS NULL OR k.valid_from<={ref}) AND (k.valid_to IS NULL OR k.valid_to>{ref})
                    AND (NOT %(hist)s OR k.created_at<={ref})))
