@@ -197,7 +197,8 @@ def record_validation_ingestion_attempt(
         task_id = int(request["task_id"]) if request else None
         if request and not accepted and disposition in {"rejected", "stale"} and request["status"] == "pending":
             conn.execute(
-                "UPDATE vres.validation_requests SET status=%s,completed_at=COALESCE(completed_at,now()) WHERE id=%s",
+                "UPDATE vres.validation_requests SET status=%s,completed_at=COALESCE(completed_at,now()) "
+                "WHERE id=%s AND status='pending'",
                 (disposition, request_id),
             )
 

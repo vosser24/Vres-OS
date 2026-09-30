@@ -11,7 +11,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from .redaction import redact
+from .redaction import redact, redact_text
 from .transcript import _text_from_content, transcript_tail
 
 STATE_FIELDS = (
@@ -279,6 +279,91 @@ class ValidationService:
             "instruction": instruction,
         }
 
+    def abandon(
+        self,
+        task_key: str,
+        project_id: int,
+        request_key: str,
+        reason: str,
+        provider_session_id: str,
+    ) -> dict:
+        """Explicitly supersede one stranded pending validation request (exact identity).
+
+        Lock order matches prepare/checkpoint/ingestion: task_state, then the exact
+        request row, then tasks. Only a request that is still exactly 'pending' can be
+        abandoned; the frozen digest/manifest are untouched and the task never becomes PASS.
+        """
+        safe_reason = redact_text(str(reason or "").strip())
+        if not safe_reason:
+            raise ValueError("validation_abandon requires a concrete non-empty reason")
+        if len(safe_reason) > 1000:
+            raise ValueError("validation abandonment reason must be <= 1000 characters")
+        if not isinstance(request_key, str) or not request_key.strip():
+            raise ValueError("validation_abandon requires the exact request_key")
+        with _connect() as conn, conn.transaction():
+            task = conn.execute(
+                "SELECT id FROM vres.tasks WHERE task_key=%s AND project_id=%s",
+                (task_key, project_id),
+            ).fetchone()
+            if not task:
+                raise ValueError("Validation abandonment requires an unfinished task in this project")
+            session = conn.execute(
+                "SELECT 1 FROM vres.sessions WHERE provider='claude' AND provider_session_id=%s "
+                "AND project_id=%s AND ended_at IS NULL AND task_id=%s",
+                (provider_session_id, project_id, task["id"]),
+            ).fetchone()
+            if not session:
+                raise ValueError("Validation abandonment requires the current session to be bound to the task")
+            conn.execute("SELECT 1 FROM vres.task_state WHERE task_id=%s FOR UPDATE", (task["id"],))
+            request = conn.execute(
+                "SELECT id,status FROM vres.validation_requests "
+                "WHERE request_key=%s AND task_id=%s FOR UPDATE",
+                (request_key, task["id"]),
+            ).fetchone()
+            if not request:
+                raise ValueError("Validation request is unknown for this task")
+            if request["status"] != "pending":
+                raise ValueError(
+                    f"Validation request {request_key} is {request['status']}; only a pending request can be abandoned"
+                )
+            if not conn.execute(
+                "UPDATE vres.tasks SET updated_at=now() WHERE id=%s "
+                "AND status IN ('active','blocked','waiting_user') RETURNING id",
+                (task["id"],),
+            ).fetchone():
+                raise ValueError("Validation abandonment requires an unfinished task in this project")
+            conn.execute(
+                "UPDATE vres.validation_requests SET status='superseded',completed_at=now() WHERE id=%s",
+                (request["id"],),
+            )
+            conn.execute(
+                "UPDATE vres.task_state SET updated_at=now() WHERE task_id=%s", (task["id"],)
+            )
+            conn.execute(
+                "INSERT INTO vres.task_events(task_id,event_type,actor,payload,session_id) "
+                "VALUES (%s,'VALIDATION_ABANDONED','chairman',%s::jsonb,%s)",
+                (
+                    task["id"],
+                    json.dumps(
+                        {
+                            "request_key": request_key,
+                            "reason": safe_reason,
+                            "previous_status": "pending",
+                            "new_status": "superseded",
+                        }
+                    ),
+                    provider_session_id,
+                ),
+            )
+        return {
+            "abandoned": True,
+            "task_key": task_key,
+            "request_key": request_key,
+            "status": "superseded",
+            "validation_status": "pending",
+            "reason": safe_reason,
+        }
+
     def record_from_hook(self, payload: dict, project_id: int, root: Path) -> dict:
         if (
             payload.get("agent_type") != "vres-os:validator"
@@ -305,6 +390,13 @@ class ValidationService:
             payload.get("last_assistant_message", ""), records
         )
         with _connect() as conn, conn.transaction():
+            # Lock task_state before the request row (same order as prepare/checkpoint/abandon).
+            owner = conn.execute(
+                "SELECT task_id FROM vres.validation_requests WHERE request_key=%s",
+                (report["request_key"],),
+            ).fetchone()
+            if owner:
+                conn.execute("SELECT 1 FROM vres.task_state WHERE task_id=%s FOR UPDATE", (owner["task_id"],))
             request = conn.execute(
                 "SELECT r.*,t.project_id,t.task_key,t.objective FROM vres.validation_requests r "
                 "JOIN vres.tasks t ON t.id=r.task_id "

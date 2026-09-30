@@ -9,6 +9,11 @@ class _FakeRepository:
     def __init__(self):
         self.checkpoints = []
         self.events = []
+        self.pending = None
+        self.checkpoint_error = None
+
+    def pending_validation_key(self, task_key):
+        return self.pending
 
     def active_task(self, project_id, provider_session_id):
         assert project_id == 17
@@ -31,6 +36,8 @@ class _FakeRepository:
         reason,
         actor,
     ):
+        if self.checkpoint_error:
+            raise self.checkpoint_error
         self.checkpoints.append(
             {
                 "task_key": task_key,
@@ -113,6 +120,59 @@ def test_precompact_checkpoint_records_manual_trigger(monkeypatch):
 
     assert repo.checkpoints[0]["context"]["trigger"] == "manual"
     assert repo.checkpoints[0]["context"]["snapshot_captured"] is False
+    assert repo.events == []
+
+
+def _compact_payload(**extra):
+    return {"hook_event_name": "PreCompact", "session_id": "SESSION-COMPACT", "trigger": "auto"} | extra
+
+
+def test_precompact_during_pending_validation_writes_nothing_and_logs_no_error(monkeypatch):
+    repo = _wire(monkeypatch)
+    repo.pending = "VAL-PENDING"
+    logged = []
+    monkeypatch.setattr(hooks, "_log_hook_error", lambda *args: logged.append(args))
+    monkeypatch.setattr(hooks, "last_assistant_snapshot", lambda _payload: "latest answer")
+
+    hooks.compact("pre_compact", _compact_payload())
+
+    assert repo.checkpoints == []
+    assert repo.events == []
+    assert logged == []
+
+
+def test_precompact_race_rejection_is_quiet(monkeypatch):
+    repo = _wire(monkeypatch)
+    repo.checkpoint_error = hooks.PendingValidationError("Checkpoint rejected: pending")
+    logged = []
+    monkeypatch.setattr(hooks, "_log_hook_error", lambda *args: logged.append(args))
+    monkeypatch.setattr(hooks, "last_assistant_snapshot", lambda _payload: None)
+
+    hooks.compact("pre_compact", _compact_payload())
+
+    assert repo.checkpoints == []
+    assert logged == []
+
+
+def test_precompact_other_checkpoint_failure_is_still_logged(monkeypatch):
+    repo = _wire(monkeypatch)
+    repo.checkpoint_error = RuntimeError("boom")
+    logged = []
+    monkeypatch.setattr(hooks, "_log_hook_error", lambda *args: logged.append(args))
+    monkeypatch.setattr(hooks, "last_assistant_snapshot", lambda _payload: None)
+
+    hooks.compact("pre_compact", _compact_payload())
+
+    assert len(logged) == 1
+
+
+def test_precompact_subagent_remains_noop_even_without_pending(monkeypatch):
+    repo = _wire(monkeypatch)
+    monkeypatch.setattr(hooks, "last_assistant_snapshot", lambda _payload: "x")
+
+    hooks.compact("pre_compact", _compact_payload(agent_id="sub-1"))
+
+    assert repo.checkpoints == []
     assert repo.events == []
 
 

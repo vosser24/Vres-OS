@@ -214,6 +214,27 @@ bounded candidate set, so recall is limited and must not be described as exhaust
 has no real company benchmark yet. Similarity, numeric confidence and repeated model agreement are not
 probabilities of truth. Knowledge freshness requires real re-verification, not just resetting a date.
 
+### Unified experience retrieval (#176 E3)
+
+E3 exposes one explicit, read-only MCP tool, `experience_retrieve`, bound to the current session project. It
+returns a bounded experience pack read from the existing Vres truth owners (knowledge, procedures, task
+decisions, E1 episodes, relations); it is not a second generic memory authority and stores nothing.
+
+- Authority and scope are applied before relevance. Relevance, semantic similarity and recency are ordering
+  signals only and are not truth; stored `confidence` is passed through as author-asserted, not verified.
+- Conflicts, stale items, challenged items and premise mismatches are surfaced with their members and reasons.
+  E3 does not silently resolve, average or promote them. Premise checks compare only caller-asserted premises
+  against premises the item states; unstated premises are flagged unverified, not matched.
+- Raw fallback is a bounded lexical search over already-stored, sanitized chunks, returned as low-trust evidence
+  references only. E3 introduces no filesystem or network re-read of raw sources.
+- The optional semantic signal depends on the embedding limitations above (optional model, bounded JSON-vector
+  fallback, truncation reported); when unavailable, retrieval degrades to lexical and says so.
+- Automatic Chairman/hook injection is not enabled in E3; it remains E8. Retrieval observation and utility
+  recording are not enabled in E3; they remain E6. Retrieval is therefore an explicit call, not autonomous
+  infinite memory or context injection.
+- Live proof of the packaged tool on the target host is a separate gate; see the E3 handoff for what was and was
+  not exercised.
+
 ## Licensing and supply chain
 
 Vres source is MIT. Third-party packages/models have their own licenses; the PDF dependency is now pypdf,

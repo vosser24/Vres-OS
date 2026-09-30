@@ -13,7 +13,7 @@ from .paths import logs_dir
 from .project import discover_project
 from .redaction import redact_text
 from .reply_guard import begin_reply_turn, inspect_stop_guard, mark_stop_guard_blocked
-from .repository import Repository
+from .repository import PendingValidationError, Repository
 from .session_lifecycle import (
     canonical_session_end_reason,
     cleanup_materialized_secrets_if_last_session,
@@ -259,6 +259,9 @@ def compact(reason: str, payload: dict[str, Any] | None = None) -> None:
         sid = _session_id(payload)
         _observe_session(project_id, sid)
         task = repo.active_task(project_id, sid)
+        if task and repo.pending_validation_key(task.task_key):
+            # Protected validation freezes task state; an automatic checkpoint would mutate it.
+            return
         if task:
             snap = last_assistant_snapshot(payload)
             if snap:
@@ -283,6 +286,8 @@ def compact(reason: str, payload: dict[str, Any] | None = None) -> None:
                 reason,
                 "vres-lifecycle",
             )
+    except PendingValidationError:
+        return  # validation became pending after the read-only check; expected, not an error
     except Exception as exc:
         _log_hook_error("PreCompact", exc)
 

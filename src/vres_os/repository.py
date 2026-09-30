@@ -9,6 +9,7 @@ from typing import Any
 from .db import connect
 from .project import ProjectIdentity
 from .redaction import redact
+from .validation import STATE_FIELDS
 
 _ACTIVE = ("active", "waiting_user", "blocked")
 _VALIDATION = {"not_required", "pending", "passed", "failed"}
@@ -33,6 +34,10 @@ def _clip(value: Any, *, max_text: int = _MAX_TEXT, max_list: int = _MAX_LIST) -
     if isinstance(value, dict):
         return {str(k): _clip(v, max_text=max_text, max_list=max_list) for k, v in list(value.items())[:50]}
     return value
+
+
+class PendingValidationError(ValueError):
+    """A checkpoint was attempted while a protected validation request is pending."""
 
 
 @dataclass(slots=True)
@@ -370,8 +375,17 @@ class Repository:
         with connect() as conn, conn.transaction():
             task_id = self._task_id(conn, task_key)
             current = conn.execute("SELECT * FROM vres.task_state WHERE task_id=%s FOR UPDATE", (task_id,)).fetchone()
-            material = any(k not in {"latest_user_instruction", "validation_status"} and current.get(k) != redact(v)
-                           for k, v in fields.items())
+            changed = {k for k, v in fields.items() if current.get(k) != redact(v)}
+            material = bool(changed - {"latest_user_instruction", "validation_status"})
+            pending = self._pending_validation_key(conn, task_id)
+            if pending:
+                # Same lock order as checkpoint/prepare: task_state first, then check, compare, write.
+                if changed & set(STATE_FIELDS):
+                    raise PendingValidationError(
+                        f"State change rejected: protected validation request {pending} is pending"
+                    )
+                if not changed:
+                    return  # identical values: true no-op, no write, no timestamp bump
             if material and "validation_status" not in fields:
                 updates.append("validation_status='pending'")
             params.append(task_id)
@@ -380,6 +394,20 @@ class Repository:
                 params,
             )
             conn.execute("UPDATE vres.tasks SET updated_at=now() WHERE id=%s", (task_id,))
+
+    @staticmethod
+    def _pending_validation_key(conn, task_id: int) -> str | None:
+        row = conn.execute(
+            "SELECT request_key FROM vres.validation_requests WHERE task_id=%s AND status='pending' "
+            "ORDER BY created_at DESC,id DESC LIMIT 1",
+            (task_id,),
+        ).fetchone()
+        return str(row["request_key"]) if row else None
+
+    def pending_validation_key(self, task_key: str) -> str | None:
+        """Read-only: the latest pending protected validation request key for a task, if any."""
+        with connect() as conn:
+            return self._pending_validation_key(conn, self._task_id(conn, task_key))
 
     def checkpoint(
         self,
@@ -398,6 +426,13 @@ class Repository:
         safe_context = redact(context)
         with connect() as conn, conn.transaction():
             task_id = self._task_id(conn, task_key)
+            # Same lock ValidationService.prepare takes, so prepare and checkpoint serialize.
+            conn.execute("SELECT 1 FROM vres.task_state WHERE task_id=%s FOR UPDATE", (task_id,))
+            pending = self._pending_validation_key(conn, task_id)
+            if pending:
+                raise PendingValidationError(
+                    f"Checkpoint rejected: protected validation request {pending} is pending"
+                )
             conn.execute(
                 """
                 INSERT INTO vres.checkpoints(checkpoint_key,task_id,summary,current_position,next_action,context,reason,created_by)

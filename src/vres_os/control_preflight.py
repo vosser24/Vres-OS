@@ -34,6 +34,10 @@ _SAFE_VRES_TOOLS = {
 }
 _VRES_PREFIX = "mcp__plugin_vres-os_vres__"
 _SCOPED_FILE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
+# Protected validation lifecycle controls are Chairman/control-plane authority.
+_PARENT_ONLY_VALIDATION_TOOLS = frozenset(
+    {"validation_prepare", "validation_invalidate", "validation_abandon"}
+)
 
 
 def _session_id(payload: dict[str, Any]) -> str | None:
@@ -94,6 +98,28 @@ def work_scope_for_agent(agent_id: str) -> dict[str, Any] | None:
             (agent_id,),
         ).fetchone()
     return dict(row) if row else None
+
+
+def _host_agent_id(payload: dict[str, Any]) -> str:
+    """Host-observed subagent id; empty for the parent. Never read from tool_input."""
+    return str(payload.get("agent_id") or "").strip()
+
+
+def evaluate_parent_only_validation_preflight(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Deny protected validation lifecycle controls when the host reports a subagent caller."""
+    if payload.get("hook_event_name") != "PreToolUse":
+        return None
+    tool_name = str(payload.get("tool_name") or "").strip()
+    if not tool_name.startswith(_VRES_PREFIX):
+        return None
+    if tool_name[len(_VRES_PREFIX):] not in _PARENT_ONLY_VALIDATION_TOOLS:
+        return None
+    if not _host_agent_id(payload):
+        return None
+    return _deny(
+        "Protected validation lifecycle controls are Chairman/control-plane authority "
+        "and cannot be invoked by a subagent."
+    )
 
 
 def evaluate_work_scope_preflight(
@@ -177,11 +203,16 @@ def main() -> int:
         if payload.get("hook_event_name") != "PreToolUse":
             return 0
         tool_name = str(payload.get("tool_name") or "").strip()
+        parent_only = evaluate_parent_only_validation_preflight(payload)
+        if parent_only is not None:
+            json.dump(parent_only, sys.stdout, separators=(",", ":"))
+            sys.stdout.write("\n")
+            return 0
         if not tool_name or is_read_only_tool(tool_name):
             return 0
         if not ConfigStore().load().configured:
             return 0
-        agent_id = str(payload.get("agent_id") or "").strip()
+        agent_id = _host_agent_id(payload)
         if agent_id:
             try:
                 scope = work_scope_for_agent(agent_id)

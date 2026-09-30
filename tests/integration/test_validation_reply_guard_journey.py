@@ -1,4 +1,5 @@
 import json
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -13,7 +14,7 @@ from vres_os.reply_guard import (
     inspect_stop_guard,
     observe_reply_activity,
 )
-from vres_os.repository import Repository
+from vres_os.repository import PendingValidationError, Repository
 from vres_os.session_lifecycle import inherit_replaced_session_task, touch_session_host
 from vres_os.validation import ValidationService
 
@@ -160,17 +161,21 @@ def test_post_prepare_task_checkpoint_still_stales_review_and_disables_validatio
     prepared = service.prepare(task, pg_project, tmp_path, [artifact.name])
     observe_reply_activity(pg_project, sid, "Task", tool_use_id="validator-launch")
 
-    # This is the exact anti-pattern seen in physical acceptance: a checkpoint after
-    # validation_prepare mutates review-relevant state and must continue to stale review.
-    repo.checkpoint(
-        task,
-        "Validation was dispatched, but this state mutation is intentionally stale.",
-        "validation dispatched",
-        "Wait for validator and then complete.",
-        {"anti_pattern": True},
-        "material_transition",
-        "chairman",
-    )
+    # A checkpoint after validation_prepare is now rejected outright (see the pending
+    # checkpoint tests below); a direct review-relevant state mutation must still stale review.
+    # update_state is itself rejected while pending (see test_validation_abandon.py), so mutate
+    # the row directly to keep exercising the stale-review ingestion path.
+    with connect() as conn, conn.transaction():
+        conn.execute(
+            "UPDATE vres.task_state SET state_summary=%s,current_step=%s,next_action=%s "
+            "WHERE task_id=(SELECT id FROM vres.tasks WHERE task_key=%s)",
+            (
+                "Validation was dispatched, but this state mutation is intentionally stale.",
+                "validation dispatched",
+                "Wait for validator and then complete.",
+                task,
+            ),
+        )
 
     gate = confirm_reply_gate(pg_project, sid, task, advances_state=False)
     assert gate["mode"] == "non_material"
@@ -369,3 +374,321 @@ def test_passed_validation_resume_derives_live_continuation_across_compact_and_c
 
     assert original_checkpoint_after == frozen_checkpoint
     assert persisted_after == persisted
+
+
+# ---- pending-validation checkpoint protection -------------------------------------
+
+
+def _prepared_task(pg_project, tmp_path, name):
+    repo = Repository()
+    task = repo.begin_task(pg_project, name, "Protect frozen review state from checkpoints.", "test", "chairman")
+    sid = f"{name}-session"
+    repo.open_session(pg_project, sid)
+    repo.bind_session(pg_project, sid, task)
+    assert begin_reply_turn(pg_project, sid)
+    checkpoint = _final_review_checkpoint(repo, task)
+    artifact = tmp_path / "synthetic-evidence.txt"
+    artifact.write_text("reviewed evidence", encoding="utf-8")
+    prepared = ValidationService().prepare(task, pg_project, tmp_path, [artifact.name])
+    return repo, task, sid, checkpoint, prepared
+
+
+def _snapshot(task):
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT t.id,t.updated_at AS task_updated,s.* FROM vres.tasks t "
+            "JOIN vres.task_state s ON s.task_id=t.id WHERE t.task_key=%s",
+            (task,),
+        ).fetchone()
+        count = conn.execute("SELECT count(*) AS n FROM vres.checkpoints WHERE task_id=%s", (row["id"],)).fetchone()["n"]
+        side = conn.execute(
+            "SELECT (SELECT count(*) FROM vres.task_decisions WHERE task_id=%s) AS d,"
+            "(SELECT count(*) FROM vres.routing_requests WHERE task_id=%s) AS r,"
+            "(SELECT count(*) FROM vres.orchestration_work_units WHERE task_id=%s) AS w",
+            (row["id"], row["id"], row["id"]),
+        ).fetchone()
+    return dict(row), count, dict(side)
+
+
+def _wire_hooks(monkeypatch, pg_project, snapshot=None):
+    monkeypatch.setattr(hooks.ConfigStore, "load", lambda _self: SimpleNamespace(configured=True))
+    monkeypatch.setattr(hooks, "_project_id", lambda _repo, _payload=None: pg_project)
+    monkeypatch.setattr(hooks, "_observe_session", lambda *_a, **_k: None)
+    monkeypatch.setattr(hooks, "last_assistant_snapshot", lambda _payload: snapshot)
+    logged = []
+    monkeypatch.setattr(hooks, "_log_hook_error", lambda *args: logged.append(args))
+    return logged
+
+
+def _insert_lifecycle_checkpoint(task, summary, position, next_action):
+    with connect() as conn, conn.transaction():
+        conn.execute(
+            "INSERT INTO vres.checkpoints(checkpoint_key,task_id,summary,current_position,next_action,context,reason,created_by) "
+            "SELECT 'CP-LEGACY-'||substr(md5(random()::text),1,8),id,%s,%s,%s,'{}'::jsonb,'pre_compact','vres-lifecycle' "
+            "FROM vres.tasks WHERE task_key=%s",
+            (summary, position, next_action, task),
+        )
+
+
+def test_checkpoint_succeeds_before_prepare_then_is_rejected_without_any_write_while_pending(
+    pg_project, tmp_path
+):
+    repo, task, _sid, checkpoint, prepared = _prepared_task(pg_project, tmp_path, "pending-cp-reject")
+    assert checkpoint.startswith("CP-")  # succeeded immediately before validation_prepare
+    before = _snapshot(task)
+
+    with pytest.raises(
+        PendingValidationError,
+        match=f"Checkpoint rejected: protected validation request {prepared['request_key']} is pending",
+    ):
+        repo.checkpoint(task, "mutated", "elsewhere", "other", {}, "material_transition", "chairman")
+
+    after = _snapshot(task)
+    assert after[1] == before[1]  # no checkpoint row inserted
+    assert after[0]["updated_at"] == before[0]["updated_at"]  # task_state.updated_at
+    assert after[0]["task_updated"] == before[0]["task_updated"]  # tasks.updated_at
+    assert after[0]["validation_status"] == before[0]["validation_status"] == "pending"
+    assert after[0] == before[0] and after[2] == before[2]
+
+
+def test_precompact_during_pending_validation_cannot_create_lifecycle_checkpoint(
+    pg_project, tmp_path, monkeypatch
+):
+    repo, task, sid, _cp, _prepared = _prepared_task(pg_project, tmp_path, "pending-precompact")
+    logged = _wire_hooks(monkeypatch, pg_project, snapshot="assistant text")
+    before = _snapshot(task)
+    hooks.compact("pre_compact", {"hook_event_name": "PreCompact", "session_id": sid, "trigger": "auto"})
+    hooks.compact(  # subagent payload stays a no-op
+        "pre_compact", {"hook_event_name": "PreCompact", "session_id": sid, "agent_id": "sub"}
+    )
+    assert _snapshot(task) == before
+    assert logged == []
+    with connect() as conn:
+        n = conn.execute(
+            "SELECT count(*) AS n FROM vres.checkpoints c JOIN vres.tasks t ON t.id=c.task_id "
+            "WHERE t.task_key=%s AND c.created_by='vres-lifecycle'",
+            (task,),
+        ).fetchone()["n"]
+    assert n == 0
+
+
+def test_precompact_outside_validation_still_creates_lifecycle_checkpoint(pg_project, monkeypatch):
+    repo = Repository()
+    task = repo.begin_task(pg_project, "compact-normal", "Normal lifecycle checkpoint.", "test", "chairman")
+    sid = "compact-normal-session"
+    repo.open_session(pg_project, sid)
+    repo.bind_session(pg_project, sid, task)
+    _wire_hooks(monkeypatch, pg_project)
+    before = _snapshot(task)
+    hooks.compact("pre_compact", {"hook_event_name": "PreCompact", "session_id": sid, "trigger": "auto"})
+    assert _snapshot(task)[1] == before[1] + 1
+    assert repo.resume_context(pg_project, provider_session_id=sid)["latest_checkpoint"]["reason"] == "pre_compact"
+
+
+def test_terminal_validation_no_longer_blocks_checkpoints(pg_project, tmp_path, monkeypatch):
+    repo, task, sid, _cp, prepared = _prepared_task(pg_project, tmp_path, "terminal-cp")
+    report = _report(prepared["request_key"])
+    result = ValidationService().record_from_hook(
+        {
+            "agent_type": "vres-os:validator",
+            "agent_id": "validator-terminal",
+            "session_id": sid,
+            "agent_transcript_path": _validator_transcript(tmp_path, report),
+            "last_assistant_message": json.dumps(report),
+        },
+        pg_project,
+        tmp_path,
+    )
+    assert result["outcome"] == "passed"
+    before = _snapshot(task)
+    # Existing behaviour: an unchanged-state checkpoint after a fresh PASS is allowed.
+    repo.checkpoint(
+        task,
+        "Implementation and evidence are frozen for protected validation.",
+        "protected validation",
+        "Wait for protected validation result.",
+        {},
+        "post_pass",
+        "chairman",
+    )
+    assert _snapshot(task)[1] == before[1] + 1
+    _wire_hooks(monkeypatch, pg_project)
+    hooks.compact("pre_compact", {"hook_event_name": "PreCompact", "session_id": sid, "trigger": "auto"})
+    assert _snapshot(task)[1] == before[1] + 2
+
+
+def test_later_lifecycle_checkpoint_does_not_hide_validation_in_flight(pg_project, tmp_path):
+    repo, task, sid, checkpoint, prepared = _prepared_task(pg_project, tmp_path, "legacy-lifecycle")
+    # Legacy contamination: identical summary/step/next => unchanged state digest.
+    _insert_lifecycle_checkpoint(
+        task,
+        "Implementation and evidence are frozen for protected validation.",
+        "protected validation",
+        "Wait for protected validation result.",
+    )
+    before = _snapshot(task)
+    gate = confirm_reply_gate(pg_project, sid, task, advances_state=False)
+    assert gate["mode"] == "validation_in_flight"
+    assert gate["validation_request_key"] == prepared["request_key"]
+    after = _snapshot(task)
+    assert after[1] == before[1]  # the gate creates no checkpoints
+    assert after[2] == before[2] == {"d": 0, "r": 0, "w": 0}
+
+    # Material gate stays strict: the latest checkpoint is lifecycle-created.
+    with pytest.raises(ValueError, match="explicit Chairman task_checkpoint"):
+        confirm_reply_gate(pg_project, sid, task, advances_state=True)
+
+
+def test_digest_change_prevents_validation_in_flight_even_with_lifecycle_checkpoint(pg_project, tmp_path):
+    repo, task, sid, _cp, _prepared = _prepared_task(pg_project, tmp_path, "digest-change")
+    _insert_lifecycle_checkpoint(task, "Other", "other", "other")
+    with connect() as conn, conn.transaction():  # update_state is rejected while pending
+        conn.execute(
+            "UPDATE vres.task_state SET pending_work=%s::jsonb WHERE task_id=(SELECT id FROM vres.tasks WHERE task_key=%s)",
+            (json.dumps(["something new"]), task),
+        )
+    gate = confirm_reply_gate(pg_project, sid, task, advances_state=False)
+    assert gate["mode"] == "non_material"
+
+
+def test_non_material_gate_outside_validation_is_unchanged(pg_project):
+    repo = Repository()
+    task = repo.begin_task(pg_project, "gate-plain", "Plain gate.", "test", "chairman")
+    sid = "gate-plain-session"
+    repo.open_session(pg_project, sid)
+    repo.bind_session(pg_project, sid, task)
+    assert begin_reply_turn(pg_project, sid)
+    before = _snapshot(task)
+    gate = confirm_reply_gate(pg_project, sid, task, advances_state=False)
+    assert gate["mode"] == "non_material"
+    assert _snapshot(task)[1] == before[1]
+
+
+def _lock_and_hold(task, started, release, insert_pending=False, mutate=False):
+    with connect() as conn, conn.transaction():
+        row = conn.execute(
+            "SELECT t.objective,s.* FROM vres.tasks t JOIN vres.task_state s ON s.task_id=t.id "
+            "WHERE t.task_key=%s FOR UPDATE OF s",
+            (task,),
+        ).fetchone()
+        if mutate:
+            conn.execute("UPDATE vres.task_state SET state_summary='changed by checkpoint' WHERE task_id=%s", (row["task_id"],))
+        started.set()
+        assert release.wait(20)
+        if insert_pending:
+            from vres_os.validation import state_digest
+
+            conn.execute(
+                "INSERT INTO vres.validation_requests(request_key,task_id,state_digest,artifact_manifest) "
+                "VALUES ('VAL-RACE0000000001',%s,%s,'{}'::jsonb)",
+                (row["task_id"], state_digest(dict(row))),
+            )
+
+
+def test_race_prepare_holding_lock_blocks_then_rejects_checkpoint(pg_project):
+    repo = Repository()
+    task = repo.begin_task(pg_project, "race-prepare-first", "Race.", "test", "chairman")
+    baseline = _snapshot(task)[1]
+    started, release, outcome = threading.Event(), threading.Event(), {}
+    holder = threading.Thread(target=_lock_and_hold, args=(task, started, release, True))
+    holder.start()
+    assert started.wait(20)
+
+    def attempt():
+        try:
+            repo.checkpoint(task, "s", "p", "n", {}, "r", "chairman")
+            outcome["result"] = "written"
+        except PendingValidationError as exc:
+            outcome["result"] = str(exc)
+
+    worker = threading.Thread(target=attempt)
+    worker.start()
+    worker.join(1.5)
+    assert worker.is_alive(), "checkpoint must block on the task_state lock held by prepare"
+    release.set()
+    holder.join(20)
+    worker.join(20)
+    assert "VAL-RACE0000000001 is pending" in outcome["result"]
+    assert _snapshot(task)[1] == baseline
+
+
+def test_race_checkpoint_first_then_prepare_freezes_post_checkpoint_state(pg_project, tmp_path):
+    repo = Repository()
+    task = repo.begin_task(pg_project, "race-checkpoint-first", "Race.", "test", "chairman")
+    artifact = tmp_path / "synthetic-evidence.txt"
+    artifact.write_text("reviewed evidence", encoding="utf-8")
+    started, release, outcome = threading.Event(), threading.Event(), {}
+    holder = threading.Thread(target=_lock_and_hold, args=(task, started, release, False, True))
+    holder.start()
+    assert started.wait(20)
+
+    def do_prepare():
+        outcome["prepared"] = ValidationService().prepare(task, pg_project, tmp_path, [artifact.name])
+
+    worker = threading.Thread(target=do_prepare)
+    worker.start()
+    worker.join(1.5)
+    assert worker.is_alive(), "prepare must block on the in-flight state writer"
+    release.set()
+    holder.join(20)
+    worker.join(20)
+    from vres_os.validation import state_digest
+
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT t.objective,s.* FROM vres.tasks t JOIN vres.task_state s ON s.task_id=t.id WHERE t.task_key=%s",
+            (task,),
+        ).fetchone()
+        request = conn.execute(
+            "SELECT state_digest FROM vres.validation_requests WHERE request_key=%s",
+            (outcome["prepared"]["request_key"],),
+        ).fetchone()
+    assert row["state_summary"] == "changed by checkpoint"
+    assert request["state_digest"] == state_digest(dict(row))
+
+
+def test_real_prepare_and_real_checkpoint_racing_never_leave_a_checkpoint_after_the_freeze(pg_project, tmp_path):
+    from vres_os.validation import state_digest
+
+    repo = Repository()
+    artifact = tmp_path / "synthetic-evidence.txt"
+    artifact.write_text("reviewed evidence", encoding="utf-8")
+    outcomes = set()
+    for i in range(6):
+        task = repo.begin_task(pg_project, f"race-real-{i}", "Real race.", "test", "chairman")
+        barrier, result = threading.Barrier(2), {}
+
+        def do_prepare():
+            barrier.wait(10)
+            result["prepared"] = ValidationService().prepare(task, pg_project, tmp_path, [artifact.name])
+
+        def do_checkpoint():
+            barrier.wait(10)
+            try:
+                repo.checkpoint(task, f"cp-{i}", "racing", "next", {}, "material_transition", "vres-lifecycle")
+                result["checkpoint"] = "written"
+            except PendingValidationError:
+                result["checkpoint"] = "rejected"
+
+        threads = [threading.Thread(target=do_prepare), threading.Thread(target=do_checkpoint)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(30)
+        outcomes.add(result["checkpoint"])
+        with connect() as conn:
+            row = conn.execute(
+                "SELECT t.objective,s.* FROM vres.tasks t JOIN vres.task_state s ON s.task_id=t.id WHERE t.task_key=%s",
+                (task,),
+            ).fetchone()
+            request = conn.execute(
+                "SELECT state_digest,created_at FROM vres.validation_requests WHERE request_key=%s",
+                (result["prepared"]["request_key"],),
+            ).fetchone()
+            late = conn.execute(
+                "SELECT count(*) AS n FROM vres.checkpoints WHERE task_id=%s AND created_at>%s",
+                (row["task_id"], request["created_at"]),
+            ).fetchone()["n"]
+        assert late == 0  # no checkpoint may land after the request froze the state
+        assert request["state_digest"] == state_digest(dict(row))  # frozen digest is still current
+    assert outcomes <= {"written", "rejected"}

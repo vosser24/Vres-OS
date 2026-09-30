@@ -26,8 +26,9 @@ def test_reply_guard_contains_mechanically_verified_validation_in_flight_mode():
     assert "_current_validation_in_flight" in source
     assert '"validation_in_flight"' in source
     assert "request['state_digest']" in source or 'request["state_digest"]' in source
-    assert "checkpoint[\"created_at\"] < started_at" in source
-    assert "request[\"created_at\"] < checkpoint[\"created_at\"]" in source
+    # The frozen Chairman checkpoint is anchored to the request, not to the latest checkpoint.
+    assert "created_by='chairman' AND created_at>=%s AND created_at<=%s" in source
+    assert "request[\"created_at\"]" in source
 
 
 def test_chairman_contract_freezes_before_validation_and_does_not_checkpoint_after_freeze():

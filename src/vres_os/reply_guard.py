@@ -144,16 +144,16 @@ def observe_reply_activity(
     return {"observed": True, "turn_id": guard["turn_id"], "activity_seq": sequence}
 
 
-def _current_validation_in_flight(conn, task_id: int, started_at: datetime, checkpoint) -> dict[str, Any] | None:
+def _current_validation_in_flight(conn, task_id: int, started_at: datetime) -> dict[str, Any] | None:
     """Return one mechanically current pending validation request for reply gating.
 
     This is deliberately narrower than a generic non-material escape hatch. The task
     must have been explicitly checkpointed by the Chairman in the current user turn,
     the validation request must have been prepared after that checkpoint, and the
     current review-relevant task state must still match the frozen request digest.
+    The frozen checkpoint is anchored to the request, not to the latest checkpoint,
+    so a later non-material lifecycle checkpoint cannot hide an in-flight validation.
     """
-    if not checkpoint or checkpoint["created_by"] != "chairman" or checkpoint["created_at"] < started_at:
-        return None
     request = conn.execute(
         """
         SELECT id,request_key,state_digest,status,created_at
@@ -163,7 +163,17 @@ def _current_validation_in_flight(conn, task_id: int, started_at: datetime, chec
         """,
         (task_id,),
     ).fetchone()
-    if not request or request["created_at"] < checkpoint["created_at"]:
+    if not request:
+        return None
+    frozen = conn.execute(
+        """
+        SELECT id FROM vres.checkpoints
+         WHERE task_id=%s AND created_by='chairman' AND created_at>=%s AND created_at<=%s
+         ORDER BY created_at DESC,id DESC LIMIT 1
+        """,
+        (task_id, started_at, request["created_at"]),
+    ).fetchone()
+    if not frozen:
         return None
     state = conn.execute(
         """
@@ -194,8 +204,8 @@ def confirm_reply_gate(
     A material declaration is accepted only when the latest explicit Chairman
     checkpoint is newer than both the user-turn boundary and the latest host-observed
     non-protocol tool activity. A non-material declaration does not require a new
-    checkpoint. When the current turn checkpoint was frozen by a still-current pending
-    validation request, a non-material declaration is labeled validation_in_flight so
+    checkpoint. When a current-turn Chairman checkpoint was frozen by a still-current pending
+    validation request (anchored to the request, not the latest checkpoint), a non-material declaration is labeled validation_in_flight so
     a background validator launch does not require a second checkpoint that would
     stale its own frozen review state.
     """
@@ -256,7 +266,7 @@ def confirm_reply_gate(
 
         validation_request = None
         if not advances_state:
-            validation_request = _current_validation_in_flight(conn, int(task_id), started_at, checkpoint)
+            validation_request = _current_validation_in_flight(conn, int(task_id), started_at)
 
         state = conn.execute(
             "SELECT updated_at FROM vres.task_state WHERE task_id=%s",
