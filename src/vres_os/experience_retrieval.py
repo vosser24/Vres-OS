@@ -22,7 +22,7 @@ from .embeddings import EmbeddingUnavailable
 from .experience import _HIDDEN_REASONING_KEYS, _canonical, _normalize_key
 from .experience_consolidation import episode_payload_digest, statement_digest
 from .redaction import redact_text
-from .sensitive_policy import sanitize_extracted_text
+from .sensitive_policy import SENSITIVE_SANITIZED, sanitize_extracted_text
 
 SCHEMA_VERSION = "176.e3.v1"
 E2_SOURCE_OWNER = "experience:176.e2.v1"
@@ -591,10 +591,32 @@ def raw_chunk_item(row: dict[str, Any], req: dict[str, Any]) -> tuple[dict | Non
     """One already-SQL-gated knowledge chunk -> a lowest-tier `evidence_ref` item. Pure.
 
     Never authoritative, never instruction, no premise/conflict role. Emits ONLY the durable chunk_key/source_key
-    (and knowledge_key when linked); never DB ids, paths, URIs or vectors. Text is re-redacted and <=300 chars;
+    (and knowledge_key when linked); never DB ids, paths, URIs or vectors. Text is #164-sanitized at read time
+    (sanitized text only; review-required content is never emitted), re-redacted and <=300 chars;
     instruction-shaped text is dropped (counted), so raw text is evidence only.
+
+    Provenance shapes (the SQL gate in `_raw` is authoritative; this is the Python-side defence):
+      source-only    evidence [source:K]; scope from the source owner only.
+      knowledge-only evidence [knowledge:K]; scope from the knowledge owner only (no project-local/trusted assumption).
+      both           BOTH links passed their own gate; scope is company_approved if EITHER owner is company-level.
+      orphan         neither link: never emitted, never counted, no default scope.
     """
-    text = f"[{row['section']}] {row['content']}" if row.get("section") else str(row["content"])
+    if not row.get("source_key") and not row.get("knowledge_key"):
+        return None, None
+    parts = []
+    for piece in (row.get("section"), row["content"]):
+        if not piece:
+            continue
+        disposition = sanitize_extracted_text(str(piece))
+        if disposition.status is None:
+            parts.append(str(piece))
+        elif disposition.status == SENSITIVE_SANITIZED:
+            parts.append(disposition.text)  # sanitized text ONLY; never the original
+        else:
+            return None, "excluded_sensitive_content"  # review-required (or unknown status): fail closed
+    if not parts:
+        return None, None
+    text = f"[{parts[0]}] {parts[1]}" if len(parts) == 2 else parts[0]
     if _INSTRUCTION_SHAPED.search(text):
         return None, "quarantined_injection"
     owners = [p for p, linked in ((row.get("source_project_id"), row.get("source_key")),
@@ -604,8 +626,6 @@ def raw_chunk_item(row: dict[str, Any], req: dict[str, Any]) -> tuple[dict | Non
     evidence = [f"source:{row['source_key']}"] if row.get("source_key") else []
     if row.get("knowledge_key"):
         evidence.append(f"knowledge:{row['knowledge_key']}")
-    if not evidence:
-        return None, None
     return _item(
         section="raw_evidence_refs", kind="raw", memory_key=row["chunk_key"], memory_class="raw_evidence", scope=scope,
         project_id=None if company else req["project_id"], authority_class="evidence_ref", status="active",
@@ -999,6 +1019,8 @@ class ExperienceRetrievalService:
             refs = sorted({i["_ref"] for i, _ in built if i is not None and i.get("_ref")})
             edges = self._edges(conn, refs)
             counts = dict(diag)
+            # Raw-fallback time reference: the validated as_of for historical intent, else DB now(); never from query text.
+            raw_at = req["as_of"] if req["temporal_intent"] == "historical" else None
             items = []
             for item, reason in built:
                 if item is not None:
@@ -1006,7 +1028,7 @@ class ExperienceRetrievalService:
                 elif reason:
                     counts[reason] = counts.get(reason, 0) + 1
             # compose runs inside the same READ ONLY transaction so the (lazy, gated) raw fallback can read from it.
-            return compose(items, req, counts, edges, raw_fn=lambda: self._raw(conn, params, tokens))
+            return compose(items, req, counts, edges, raw_fn=lambda: self._raw(conn, params, tokens, raw_at))
 
     def _semantic(self, req) -> tuple[dict[int, int], dict[str, Any]]:
         """Optional semantic signal: {knowledge_id: 1-based position}. Never fails the retrieval, never trusted:
@@ -1105,28 +1127,48 @@ class ExperienceRetrievalService:
         ).fetchall()
 
     @staticmethod
-    def _raw(conn, params, tokens):
+    def _raw(conn, params, tokens, raw_at=None):
         """Lexical-only raw `knowledge_chunks` fallback: (rows, extras). Gate is in SQL BEFORE ranking.
 
         Deliberately NOT read: sources.path_or_uri, source_locations, artifacts, knowledge_evidence (no path/URI/
-        file/network exposure), and no semantic/embedding store. Chunks are already #164-sanitized at write time;
-        sensitive_excluded/sensitive_review_required dispositions (source or chunk) are excluded again here. A
-        source link and a knowledge link are BOTH gated when both exist; links never widen scope. Foreign-project
-        rows are neither returned nor counted; unapproved company rows are only counted.
+        file/network exposure), and no semantic/embedding store. Sensitive dispositions (source or chunk) are
+        excluded here; content is additionally #164-sanitized at read time in `raw_chunk_item`.
+
+        Time reference `ref` = raw_at (validated req.as_of, historical intent only) else DB now(); never inferred
+        from query text. Historical: knowledge validity window is evaluated at ref, `superseded` knowledge is
+        allowed (its window governs) and creation guards apply (chunk.created_at, source.ingested_at,
+        knowledge.created_at all <= ref). Current: valid now, `superseded` excluded, no creation guards.
+        `rejected`/`challenged` knowledge is always excluded. Current source status/#164 gates are not
+        reconstructed for the past.
+
+        Provenance shapes (count and select share ONE gate definition `base`):
+          source-only    source: project/approved-company + active + sensitive gate.
+          knowledge-only knowledge: project/approved-company + status + temporal gate.
+          both           BOTH gates must pass individually; the less permissive wins; one link never widens the other.
+          orphan         both NULL: excluded fail-closed here (never ranked, never counted).
+        Foreign-project rows are neither returned nor counted; unapproved company rows are only counted.
         """
         match, rank = _lexical("c.search_vector", "c.content", tokens)
         sens = "('sensitive_excluded','sensitive_review_required')"
+        params = {**params, "raw_at": raw_at}
+        ref = "coalesce(%(raw_at)s::timestamptz, now())"
         base = f"""
              FROM vres.knowledge_chunks c
              LEFT JOIN vres.sources s ON s.id=c.source_id
              LEFT JOIN vres.knowledge_items k ON k.id=c.knowledge_id
             WHERE (c.source_id IS NOT NULL OR c.knowledge_id IS NOT NULL)
               AND coalesce(c.metadata->>'sensitive_disposition','') NOT IN {sens}
-              AND (c.source_id IS NULL OR (s.status='active' AND (s.project_id=%(pid)s OR s.project_id IS NULL)
-                   AND coalesce(s.metadata->>'sensitive_disposition','') NOT IN {sens}))
-              AND (c.knowledge_id IS NULL OR (k.project_id=%(pid)s OR k.project_id IS NULL)
-                   AND k.status NOT IN ('rejected','superseded','challenged')
-                   AND (k.valid_from IS NULL OR k.valid_from<=now()) AND (k.valid_to IS NULL OR k.valid_to>now()))
+              AND (NOT %(hist)s OR c.created_at<={ref})
+              AND (c.source_id IS NULL OR (
+                       s.status='active' AND (s.project_id=%(pid)s OR s.project_id IS NULL)
+                   AND coalesce(s.metadata->>'sensitive_disposition','') NOT IN {sens}
+                   AND (NOT %(hist)s OR s.ingested_at<={ref})))
+              AND (c.knowledge_id IS NULL OR (
+                       (k.project_id=%(pid)s OR k.project_id IS NULL)
+                   AND k.status NOT IN ('rejected','challenged')
+                   AND (k.status<>'superseded' OR %(hist)s)
+                   AND (k.valid_from IS NULL OR k.valid_from<={ref}) AND (k.valid_to IS NULL OR k.valid_to>{ref})
+                   AND (NOT %(hist)s OR k.created_at<={ref})))
               AND {match}"""
         approved = ("(c.source_id IS NULL OR s.project_id IS NOT NULL OR s.scope_approval_event_id IS NOT NULL) AND "
                     "(c.knowledge_id IS NULL OR k.project_id IS NOT NULL OR k.scope_approval_event_id IS NOT NULL)")
