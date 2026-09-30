@@ -123,9 +123,11 @@ def _keys(pack, *sections):
 
 
 def _sups(pack):
-    """Explicit-supersession notes carried on the items themselves (one per pair, from the successor side)."""
-    return [i["supersession"] for v in pack.values() if isinstance(v, list) for i in v
-            if isinstance(i, dict) and i.get("supersession", {}).get("role") == "successor"]
+    """(predecessor, successor) memory keys shown via frozen item fields only (why_retrieved names)."""
+    items = [i for v in pack.values() if isinstance(v, list) for i in v if isinstance(i, dict) and "why_retrieved" in i]
+    pred = sorted(i["memory_key"] for i in items if "explicit_supersession_predecessor" in i["why_retrieved"])
+    succ = sorted(i["memory_key"] for i in items if "explicit_supersession_successor" in i["why_retrieved"])
+    return list(zip(pred, succ)) if len(pred) == len(succ) else [(pred, succ)]
 
 
 def _all_keys(pack):
@@ -681,7 +683,7 @@ def test_c3_ordinary_opposite_polarity_conflict_has_no_winner(pg_project):
     assert [c["reason"] for c in pack["conflicts"]] == ["opposite_polarity"] and _sups(pack) == []
     assert _keys(pack, "validated_lessons") == []
     assert {i["role"] for i in pack["conflicts_and_stale"]} == {"conflict"}
-    assert "governed_preferred" not in _canonical(pack) and "winner" not in _canonical(pack)
+    assert "explicit_supersession" not in _canonical(pack) and "winner" not in _canonical(pack)
     assert _snapshot() == before
 
 
@@ -699,12 +701,13 @@ def test_c3_explicit_supersession_prefers_successor_by_relation_and_mutates_noth
     before = _snapshot()
     pack = _retrieve(pg_project, mk)
     assert pack["conflicts"] == []
-    (sup,) = _sups(pack)
-    assert sup["predecessor"]["memory_key"] == old and sup["successor"]["memory_key"] == new
-    assert sup["preference_basis"] == "explicit_supersession" and sup["evidence"] == [f"relation:{rid}"]
+    assert _sups(pack) == [(old, new)]
     got = {i["memory_key"]: i for i in pack["validated_lessons"]}
-    assert got[new]["role"] == "instruction" and "governed_preferred" in got[new]["flags"]
+    assert got[new]["role"] == "instruction" and "explicit_supersession_successor" in got[new]["why_retrieved"]
+    assert f"relation:{rid}" in got[new]["evidence"] and "historical" not in got[new]["flags"]
     assert got[old]["role"] == "evidence_ref" and "historical" in got[old]["flags"]
+    assert f"relation:{rid}" in got[old]["evidence"] and "explicit_supersession_predecessor" in got[old]["why_retrieved"]
+    assert not ({"supersession", "governed_preferred", "superseded_by_relation"} & (set(got[old]) | set(got[new])))
     assert _snapshot() == before  # nothing was superseded/mutated by retrieval
 
 
@@ -719,10 +722,9 @@ def test_c3_historical_intent_retains_superseded_predecessor_not_as_current(pg_p
     current = _retrieve(pg_project, mk)
     assert _keys(current, "validated_lessons") == [new] and _sups(current) == []  # edge needs both survivors
     hist = _retrieve(pg_project, mk, temporal_intent="historical", as_of=(now - timedelta(days=5)).isoformat())
-    (sup,) = _sups(hist)
-    assert (sup["predecessor"]["memory_key"], sup["successor"]["memory_key"]) == (old, new)
-    assert sup["evidence"] == [f"relation:{rid}"] and hist["conflicts"] == []
+    assert _sups(hist) == [(old, new)] and hist["conflicts"] == []
     got = {i["memory_key"]: i for i in hist["validated_lessons"]}
+    assert f"relation:{rid}" in got[old]["evidence"] and got[old]["role"] == "evidence_ref"
     assert set(got) == {old, new} and got[old]["status"] == "superseded" and got[old]["role"] != "instruction"
     assert "historical" in got[old]["flags"]
 
@@ -739,4 +741,4 @@ def test_c3_cross_project_supersession_edge_cannot_leak(pg_project, other_projec
     assert _sups(pack) == [] and pack["conflicts"] == []
     assert foreign not in _canonical(pack) and "foreign successor" not in _canonical(pack)
     assert _keys(pack, "validated_lessons") == [mine]
-    assert "governed_preferred" not in _canonical(pack)
+    assert "explicit_supersession" not in _canonical(pack)

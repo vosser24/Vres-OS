@@ -632,8 +632,8 @@ def evaluate(items: list[dict[str, Any]], req: dict[str, Any], edges: list[dict[
 
     Pure and deterministic. Uses ONLY durable evidence passed in: item fields and `edges` (relations whose both
     endpoints are surviving items). Never changes authority_class/status/tier, never picks a winner, never mutates
-    a source. Returns (items, conflict_sets, supersessions): conflict sets are {conflict_key, reason, members, evidence}
-    with NO winner; supersessions are directed {predecessor, successor, evidence} from explicit relations only.
+    a source. Returns (items, conflict_sets): conflict sets are {conflict_key, reason, members, evidence}
+    with NO winner; explicit supersession is shown only via item why_retrieved/flags/role/evidence.
     """
     by_ref = {i["_ref"]: i for i in items if i.get("_ref")}
     for item in items:
@@ -679,32 +679,19 @@ def evaluate(items: list[dict[str, Any]], req: dict[str, Any], edges: list[dict[
             by_ref[ref]["signals"]["relation_count"] = n
             _why(by_ref[ref], "graph_related")
 
-    supersessions: list[dict[str, Any]] = []
     for (pred, succ), markers in sorted(directed.items()):
         p_item, s_item = by_ref[pred], by_ref[succ]
         if (succ, pred) in directed:  # contradictory governed edges: no direction can be trusted, so no winner
             add_set("contradictory_supersession", [p_item["memory_key"], s_item["memory_key"]], markers + directed[(succ, pred)])
             continue
-        # The successor is preferred ONLY because of the explicit relation evidence, never because of recency/relevance.
-        _flag(s_item, "governed_preferred")
+        # Expressed with frozen item fields only: why_retrieved + evidence. Role of the successor is NOT changed
+        # (never preferred by recency/relevance); the predecessor is historical evidence, never an instruction.
         _why(s_item, "explicit_supersession_successor")
-        _flag(p_item, "historical", "superseded_by_relation")
+        _flag(p_item, "historical")
         _why(p_item, "explicit_supersession_predecessor")
         _demote(p_item, "evidence_ref", move=False)
-        entry = {
-            "reason": "explicit_supersession",
-            "predecessor": {"memory_key": p_item["memory_key"], "authority_class": p_item["authority_class"],
-                            "status": p_item["status"], "label": "historical"},
-            "successor": {"memory_key": s_item["memory_key"], "authority_class": s_item["authority_class"],
-                          "status": s_item["status"], "label": "governed_preferred"},
-            "preference_basis": "explicit_supersession",
-            "evidence": sorted(set(markers)),
-        }
-        # Noted on the two items themselves (no new pack section): the pack schema stays the frozen 176.e3.v1.
-        for item, role in ((p_item, "predecessor"), (s_item, "successor")):
-            item["supersession"] = {**entry, "role": role}
+        for item in (p_item, s_item):
             item["evidence"] = sorted(set(item["evidence"]) | set(markers))
-        supersessions.append(entry)
 
     subjects: dict[str, list[dict[str, Any]]] = {}
     for item in items:
@@ -732,7 +719,7 @@ def evaluate(items: list[dict[str, Any]], req: dict[str, Any], edges: list[dict[
             _why(member, "conflict_member")
             member.setdefault("conflict_keys", []).append(entry["conflict_key"])
             member["conflict_keys"] = sorted(set(member["conflict_keys"]))
-    return items, sorted(sets.values(), key=lambda c: (c["reason"], c["conflict_key"])), supersessions
+    return items, sorted(sets.values(), key=lambda c: (c["reason"], c["conflict_key"]))
 
 
 def _settle(kept: list[dict[str, Any]], sets: dict[str, dict[str, Any]], diag: dict[str, Any]) -> None:
@@ -760,7 +747,7 @@ def compose(items: list[dict[str, Any]], req: dict[str, Any], diagnostics: dict[
         **diagnostics, "deduplicated": 0, "deduplicated_cited_episode": 0,
         "truncated": {"section_budget": 0, "total_items": 0, "pack_bytes": 0, "conflict_sets": 0},
     }
-    items, conflict_list, _supersessions = evaluate(copy.deepcopy(list(items)), req, list(edges))
+    items, conflict_list = evaluate(copy.deepcopy(list(items)), req, list(edges))
     sets = {c["conflict_key"]: c for c in conflict_list}
     in_conflict = {m["memory_key"] for c in conflict_list for m in c["members"]}
     cited: dict[str, set[str]] = {}
