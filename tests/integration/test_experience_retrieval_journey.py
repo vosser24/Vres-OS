@@ -1,7 +1,7 @@
 """E3 chunk 1 retrieval journey on a disposable PostgreSQL database (opt-in; see conftest.pg_project)."""
 import json
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -120,6 +120,12 @@ def _retrieve(pid, query, **kw):
 
 def _keys(pack, *sections):
     return [i["memory_key"] for s in sections for i in pack[s]]
+
+
+def _sups(pack):
+    """Explicit-supersession notes carried on the items themselves (one per pair, from the successor side)."""
+    return [i["supersession"] for v in pack.values() if isinstance(v, list) for i in v
+            if isinstance(i, dict) and i.get("supersession", {}).get("role") == "successor"]
 
 
 def _all_keys(pack):
@@ -458,7 +464,7 @@ def test_c2_cross_project_relation_cannot_leak(pg_project, other_project, relati
     _relate(mine, "related_to", foreign, provenance=E2_PROV)
     _relate(foreign, "supersedes", mine)
     pack = _retrieve(pg_project, mk)
-    assert _keys(pack, "validated_lessons") == [mine] and pack["conflicts"] == []
+    assert _keys(pack, "validated_lessons") == [mine] and pack["conflicts"] == [] and _sups(pack) == []
     assert foreign not in _canonical(pack) and "foreign secret" not in _canonical(pack)
 
 
@@ -526,17 +532,18 @@ def test_c2_semantic_cannot_promote_lesson_over_validated_or_decision(pg_project
 def test_c2_structured_applicability_and_premises_from_real_rows(pg_project):
     mk = _mk()
     _knowledge(f"K-PLAIN-{mk}", pg_project, mk, statement=f"{mk} plain words")
-    _knowledge(f"K-TAG-{mk}", pg_project, mk, statement=f"{mk} tagged words", metadata={"tags": ["redis"]})
+    _knowledge(f"K-FAM-{mk}", pg_project, mk, statement=f"{mk} family words", metadata={"task_family": "engineering"})
     _knowledge(f"K-EU-{mk}", pg_project, mk, statement=f"{mk} eu words", metadata={"premises": {"region": "eu"}})
     _knowledge(f"K-US-{mk}", pg_project, mk, statement=f"{mk} us words", metadata={"premises": {"region": "us"}})
-    pack = _retrieve(pg_project, mk, tags=["redis"], premises={"region": "EU"})
-    assert _keys(pack, "validated_lessons")[0] == f"K-TAG-{mk}" or f"K-EU-{mk}" in _keys(pack, "validated_lessons")
+    pack = _retrieve(pg_project, mk, task_family="engineering", premises={"region": "EU"})
+    assert _keys(pack, "validated_lessons")[0] == f"K-FAM-{mk}"
     by = {i["memory_key"]: i for s in ("validated_lessons", "conflicts_and_stale") for i in pack[s]}
     assert by[f"K-EU-{mk}"]["role"] == "instruction" and by[f"K-EU-{mk}"]["applicability"]["premise_status"] == "match"
     us = by[f"K-US-{mk}"]
     assert us["role"] == "warning_example" and us["applicability"]["premise_mismatches"][0]["key"] == "region"
     assert by[f"K-PLAIN-{mk}"]["applicability"]["premise_status"] == "unverified"
-    assert by[f"K-TAG-{mk}"]["signals"]["tag_overlap"] == 1
+    assert by[f"K-FAM-{mk}"]["signals"]["task_family_match"] is True
+    assert "tag_overlap" not in by[f"K-FAM-{mk}"]["signals"]
 
 
 def test_c2_challenged_and_stale_surface_as_warnings_only(pg_project):
@@ -561,14 +568,14 @@ def test_c2_no_write_proof_with_signals_and_relations(pg_project, relations):
     mk = _mk()
     a, b = f"K-A-{mk}", f"K-B-{mk}"
     _knowledge(a, pg_project, mk)
-    _knowledge(b, pg_project, mk, metadata={"tags": ["x"], "premises": {"region": "us"}})
+    _knowledge(b, pg_project, mk, metadata={"premises": {"region": "us"}})
     relations += [a, b]
     _relate(a, "related_to", b, provenance=E2_PROV)
     with connect() as conn:
         bid = conn.execute("SELECT id FROM vres.knowledge_items WHERE knowledge_key=%s", (b,)).fetchone()["id"]
     before = _snapshot()
     svc = ExperienceRetrievalService(semantic_fn=_stub_semantic([{"knowledge_id": bid}]))
-    packs = [svc.retrieve({"project_id": pg_project, "query": mk, "premises": {"region": "eu"}, "tags": ["x"]})
+    packs = [svc.retrieve({"project_id": pg_project, "query": mk, "premises": {"region": "eu"}})
              for _ in range(3)]
     assert len({_canonical(p) for p in packs}) == 1  # byte-identical on unchanged state
     assert packs[0]["conflicts"] and _snapshot() == before
@@ -580,3 +587,156 @@ def test_c2_no_write_proof_with_signals_and_relations(pg_project, relations):
         with pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
             conn.execute("UPDATE vres.relations SET confidence=0.1")
     assert _snapshot() == before
+
+
+# ---- FINDING 3: semantic-only hits cannot override status / scope / authority / temporal intent
+
+def _ids(*keys):
+    with connect() as conn:
+        rows = conn.execute("SELECT id,knowledge_key FROM vres.knowledge_items WHERE knowledge_key=ANY(%s)", (list(keys),))
+        by = {r["knowledge_key"]: r["id"] for r in rows}
+    return [{"knowledge_id": by[k]} for k in keys]
+
+
+def _sem_retrieve(pid, query, keys, **kw):
+    svc = ExperienceRetrievalService(semantic_fn=_stub_semantic(_ids(*keys)))
+    return svc.retrieve({"project_id": pid, "query": query, **kw})
+
+
+def _seed_semantic_states(pid, foreign_pid, other):
+    """Rows whose text shares NO token with the query: they can only ever arrive through the semantic path."""
+    now = datetime.now(timezone.utc)
+    d = timedelta
+    rows = {
+        "ok": {},
+        "superseded": dict(status="superseded", valid_from=now - d(days=10)),
+        "rejected": dict(status="rejected"),
+        "expired": dict(valid_from=now - d(days=10), valid_to=now - d(days=1)),
+        "expired_before": dict(valid_from=now - d(days=20), valid_to=now - d(days=8)),
+        "future": dict(valid_from=now + d(days=10)),
+    }
+    keys = {}
+    for name, kw in rows.items():
+        keys[name] = f"K-SEM-{name}-{other}"
+        _knowledge(keys[name], pid, other, statement=f"{other} distinct wording {name}", **kw)
+    keys["foreign"] = f"K-SEM-foreign-{other}"
+    _knowledge(keys["foreign"], foreign_pid, other, statement=f"{other} distinct wording foreign")
+    return keys
+
+
+def test_c3_semantic_only_current_intent_cannot_admit_ineligible_states(pg_project, other_project):
+    mk, other = _mk(), _mk()
+    keys = _seed_semantic_states(pg_project, other_project, other)
+    assert _retrieve(pg_project, mk)["abstained"]  # nothing matches lexically: any hit below is semantic-only
+    pack = _sem_retrieve(pg_project, mk, list(keys.values()))
+    assert pack["diagnostics"]["embedding"] == "used"
+    assert _all_keys(pack) == [keys["ok"]]
+    why = pack["validated_lessons"][0]["why_retrieved"]
+    assert "semantic_match" in why and "lexical_match" not in why
+    assert "historical" not in pack["validated_lessons"][0]["flags"]
+    for excluded in ("superseded", "rejected", "expired", "expired_before", "future", "foreign"):
+        assert keys[excluded] not in _canonical(pack)
+
+
+def test_c3_semantic_only_historical_intent_needs_validity_at_as_of(pg_project, other_project):
+    mk, other = _mk(), _mk()
+    keys = _seed_semantic_states(pg_project, other_project, other)
+    as_of = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
+    assert _retrieve(pg_project, mk, temporal_intent="historical", as_of=as_of)["abstained"]
+    pack = _sem_retrieve(pg_project, mk, list(keys.values()), temporal_intent="historical", as_of=as_of)
+    assert sorted(_all_keys(pack)) == sorted(keys[n] for n in ("ok", "superseded", "expired"))
+    got = {i["memory_key"]: i for i in pack["validated_lessons"]}
+    assert "historical" in got[keys["superseded"]]["flags"] and "historical" in got[keys["expired"]]["flags"]
+    assert "historical" not in got[keys["ok"]]["flags"]
+    assert got[keys["superseded"]]["role"] != "instruction" and got[keys["expired"]]["role"] != "instruction"
+    for excluded in ("rejected", "expired_before", "future", "foreign"):
+        assert keys[excluded] not in _canonical(pack)
+
+
+def test_c3_semantic_score_cannot_override_authority_or_challenged_status(pg_project):
+    mk, other = _mk(), _mk()
+    _knowledge(f"K-V-{mk}", pg_project, mk)
+    _knowledge(f"K-P-{other}", pg_project, other, status="proposed", statement=f"{other} distinct proposed wording")
+    _knowledge(f"K-C-{other}", pg_project, other, status="challenged", statement=f"{other} distinct challenged wording")
+    # semantic ranks put the weak items FIRST
+    pack = _sem_retrieve(pg_project, mk, [f"K-C-{other}", f"K-P-{other}", f"K-V-{mk}"])
+    assert _keys(pack, "validated_lessons") == [f"K-V-{mk}"]
+    assert pack["validated_lessons"][0]["role"] == "instruction"
+    assert _keys(pack, "candidate_lessons") == [f"K-P-{other}"] and pack["candidate_lessons"][0]["role"] == "candidate"
+    assert _keys(pack, "conflicts_and_stale") == [f"K-C-{other}"]
+    assert [i["role"] for i in pack["conflicts_and_stale"]] == ["conflict"]
+
+
+# ---- FINDING 1: ordinary conflict has no winner; explicit supersession is directed and governed
+
+def test_c3_ordinary_opposite_polarity_conflict_has_no_winner(pg_project):
+    mk = _mk()
+    _knowledge(f"K-P-{mk}", pg_project, mk, metadata={"subject_key": "cache.ttl", "polarity": "positive"})
+    _knowledge(f"K-N-{mk}", pg_project, mk, metadata={"subject_key": "cache.ttl", "polarity": "negative"})
+    with connect() as conn, conn.transaction():  # the negative one is the NEWER verification: still no winner
+        conn.execute("UPDATE vres.knowledge_items SET last_verified_at=now()-interval '300 days' WHERE knowledge_key=%s",
+                     (f"K-P-{mk}",))
+    before = _snapshot()
+    pack = _retrieve(pg_project, mk)
+    assert [c["reason"] for c in pack["conflicts"]] == ["opposite_polarity"] and _sups(pack) == []
+    assert _keys(pack, "validated_lessons") == []
+    assert {i["role"] for i in pack["conflicts_and_stale"]} == {"conflict"}
+    assert "governed_preferred" not in _canonical(pack) and "winner" not in _canonical(pack)
+    assert _snapshot() == before
+
+
+@pytest.mark.parametrize("direction", ["supersedes", "superseded_by"])
+def test_c3_explicit_supersession_prefers_successor_by_relation_and_mutates_nothing(pg_project, relations, direction):
+    mk = _mk()
+    old, new = f"K-OLD-{mk}", f"K-NEW-{mk}"
+    _knowledge(old, pg_project, mk)
+    _knowledge(new, pg_project, mk)
+    with connect() as conn, conn.transaction():  # predecessor is the more recently verified one
+        conn.execute("UPDATE vres.knowledge_items SET last_verified_at=now()-interval '300 days' WHERE knowledge_key=%s",
+                     (new,))
+    relations += [old, new]
+    rid = _relate(new, "supersedes", old) if direction == "supersedes" else _relate(old, "superseded_by", new)
+    before = _snapshot()
+    pack = _retrieve(pg_project, mk)
+    assert pack["conflicts"] == []
+    (sup,) = _sups(pack)
+    assert sup["predecessor"]["memory_key"] == old and sup["successor"]["memory_key"] == new
+    assert sup["preference_basis"] == "explicit_supersession" and sup["evidence"] == [f"relation:{rid}"]
+    got = {i["memory_key"]: i for i in pack["validated_lessons"]}
+    assert got[new]["role"] == "instruction" and "governed_preferred" in got[new]["flags"]
+    assert got[old]["role"] == "evidence_ref" and "historical" in got[old]["flags"]
+    assert _snapshot() == before  # nothing was superseded/mutated by retrieval
+
+
+def test_c3_historical_intent_retains_superseded_predecessor_not_as_current(pg_project, relations):
+    mk = _mk()
+    old, new = f"K-OLD-{mk}", f"K-NEW-{mk}"
+    now = datetime.now(timezone.utc)
+    _knowledge(old, pg_project, mk, status="superseded", valid_from=now - timedelta(days=30))
+    _knowledge(new, pg_project, mk, valid_from=now - timedelta(days=30))
+    relations += [old, new]
+    rid = _relate(old, "superseded_by", new)
+    current = _retrieve(pg_project, mk)
+    assert _keys(current, "validated_lessons") == [new] and _sups(current) == []  # edge needs both survivors
+    hist = _retrieve(pg_project, mk, temporal_intent="historical", as_of=(now - timedelta(days=5)).isoformat())
+    (sup,) = _sups(hist)
+    assert (sup["predecessor"]["memory_key"], sup["successor"]["memory_key"]) == (old, new)
+    assert sup["evidence"] == [f"relation:{rid}"] and hist["conflicts"] == []
+    got = {i["memory_key"]: i for i in hist["validated_lessons"]}
+    assert set(got) == {old, new} and got[old]["status"] == "superseded" and got[old]["role"] != "instruction"
+    assert "historical" in got[old]["flags"]
+
+
+def test_c3_cross_project_supersession_edge_cannot_leak(pg_project, other_project, relations):
+    mk = _mk()
+    mine, foreign = f"K-MINE-{mk}", f"K-FRN-{mk}"
+    _knowledge(mine, pg_project, mk)
+    _knowledge(foreign, other_project, mk, statement=f"{mk} foreign successor secret")
+    relations += [mine, foreign]
+    _relate(mine, "superseded_by", foreign)
+    _relate(foreign, "supersedes", mine)
+    pack = _retrieve(pg_project, mk)
+    assert _sups(pack) == [] and pack["conflicts"] == []
+    assert foreign not in _canonical(pack) and "foreign successor" not in _canonical(pack)
+    assert _keys(pack, "validated_lessons") == [mine]
+    assert "governed_preferred" not in _canonical(pack)

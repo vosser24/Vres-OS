@@ -40,6 +40,8 @@ def _kitem(row=None, req=None):
     {"project_id": 1, "query": ""},
     {"project_id": 1, "query": "x" * 501},
     {"project_id": 1, "query": "x", "surprise": 1},
+    {"project_id": 1, "query": "x", "tags": ["redis"]},
+    {"project_id": 1, "query": "x", "raw_fallback": "yes"},
     {"project_id": 1, "query": "x", "temporal_intent": "future"},
     {"project_id": 1, "query": "x", "as_of": "2026-01-01T00:00:00+00:00"},
     {"project_id": 1, "query": "x", "temporal_intent": "historical", "as_of": "garbage"},
@@ -297,6 +299,12 @@ def _edge(a, b, rel="related_to", marked=False, eid=1, ak="knowledge", bk="knowl
             "consolidation_marked": marked}
 
 
+def _sups(pack):
+    """Explicit-supersession notes carried on the items themselves (one per pair, from the successor side)."""
+    return [i["supersession"] for v in pack.values() if isinstance(v, list) for i in v
+            if isinstance(i, dict) and i.get("supersession", {}).get("role") == "successor"]
+
+
 def _order(pack, section="validated_lessons"):
     return [i["memory_key"] for i in pack[section]]
 
@@ -306,14 +314,22 @@ def _pm(**premises):
 
 
 def test_structured_applicability_improves_relevance_among_comparable_items():
-    req = _req(task_family="engineering", capability_keys=["cap.cache"], tags=["Redis"])
+    req = _req(task_family="engineering", capability_keys=["cap.cache"])
     plain = _kitem(_k("K-A", statement="alpha words", rank=0.5), req)
     fam = _kitem(_k("K-B", statement="bravo words", rank=0.5, scope={"task_family": "engineering"}), req)
-    tag = _kitem(_k("K-C", statement="charlie words", rank=0.5, scope={"tags": ["redis"]}), req)
-    pack = er.compose([plain, tag, fam], req, {})
+    cap = _kitem(_k("K-C", statement="charlie words", rank=0.5, scope={"capability_keys": ["cap.cache"]}), req)
+    pack = er.compose([plain, cap, fam], req, {})
     assert _order(pack) == ["K-B", "K-C", "K-A"]
     got = {i["memory_key"]: i for i in pack["validated_lessons"]}
-    assert "tag_match" in got["K-C"]["why_retrieved"] and got["K-C"]["signals"]["tag_overlap"] == 1
+    assert "capability_match" in got["K-C"]["why_retrieved"] and "tag_overlap" not in got["K-C"]["signals"]
+    assert "tags" not in got["K-C"]["applicability"] and "tags" not in pack["request"]
+
+
+def test_raw_fallback_accepted_but_not_implemented():
+    assert er.normalize_request({"project_id": 1, "query": "x"})["raw_fallback"] is True
+    pack = er.compose([], _req(), {})
+    assert pack["diagnostics"]["raw_fallback"] == "not_implemented" and pack["raw_evidence_refs"] == []
+    assert er.compose([], _req(raw_fallback=False), {})["diagnostics"]["raw_fallback"] == "disabled"
 
 
 def test_lexical_relevance_orders_without_changing_authority():
@@ -461,7 +477,9 @@ def test_opposite_polarity_supersession_and_challenged_conflicts():
     ch = _kitem(_k("K-C", status="challenged", statement="c"), req)
     x, y = _kitem(_k("K-X", statement="x"), req), _kitem(_k("K-Y", statement="y"), req)
     pack = er.compose([pos, neg, ch, x, y], req, {}, [_edge("K-Y", "K-X", "supersedes")])
-    assert sorted(c["reason"] for c in pack["conflicts"]) == ["challenged", "opposite_polarity", "supersession_edge"]
+    assert sorted(c["reason"] for c in pack["conflicts"]) == ["challenged", "opposite_polarity"]
+    assert "supersession_edge" not in _canonical(pack["conflicts"])
+    assert [(s["predecessor"]["memory_key"], s["successor"]["memory_key"]) for s in _sups(pack)] == [("K-X", "K-Y")]
     pol = next(c for c in pack["conflicts"] if c["reason"] == "opposite_polarity")
     assert [m["memory_key"] for m in pol["members"]] == ["K-N", "K-P"]
     chal = next(c for c in pack["conflicts"] if c["reason"] == "challenged")
@@ -559,3 +577,76 @@ def test_chunk1_hardening_holds_in_chunk2_composition():
     pack = er.compose([benign], req, {})
     assert pack["candidate_lessons"][0]["role"] == "candidate"
     assert all(i["role"] != "instruction" for i in pack["candidate_lessons"] + pack["conflicts_and_stale"])
+
+
+# ---- FINDING 1: ordinary conflict (no winner) vs explicit directed supersession (governed successor)
+
+def _flags(pack, key):
+    return next(i for sec in er.SECTIONS for i in pack[sec] if i["memory_key"] == key)["flags"]
+
+
+def test_ordinary_opposite_polarity_conflict_has_no_winner_and_recency_is_not_one():
+    req = _req()
+    old = _kitem(_k("K-OLD", statement="o", last_verified_at=NOW - timedelta(days=400),
+                    metadata={"subject_key": "cache.ttl", "polarity": "positive"}), req)
+    new = _kitem(_k("K-NEW", statement="n", last_verified_at=NOW,
+                    metadata={"subject_key": "cache.ttl", "polarity": "negative"}), req)
+    pack = er.compose([new, old], req, {})
+    text = _canonical(pack)
+    assert [c["reason"] for c in pack["conflicts"]] == ["opposite_polarity"] and _sups(pack) == []
+    assert "governed_preferred" not in text and "winner" not in text
+    assert all(i["role"] == "conflict" for i in pack["conflicts_and_stale"])
+
+
+def test_recency_alone_yields_no_preference_between_unrelated_items():
+    req = _req()
+    a = _kitem(_k("K-A", statement="a", last_verified_at=NOW - timedelta(days=400)), req)
+    b = _kitem(_k("K-B", statement="b", last_verified_at=NOW), req)
+    pack = er.compose([a, b], req, {})
+    assert pack["conflicts"] == [] and _sups(pack) == []
+    assert not any("governed_preferred" in i["flags"] for i in pack["validated_lessons"])
+
+
+@pytest.mark.parametrize("edge", [_edge("K-NEW", "K-OLD", "supersedes"), _edge("K-OLD", "K-NEW", "superseded_by")])
+def test_explicit_supersession_is_directed_and_prefers_successor_by_relation_not_recency(edge):
+    req = _req()
+    # predecessor is the NEWER row: preference must follow the relation, not recency
+    old = _kitem(_k("K-OLD", statement="o", last_verified_at=NOW), req)
+    new = _kitem(_k("K-NEW", statement="n", last_verified_at=NOW - timedelta(days=400)), req)
+    pack = er.compose([old, new], req, {}, [edge])
+    assert pack["conflicts"] == []
+    (sup,) = _sups(pack)
+    assert sup["reason"] == "explicit_supersession" and sup["preference_basis"] == "explicit_supersession"
+    assert sup["predecessor"]["memory_key"] == "K-OLD" and sup["successor"]["memory_key"] == "K-NEW"
+    assert sup["predecessor"]["label"] == "historical" and sup["successor"]["label"] == "governed_preferred"
+    assert sup["evidence"] == ["relation:1"] and "relation:1" in pack["evidence_keys"]
+    assert "governed_preferred" in _flags(pack, "K-NEW") and "historical" in _flags(pack, "K-OLD")
+    got = {i["memory_key"]: i for i in pack["validated_lessons"]}
+    assert got["K-NEW"]["role"] == "instruction" and got["K-OLD"]["role"] == "evidence_ref"
+    assert "probab" not in _canonical(sup) and "confidence" not in _canonical(sup)
+
+
+def test_historical_intent_retains_predecessor_without_making_it_current():
+    req = _req(temporal_intent="historical", as_of="2026-06-01T00:00:00+00:00")
+    old = _kitem(_k("K-OLD", status="superseded", statement="o", valid_to=datetime(2026, 8, 1, tzinfo=timezone.utc)), req)
+    new = _kitem(_k("K-NEW", statement="n", valid_from=datetime(2026, 1, 1, tzinfo=timezone.utc)), req)
+    pack = er.compose([old, new], req, {}, [_edge("K-OLD", "K-NEW", "superseded_by", eid=7)])
+    assert sorted(_order(pack)) == ["K-NEW", "K-OLD"]
+    got = {i["memory_key"]: i for i in pack["validated_lessons"]}
+    assert got["K-OLD"]["role"] != "instruction" and "historical" in got["K-OLD"]["flags"]
+    assert _sups(pack)[0]["evidence"] == ["relation:7"]
+
+
+def test_current_intent_suppresses_superseded_predecessor_so_no_edge_is_shown():
+    req = _req()
+    assert er.knowledge_item(_k("K-OLD", status="superseded"), req, NOW) == (None, None)
+    new = _kitem(_k("K-NEW", statement="n"), req)
+    pack = er.compose([new], req, {}, [_edge("K-OLD", "K-NEW", "superseded_by")])
+    assert _sups(pack) == [] and pack["conflicts"] == []
+
+
+def test_contradictory_supersession_edges_are_an_unresolved_conflict_without_winner():
+    req = _req()
+    a, b = _kitem(_k("K-A", statement="a"), req), _kitem(_k("K-B", statement="b"), req)
+    pack = er.compose([a, b], req, {}, [_edge("K-A", "K-B", "supersedes", eid=1), _edge("K-B", "K-A", "supersedes", eid=2)])
+    assert [c["reason"] for c in pack["conflicts"]] == ["contradictory_supersession"] and _sups(pack) == []
