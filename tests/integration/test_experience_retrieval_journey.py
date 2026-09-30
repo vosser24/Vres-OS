@@ -13,7 +13,7 @@ import psycopg
 from vres_os.db import connect
 from vres_os.experience import POLICY_DIGEST as E1_DIGEST, POLICY_VERSION as E1_VERSION, _canonical
 from vres_os.experience_consolidation import episode_payload_digest
-from vres_os.experience_retrieval import BUDGETS, E2_SOURCE_OWNER, ExperienceRetrievalService
+from vres_os.experience_retrieval import BUDGETS, E2_SOURCE_OWNER, SECTIONS, ExperienceRetrievalService
 from vres_os.project import ProjectIdentity
 from vres_os.repository import Repository
 
@@ -114,8 +114,61 @@ def _company_approval(pid, task_key):
         ).fetchone()["id"]
 
 
+# Contract-derived closed schema (EXPERIENCE-INTELLIGENCE-E3-CONTRACT-2026-09-29.md). Written out explicitly and
+# independently of the implementation so that any emitted key outside the contract fails on REAL database rows too.
+PACK_KEYS = frozenset({"schema_version", "current_decisions", "accepted_procedures", "validated_lessons",
+                       "candidate_lessons", "conflicts_and_stale", "precedent_episodes", "low_trust_observations",
+                       "raw_evidence_refs", "abstained", "reason", "diagnostics", "evidence_keys",
+                       "estimated_tokens", "policy"})
+ITEM_KEYS = frozenset({"memory_key", "memory_class", "project_id", "scope", "authority_class", "status", "trust_class",
+                       "role", "applicability", "why_retrieved", "evidence", "flags", "signals", "text"})
+ITEM_EXTENSIONS = frozenset({"stored_confidence", "last_verified_at", "review_after", "also_matched", "provenance"})
+FLAGS = frozenset({"stale", "conflict", "challenged", "historical", "premise_mismatch", "premise_unverified"})
+ROLES = frozenset({"instruction", "candidate", "warning_example", "low_trust_observation", "conflict",
+                   "stale_assumption", "evidence_ref"})
+MEMORY_CLASSES = frozenset({"decision", "procedural", "semantic", "episodic", "raw_evidence"})
+SCOPES = frozenset({"project", "company_approved"})
+SIGNAL_KEYS = frozenset({"authority_tier", "scope_rank", "task_family_match", "capability_match", "fusion_rank_score",
+                         "recency_epoch"})
+APPLICABILITY_KEYS = frozenset({"task_family", "capability_keys", "premises", "premise_status", "premise_mismatches",
+                                "constraints"})
+
+
+def assert_pack_schema(pack):
+    """Every emitted pack/item/nested key must be contract-named; no internal (underscore) key may leak."""
+    assert set(pack) == PACK_KEYS, set(pack) ^ PACK_KEYS
+    for section in SECTIONS:
+        for item in pack[section]:
+            keys = set(item)
+            assert ITEM_KEYS <= keys and keys <= ITEM_KEYS | ITEM_EXTENSIONS, (item["memory_key"], keys ^ ITEM_KEYS)
+            assert not any(k.startswith("_") for k in item)
+            assert item["memory_class"] in MEMORY_CLASSES and item["scope"] in SCOPES
+            assert item["role"] in ROLES and set(item["flags"]) <= FLAGS
+            assert set(item["signals"]) == SIGNAL_KEYS and set(item["applicability"]) <= APPLICABILITY_KEYS
+            assert item["why_retrieved"] and item["evidence"]
+            if "provenance" in item:
+                assert item["role"] == "low_trust_observation"
+            if "stored_confidence" in item:
+                assert item["memory_class"] in {"decision", "semantic"} and item["stored_confidence"] is not None
+            if "constraints" in item["applicability"]:
+                assert item["memory_class"] == "episodic"
+
+
 def _retrieve(pid, query, **kw):
-    return ExperienceRetrievalService().retrieve({"project_id": pid, "query": query, **kw})
+    pack = ExperienceRetrievalService().retrieve({"project_id": pid, "query": query, **kw})
+    assert_pack_schema(pack)
+    return pack
+
+
+def _conf(pack):
+    """Conflict sets reconstructed from conflicts_and_stale items only: reason -> sorted member keys."""
+    out = {}
+    for i in pack["conflicts_and_stale"]:
+        if "conflict_member" in i["why_retrieved"]:
+            for w in i["why_retrieved"]:
+                if w.startswith("conflict_reason_"):
+                    out.setdefault(w[len("conflict_reason_"):], []).append(i["memory_key"])
+    return {k: sorted(v) for k, v in out.items()}
 
 
 def _keys(pack, *sections):
@@ -240,8 +293,9 @@ def test_e2_lesson_stays_proposed_low_authority_and_capped(pg_project):
     pack = _retrieve(pg_project, mk)
     lessons = pack["candidate_lessons"]
     assert len(lessons) == 3 == BUDGETS["candidate_lessons"]
-    assert all(i["memory_class"] == "lesson_candidate" and i["status"] == "proposed" and i["role"] == "candidate"
-               and "gotcha" in i["flags"] for i in lessons)
+    assert all(i["memory_class"] == "semantic" and i["status"] == "proposed" and i["role"] == "candidate"
+               and i["authority_class"] == "proposed" and {"gotcha_example", "e2_lesson"} <= set(i["why_retrieved"])
+               and "gotcha" not in i["flags"] for i in lessons)
     assert _keys(pack, "validated_lessons") == [f"K-V-{mk}"]
     assert not any(k.startswith("K-L") for k in _keys(pack, "validated_lessons", "current_decisions"))
     off = _retrieve(pg_project, mk, include_candidates=False)
@@ -253,7 +307,8 @@ def test_failed_episode_is_failure_not_recipe(pg_project):
     ep = _episode(pg_project, mk, outcome="failed")
     item = _retrieve(pg_project, mk)["precedent_episodes"][0]
     assert item["memory_key"] == ep and item["role"] == "warning_example"
-    assert {"failure", "gotcha"} <= set(item["flags"]) and item["outcome"]["outcome_status"] == "failed"
+    assert "gotcha_example" in item["why_retrieved"] and item["status"] == "failed" and item["memory_class"] == "episodic"
+    assert not ({"failure", "gotcha"} & set(item["flags"])) and "outcome" not in item
     assert item["text"].startswith("Past failure, not a recipe")
 
 
@@ -439,11 +494,9 @@ def test_c2_relation_conflict_surfaced_with_evidence_and_no_winner(pg_project, r
     relations += [a, b]
     rid = _relate(a, "related_to", b, provenance=E2_PROV)
     pack = _retrieve(pg_project, mk)
-    (conf,) = pack["conflicts"]
-    assert conf["reason"] == "related_to_conflict" and conf["evidence"] == [f"relation:{rid}"]
-    assert sorted(m["memory_key"] for m in conf["members"]) == sorted([a, b])
+    assert _conf(pack) == {"related_to_conflict": sorted([a, b])} and "conflicts" not in pack
     assert sorted(_keys(pack, "conflicts_and_stale")) == sorted([a, b]) and pack["validated_lessons"] == []
-    assert all(i["role"] == "conflict" for i in pack["conflicts_and_stale"])
+    assert all(i["role"] == "conflict" and f"relation:{rid}" in i["evidence"] for i in pack["conflicts_and_stale"])
     assert "winner" not in _canonical(pack)
     plain = f"K-C-{mk}"
     _knowledge(plain, pg_project, mk)
@@ -452,7 +505,7 @@ def test_c2_relation_conflict_surfaced_with_evidence_and_no_winner(pg_project, r
     relations += [plain, other]
     _relate(plain, "related_to", other)  # unmarked related_to is a relevance edge, not a conflict
     again = _retrieve(pg_project, mk)
-    assert len(again["conflicts"]) == 1
+    assert len(_conf(again)) == 1
     assert {i["memory_key"] for i in again["validated_lessons"]} == {plain, other}
     assert all("graph_related" in i["why_retrieved"] for i in again["validated_lessons"])
 
@@ -466,7 +519,7 @@ def test_c2_cross_project_relation_cannot_leak(pg_project, other_project, relati
     _relate(mine, "related_to", foreign, provenance=E2_PROV)
     _relate(foreign, "supersedes", mine)
     pack = _retrieve(pg_project, mk)
-    assert _keys(pack, "validated_lessons") == [mine] and pack["conflicts"] == [] and _sups(pack) == []
+    assert _keys(pack, "validated_lessons") == [mine] and _conf(pack) == {} and _sups(pack) == []
     assert foreign not in _canonical(pack) and "foreign secret" not in _canonical(pack)
 
 
@@ -559,6 +612,8 @@ def test_c2_challenged_and_stale_surface_as_warnings_only(pg_project):
     by = {i["memory_key"]: i for i in pack["conflicts_and_stale"]}
     assert set(by) == {f"K-CH-{mk}", f"K-ST-{mk}"}
     assert by[f"K-ST-{mk}"]["status"] == "validated" and "stale" in by[f"K-ST-{mk}"]["flags"]
+    assert by[f"K-ST-{mk}"]["role"] == "stale_assumption" and by[f"K-ST-{mk}"]["review_after"]
+    assert "freshness" not in by[f"K-ST-{mk}"]
     assert by[f"K-CH-{mk}"]["status"] == "challenged" and by[f"K-CH-{mk}"]["role"] == "conflict"
     with connect() as conn:  # nothing was changed by surfacing them
         rows = {r["knowledge_key"]: r["status"] for r in conn.execute(
@@ -579,8 +634,11 @@ def test_c2_no_write_proof_with_signals_and_relations(pg_project, relations):
     svc = ExperienceRetrievalService(semantic_fn=_stub_semantic([{"knowledge_id": bid}]))
     packs = [svc.retrieve({"project_id": pg_project, "query": mk, "premises": {"region": "eu"}})
              for _ in range(3)]
+    for p in packs:
+        assert_pack_schema(p)
     assert len({_canonical(p) for p in packs}) == 1  # byte-identical on unchanged state
-    assert packs[0]["conflicts"] and _snapshot() == before
+    assert any("premise_mismatch" in i["flags"] or "conflict" in i["flags"] for i in packs[0]["conflicts_and_stale"])
+    assert _snapshot() == before
     with svc._open() as conn:
         with pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
             conn.execute("INSERT INTO vres.relations(source_kind,source_key,relation_type,target_kind,target_key) "
@@ -680,7 +738,7 @@ def test_c3_ordinary_opposite_polarity_conflict_has_no_winner(pg_project):
                      (f"K-P-{mk}",))
     before = _snapshot()
     pack = _retrieve(pg_project, mk)
-    assert [c["reason"] for c in pack["conflicts"]] == ["opposite_polarity"] and _sups(pack) == []
+    assert list(_conf(pack)) == ["opposite_polarity"] and _sups(pack) == []
     assert _keys(pack, "validated_lessons") == []
     assert {i["role"] for i in pack["conflicts_and_stale"]} == {"conflict"}
     assert "explicit_supersession" not in _canonical(pack) and "winner" not in _canonical(pack)
@@ -700,7 +758,7 @@ def test_c3_explicit_supersession_prefers_successor_by_relation_and_mutates_noth
     rid = _relate(new, "supersedes", old) if direction == "supersedes" else _relate(old, "superseded_by", new)
     before = _snapshot()
     pack = _retrieve(pg_project, mk)
-    assert pack["conflicts"] == []
+    assert _conf(pack) == {}
     assert _sups(pack) == [(old, new)]
     got = {i["memory_key"]: i for i in pack["validated_lessons"]}
     assert got[new]["role"] == "instruction" and "explicit_supersession_successor" in got[new]["why_retrieved"]
@@ -722,7 +780,7 @@ def test_c3_historical_intent_retains_superseded_predecessor_not_as_current(pg_p
     current = _retrieve(pg_project, mk)
     assert _keys(current, "validated_lessons") == [new] and _sups(current) == []  # edge needs both survivors
     hist = _retrieve(pg_project, mk, temporal_intent="historical", as_of=(now - timedelta(days=5)).isoformat())
-    assert _sups(hist) == [(old, new)] and hist["conflicts"] == []
+    assert _sups(hist) == [(old, new)] and _conf(hist) == {}
     got = {i["memory_key"]: i for i in hist["validated_lessons"]}
     assert f"relation:{rid}" in got[old]["evidence"] and got[old]["role"] == "evidence_ref"
     assert set(got) == {old, new} and got[old]["status"] == "superseded" and got[old]["role"] != "instruction"
@@ -738,7 +796,7 @@ def test_c3_cross_project_supersession_edge_cannot_leak(pg_project, other_projec
     _relate(mine, "superseded_by", foreign)
     _relate(foreign, "supersedes", mine)
     pack = _retrieve(pg_project, mk)
-    assert _sups(pack) == [] and pack["conflicts"] == []
+    assert _sups(pack) == [] and _conf(pack) == {}
     assert foreign not in _canonical(pack) and "foreign successor" not in _canonical(pack)
     assert _keys(pack, "validated_lessons") == [mine]
     assert "explicit_supersession" not in _canonical(pack)

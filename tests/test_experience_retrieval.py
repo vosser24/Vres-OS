@@ -8,6 +8,28 @@ from vres_os.experience import _canonical
 
 NOW = datetime(2026, 9, 29, 12, 0, tzinfo=timezone.utc)
 
+# Contract-derived closed schema (EXPERIENCE-INTELLIGENCE-E3-CONTRACT-2026-09-29.md, "Inputs", "Pack", "Roles").
+# Written out explicitly so a schema change must be made here, deliberately, not inferred from the implementation.
+REQUEST_KEYS = frozenset({"project_id", "query", "task_key", "task_family", "capability_keys", "temporal_intent",
+                          "as_of", "premises", "raw_fallback", "include_candidates"})
+PACK_KEYS = frozenset({"schema_version", "current_decisions", "accepted_procedures", "validated_lessons",
+                       "candidate_lessons", "conflicts_and_stale", "precedent_episodes", "low_trust_observations",
+                       "raw_evidence_refs", "abstained", "reason", "diagnostics", "evidence_keys",
+                       "estimated_tokens", "policy"})
+ITEM_KEYS = frozenset({"memory_key", "memory_class", "project_id", "scope", "authority_class", "status", "trust_class",
+                       "role", "applicability", "why_retrieved", "evidence", "flags", "signals", "text"})
+ITEM_EXTENSIONS = frozenset({"stored_confidence", "last_verified_at", "review_after", "also_matched", "provenance"})
+FLAGS = frozenset({"stale", "conflict", "challenged", "historical", "premise_mismatch", "premise_unverified"})
+ROLES = frozenset({"instruction", "candidate", "warning_example", "low_trust_observation", "conflict",
+                   "stale_assumption", "evidence_ref"})
+MEMORY_CLASSES = frozenset({"decision", "procedural", "semantic", "episodic", "raw_evidence"})
+SCOPES = frozenset({"project", "company_approved"})
+SIGNAL_KEYS = frozenset({"authority_tier", "scope_rank", "task_family_match", "capability_match", "fusion_rank_score",
+                         "recency_epoch"})
+APPLICABILITY_KEYS = frozenset({"task_family", "capability_keys", "premises", "premise_status", "premise_mismatches",
+                                "constraints"})
+_APPLICABILITY_KEYS = APPLICABILITY_KEYS
+
 
 def _req(**over):
     return er.normalize_request({"project_id": 1, "query": "cache invalidation", **over})
@@ -112,10 +134,11 @@ def test_historical_labels_and_rejected_still_excluded():
 def test_e2_lesson_is_low_authority_and_gotcha_labelled():
     row = _k("K-L", status="proposed", source_owner=er.E2_SOURCE_OWNER, metadata={"polarity": "negative"})
     item = _kitem(row)
-    assert item["memory_class"] == "lesson_candidate" and item["status"] == "proposed"
-    assert item["role"] == "candidate" and "gotcha" in item["flags"]
+    assert item["memory_class"] == "semantic" and item["status"] == "proposed" and item["authority_class"] == "proposed"
+    assert item["role"] == "candidate" and "gotcha_example" in item["why_retrieved"] and "e2_lesson" in item["why_retrieved"]
+    assert "gotcha" not in item["flags"]
     via_meta = _kitem(_k("K-M", status="observed", metadata={"experience_transition_key": "T-1"}))
-    assert via_meta["memory_class"] == "lesson_candidate"
+    assert via_meta["memory_class"] == "semantic" and "e2_lesson" in via_meta["why_retrieved"]
     assert er.knowledge_item(row, _req(include_candidates=False), NOW) == (None, None)
 
 
@@ -141,7 +164,7 @@ def test_decision_authority_split():
     other, _ = er.decision_item(_decision("D-2", task_key="T-2"), req, NOW)
     assert own["authority_class"] == "decision_current_task" and own["role"] == "instruction"
     assert other["authority_class"] == "task_scoped_prior" and other["role"] == "candidate"
-    assert "task_scoped_prior" in other["flags"]
+    assert "task_scoped_prior" in other["why_retrieved"] and "task_scoped_prior" not in other["flags"]
     retired = _decision("D-3", status="retired", retired_at=NOW - timedelta(hours=1))
     assert er.decision_item(retired, req, NOW) == (None, None)
     hist_req = er.normalize_request({"project_id": 1, "query": "x", "temporal_intent": "historical",
@@ -170,7 +193,11 @@ def test_episode_whitelist_corruption_failure_and_low_trust():
     bad["payload"]["objective"] = "tampered"
     assert er.episode_item(bad, _req(), NOW) == (None, "rejected_corrupt")
     failed, _ = er.episode_item(_episode_row("E-2", outcome="failed"), _req(), NOW)
-    assert "gotcha" in failed["flags"] and failed["role"] == "warning_example" and "recipe" not in failed["role"]
+    assert "gotcha_example" in failed["why_retrieved"] and failed["role"] == "warning_example" and "recipe" not in failed["role"]
+    assert failed["status"] == "failed" and "failure" not in failed["flags"] and "outcome" not in failed
+    assert failed["text"].startswith("Past failure, not a recipe. Objective: Fix the cache. Outcome: failed.")
+    assert failed["applicability"]["constraints"] == ["no downtime"] and failed["memory_class"] == "episodic"
+    assert "provenance" not in failed and "provenance" not in ok
     low, _ = er.episode_item(_episode_row("E-3", trust="external_untrusted_observation"), _req(), NOW)
     assert low["role"] == "low_trust_observation" and low["_section"] == "low_trust_observations"
     obs, _ = er.episode_item(_episode_row("E-4", participation="observed"), _req(), NOW)
@@ -190,10 +217,10 @@ def _dec_items(n, req):
 
 def test_ordering_section_then_tuple_and_key_tiebreak():
     req = _req(task_key="T-1")
-    proj = _kitem(_k("K-B", rank=0.5), req)
-    comp = _kitem(_k("K-A", project_id=None, approved=True, statement="other words here", rank=0.5), req)
-    strong = _kitem(_k("K-C", statement="third distinct", rank=0.9), req)
-    tie = _kitem(_k("K-0", statement="fourth distinct", rank=0.5), req)
+    proj = _kitem(_k("K-B"), req)
+    comp = _kitem(_k("K-A", project_id=None, approved=True, statement="other words here"), req)
+    strong = _kitem(_k("K-C", statement="third distinct", lex_pos=1, lex=True), req)
+    tie = _kitem(_k("K-0", statement="fourth distinct"), req)
     dec = er.decision_item(_decision("D-9"), req, NOW)[0]
     pack = er.compose([proj, comp, strong, tie, dec], req, {})
     assert [i["memory_key"] for i in pack["current_decisions"]] == ["D-9"]
@@ -255,7 +282,7 @@ def test_premises_passed_through_unverified_and_deterministic_json():
     a = er.compose(items, req, {})
     b = er.compose(list(reversed(items)), req, {})
     assert _canonical(a) == _canonical(b)
-    assert a["premises"] == {"db": "postgres"}
+    assert "premises" not in a and "request" not in a
     assert all(i["applicability"]["premise_status"] == "unverified" for i in a["validated_lessons"])
     assert "_section" not in _canonical(a)
 
@@ -307,6 +334,17 @@ def _sups(pack):
     return list(zip(pred, succ)) if len(pred) == len(succ) else [(pred, succ)]
 
 
+def _conf(pack):
+    """Conflict sets reconstructed from conflicts_and_stale items only: reason -> sorted member keys."""
+    out = {}
+    for i in pack["conflicts_and_stale"]:
+        if "conflict_member" not in i["why_retrieved"]:
+            continue
+        for reason in (w[len("conflict_reason_"):] for w in i["why_retrieved"] if w.startswith("conflict_reason_")):
+            out.setdefault(reason, []).append(i["memory_key"])
+    return {k: sorted(v) for k, v in out.items()}
+
+
 def _order(pack, section="validated_lessons"):
     return [i["memory_key"] for i in pack[section]]
 
@@ -324,7 +362,7 @@ def test_structured_applicability_improves_relevance_among_comparable_items():
     assert _order(pack) == ["K-B", "K-C", "K-A"]
     got = {i["memory_key"]: i for i in pack["validated_lessons"]}
     assert "capability_match" in got["K-C"]["why_retrieved"] and "tag_overlap" not in got["K-C"]["signals"]
-    assert "tags" not in got["K-C"]["applicability"] and "tags" not in pack["request"]
+    assert "tags" not in got["K-C"]["applicability"] and "request" not in pack
 
 
 def test_raw_fallback_accepted_but_not_implemented():
@@ -354,7 +392,8 @@ def test_semantic_signal_ranks_and_is_labelled():
     assert _order(pack) == ["K-C", "K-A", "K-B"]
     got = {i["memory_key"]: i for i in pack["validated_lessons"]}
     assert "semantic_match" in got["K-B"]["why_retrieved"] and "lexical_match" not in got["K-B"]["why_retrieved"]
-    assert got["K-C"]["signals"]["semantic_rank"] == 2
+    assert got["K-C"]["signals"]["fusion_rank_score"] > got["K-A"]["signals"]["fusion_rank_score"] > 0
+    assert "semantic_rank" not in got["K-C"]["signals"] and "lexical_rank" not in got["K-C"]["signals"]
 
 
 def test_semantic_unavailable_degrades_safely():
@@ -382,16 +421,18 @@ def test_semantic_score_cannot_promote_low_authority_above_structural_authority(
     assert pack["candidate_lessons"][0]["signals"]["authority_tier"] > pack["validated_lessons"][0]["signals"]["authority_tier"]
 
 
-def test_graph_relation_is_a_tiebreak_only_and_scope_bounded():
+def test_graph_relation_is_a_label_only_never_a_ranking_signal_and_scope_bounded():
     req = _req()
     a = _kitem(_k("K-A", statement="a words", rank=0.5), req)
     b = _kitem(_k("K-B", statement="b words", rank=0.5), req)
     c = _kitem(_k("K-C", statement="c words", rank=0.5), req)
     edges = [_edge("K-C", "K-B", "supports", eid=1), _edge("K-C", "K-OUTSIDE", "supports", eid=2)]
     pack = er.compose([a, b, c], req, {}, edges)
-    assert _order(pack) == ["K-B", "K-C", "K-A"]
-    assert "graph_related" in pack["validated_lessons"][0]["why_retrieved"]
-    assert pack["conflicts"] == []
+    assert _order(pack) == ["K-A", "K-B", "K-C"]  # contract tuple has no relation term: key order decides
+    got = {i["memory_key"]: i for i in pack["validated_lessons"]}
+    assert "graph_related" in got["K-B"]["why_retrieved"] and "graph_related" in got["K-C"]["why_retrieved"]
+    assert "graph_related" not in got["K-A"]["why_retrieved"] and "relation_count" not in got["K-B"]["signals"]
+    assert _conf(pack) == {}
 
 
 def test_recency_and_staleness_are_presentation_not_truth():
@@ -399,10 +440,10 @@ def test_recency_and_staleness_are_presentation_not_truth():
     item = _kitem(_k("K-S", statement="s words", review_after=NOW - timedelta(days=1)), req)
     pack = er.compose([item], req, {})
     got = pack["conflicts_and_stale"][0]
-    assert "stale" in got["flags"] and {"type": "stale", "reason": "review_after_passed"} in got["warnings"]
+    assert "stale" in got["flags"] and got["role"] == "stale_assumption" and "stale_assumption" in got["why_retrieved"]
     assert got["authority_class"] == item["authority_class"] and got["status"] == "validated"
-    assert got["freshness"]["review_after"] is not None
-    assert pack["conflicts"] == []
+    assert got["review_after"] and got["last_verified_at"] and "freshness" not in got and "warnings" not in got
+    assert _conf(pack) == {}
 
 
 def test_matching_premises_keep_role():
@@ -410,7 +451,7 @@ def test_matching_premises_keep_role():
     item = _kitem(_k("K-1", metadata=_pm(region="eu")), req)
     got = er.compose([item], req, {})["validated_lessons"][0]
     assert got["role"] == "instruction" and got["applicability"]["premise_status"] == "match"
-    assert got["applicability"]["premise_matched_keys"] == ["region"]
+    assert set(got["applicability"]) <= _APPLICABILITY_KEYS and "premise_matched_keys" not in got["applicability"]
 
 
 def test_material_mismatch_becomes_warning_example_with_exact_keys():
@@ -419,11 +460,11 @@ def test_material_mismatch_becomes_warning_example_with_exact_keys():
     pack = er.compose([item], req, {})
     assert pack["validated_lessons"] == []
     got = pack["conflicts_and_stale"][0]
-    assert got["role"] == "warning_example" and got["role_before"] == "instruction"
+    assert got["role"] == "warning_example" and "role_before" not in got
     assert got["authority_class"] == item["authority_class"] and got["status"] == "validated"
     assert got["applicability"]["premise_status"] == "mismatch"
     assert got["applicability"]["premise_mismatches"] == [{"key": "region", "item_values": ["us"], "request_value": "eu"}]
-    assert {"type": "premise_mismatch", "keys": ["region"]} in got["warnings"]
+    assert "warnings" not in got
     assert "premise_mismatch" in got["flags"] and "premise_mismatch" in got["why_retrieved"]
 
 
@@ -436,7 +477,7 @@ def test_missing_premise_is_unverified_not_mismatch():
     for req, meta, basis in cases:
         got = er.compose([_kitem(_k("K-1", metadata=meta), req)], req, {})["validated_lessons"][0]
         assert got["role"] == "instruction"
-        assert got["applicability"]["premise_status"] == "unverified" and got["applicability"]["premise_basis"] == basis
+        assert got["applicability"]["premise_status"] == "unverified" and "premise_basis" not in got["applicability"]
         assert "premise_unverified" in got["flags"] and got["applicability"]["premise_mismatches"] == []
 
 
@@ -451,13 +492,12 @@ def test_e2_conflict_surfaced_with_both_sides_and_evidence_no_winner():
     older = _kitem(_k("K-OLD", statement="old words", rank=0.9), req)
     newer = _kitem(_k("K-NEW", statement="new words", rank=0.1, last_verified_at=NOW + timedelta(days=1)), req)
     pack = er.compose([older, newer], req, {}, [_edge("K-NEW", "K-OLD", marked=True, eid=5)])
-    (conf,) = pack["conflicts"]
-    assert conf["reason"] == "related_to_conflict" and conf["evidence"] == ["relation:5"]
-    assert [m["memory_key"] for m in conf["members"]] == ["K-NEW", "K-OLD"]
+    assert _conf(pack) == {"related_to_conflict": ["K-NEW", "K-OLD"]}
     assert sorted(_order(pack, "conflicts_and_stale")) == ["K-NEW", "K-OLD"]
     assert pack["validated_lessons"] == []
-    assert all(i["role"] == "conflict" and "conflict" in i["flags"] for i in pack["conflicts_and_stale"])
-    assert "winner" not in _canonical(pack) and "preferred" not in _canonical(conf)
+    assert all(i["role"] == "conflict" and "conflict" in i["flags"] and "relation:5" in i["evidence"]
+               for i in pack["conflicts_and_stale"])
+    assert "conflicts" not in pack and "winner" not in _canonical(pack) and "preferred" not in _canonical(pack)
 
 
 def test_no_automatic_winner_newer_not_preferred_order_is_key_based():
@@ -467,7 +507,7 @@ def test_no_automatic_winner_newer_not_preferred_order_is_key_based():
     p1 = er.compose([a, b], req, {}, [_edge("K-B", "K-A", marked=True)])
     p2 = er.compose([b, a], req, {}, [_edge("K-A", "K-B", marked=True)])
     assert _order(p1, "conflicts_and_stale") == _order(p2, "conflicts_and_stale") == ["K-A", "K-B"]
-    assert p1["conflicts"][0]["conflict_key"] == p2["conflicts"][0]["conflict_key"]
+    assert _conf(p1) == _conf(p2) == {"related_to_conflict": ["K-A", "K-B"]}
 
 
 def test_opposite_polarity_supersession_and_challenged_conflicts():
@@ -475,17 +515,17 @@ def test_opposite_polarity_supersession_and_challenged_conflicts():
     pos = _kitem(_k("K-P", statement="p", metadata={"subject_key": "cache.ttl", "polarity": "positive"}), req)
     neg = _kitem(_k("K-N", statement="n", metadata={"subject_key": "cache.ttl", "polarity": "negative"}), req)
     same = _kitem(_k("K-S", statement="s", metadata={"subject_key": "cache.ttl", "polarity": "positive"}), req)
-    assert er.compose([pos, same], req, {})["conflicts"] == []
+    assert _conf(er.compose([pos, same], req, {})) == {}
     ch = _kitem(_k("K-C", status="challenged", statement="c"), req)
     x, y = _kitem(_k("K-X", statement="x"), req), _kitem(_k("K-Y", statement="y"), req)
     pack = er.compose([pos, neg, ch, x, y], req, {}, [_edge("K-Y", "K-X", "supersedes")])
-    assert sorted(c["reason"] for c in pack["conflicts"]) == ["challenged", "opposite_polarity"]
-    assert "supersession_edge" not in _canonical(pack["conflicts"])
+    assert _conf(pack) == {"challenged": ["K-C"], "opposite_polarity": ["K-N", "K-P"]}
+    assert "supersession_edge" not in _canonical(pack)
     assert _sups(pack) == [("K-X", "K-Y")]
-    pol = next(c for c in pack["conflicts"] if c["reason"] == "opposite_polarity")
-    assert [m["memory_key"] for m in pol["members"]] == ["K-N", "K-P"]
-    chal = next(c for c in pack["conflicts"] if c["reason"] == "challenged")
-    assert chal["members"][0]["authority_class"] == "challenged_knowledge"
+    chal = next(i for i in pack["conflicts_and_stale"] if i["memory_key"] == "K-C")
+    assert chal["authority_class"] == "challenged_knowledge" and "challenged" in chal["flags"]
+    pol = next(i for i in pack["conflicts_and_stale"] if i["memory_key"] == "K-P")
+    assert {"subject:cache.ttl", "polarity:positive:K-P", "polarity:negative:K-N"} <= set(pol["evidence"])
 
 
 def test_deterministic_sections_and_order_independent_of_input_order():
@@ -494,7 +534,7 @@ def test_deterministic_sections_and_order_independent_of_input_order():
     items.append(er.decision_item(_decision("D-1"), req, NOW)[0])
     assert _canonical(er.compose(items, req, {})) == _canonical(er.compose(items[::-1], req, {}))
     pack = er.compose(items, req, {})
-    assert all(s in pack for s in er.SECTIONS) and "conflicts" in pack
+    assert all(s in pack for s in er.SECTIONS) and "conflicts" not in pack
 
 
 def test_conflict_set_evicted_whole_never_half_shown():
@@ -503,11 +543,14 @@ def test_conflict_set_evicted_whole_never_half_shown():
     edges = [_edge(f"K-{2 * i:02d}", f"K-{2 * i + 1:02d}", marked=True, eid=i + 1) for i in range(7)]
     pack = er.compose(items, req, {}, edges)
     shown = set(_order(pack, "conflicts_and_stale"))
-    for c in pack["conflicts"]:
-        assert {m["memory_key"] for m in c["members"]} <= shown
-    assert len(shown) == 2 * len(pack["conflicts"]) <= er.BUDGETS["conflicts_and_stale"]
-    assert len(pack["conflicts"]) == er.BUDGETS["conflicts_and_stale"] // 2
-    assert pack["diagnostics"]["truncated"]["conflict_sets"] == 7 - len(pack["conflicts"])
+    by_relation = {}
+    for i in pack["conflicts_and_stale"]:
+        (rel,) = [e for e in i["evidence"] if e.startswith("relation:")]
+        by_relation.setdefault(rel, set()).add(i["memory_key"])
+    assert all(len(members) == 2 for members in by_relation.values())  # whole sets only, never one side
+    assert len(shown) == 2 * len(by_relation) <= er.BUDGETS["conflicts_and_stale"]
+    assert len(by_relation) == er.BUDGETS["conflicts_and_stale"] // 2
+    assert pack["diagnostics"]["truncated"]["conflict_sets"] == 7 - len(by_relation)
 
 
 def test_budget_eviction_preserves_higher_priority_authority():
@@ -558,7 +601,7 @@ def test_every_item_has_reason_and_evidence_ids():
     assert len(shown) == 4
     for i in shown:
         assert i["why_retrieved"] and i["evidence"], i["memory_key"]
-    assert pack["conflicts"] and all(c["evidence"] for c in pack["conflicts"])
+    assert "conflicts" not in pack and any("conflict_member" in i["why_retrieved"] for i in shown)
 
 
 def test_repeat_compose_byte_identical_and_does_not_mutate_inputs():
@@ -595,7 +638,7 @@ def test_ordinary_opposite_polarity_conflict_has_no_winner_and_recency_is_not_on
                     metadata={"subject_key": "cache.ttl", "polarity": "negative"}), req)
     pack = er.compose([new, old], req, {})
     text = _canonical(pack)
-    assert [c["reason"] for c in pack["conflicts"]] == ["opposite_polarity"] and _sups(pack) == []
+    assert list(_conf(pack)) == ["opposite_polarity"] and _sups(pack) == []
     assert "explicit_supersession" not in text and "winner" not in text
     assert all(i["role"] == "conflict" for i in pack["conflicts_and_stale"])
 
@@ -605,7 +648,7 @@ def test_recency_alone_yields_no_preference_between_unrelated_items():
     a = _kitem(_k("K-A", statement="a", last_verified_at=NOW - timedelta(days=400)), req)
     b = _kitem(_k("K-B", statement="b", last_verified_at=NOW), req)
     pack = er.compose([a, b], req, {})
-    assert pack["conflicts"] == [] and _sups(pack) == []
+    assert _conf(pack) == {} and _sups(pack) == []
     assert not any("explicit_supersession" in w for i in pack["validated_lessons"] for w in i["why_retrieved"])
 
 
@@ -616,7 +659,7 @@ def test_explicit_supersession_is_directed_and_prefers_successor_by_relation_not
     old = _kitem(_k("K-OLD", statement="o", last_verified_at=NOW), req)
     new = _kitem(_k("K-NEW", statement="n", last_verified_at=NOW - timedelta(days=400)), req)
     pack = er.compose([old, new], req, {}, [edge])
-    assert pack["conflicts"] == []
+    assert _conf(pack) == {}
     assert _sups(pack) == [("K-OLD", "K-NEW")]
     got = {i["memory_key"]: i for i in pack["validated_lessons"]}
     assert "explicit_supersession_successor" in got["K-NEW"]["why_retrieved"] and "relation:1" in got["K-NEW"]["evidence"]
@@ -644,14 +687,14 @@ def test_current_intent_suppresses_superseded_predecessor_so_no_edge_is_shown():
     assert er.knowledge_item(_k("K-OLD", status="superseded"), req, NOW) == (None, None)
     new = _kitem(_k("K-NEW", statement="n"), req)
     pack = er.compose([new], req, {}, [_edge("K-OLD", "K-NEW", "superseded_by")])
-    assert _sups(pack) == [] and pack["conflicts"] == []
+    assert _sups(pack) == [] and _conf(pack) == {}
 
 
 def test_contradictory_supersession_edges_are_an_unresolved_conflict_without_winner():
     req = _req()
     a, b = _kitem(_k("K-A", statement="a"), req), _kitem(_k("K-B", statement="b"), req)
     pack = er.compose([a, b], req, {}, [_edge("K-A", "K-B", "supersedes", eid=1), _edge("K-B", "K-A", "supersedes", eid=2)])
-    assert [c["reason"] for c in pack["conflicts"]] == ["contradictory_supersession"] and _sups(pack) == []
+    assert list(_conf(pack)) == ["contradictory_supersession"] and _sups(pack) == []
 
 
 # ---- frozen request key set and closed item/flag schema
@@ -670,11 +713,9 @@ def test_request_accepts_exactly_the_frozen_key_set():
             er.normalize_request({**full, extra: ["x"]})
 
 
-_FROZEN_FLAGS = {"stale", "conflict", "challenged", "historical", "premise_mismatch", "premise_unverified"}
-_FROZEN_ROLES = {"instruction", "candidate", "warning_example", "low_trust_observation", "conflict",
-                 "stale_assumption", "evidence_ref"}
-_FROZEN_ITEM_KEYS = {"memory_key", "memory_class", "project_id", "scope", "authority_class", "status", "trust_class",
-                     "role", "applicability", "why_retrieved", "evidence", "flags", "signals", "text"}
+_FROZEN_ITEM_KEYS = ITEM_KEYS
+_FROZEN_FLAGS = FLAGS
+_FROZEN_ROLES = ROLES
 _UNDECLARED_ITEM_KEYS = {"supersession", "governed_preferred", "superseded_by_relation"}
 
 
@@ -691,3 +732,149 @@ def test_pack_with_explicit_supersession_stays_within_frozen_schema():
         assert _FROZEN_ITEM_KEYS <= set(i) and not (set(i) & _UNDECLARED_ITEM_KEYS)
         assert set(i["flags"]) <= _FROZEN_FLAGS and i["role"] in _FROZEN_ROLES
     assert "governed_preferred" not in _canonical(pack) and "superseded_by_relation" not in _canonical(pack)
+
+
+# ======================================================================= closed-schema lock (contract-derived)
+
+def assert_pack_schema(pack, *, expect_items=None):
+    """Every emitted pack/item/nested key must be contract-named. Nothing underscore-prefixed may leak."""
+    assert set(pack) == PACK_KEYS, set(pack) ^ PACK_KEYS
+    assert not any(str(k).startswith("_") for k in pack)
+    count = 0
+    for section in er.SECTIONS:
+        for item in pack[section]:
+            count += 1
+            keys = set(item)
+            assert ITEM_KEYS <= keys, ITEM_KEYS - keys
+            assert keys <= ITEM_KEYS | ITEM_EXTENSIONS, keys - ITEM_KEYS - ITEM_EXTENSIONS
+            assert not any(k.startswith("_") for k in item), [k for k in item if k.startswith("_")]
+            assert item["memory_class"] in MEMORY_CLASSES and item["scope"] in SCOPES
+            assert item["role"] in ROLES and set(item["flags"]) <= FLAGS
+            assert set(item["signals"]) == SIGNAL_KEYS, set(item["signals"]) ^ SIGNAL_KEYS
+            assert set(item["applicability"]) <= APPLICABILITY_KEYS
+            assert {"task_family", "capability_keys", "premises", "premise_status", "premise_mismatches"} <= set(item["applicability"])
+            assert item["why_retrieved"] and item["evidence"]
+            if "stored_confidence" in item:
+                assert item["memory_class"] in {"decision", "semantic"} and item["stored_confidence"] is not None
+            if "last_verified_at" in item or "review_after" in item:
+                assert item["memory_class"] in {"decision", "semantic"}
+            if "provenance" in item:
+                assert item["role"] == "low_trust_observation"
+            if "constraints" in item["applicability"]:
+                assert item["memory_class"] == "episodic"
+    if expect_items is not None:
+        assert count == expect_items
+    assert "conflicts" not in pack and "request" not in pack and "premises" not in pack
+    return count
+
+
+def _proc_row(key="P-1"):
+    return {"procedure_key": key, "project_id": 1, "approved": False, "status": "active", "preferred_version": 1,
+            "version_status": "preferred", "name": "Deploy", "description": "Run the deploy checklist",
+            "task_family": "engineering", "updated_at": NOW, "input_contract": {"premises": {"platform": "windows"}}, "rank": 0.3}
+
+
+def _scenarios():
+    """Representative packs covering every emitting path."""
+    scen = {}
+    req = _req(task_key="T-1", premises={"region": "eu", "platform": "windows"}, task_family="engineering")
+    items = [
+        er.decision_item(_decision("D-1"), req, NOW)[0],
+        er.decision_item(_decision("D-2", task_key="T-2", text="other decision"), req, NOW)[0],
+        er.procedure_item(_proc_row(), req, NOW)[0],
+        _kitem(_k("K-V", statement="validated"), req),
+        _kitem(_k("K-RULE", statement="a rule", knowledge_type="rule"), req),
+        _kitem(_k("K-C1", status="proposed", source_owner=er.E2_SOURCE_OWNER, statement="cand", metadata={"polarity": "negative"}), req),
+        _kitem(_k("K-DUP1", status="proposed", statement="dupe words"), req),
+        _kitem(_k("K-DUP2", status="proposed", statement="dupe   words"), req),
+        _kitem(_k("K-P", statement="p", metadata={"subject_key": "s", "polarity": "positive"}), req),
+        _kitem(_k("K-N", statement="n", metadata={"subject_key": "s", "polarity": "negative"}), req),
+        _kitem(_k("K-EXT", statement="ext", metadata={"trust_class": "external_untrusted_observation"}), req),
+        _kitem(_k("K-COMP", project_id=None, approved=True, statement="company"), req),
+    ]
+    episodes = [
+        er.episode_item(_episode_row("E-OK"), req, NOW)[0],
+        er.episode_item(_episode_row("E-BAD", outcome="failed", validation={"status": "passed"},
+                                     failure_classification="failure", capability_keys=["cap.x"],
+                                     source_keys=["S-1"]), req, NOW)[0],
+        er.episode_item(_episode_row("E-CAN", outcome="cancelled"), req, NOW)[0],
+        er.episode_item(_episode_row("E-LOW", trust="external_untrusted_observation", objective="Observed note"), req, NOW)[0],
+    ]
+    for n, ep in enumerate(episodes):
+        ep["_group"] = 100 + n  # distinct task groups so every episode survives group dedupe
+    scen["mixed_current"] = (items + episodes, req, [_edge("K-P", "K-N", "supports", eid=3)])
+    extra = [_kitem(_k("K-STALE", statement="stale one", review_after=NOW - timedelta(days=1)), req),
+             _kitem(_k("K-PM", statement="mismatch", metadata=_pm(region="us")), req),
+             _kitem(_k("K-CH", status="challenged", statement="challenged"), req),
+             _kitem(_k("K-V", statement="validated"), req), _kitem(_k("K-C1", status="proposed", statement="cand"), req)]
+    scen["stale_mismatch_challenged"] = (extra, req, [_edge("K-C1", "K-V", "related_to", marked=True, eid=4)])
+    hreq = _req(temporal_intent="historical", as_of="2026-06-01T00:00:00+00:00")
+    old = _kitem(_k("K-OLD", status="superseded", statement="o", valid_to=datetime(2026, 8, 1, tzinfo=timezone.utc)), hreq)
+    new = _kitem(_k("K-NEW", statement="n", valid_from=datetime(2026, 1, 1, tzinfo=timezone.utc)), hreq)
+    scen["historical_supersession"] = ([old, new], hreq, [_edge("K-OLD", "K-NEW", "superseded_by", eid=7)])
+    a, b = _kitem(_k("K-A", statement="a"), _req()), _kitem(_k("K-B", statement="b"), _req())
+    scen["contradictory"] = ([a, b], _req(), [_edge("K-A", "K-B", "supersedes", eid=1), _edge("K-B", "K-A", "supersedes", eid=2)])
+    scen["empty"] = ([], _req(), [])
+    return scen
+
+
+@pytest.mark.parametrize("name", ["mixed_current", "stale_mismatch_challenged", "historical_supersession",
+                                  "contradictory", "empty"])
+def test_every_representative_pack_matches_the_closed_contract_schema(name):
+    items, req, edges = _scenarios()[name]
+    pack = er.compose(items, req, {}, edges)
+    count = assert_pack_schema(pack)
+    assert (count == 0) == pack["abstained"]
+    assert set(pack["diagnostics"]) <= {
+        "excluded_unapproved_company", "rejected_corrupt", "quarantined_injection", "embedding", "embedding_truncated",
+        "truncated", "embedding_error", "deduplicated", "deduplicated_cited_episode", "raw_fallback"}
+
+
+def test_mixed_scenario_exercises_every_extension_and_class():
+    shown = []
+    for name in ("mixed_current", "stale_mismatch_challenged"):
+        items, req, edges = _scenarios()[name]
+        pack = er.compose(items, req, {}, edges)
+        shown += [i for s in er.SECTIONS for i in pack[s]]
+    shown = list({i["memory_key"]: i for i in shown}.values())
+    assert {i["memory_class"] for i in shown} == {"decision", "procedural", "semantic", "episodic"}
+    assert {"stored_confidence", "last_verified_at", "review_after", "also_matched", "provenance"} <= {k for i in shown for k in i}
+    assert {i["role"] for i in shown} >= {"instruction", "candidate", "warning_example", "low_trust_observation", "conflict",
+                                            "stale_assumption"}
+    assert {f for i in shown for f in i["flags"]} >= {"stale", "conflict", "challenged", "premise_mismatch", "premise_unverified"}
+    cancelled = next(i for i in shown if i["memory_key"] == "E-CAN")
+    assert cancelled["role"] == "warning_example" and cancelled["status"] == "cancelled"
+    bad = next(i for i in shown if i["memory_key"] == "E-BAD")
+    assert bad["text"] == ("Past failure, not a recipe. Objective: Fix the cache. Outcome: failed. "
+                           "Failure classification: failure. Validation: passed.")
+    assert {"capability:cap.x", "source:S-1"} <= set(bad["evidence"])
+
+
+def test_schema_lock_rejects_an_injected_extra_key():
+    items, req, edges = _scenarios()["mixed_current"]
+    for mutate in (
+        lambda p: p.__setitem__("conflicts", []),
+        lambda p: p["validated_lessons"][0].__setitem__("outcome", None),
+        lambda p: p["validated_lessons"][0].__setitem__("_kind", "knowledge"),
+        lambda p: p["validated_lessons"][0]["signals"].__setitem__("lexical_rank", 1.0),
+        lambda p: p["validated_lessons"][0]["flags"].append("gotcha"),
+        lambda p: p["validated_lessons"][0]["applicability"].__setitem__("premise_basis", "x"),
+        lambda p: p["validated_lessons"][0].__setitem__("memory_class", "lesson_candidate"),
+        lambda p: p["validated_lessons"][0].pop("text"),
+    ):
+        pack = er.compose(items, req, {}, edges)
+        assert_pack_schema(pack)
+        mutate(pack)
+        with pytest.raises(AssertionError):
+            assert_pack_schema(pack)
+
+
+def test_conflict_members_carry_reason_and_evidence_and_no_internal_keys():
+    items, req, edges = _scenarios()["stale_mismatch_challenged"]
+    pack = er.compose(items, req, {}, edges)
+    members = [i for i in pack["conflicts_and_stale"] if "conflict_member" in i["why_retrieved"]]
+    assert members and all(i["role"] == "conflict" and "conflict" in i["flags"] for i in members)
+    reasons = {w for i in members for w in i["why_retrieved"] if w.startswith("conflict_reason_")}
+    assert reasons and reasons <= {"conflict_reason_" + r for r in (
+        "opposite_polarity", "related_to_conflict", "challenged", "contradictory_supersession")}
+    assert "conflict_keys" not in _canonical(pack) and "role_before" not in _canonical(pack)
