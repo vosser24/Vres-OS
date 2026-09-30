@@ -28,6 +28,16 @@ def test_explicit_validation_invalidation_tool_is_registered_separately_from_rea
     assert "validation_lifecycle_mcp" in entrypoint_text
 
 
+def test_validation_abandon_tool_is_registered_on_the_chairman_lifecycle_surface():
+    lifecycle_tool = (ROOT / "src/vres_os/validation_lifecycle_mcp.py").read_text(encoding="utf-8")
+    evidence_tool = (ROOT / "src/vres_os/validation_evidence_mcp.py").read_text(encoding="utf-8")
+    assert "def validation_abandon(" in lifecycle_tool
+    assert "_current_session(pid, session_id)" in lifecycle_tool
+    assert '_require_node("task", task_key, write=True)' in lifecycle_tool
+    assert "ValidationService().abandon(" in lifecycle_tool
+    assert "def validation_abandon(" not in evidence_tool
+
+
 def test_chairman_contract_already_forbids_post_freeze_checkpointing():
     text = (ROOT / "plugins/vres-os/agents/chairman.md").read_text(encoding="utf-8")
     assert "Do not call `task_checkpoint` after `validation_prepare`" in text

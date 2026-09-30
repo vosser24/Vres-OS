@@ -163,12 +163,19 @@ def test_post_prepare_task_checkpoint_still_stales_review_and_disables_validatio
 
     # A checkpoint after validation_prepare is now rejected outright (see the pending
     # checkpoint tests below); a direct review-relevant state mutation must still stale review.
-    repo.update_state(
-        task,
-        state_summary="Validation was dispatched, but this state mutation is intentionally stale.",
-        current_step="validation dispatched",
-        next_action="Wait for validator and then complete.",
-    )
+    # update_state is itself rejected while pending (see test_validation_abandon.py), so mutate
+    # the row directly to keep exercising the stale-review ingestion path.
+    with connect() as conn, conn.transaction():
+        conn.execute(
+            "UPDATE vres.task_state SET state_summary=%s,current_step=%s,next_action=%s "
+            "WHERE task_id=(SELECT id FROM vres.tasks WHERE task_key=%s)",
+            (
+                "Validation was dispatched, but this state mutation is intentionally stale.",
+                "validation dispatched",
+                "Wait for validator and then complete.",
+                task,
+            ),
+        )
 
     gate = confirm_reply_gate(pg_project, sid, task, advances_state=False)
     assert gate["mode"] == "non_material"
@@ -535,7 +542,11 @@ def test_later_lifecycle_checkpoint_does_not_hide_validation_in_flight(pg_projec
 def test_digest_change_prevents_validation_in_flight_even_with_lifecycle_checkpoint(pg_project, tmp_path):
     repo, task, sid, _cp, _prepared = _prepared_task(pg_project, tmp_path, "digest-change")
     _insert_lifecycle_checkpoint(task, "Other", "other", "other")
-    repo.update_state(task, pending_work=["something new"])
+    with connect() as conn, conn.transaction():  # update_state is rejected while pending
+        conn.execute(
+            "UPDATE vres.task_state SET pending_work=%s::jsonb WHERE task_id=(SELECT id FROM vres.tasks WHERE task_key=%s)",
+            (json.dumps(["something new"]), task),
+        )
     gate = confirm_reply_gate(pg_project, sid, task, advances_state=False)
     assert gate["mode"] == "non_material"
 

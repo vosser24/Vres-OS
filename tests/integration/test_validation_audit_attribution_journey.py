@@ -53,13 +53,13 @@ def test_invalid_report_audit_stays_on_fresh_request_and_keeps_specific_reason(
     service = ValidationService()
     old = service.prepare(task, pg_project, tmp_path, [evidence.name])
 
-    repo.update_state(
-        task,
-        current_phase="validate",
-        current_step="fresh review",
-        state_summary="Fresh frozen review.",
-        next_action="Wait for validator.",
-    )
+    # update_state is rejected while the old request is pending; change the row directly.
+    with connect() as conn, conn.transaction():
+        conn.execute(
+            "UPDATE vres.task_state SET current_phase=%s,current_step=%s,state_summary=%s,next_action=%s "
+            "WHERE task_id=(SELECT id FROM vres.tasks WHERE task_key=%s)",
+            ("validate", "fresh review", "Fresh frozen review.", "Wait for validator.", task),
+        )
     fresh = service.prepare(task, pg_project, tmp_path, [evidence.name])
 
     invalid_report = json.dumps(

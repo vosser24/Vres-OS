@@ -255,12 +255,18 @@ def test_stale_task_state_on_first_stop_classifies_stale_not_deferred(pg_project
     )
 
     # Mutate review-relevant task state after prepare() to force staleness.
-    repo.update_state(
-        task,
-        state_summary="Validation was dispatched, but this state mutation is intentionally stale.",
-        current_step="validation dispatched",
-        next_action="Wait for validator and then complete.",
-    )
+    # update_state is rejected while a request is pending, so mutate the row directly.
+    with connect() as conn, conn.transaction():
+        conn.execute(
+            "UPDATE vres.task_state SET state_summary=%s,current_step=%s,next_action=%s "
+            "WHERE task_id=(SELECT id FROM vres.tasks WHERE task_key=%s)",
+            (
+                "Validation was dispatched, but this state mutation is intentionally stale.",
+                "validation dispatched",
+                "Wait for validator and then complete.",
+                task,
+            ),
+        )
 
     report = _report(prepared["request_key"])
     payload = {

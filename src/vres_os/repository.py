@@ -9,6 +9,7 @@ from typing import Any
 from .db import connect
 from .project import ProjectIdentity
 from .redaction import redact
+from .validation import STATE_FIELDS
 
 _ACTIVE = ("active", "waiting_user", "blocked")
 _VALIDATION = {"not_required", "pending", "passed", "failed"}
@@ -374,8 +375,17 @@ class Repository:
         with connect() as conn, conn.transaction():
             task_id = self._task_id(conn, task_key)
             current = conn.execute("SELECT * FROM vres.task_state WHERE task_id=%s FOR UPDATE", (task_id,)).fetchone()
-            material = any(k not in {"latest_user_instruction", "validation_status"} and current.get(k) != redact(v)
-                           for k, v in fields.items())
+            changed = {k for k, v in fields.items() if current.get(k) != redact(v)}
+            material = bool(changed - {"latest_user_instruction", "validation_status"})
+            pending = self._pending_validation_key(conn, task_id)
+            if pending:
+                # Same lock order as checkpoint/prepare: task_state first, then check, compare, write.
+                if changed & set(STATE_FIELDS):
+                    raise PendingValidationError(
+                        f"State change rejected: protected validation request {pending} is pending"
+                    )
+                if not changed:
+                    return  # identical values: true no-op, no write, no timestamp bump
             if material and "validation_status" not in fields:
                 updates.append("validation_status='pending'")
             params.append(task_id)
