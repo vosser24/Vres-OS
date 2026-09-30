@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import io
+import json
 from contextlib import contextmanager
 
+import pytest
+
 from vres_os.control_preflight import (
+    _PARENT_ONLY_VALIDATION_TOOLS,
+    _VRES_PREFIX,
     evaluate_control_preflight,
+    evaluate_parent_only_validation_preflight,
     evaluate_work_scope_preflight,
     is_read_only_tool,
 )
@@ -188,3 +195,271 @@ def test_plugin_pretool_matcher_exempts_inspection_discovery_and_capability_reso
     assert "orchestration_work_ready" in matcher
     assert "artifact_get" in matcher
     assert "Agent" not in matcher
+
+
+# --- Parent-only protected validation lifecycle controls -------------------
+
+_PREPARE = _VRES_PREFIX + "validation_prepare"
+_INVALIDATE = _VRES_PREFIX + "validation_invalidate"
+_ABANDON = _VRES_PREFIX + "validation_abandon"
+_PROTECTED = (_PREPARE, _INVALIDATE, _ABANDON)
+_DENY_REASON = (
+    "Protected validation lifecycle controls are Chairman/control-plane authority "
+    "and cannot be invoked by a subagent."
+)
+
+
+def _assert_denied(result):
+    assert result is not None
+    out = result["hookSpecificOutput"]
+    assert out["hookEventName"] == "PreToolUse"
+    assert out["permissionDecision"] == "deny"
+    assert out["permissionDecisionReason"] == _DENY_REASON
+
+
+def _agent_payload(tool_name, agent_id="agent-1", agent_type=None):
+    value = _payload(tool_name, agent_id=agent_id)
+    if agent_type:
+        value["agent_type"] = agent_type
+    return value
+
+
+def test_protected_constant_is_exactly_the_three_controls():
+    assert _PARENT_ONLY_VALIDATION_TOOLS == frozenset(
+        {"validation_prepare", "validation_invalidate", "validation_abandon"}
+    )
+
+
+def test_parent_validation_prepare_not_denied_by_parent_only_rule():
+    assert evaluate_parent_only_validation_preflight(_payload(_PREPARE)) is None
+
+
+def test_parent_validation_invalidate_not_denied_by_parent_only_rule():
+    assert evaluate_parent_only_validation_preflight(_payload(_INVALIDATE)) is None
+
+
+def test_parent_validation_abandon_not_denied_by_parent_only_rule():
+    assert evaluate_parent_only_validation_preflight(_payload(_ABANDON)) is None
+
+
+def test_subagent_validation_prepare_denied():
+    _assert_denied(evaluate_parent_only_validation_preflight(_agent_payload(_PREPARE)))
+
+
+def test_subagent_validation_invalidate_denied():
+    _assert_denied(evaluate_parent_only_validation_preflight(_agent_payload(_INVALIDATE)))
+
+
+def test_subagent_validation_abandon_denied():
+    _assert_denied(evaluate_parent_only_validation_preflight(_agent_payload(_ABANDON)))
+
+
+@pytest.mark.parametrize("agent_id", ["a", "future-agent-99", "x" * 500, 12345])
+@pytest.mark.parametrize("agent_type", [None, "future:new-role", "anything"])
+def test_arbitrary_agent_id_and_type_denied_identically(agent_id, agent_type):
+    for tool in _PROTECTED:
+        payload = _agent_payload(tool, agent_type=agent_type)
+        payload["agent_id"] = agent_id
+        _assert_denied(evaluate_parent_only_validation_preflight(payload))
+
+
+@pytest.mark.parametrize(
+    "agent_type",
+    [
+        "vres-os:sonnet-expert",
+        "vres-os:opus-expert",
+        "vres-os:validator",
+        "vres-os:routing-arbiter",
+    ],
+)
+def test_governed_agent_types_denied_for_all_three_controls(agent_type):
+    # Covers Sonnet (8), Opus (9), validator (10), routing arbiter (11).
+    for tool in _PROTECTED:
+        _assert_denied(
+            evaluate_parent_only_validation_preflight(
+                _agent_payload(tool, agent_type=agent_type)
+            )
+        )
+
+
+def test_subagent_non_protected_vres_tools_allowed_by_parent_only_rule():
+    for name in (
+        "orchestration_expert_report",
+        "orchestration_work_unit_start",
+        "orchestration_work_unit_fail",
+        "validation_evidence",
+        "routing_evidence",
+        "vres_status",
+    ):
+        assert (
+            evaluate_parent_only_validation_preflight(_agent_payload(_VRES_PREFIX + name))
+            is None
+        ), name
+
+
+def test_valid_write_scope_does_not_grant_validation_authority(tmp_path):
+    scope = {
+        "work_unit_key": "ORCHWORK-1",
+        "root_path": str(tmp_path),
+        "write_scope": ["src/backend"],
+    }
+    payload = _agent_payload(_PREPARE, agent_id="worker-1")
+    payload["tool_input"] = {"task_key": "T", "artifact_paths": ["src/backend/app.py"]}
+    assert evaluate_work_scope_preflight(payload, scope) is None
+    _assert_denied(evaluate_parent_only_validation_preflight(payload))
+
+
+def test_hold_behavior_unchanged_and_parent_only_rule_does_not_replace_it():
+    hold = {"active": True}
+    assert evaluate_control_preflight(_payload("Bash"), hold) is not None
+    assert evaluate_control_preflight(_payload(_VRES_PREFIX + "vres_status"), hold) is None
+    # Parent validation control is still governed by the hold, not by the new rule.
+    assert evaluate_parent_only_validation_preflight(_payload(_PREPARE)) is None
+    assert evaluate_control_preflight(_payload(_PREPARE), hold) is not None
+    assert evaluate_control_preflight(_payload(_PREPARE), None) is None
+
+
+def test_tool_input_cannot_spoof_away_host_agent_id():
+    for tool in _PROTECTED:
+        payload = _agent_payload(tool)
+        payload["tool_input"] = {
+            "task_key": "T",
+            "agent_id": "",
+            "is_chairman": True,
+            "session_id": "parent",
+            "agent_type": "vres-os:chairman",
+            "request_key": "R",
+            "reason": "x",
+        }
+        _assert_denied(evaluate_parent_only_validation_preflight(payload))
+    # Parent stays un-denied even if tool_input claims an agent_id.
+    parent = _payload(_PREPARE)
+    parent["tool_input"] = {"agent_id": "spoof"}
+    assert evaluate_parent_only_validation_preflight(parent) is None
+
+
+def test_whitespace_or_null_agent_id_is_treated_as_parent():
+    # Existing convention: only a non-empty (stripped) host agent_id marks a subagent.
+    for value in ("", "   ", None):
+        payload = _payload(_PREPARE)
+        payload["agent_id"] = value
+        assert evaluate_parent_only_validation_preflight(payload) is None
+
+
+def test_tool_name_parsing_variants_do_not_wrongly_allow_or_deny():
+    def run(name):
+        return evaluate_parent_only_validation_preflight(_agent_payload(name))
+
+    # Fully qualified protected names deny, tolerant of surrounding whitespace.
+    _assert_denied(run("  " + _PREPARE + " "))
+    # Non-canonical spellings are different tools, so this rule does not deny them.
+    for name in (
+        "validation_prepare",
+        "mcp__plugin_other_vres__validation_prepare",
+        _VRES_PREFIX + "Validation_Prepare",
+        _VRES_PREFIX + "validation_prepare_x",
+        _VRES_PREFIX + "xvalidation_prepare",
+        _VRES_PREFIX + "validation_prepare/",
+        _VRES_PREFIX,
+        "",
+    ):
+        assert run(name) is None, name
+
+
+def test_non_pretooluse_event_is_ignored_by_parent_only_rule():
+    payload = _agent_payload(_PREPARE)
+    payload["hook_event_name"] = "PostToolUse"
+    assert evaluate_parent_only_validation_preflight(payload) is None
+
+
+def _run_main(monkeypatch, capsys, payload):
+    from vres_os import control_preflight
+
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
+    code = control_preflight.main()
+    captured = capsys.readouterr()
+    return code, captured.out, captured.err
+
+
+def test_hook_entrypoint_denies_subagent_protected_control_before_config_or_db(
+    monkeypatch, capsys
+):
+    from vres_os import control_preflight
+
+    def boom(*_a, **_k):
+        raise AssertionError("config/db must not be consulted before the parent-only deny")
+
+    monkeypatch.setattr(control_preflight, "ConfigStore", boom)
+    monkeypatch.setattr(control_preflight, "work_scope_for_agent", boom)
+    monkeypatch.setattr(control_preflight, "read_only_hold_for_session", boom)
+    code, out, err = _run_main(monkeypatch, capsys, _agent_payload(_ABANDON))
+    assert code == 0 and err == ""
+    assert out.endswith("\n")
+    assert json.loads(out) == {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": _DENY_REASON,
+        }
+    }
+
+
+class _ConfiguredStore:
+    def load(self):
+        return type("C", (), {"configured": True})()
+
+
+def test_hook_entrypoint_parent_protected_control_not_denied_by_new_rule(
+    monkeypatch, capsys
+):
+    from vres_os import control_preflight
+
+    monkeypatch.setattr(control_preflight, "ConfigStore", _ConfiguredStore)
+    monkeypatch.setattr(control_preflight, "read_only_hold_for_session", lambda sid: None)
+    code, out, err = _run_main(monkeypatch, capsys, _payload(_PREPARE))
+    assert (code, out, err) == (0, "", "")
+
+
+def test_missing_session_still_fails_closed_for_unrelated_mutation_tool(monkeypatch, capsys):
+    from vres_os import control_preflight
+
+    monkeypatch.setattr(control_preflight, "ConfigStore", _ConfiguredStore)
+    payload = {"hook_event_name": "PreToolUse", "tool_name": "Bash"}
+    code, out, _ = _run_main(monkeypatch, capsys, payload)
+    assert code == 0
+    reason = json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "session id is missing" in reason
+
+
+def test_plugin_pretool_matcher_delivers_protected_controls_to_preflight():
+    import re
+    from pathlib import Path
+
+    hooks_path = Path(__file__).parents[1] / "plugins" / "vres-os" / "hooks" / "hooks.json"
+    hooks = json.loads(hooks_path.read_text(encoding="utf-8"))
+    group = hooks["hooks"]["PreToolUse"][0]
+    assert "vres-control-preflight.ps1" in json.dumps(group["hooks"])
+    matcher = re.compile(group["matcher"])
+    for tool in _PROTECTED:
+        assert matcher.search(tool), tool
+    assert not matcher.search(_VRES_PREFIX + "validation_evidence")
+
+
+def test_protected_validation_tools_registered_exactly_once_with_unchanged_signatures():
+    import asyncio
+    import inspect
+
+    from vres_os import mcp_entrypoint  # noqa: F401 - registers all tools
+    from vres_os import mcp_server
+
+    tools = [t.name for t in asyncio.run(mcp_server.mcp.list_tools())]
+    for name in ("validation_prepare", "validation_invalidate", "validation_abandon"):
+        assert tools.count(name) == 1, name
+    manager = mcp_server.mcp._tool_manager
+    expected = {
+        "validation_prepare": ["task_key", "artifact_paths"],
+        "validation_invalidate": ["task_key", "reason"],
+        "validation_abandon": ["task_key", "request_key", "reason", "session_id"],
+    }
+    for name, params in expected.items():
+        assert list(inspect.signature(manager.get_tool(name).fn).parameters) == params
