@@ -1186,3 +1186,33 @@ def test_c3h_1_to_5_raw_sql_count_and_select_share_one_gate_and_use_the_time_ref
             assert "k.status NOT IN ('rejected','challenged')" in flat and "(k.status<>'superseded' OR %(hist)s)" in flat
             assert "s.ingested_at<=" in flat and "k.created_at<=" in flat and "c.created_at<=" in flat
             assert "(c.source_id IS NOT NULL OR c.knowledge_id IS NOT NULL)" in flat  # orphan excluded fail-closed
+
+
+# ---- E3 chunk 3 contract-clause tests (test_c3s_*)
+
+def test_c3s_1_raw_fallback_is_deliberately_stricter_than_structured_for_challenged_knowledge():
+    """Contract EXPERIENCE-INTELLIGENCE-E3-CONTRACT-2026-09-29 (raw fallback section): the chunk's knowledge must be
+    'not rejected/superseded/challenged'. The structured path surfaces challenged knowledge as role=conflict in
+    conflicts_and_stale; raw evidence never surfaces as a conflict, so the raw SQL excludes challenged under BOTH
+    current and historical intent. This asymmetry is deliberate."""
+    item = _kitem(_k(status="challenged"))
+    assert item["_section"] == "conflicts_and_stale" and item["role"] == "conflict" and "challenged" in item["flags"]
+    at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    for raw_at, hist in ((None, False), (at, True)):
+        conn = _Conn()
+        er.ExperienceRetrievalService._raw(conn, {"pid": 1, "hist": hist, "tsq": "'cache'", "phrase": "cache"}, ["cache"], raw_at)
+        for sql, _params in conn.calls:
+            assert "k.status NOT IN ('rejected','challenged')" in " ".join(sql.split())
+
+
+def test_c3s_2_historical_without_as_of_is_accepted_and_as_of_rules_are_unchanged():
+    """Contract request line: `as_of optional timestamp; only with "historical"; default = now`."""
+    req = er.normalize_request({"project_id": 1, "query": "q", "temporal_intent": "historical"})
+    assert req["temporal_intent"] == "historical" and req["as_of"] is None
+    for bad in ({"project_id": 1, "query": "q", "temporal_intent": "current", "as_of": "2026-01-01T00:00:00+00:00"},
+                {"project_id": 1, "query": "q", "temporal_intent": "historical", "as_of": "not-a-date"},
+                {"project_id": 1, "query": "q", "temporal_intent": "historical", "as_of": 12345}):
+        with pytest.raises(ValueError):
+            er.normalize_request(bad)
+    naive = er.normalize_request({"project_id": 1, "query": "q", "temporal_intent": "historical", "as_of": "2026-01-01T00:00:00"})
+    assert naive["as_of"] == datetime(2026, 1, 1, tzinfo=timezone.utc)

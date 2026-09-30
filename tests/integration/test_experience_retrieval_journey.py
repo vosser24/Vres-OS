@@ -1333,3 +1333,72 @@ def test_c3h_no_write_proof_covers_hardening_scenarios(pg_project, raw_rows):
     with svc._open() as conn:
         with pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
             conn.execute("INSERT INTO vres.task_events(task_id,event_type,actor) SELECT id,'X','x' FROM vres.tasks LIMIT 1")
+
+
+# ======================================================================= E3 contract-clause tests (test_c3s_*)
+# Contract: raw fallback excludes challenged knowledge (raw evidence never surfaces as a conflict) while the structured
+# path surfaces it as role=conflict; historical intent without as_of uses one transaction-time now() on both paths.
+
+def _conflict_item(pack, key):
+    (item,) = [i for i in pack["conflicts_and_stale"] if i["memory_key"] == key]
+    return item
+
+
+def _k_keys(pack):
+    return sorted(k for k in _all_keys(pack) if k.startswith("K-"))
+
+
+def test_c3s_3_challenged_knowledge_is_a_structured_conflict_but_never_raw_evidence(pg_project, raw_rows):
+    mk = _mk()
+    _knowledge(f"K-ch-{mk}", pg_project, mk, status="challenged", valid_from=_ago(50))
+    sid = _source(raw_rows, f"S-ch-{mk}", pg_project)
+    _backdate(source=f"S-ch-{mk}", at=_ago(60))
+    challenged_chunk = _kchunk(raw_rows, mk, "ch", f"K-ch-{mk}", source_id=sid)
+    _owner(f"K-ctl-{mk}", pg_project, valid_from=_ago(50))  # control: same shape, validated -> raw surfaces it
+    control_chunk = _kchunk(raw_rows, mk, "ctl", f"K-ctl-{mk}")
+    for pack in (_retrieve(pg_project, mk), _hist(pg_project, mk, 10)):
+        item = _conflict_item(pack, f"K-ch-{mk}")
+        assert item["role"] == "conflict" and item["status"] == "challenged" and "challenged" in item["flags"]
+        assert pack["diagnostics"]["raw_fallback"] == "used"  # no primary item: raw really ran
+        assert _raw_keys(pack) == [control_chunk] and challenged_chunk not in _all_keys(pack)
+
+
+def test_c3s_4_challenged_knowledge_only_chunk_raw_attempted_and_yields_no_results(pg_project, raw_rows):
+    mk = _mk()
+    _knowledge(f"K-{mk}", pg_project, mk, status="challenged", valid_from=_ago(50))
+    chunk = _kchunk(raw_rows, mk, "ch", f"K-{mk}")
+    for pack in (_retrieve(pg_project, mk), _hist(pg_project, mk, 10)):
+        assert _conflict_item(pack, f"K-{mk}")["role"] == "conflict"
+        assert pack["raw_evidence_refs"] == [] and chunk not in _all_keys(pack)
+        assert pack["diagnostics"]["raw_fallback"] == "no_results"  # attempted (not "not_needed"/"disabled"), found nothing
+        assert pack["diagnostics"]["excluded_unapproved_company"] == 0
+
+
+def test_c3s_5_historical_without_as_of_applies_the_same_effective_time_on_both_paths(pg_project, raw_rows):
+    def query_variants(mk):
+        # query text can never set the reference: dates before/after now must not change eligibility (see also c3h_5b)
+        return [mk, f"{mk} as of {_ago(10).date().isoformat()}", f"{mk} as of {_ago(-10).date().isoformat()}",
+                f"{mk} as of 2001-01-01"]
+
+    # structured path: validated knowledge whose statement matches (so a primary item exists and raw is not needed)
+    mk = _mk()
+    _knowledge(f"K-ok-{mk}", pg_project, mk, valid_from=_ago(30), valid_to=_ago(-30))
+    _knowledge(f"K-future-{mk}", pg_project, mk, valid_from=_ago(-1))
+    _knowledge(f"K-exp-{mk}", pg_project, mk, valid_from=_ago(50), valid_to=_ago(1))
+    hist = _retrieve(pg_project, mk, temporal_intent="historical")
+    assert _k_keys(hist) == [f"K-ok-{mk}"] == _k_keys(_retrieve(pg_project, mk))
+    for q in query_variants(mk):
+        h, c = _retrieve(pg_project, q, temporal_intent="historical"), _retrieve(pg_project, q)
+        assert _k_keys(h) == _k_keys(c) and set(_k_keys(h)) <= {f"K-ok-{mk}"}
+    # raw path: the same three states as unrelated owners of matching chunks, no primary item -> raw fallback runs
+    mr = _mk()
+    for tag, kw in (("ok", dict(valid_from=_ago(30), valid_to=_ago(-30))), ("future", dict(valid_from=_ago(-1))),
+                    ("exp", dict(valid_from=_ago(50), valid_to=_ago(1)))):
+        _owner(f"K-{tag}-{mr}", pg_project, **kw)
+    keys = {t: _kchunk(raw_rows, mr, t, f"K-{t}-{mr}") for t in ("ok", "future", "exp")}
+    rhist = _retrieve(pg_project, mr, temporal_intent="historical")
+    assert rhist["diagnostics"]["raw_fallback"] == "used"
+    assert _raw_keys(rhist) == [keys["ok"]] == _raw_keys(_retrieve(pg_project, mr))
+    for q in query_variants(mr):
+        rh, rc = _retrieve(pg_project, q, temporal_intent="historical"), _retrieve(pg_project, q)
+        assert _raw_keys(rh) == _raw_keys(rc) and set(_raw_keys(rh)) <= {keys["ok"]}

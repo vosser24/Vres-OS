@@ -1152,6 +1152,9 @@ class ExperienceRetrievalService:
         sens = "('sensitive_excluded','sensitive_review_required')"
         params = {**params, "raw_at": raw_at}
         ref = "coalesce(%(raw_at)s::timestamptz, now())"
+        # k.status NOT IN ('rejected','challenged') below is deliberately stricter than the structured path: the E3 contract
+        # (raw fallback section: chunk's knowledge 'not rejected/superseded/challenged') keeps challenged knowledge out of raw
+        # evidence under current AND historical intent; it surfaces only as a structured conflict (role=conflict).
         base = f"""
              FROM vres.knowledge_chunks c
              LEFT JOIN vres.sources s ON s.id=c.source_id
