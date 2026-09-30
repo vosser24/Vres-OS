@@ -35,6 +35,10 @@ def _clip(value: Any, *, max_text: int = _MAX_TEXT, max_list: int = _MAX_LIST) -
     return value
 
 
+class PendingValidationError(ValueError):
+    """A checkpoint was attempted while a protected validation request is pending."""
+
+
 @dataclass(slots=True)
 class ActiveTask:
     task_key: str
@@ -381,6 +385,20 @@ class Repository:
             )
             conn.execute("UPDATE vres.tasks SET updated_at=now() WHERE id=%s", (task_id,))
 
+    @staticmethod
+    def _pending_validation_key(conn, task_id: int) -> str | None:
+        row = conn.execute(
+            "SELECT request_key FROM vres.validation_requests WHERE task_id=%s AND status='pending' "
+            "ORDER BY created_at DESC,id DESC LIMIT 1",
+            (task_id,),
+        ).fetchone()
+        return str(row["request_key"]) if row else None
+
+    def pending_validation_key(self, task_key: str) -> str | None:
+        """Read-only: the latest pending protected validation request key for a task, if any."""
+        with connect() as conn:
+            return self._pending_validation_key(conn, self._task_id(conn, task_key))
+
     def checkpoint(
         self,
         task_key: str,
@@ -398,6 +416,13 @@ class Repository:
         safe_context = redact(context)
         with connect() as conn, conn.transaction():
             task_id = self._task_id(conn, task_key)
+            # Same lock ValidationService.prepare takes, so prepare and checkpoint serialize.
+            conn.execute("SELECT 1 FROM vres.task_state WHERE task_id=%s FOR UPDATE", (task_id,))
+            pending = self._pending_validation_key(conn, task_id)
+            if pending:
+                raise PendingValidationError(
+                    f"Checkpoint rejected: protected validation request {pending} is pending"
+                )
             conn.execute(
                 """
                 INSERT INTO vres.checkpoints(checkpoint_key,task_id,summary,current_position,next_action,context,reason,created_by)

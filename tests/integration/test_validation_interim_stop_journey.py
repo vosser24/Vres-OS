@@ -255,14 +255,11 @@ def test_stale_task_state_on_first_stop_classifies_stale_not_deferred(pg_project
     )
 
     # Mutate review-relevant task state after prepare() to force staleness.
-    repo.checkpoint(
+    repo.update_state(
         task,
-        "Validation was dispatched, but this state mutation is intentionally stale.",
-        "validation dispatched",
-        "Wait for validator and then complete.",
-        {"anti_pattern": True},
-        "material_transition",
-        "chairman",
+        state_summary="Validation was dispatched, but this state mutation is intentionally stale.",
+        current_step="validation dispatched",
+        next_action="Wait for validator and then complete.",
     )
 
     report = _report(prepared["request_key"])
