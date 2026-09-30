@@ -1,9 +1,10 @@
-"""E3 chunks 1-2: deterministic, scope-first, READ-ONLY experience retrieval over existing truth owners.
+"""E3 chunks 1-3: deterministic, scope-first, READ-ONLY experience retrieval over existing truth owners.
 
 Reads decisions, accepted procedures, knowledge (incl. E2 proposed lessons) and E1 episodes through one
 eligibility gate. Authority (tier/role) is structural and fixed BEFORE relevance ranking; lexical, optional
 semantic and graph signals only order items inside an authority tier and never change it. Chunk 2 adds premise
-comparison, conflict/staleness surfacing and pack composition. Still absent: raw-chunk fallback, MCP tool.
+comparison, conflict/staleness surfacing and pack composition. Chunk 3 adds a bounded, lexical-only raw-evidence
+fallback (knowledge_chunks) behind the same scope/lifecycle/#164 gate. Still absent: MCP tool.
 """
 
 from __future__ import annotations
@@ -43,21 +44,20 @@ BUDGETS = {
     "conflicts_and_stale": 5,
     "precedent_episodes": 3,
     "low_trust_observations": 3,
-    "raw_evidence_refs": 0,  # raw fallback is chunk 3
+    "raw_evidence_refs": 5,
 }
 MAX_ITEMS = 24
 MAX_PACK_BYTES = 16 * 1024
 MAX_TEXT = 600
 POLICY = {
     "version": SCHEMA_VERSION,
-    "chunk": 2,
-    "retrieval_mode": "lexical+optional_semantic",
+    "chunk": 3,
+    "retrieval_mode": "lexical+optional_semantic; raw_fallback=lexical_only",
     "rank_order": [
         "section", "authority_tier", "scope_rank", "task_family_or_capability_match", "fusion_rank_score",
         "recency_epoch", "memory_key",
     ],
     "fusion": "reciprocal_rank_k60_lexical_semantic",
-    "not_implemented": ["raw_fallback"],
     "budgets": BUDGETS,
     "max_items": MAX_ITEMS,
     "max_pack_bytes": MAX_PACK_BYTES,
@@ -74,7 +74,12 @@ _INSTRUCTION_SHAPED = re.compile(
     r"(?:reveal|print|send|leak|exfiltrate)\s+(?:the\s+|your\s+|all\s+)?(?:credentials?|passwords?|api[ _-]?keys?|secrets?|tokens?))\b"
 )
 
-_TIER_CURRENT_DECISION, _TIER_PROCEDURE, _TIER_VALIDATED, _TIER_CANDIDATE, _TIER_LOW_TRUST = 0, 1, 2, 3, 4
+_TIER_CURRENT_DECISION, _TIER_PROCEDURE, _TIER_VALIDATED, _TIER_CANDIDATE, _TIER_LOW_TRUST, _TIER_RAW = 0, 1, 2, 3, 4, 5
+_PRIMARY_SECTIONS = ("current_decisions", "accepted_procedures", "validated_lessons")
+RAW_FETCH_LIMIT = 50
+RAW_PER_SOURCE = 2
+RAW_SNIPPET = 300
+_SENSITIVE_DISPOSITIONS = ("sensitive_excluded", "sensitive_review_required")
 _REQUEST_KEYS = {
     "project_id", "query", "task_key", "task_family", "capability_keys", "temporal_intent", "as_of",
     "premises", "include_candidates", "raw_fallback",
@@ -106,7 +111,7 @@ class RetrievalRequest:
     as_of: Any = None
     premises: dict[str, str] = field(default_factory=dict)
     include_candidates: bool = True
-    raw_fallback: bool = True  # accepted per the frozen Inputs; NOT implemented until chunk 3
+    raw_fallback: bool = True
 
 
 # ---------------------------------------------------------------- request (fail closed, before any read)
@@ -582,6 +587,54 @@ def episode_item(row: dict[str, Any], req: dict[str, Any], now: datetime) -> tup
     return item, None
 
 
+def raw_chunk_item(row: dict[str, Any], req: dict[str, Any]) -> tuple[dict | None, str | None]:
+    """One already-SQL-gated knowledge chunk -> a lowest-tier `evidence_ref` item. Pure.
+
+    Never authoritative, never instruction, no premise/conflict role. Emits ONLY the durable chunk_key/source_key
+    (and knowledge_key when linked); never DB ids, paths, URIs or vectors. Text is re-redacted and <=300 chars;
+    instruction-shaped text is dropped (counted), so raw text is evidence only.
+    """
+    text = f"[{row['section']}] {row['content']}" if row.get("section") else str(row["content"])
+    if _INSTRUCTION_SHAPED.search(text):
+        return None, "quarantined_injection"
+    owners = [p for p, linked in ((row.get("source_project_id"), row.get("source_key")),
+                                  (row.get("knowledge_project_id"), row.get("knowledge_key"))) if linked]
+    company = any(p is None for p in owners)
+    scope = "company_approved" if company else "project"
+    evidence = [f"source:{row['source_key']}"] if row.get("source_key") else []
+    if row.get("knowledge_key"):
+        evidence.append(f"knowledge:{row['knowledge_key']}")
+    if not evidence:
+        return None, None
+    return _item(
+        section="raw_evidence_refs", kind="raw", memory_key=row["chunk_key"], memory_class="raw_evidence", scope=scope,
+        project_id=None if company else req["project_id"], authority_class="evidence_ref", status="active",
+        trust_class="unspecified_raw", role="evidence_ref", tier=_TIER_RAW, text=_clean(text, RAW_SNIPPET),
+        why=[], evidence=evidence, flags=set(), req=req, row={"lex": True},
+        group=row.get("source_key") or row.get("knowledge_key"),
+    ), None
+
+
+def select_raw(rows: list[dict[str, Any]], req: dict[str, Any], diag: dict[str, Any]) -> list[dict[str, Any]]:
+    """Deterministic (rank desc, chunk_key) selection: <=2 chunks per source/knowledge item, <=5 total."""
+    per_group: dict[Any, int] = {}
+    out: list[dict[str, Any]] = []
+    for row in sorted(rows, key=lambda r: (-_lex(r), r["chunk_key"])):
+        item, reason = raw_chunk_item(row, req)
+        if item is None:
+            if reason:
+                diag[reason] = diag.get(reason, 0) + 1
+            continue
+        group = item["_group"]
+        if per_group.get(group, 0) >= RAW_PER_SOURCE:
+            continue
+        per_group[group] = per_group.get(group, 0) + 1
+        out.append(item)
+        if len(out) >= BUDGETS["raw_evidence_refs"]:
+            break
+    return out
+
+
 # ---------------------------------------------------------------- pure composition
 
 def _sort_key(item: dict[str, Any]):
@@ -734,11 +787,18 @@ def _settle(kept: list[dict[str, Any]], sets: dict[str, dict[str, Any]], diag: d
             break
 
 
-def compose(items: list[dict[str, Any]], req: dict[str, Any], diagnostics: dict[str, int], edges=()) -> dict[str, Any]:
-    """Evaluate, order, dedupe, budget and size-bound. Pure and deterministic."""
+def compose(items: list[dict[str, Any]], req: dict[str, Any], diagnostics: dict[str, int], edges=(), raw_fn=None) -> dict[str, Any]:
+    """Evaluate, order, dedupe, budget and size-bound. Pure and deterministic given its inputs.
+
+    Raw fallback trigger (structural, no threshold): raw_fallback is true AND the FINAL selected items (after
+    dedupe, section budgets and the total-items cap, before the byte-size trim) hold zero items in
+    current_decisions, accepted_procedures and validated_lessons. Only then is `raw_fn() -> (rows, extras)` called;
+    it is never called otherwise. Raw items never enter evaluate/conflict/supersession logic and are only ever
+    exact-digest deduplicated against (and lose to) higher-authority items.
+    """
     diag = {
         "excluded_unapproved_company": 0, "rejected_corrupt": 0, "quarantined_injection": 0,
-        "embedding": "disabled", "raw_fallback": "not_implemented" if req.get("raw_fallback", True) else "disabled",
+        "embedding": "disabled", "raw_fallback": "not_needed" if req.get("raw_fallback", True) else "disabled",
         **diagnostics, "deduplicated": 0, "deduplicated_cited_episode": 0,
         "truncated": {"section_budget": 0, "total_items": 0, "pack_bytes": 0, "conflict_sets": 0},
     }
@@ -801,11 +861,35 @@ def compose(items: list[dict[str, Any]], req: dict[str, Any], diagnostics: dict[
         if item.get("_group") is not None:
             groups.add(item["_group"])
         kept.append(item)
-    kept.sort(key=_sort_key)
-    if len(kept) > MAX_ITEMS:
-        diag["truncated"]["total_items"] = len(kept) - MAX_ITEMS
-        del kept[MAX_ITEMS:]
-        _settle(kept, sets, diag)
+    def cap_total() -> None:
+        kept.sort(key=_sort_key)
+        if len(kept) > MAX_ITEMS:
+            diag["truncated"]["total_items"] += len(kept) - MAX_ITEMS
+            del kept[MAX_ITEMS:]
+            _settle(kept, sets, diag)
+
+    cap_total()
+    if req.get("raw_fallback", True) and not any(i["_section"] in _PRIMARY_SECTIONS for i in kept):
+        try:
+            rows, extras = raw_fn() if raw_fn else ([], {})
+        except psycopg.Error as exc:
+            diag["raw_fallback"], diag["raw_fallback_error"] = "error", type(exc).__name__
+        else:
+            diag["excluded_unapproved_company"] += extras.get("excluded_unapproved_company", 0)
+            if extras.get("possibly_truncated"):
+                diag["raw_possibly_truncated"] = True
+            used = 0
+            for item in select_raw(list(rows), req, diag):
+                digest = statement_digest(item["text"])
+                if item["memory_key"] in keys or digest in digests:
+                    diag["deduplicated"] += 1
+                    continue
+                keys.add(item["memory_key"])
+                digests[digest] = item
+                kept.append(item)
+                used += 1
+            diag["raw_fallback"] = "used" if used else "no_results"
+            cap_total()
 
     def build(selected: list[dict[str, Any]], tokens: int) -> dict[str, Any]:
         # Frozen top-level keys only (contract "Experience pack"): conflict sets are carried by their member items.
@@ -914,14 +998,15 @@ class ExperienceRetrievalService:
                 built += [builder(row, req, now) for row in rows]
             refs = sorted({i["_ref"] for i, _ in built if i is not None and i.get("_ref")})
             edges = self._edges(conn, refs)
-        counts = dict(diag)
-        items = []
-        for item, reason in built:
-            if item is not None:
-                items.append(item)
-            elif reason:
-                counts[reason] = counts.get(reason, 0) + 1
-        return compose(items, req, counts, edges)
+            counts = dict(diag)
+            items = []
+            for item, reason in built:
+                if item is not None:
+                    items.append(item)
+                elif reason:
+                    counts[reason] = counts.get(reason, 0) + 1
+            # compose runs inside the same READ ONLY transaction so the (lazy, gated) raw fallback can read from it.
+            return compose(items, req, counts, edges, raw_fn=lambda: self._raw(conn, params, tokens))
 
     def _semantic(self, req) -> tuple[dict[int, int], dict[str, Any]]:
         """Optional semantic signal: {knowledge_id: 1-based position}. Never fails the retrieval, never trusted:
@@ -1018,6 +1103,44 @@ class ExperienceRetrievalService:
             """,
             params,
         ).fetchall()
+
+    @staticmethod
+    def _raw(conn, params, tokens):
+        """Lexical-only raw `knowledge_chunks` fallback: (rows, extras). Gate is in SQL BEFORE ranking.
+
+        Deliberately NOT read: sources.path_or_uri, source_locations, artifacts, knowledge_evidence (no path/URI/
+        file/network exposure), and no semantic/embedding store. Chunks are already #164-sanitized at write time;
+        sensitive_excluded/sensitive_review_required dispositions (source or chunk) are excluded again here. A
+        source link and a knowledge link are BOTH gated when both exist; links never widen scope. Foreign-project
+        rows are neither returned nor counted; unapproved company rows are only counted.
+        """
+        match, rank = _lexical("c.search_vector", "c.content", tokens)
+        sens = "('sensitive_excluded','sensitive_review_required')"
+        base = f"""
+             FROM vres.knowledge_chunks c
+             LEFT JOIN vres.sources s ON s.id=c.source_id
+             LEFT JOIN vres.knowledge_items k ON k.id=c.knowledge_id
+            WHERE (c.source_id IS NOT NULL OR c.knowledge_id IS NOT NULL)
+              AND coalesce(c.metadata->>'sensitive_disposition','') NOT IN {sens}
+              AND (c.source_id IS NULL OR (s.status='active' AND (s.project_id=%(pid)s OR s.project_id IS NULL)
+                   AND coalesce(s.metadata->>'sensitive_disposition','') NOT IN {sens}))
+              AND (c.knowledge_id IS NULL OR (k.project_id=%(pid)s OR k.project_id IS NULL)
+                   AND k.status NOT IN ('rejected','superseded','challenged')
+                   AND (k.valid_from IS NULL OR k.valid_from<=now()) AND (k.valid_to IS NULL OR k.valid_to>now()))
+              AND {match}"""
+        approved = ("(c.source_id IS NULL OR s.project_id IS NOT NULL OR s.scope_approval_event_id IS NOT NULL) AND "
+                    "(c.knowledge_id IS NULL OR k.project_id IS NOT NULL OR k.scope_approval_event_id IS NOT NULL)")
+        unapproved = conn.execute(f"SELECT count(*) AS n {base} AND NOT ({approved})", params).fetchone()["n"]
+        rows = conn.execute(
+            f"""
+            SELECT c.chunk_key,c.section,c.content,s.source_key,s.project_id AS source_project_id,
+                   k.knowledge_key,k.project_id AS knowledge_project_id,{rank} AS rank,TRUE AS lex
+            {base} AND {approved}
+            ORDER BY rank DESC,c.chunk_key LIMIT {RAW_FETCH_LIMIT}
+            """,
+            params,
+        ).fetchall()
+        return rows, {"excluded_unapproved_company": unapproved, "possibly_truncated": len(rows) >= RAW_FETCH_LIMIT}
 
     @staticmethod
     def _episodes(conn, params):
