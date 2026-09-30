@@ -1,19 +1,23 @@
-"""E3 chunk 1: deterministic, scope-first, READ-ONLY experience retrieval over existing truth owners.
+"""E3 chunks 1-2: deterministic, scope-first, READ-ONLY experience retrieval over existing truth owners.
 
 Reads decisions, accepted procedures, knowledge (incl. E2 proposed lessons) and E1 episodes through one
-eligibility gate, ranks with an inspectable tuple (no opaque score) and returns one bounded pack.
-Chunk 1 deliberately has NO semantic/embedding fusion, relation-based conflicts, premise comparison
-(premise_status is the constant 'not_evaluated'), raw-chunk fallback or MCP tool.
+eligibility gate. Authority (tier/role) is structural and fixed BEFORE relevance ranking; lexical, optional
+semantic and graph signals only order items inside an authority tier and never change it. Chunk 2 adds premise
+comparison, conflict/staleness surfacing and pack composition. Still absent: raw-chunk fallback, MCP tool.
 """
 
 from __future__ import annotations
 
+import copy
 import re
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+import psycopg
+
+from .embeddings import EmbeddingUnavailable
 from .experience import _HIDDEN_REASONING_KEYS, _canonical, _normalize_key
 from .experience_consolidation import episode_payload_digest, statement_digest
 from .redaction import redact_text
@@ -46,10 +50,14 @@ MAX_PACK_BYTES = 16 * 1024
 MAX_TEXT = 600
 POLICY = {
     "version": SCHEMA_VERSION,
-    "chunk": 1,
-    "premise_status": "not_evaluated",
-    "retrieval_mode": "lexical",
-    "not_implemented": ["semantic_fusion", "relation_conflicts", "premise_comparison", "raw_fallback"],
+    "chunk": 2,
+    "retrieval_mode": "lexical+optional_semantic",
+    "rank_order": [
+        "section", "authority_tier", "scope_rank", "task_family_or_capability_match", "tag_overlap",
+        "fusion_rank_score", "lexical_rank", "relation_count", "recency_epoch", "memory_key",
+    ],
+    "fusion": "reciprocal_rank_k60_lexical_semantic",
+    "not_implemented": ["raw_fallback"],
     "budgets": BUDGETS,
     "max_items": MAX_ITEMS,
     "max_pack_bytes": MAX_PACK_BYTES,
@@ -69,8 +77,12 @@ _INSTRUCTION_SHAPED = re.compile(
 _TIER_CURRENT_DECISION, _TIER_PROCEDURE, _TIER_VALIDATED, _TIER_CANDIDATE, _TIER_LOW_TRUST = 0, 1, 2, 3, 4
 _REQUEST_KEYS = {
     "project_id", "query", "task_key", "task_family", "capability_keys", "temporal_intent", "as_of",
-    "premises", "include_candidates",
+    "premises", "include_candidates", "tags",
 }
+RRF_K = 60  # same constant as KnowledgeService.hybrid_search
+MAX_EDGES = 500
+_CONFLICT_RELATIONS = {"supersedes", "superseded_by"}
+_CONFLICT_MEMBER_ROLES = {"instruction", "candidate"}
 _TRUST = {
     "user_authoritative", "validated_runtime", "trusted_project_source",
     "model_inferred_from_validated_evidence", "external_untrusted_observation",
@@ -92,6 +104,7 @@ class RetrievalRequest:
     as_of: Any = None
     premises: dict[str, str] = field(default_factory=dict)
     include_candidates: bool = True
+    tags: list[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------- request (fail closed, before any read)
@@ -163,6 +176,10 @@ def normalize_request(raw: Any) -> dict[str, Any]:
             raise ValueError("Retrieval as_of must be a timestamp")
         if as_of.tzinfo is None:
             as_of = as_of.replace(tzinfo=timezone.utc)
+    tags = raw.get("tags") or []
+    if not isinstance(tags, (list, tuple)) or len(tags) > 10:
+        raise ValueError("Retrieval tags must be a list of at most 10 tags")
+    tags = sorted({_text(t, "tag", 80, required=True).casefold() for t in tags})
     include = raw.get("include_candidates", True)
     if not isinstance(include, bool):
         raise ValueError("Retrieval include_candidates must be a boolean")
@@ -176,6 +193,7 @@ def normalize_request(raw: Any) -> dict[str, Any]:
         "as_of": as_of,
         "premises": premises,
         "include_candidates": include,
+        "tags": tags,
     }
 
 
@@ -212,16 +230,96 @@ def _lex(row: dict[str, Any]) -> float:
     return round(float(row.get("rank") or 0), 6)
 
 
+def _lexical_hit(row: dict[str, Any]) -> bool:
+    return bool(row["lex"]) if "lex" in row else _lex(row) > 0
+
+
+def _fusion(row: dict[str, Any]) -> float:
+    """Reciprocal-rank fusion over the lexical and (optional) semantic 1-based positions; 0 when in neither."""
+    return round(sum(1.0 / (RRF_K + row[k]) for k in ("lex_pos", "sem_pos") if row.get(k)), 6)
+
+
+def _norm(value: Any) -> str:
+    return " ".join(str(value).split()).casefold()
+
+
+def _comparable_premises(*sources: Any) -> dict[str, frozenset[str]]:
+    """Premises usable for comparison: normalized key -> set of normalized scalar values (str or list of scalars)."""
+    for source in sources:
+        if isinstance(source, dict) and isinstance(source.get("premises"), dict):
+            out: dict[str, frozenset[str]] = {}
+            for key, value in sorted(source["premises"].items(), key=lambda kv: str(kv[0]))[:10]:
+                values = value if isinstance(value, list) else [value]
+                if values and all(isinstance(v, (str, int, float)) and not isinstance(v, bool) for v in values):
+                    out[_norm(key)] = frozenset(_norm(v) for v in values)
+            return out
+    return {}
+
+
+def compare_premises(item_premises: dict[str, frozenset[str]], request_premises: dict[str, str]) -> dict[str, Any]:
+    """Deterministic premise comparison; only keys stated on BOTH sides are compared. Pure, no judgement.
+
+    match      >=1 shared key and every shared key agrees
+    mismatch   >=1 shared key disagrees (exact keys/values reported)
+    unverified nothing comparable (never reported as a mismatch)
+    """
+    req = {_norm(k): _norm(v) for k, v in request_premises.items()}
+    shared = sorted(set(item_premises) & set(req))
+    mismatches = [
+        {"key": k, "item_values": sorted(item_premises[k]), "request_value": req[k]}
+        for k in shared if req[k] not in item_premises[k]
+    ]
+    unverified = sorted(set(item_premises) - set(req))
+    if mismatches:
+        status, basis = "mismatch", "compared"
+    elif shared:
+        status, basis = "match", "compared"
+    else:
+        status = "unverified"
+        basis = ("request_premises_unstated" if not req else "item_premises_unstated" if not item_premises
+                 else "no_shared_keys")
+    return {
+        "premise_status": status,
+        "premise_basis": basis,
+        "premise_matched_keys": [k for k in shared if req[k] in item_premises[k]],
+        "premise_mismatches": mismatches,
+        "premise_unverified_keys": unverified,
+    }
+
+
+def _first(key: str, *sources: Any) -> Any:
+    for source in sources:
+        if isinstance(source, dict) and source.get(key) is not None:
+            return source[key]
+    return None
+
+
+def _applicability(scope: Any, meta: Any) -> tuple[str | None, list[str], list[str]]:
+    """Structured task family / capability keys / tags a knowledge item declares about itself."""
+    family = _first("task_family", scope, meta)
+    return (
+        _clean(family, 80) if isinstance(family, str) else None,
+        _strs(_first("capability_keys", scope, meta)),
+        sorted({t.casefold() for t in _strs(_first("tags", scope, meta), 10, 80)}),
+    )
+
+
 def _item(
     *, section, memory_key, memory_class, scope, project_id, authority_class, status, trust_class, role, tier,
     text, why, evidence, flags, req, row, task_family=None, capability_keys=(), premises=None, outcome=None,
-    provenance=None, stored_confidence=None, recency=None, authoritative=False, group=None,
+    provenance=None, stored_confidence=None, recency=None, authoritative=False, group=None, ref=None, tags=(),
+    warnings=(), freshness=None, cmp_premises=None, subject=None, polarity=None, challenged=False,
 ) -> dict[str, Any]:
     family_match = bool(task_family and req["task_family"] and task_family.casefold() == req["task_family"].casefold())
     cap_match = bool(set(capability_keys) & set(req["capability_keys"]))
+    tag_overlap = len(set(tags) & set(req["tags"]))
     why = list(why)
-    if _lex(row) > 0:
+    if _lexical_hit(row):
         why.append("lexical_match")
+    if row.get("sem_pos"):
+        why.append("semantic_match")
+    if tag_overlap:
+        why.append("tag_match")
     if family_match:
         why.append("task_family_match")
     if cap_match:
@@ -243,7 +341,7 @@ def _item(
             "task_family": task_family,
             "capability_keys": sorted(capability_keys),
             "premises": premises or {},
-            "premise_status": "not_evaluated",
+            "premise_status": "unverified",
         },
         "flags": sorted(flags),
         "signals": {
@@ -251,14 +349,29 @@ def _item(
             "scope_rank": 0 if scope == "project" else 1,
             "task_family_match": family_match,
             "capability_match": cap_match,
+            "tag_overlap": tag_overlap,
             "lexical_rank": _lex(row),
+            "semantic_rank": row.get("sem_pos"),
+            "fusion_rank_score": _fusion(row),
+            "relation_count": 0,
             "recency_epoch": _epoch(recency),
         },
         "stored_confidence": stored_confidence,
         "text": _clean(text),
         "_section": section,
         "_authoritative": authoritative,
+        "_ref": ref,
+        "_premises_cmp": cmp_premises or {},
+        "_subject": subject,
+        "_polarity": polarity,
+        "_challenged": challenged,
     }
+    if tags:
+        item["applicability"]["tags"] = sorted(tags)
+    if warnings:
+        item["warnings"] = list(warnings)
+    if freshness is not None:
+        item["freshness"] = freshness
     if provenance is not None:
         item["provenance"] = provenance
     if group is not None:
@@ -286,8 +399,7 @@ def knowledge_item(row: dict[str, Any], req: dict[str, Any], now: datetime) -> t
     status = row["status"]
     if status == "rejected":
         return None, None
-    if status == "challenged":
-        return None, "deferred_challenged"  # conflict surfacing is chunk 2
+    challenged = status == "challenged"
     eligible, hist = _temporal(row.get("valid_from"), row.get("valid_to"), status == "superseded", req, now)
     if not eligible:
         return None, None
@@ -295,11 +407,12 @@ def knowledge_item(row: dict[str, Any], req: dict[str, Any], now: datetime) -> t
     e2 = row.get("source_owner") == E2_SOURCE_OWNER or bool(meta.get("experience_transition_key"))
     external = meta.get("trust_class") == "external_untrusted_observation"
     validated = status in {"validated", "canonical"} or (status == "superseded" and hist)
-    if not validated and not (req["include_candidates"] or external):
+    if not validated and not (req["include_candidates"] or external or challenged):
         return None, None
     ref = req["as_of"] or now if req["temporal_intent"] == "historical" else now
     stale = row.get("review_after") is not None and row["review_after"] <= ref
     flags = {"historical"} if hist else set()
+    warnings: list[dict[str, Any]] = []
     why = ["validated_status" if validated else "candidate_status"]
     if hist:
         why.append("historical_as_of")
@@ -313,6 +426,9 @@ def knowledge_item(row: dict[str, Any], req: dict[str, Any], now: datetime) -> t
         lineage.append(f"digest:{_clean(meta['statement_digest'], 80)}")
     if external:
         section, role, cls, tier, authority = "low_trust_observations", "low_trust_observation", "knowledge", _TIER_LOW_TRUST, "external_untrusted"
+    elif challenged:
+        section, role, cls, tier, authority = "conflicts_and_stale", "conflict", "knowledge", _TIER_CANDIDATE, "challenged_knowledge"
+        flags, why = flags | {"challenged"}, ["challenged_status"]
     elif validated:
         is_rule = row["knowledge_type"] in {"decision", "rule"}
         section = "current_decisions" if is_rule else "validated_lessons"
@@ -328,18 +444,32 @@ def knowledge_item(row: dict[str, Any], req: dict[str, Any], now: datetime) -> t
             why.append("negative_polarity")
         if stale:
             flags.add("stale")
+    if stale:
+        flags = flags | {"stale"}
+        warnings.append({"type": "stale", "reason": "review_after_passed"})
     text = f"{row['title']}: {row['statement']}"
     authoritative = validated and not external
     if not authoritative and _INSTRUCTION_SHAPED.search(text):
         return None, "quarantined_injection"
+    family, caps, tags = _applicability(row.get("scope"), meta)
+
+    def iso(value: Any) -> str | None:
+        return value.astimezone(timezone.utc).isoformat() if isinstance(value, datetime) else None
+
+    subject, polarity = meta.get("subject_key"), meta.get("polarity")
     return _item(
         section=section, memory_key=row["knowledge_key"], memory_class=cls, scope=scope,
         project_id=row["project_id"], authority_class=authority, status=status,
         trust_class=meta.get("trust_class") or meta.get("derived_trust_class") or "unspecified", role=role,
         tier=tier, text=text, why=why, evidence=lineage, flags=flags, req=req, row=row,
-        premises=_bounded_premises(row.get("scope"), meta),
+        premises=_bounded_premises(row.get("scope"), meta), task_family=family, capability_keys=caps, tags=tags,
         stored_confidence=None if row.get("confidence") is None else float(row["confidence"]),
         recency=row.get("last_verified_at") or row.get("updated_at"), authoritative=authoritative,
+        ref=f"knowledge:{row['knowledge_key']}", warnings=warnings,
+        freshness={"last_verified_at": iso(row.get("last_verified_at")), "review_after": iso(row.get("review_after"))},
+        cmp_premises=_comparable_premises(row.get("scope"), meta), challenged=challenged,
+        subject=subject if isinstance(subject, str) else None,
+        polarity=polarity if polarity in {"positive", "negative"} else None,
     ), None
 
 
@@ -358,6 +488,8 @@ def procedure_item(row: dict[str, Any], req: dict[str, Any], now: datetime) -> t
         text=f"{row['name']}: {row['description']}", why=["preferred_procedure_version"],
         evidence=[f"procedure:{row['procedure_key']}@v{row['preferred_version']}"], flags=set(), req=req, row=row,
         task_family=row.get("task_family"), recency=row.get("updated_at"), authoritative=True,
+        ref=f"procedure:{row['procedure_key']}", premises=_bounded_premises(row.get("input_contract")),
+        cmp_premises=_comparable_premises(row.get("input_contract")),
     ), None
 
 
@@ -388,6 +520,7 @@ def decision_item(row: dict[str, Any], req: dict[str, Any], now: datetime) -> tu
         trust_class=row["source_kind"], role=role, tier=tier, text=row["text"], why=why,
         evidence=[f"decision:{row['decision_key']}", f"task:{row['task_key']}"], flags=flags, req=req, row=row,
         recency=row.get("decided_at") or row.get("recorded_at"), authoritative=authoritative,
+        ref=f"decision:{row['decision_key']}",
     ), None
 
 
@@ -441,6 +574,7 @@ def episode_item(row: dict[str, Any], req: dict[str, Any], now: datetime) -> tup
         tier=_TIER_LOW_TRUST if low_trust else _TIER_CANDIDATE, text=text, why=why, evidence=evidence,
         flags={"failure"} | ({"gotcha"} if failed else set()) if failed else set(), req=req, row=row,
         task_family=family, capability_keys=caps, recency=row.get("observed_at"), group=row.get("task_id"),
+        ref=f"episode:{row['episode_key']}",
         outcome={
             "outcome_status": row["outcome_status"], "failure_classification": classification,
             "validation_status": validation_status,
@@ -459,10 +593,13 @@ def episode_item(row: dict[str, Any], req: dict[str, Any], now: datetime) -> tup
 
 def _sort_key(item: dict[str, Any]):
     s = item["signals"]
+    if "conflict" in item["flags"]:
+        # Conflict members are ordered by structure and key only: no relevance/recency signal may make one side look preferred.
+        return (SECTIONS.index(item["_section"]), s["authority_tier"], s["scope_rank"], 0, 0, 0, 0, 0, 0, item["memory_key"])
     return (
         SECTIONS.index(item["_section"]), s["authority_tier"], s["scope_rank"],
-        -int(s["task_family_match"] or s["capability_match"]), -s["lexical_rank"], -s["recency_epoch"],
-        item["memory_key"],
+        -int(s["task_family_match"] or s["capability_match"]), -s["tag_overlap"], -s["fusion_rank_score"],
+        -s["lexical_rank"], -s["relation_count"], -s["recency_epoch"], item["memory_key"],
     )
 
 
@@ -470,19 +607,171 @@ def _public(item: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in item.items() if not k.startswith("_")}
 
 
-def compose(items: list[dict[str, Any]], req: dict[str, Any], diagnostics: dict[str, int]) -> dict[str, Any]:
-    """Order, dedupe, budget and size-bound. Pure and deterministic."""
+def _warn(item: dict[str, Any], entry: dict[str, Any]) -> None:
+    item.setdefault("warnings", []).append(entry)
+
+
+def _demote(item: dict[str, Any], role: str, *, move: bool = True) -> None:
+    """Lower a role for presentation only. Authority class/status/tier stay visible and unchanged."""
+    if item["role"] in _CONFLICT_MEMBER_ROLES:
+        item.setdefault("role_before", item["role"])
+        item["role"] = role
+        item["_authoritative"] = False
+    if move:
+        item["_section"] = "conflicts_and_stale"
+
+
+def _flag(item: dict[str, Any], *flags: str) -> None:
+    item["flags"] = sorted(set(item["flags"]) | set(flags))
+
+
+def _why(item: dict[str, Any], *reasons: str) -> None:
+    item["why_retrieved"] = sorted(set(item["why_retrieved"]) | set(reasons))
+
+
+def _conflict_key(reason: str, members: list[str]) -> str:
+    return "CONFLICT-" + statement_digest(reason + "|" + "|".join(members))[:16]
+
+
+def evaluate(items: list[dict[str, Any]], req: dict[str, Any], edges: list[dict[str, Any]]):
+    """Premise, relation, conflict and staleness evaluation over the already-gated candidate set.
+
+    Pure and deterministic. Uses ONLY durable evidence passed in: item fields and `edges` (relations whose both
+    endpoints are surviving items). Never changes authority_class/status/tier, never picks a winner, never mutates
+    a source. Returns (items, conflict_sets) where each set is {conflict_key, reason, members, evidence}.
+    """
+    by_ref = {i["_ref"]: i for i in items if i.get("_ref")}
+    for item in items:
+        cmp = compare_premises(item["_premises_cmp"], req["premises"])
+        item["applicability"].update(cmp)
+        if cmp["premise_status"] == "mismatch":
+            _flag(item, "premise_mismatch")
+            _why(item, "premise_mismatch")
+            _warn(item, {"type": "premise_mismatch", "keys": [m["key"] for m in cmp["premise_mismatches"]]})
+            if item["role"] in _CONFLICT_MEMBER_ROLES:
+                _demote(item, "warning_example")
+        elif cmp["premise_status"] == "unverified":
+            _flag(item, "premise_unverified")
+        if "stale" in item["flags"]:
+            _why(item, "stale_assumption")
+
+    sets: dict[str, dict[str, Any]] = {}
+
+    def add_set(reason: str, members: list[str], evidence: list[str]) -> None:
+        members = sorted(set(members))
+        key = _conflict_key(reason, members)
+        sets.setdefault(key, {"conflict_key": key, "reason": reason, "members": members, "evidence": sorted(set(evidence))})
+
+    counts = dict.fromkeys(by_ref, 0)
+    for edge in edges:
+        a, b = f"{edge['source_kind']}:{edge['source_key']}", f"{edge['target_kind']}:{edge['target_key']}"
+        if a not in by_ref or b not in by_ref or a == b:
+            continue
+        rel = edge["relation_type"]
+        members = [by_ref[a]["memory_key"], by_ref[b]["memory_key"]]
+        marker = f"relation:{edge['id']}" if edge.get("id") is not None else f"relation:{a}|{rel}|{b}"
+        if rel == "related_to" and edge.get("consolidation_marked"):
+            add_set("related_to_conflict", members, [marker])
+        elif rel in _CONFLICT_RELATIONS:
+            add_set("supersession_edge", members, [marker])
+        else:
+            counts[a] += 1
+            counts[b] += 1
+    for ref, n in counts.items():
+        if n:
+            by_ref[ref]["signals"]["relation_count"] = n
+            _why(by_ref[ref], "graph_related")
+
+    subjects: dict[str, list[dict[str, Any]]] = {}
+    for item in items:
+        if item["_challenged"]:
+            add_set("challenged", [item["memory_key"]], [f"status:challenged:{item['memory_key']}"])
+        if item["_subject"] and item["_polarity"]:
+            subjects.setdefault(item["_subject"], []).append(item)
+    for subject, group in sorted(subjects.items()):
+        if {i["_polarity"] for i in group} == {"positive", "negative"}:
+            add_set("opposite_polarity", [i["memory_key"] for i in group],
+                    [f"subject:{subject}"] + [f"polarity:{i['_polarity']}:{i['memory_key']}" for i in group])
+
+    by_key = {i["memory_key"]: i for i in items}
+    for entry in sets.values():
+        entry["members"] = [
+            {
+                "memory_key": k, "authority_class": by_key[k]["authority_class"], "status": by_key[k]["status"],
+                "role_before": by_key[k].get("role_before", by_key[k]["role"]),
+            }
+            for k in entry["members"]
+        ]
+        for member in (by_key[m["memory_key"]] for m in entry["members"]):
+            _demote(member, "conflict")
+            _flag(member, "conflict")
+            _why(member, "conflict_member")
+            member.setdefault("conflict_keys", []).append(entry["conflict_key"])
+            member["conflict_keys"] = sorted(set(member["conflict_keys"]))
+    return items, sorted(sets.values(), key=lambda c: (c["reason"], c["conflict_key"]))
+
+
+def _settle(kept: list[dict[str, Any]], sets: dict[str, dict[str, Any]], diag: dict[str, Any]) -> None:
+    """A conflict set is shown whole or not at all: never surface one side of a conflict as if it stood alone."""
+    changed = True
+    while changed:
+        changed = False
+        present = {i["memory_key"] for i in kept}
+        for key, entry in list(sets.items()):
+            names = {m["memory_key"] for m in entry["members"]}
+            if names <= present:
+                continue
+            del sets[key]
+            diag["truncated"]["conflict_sets"] += 1
+            kept[:] = [i for i in kept if not (i["memory_key"] in names and key in i.get("conflict_keys", []))]
+            changed = True
+            break
+
+
+def compose(items: list[dict[str, Any]], req: dict[str, Any], diagnostics: dict[str, int], edges=()) -> dict[str, Any]:
+    """Evaluate, order, dedupe, budget and size-bound. Pure and deterministic."""
     diag = {
-        "excluded_unapproved_company": 0, "deferred_challenged": 0, "rejected_corrupt": 0,
-        "quarantined_injection": 0, **diagnostics, "deduplicated": 0,
-        "truncated": {"section_budget": 0, "total_items": 0, "pack_bytes": 0},
+        "excluded_unapproved_company": 0, "rejected_corrupt": 0, "quarantined_injection": 0,
+        "embedding": "disabled", **diagnostics, "deduplicated": 0, "deduplicated_cited_episode": 0,
+        "truncated": {"section_budget": 0, "total_items": 0, "pack_bytes": 0, "conflict_sets": 0},
     }
+    items, conflict_list = evaluate(copy.deepcopy(list(items)), req, list(edges))
+    sets = {c["conflict_key"]: c for c in conflict_list}
+    in_conflict = {m["memory_key"] for c in conflict_list for m in c["members"]}
+    cited: dict[str, set[str]] = {}
+    for edge in edges:
+        if edge["relation_type"] == "derived_from" and edge["target_kind"] == "episode":
+            cited.setdefault(f"episode:{edge['target_key']}", set()).add(edge["source_key"])
     kept: list[dict[str, Any]] = []
     keys: set[str] = set()
     digests: dict[str, dict[str, Any]] = {}
     groups: set[Any] = set()
     per_section = dict.fromkeys(SECTIONS, 0)
+
+    def admit(item: dict[str, Any]) -> None:
+        keys.add(item["memory_key"])
+        digests.setdefault(statement_digest(item["text"]), item)
+        per_section[item["_section"]] += 1
+        if item.get("_group") is not None:
+            groups.add(item["_group"])
+        kept.append(item)
+
+    # Conflict sets first, whole or not at all, inside the conflicts_and_stale budget. Members bypass text dedupe.
+    by_key = {i["memory_key"]: i for i in items}
+    for entry in sorted(conflict_list, key=lambda c: (
+        min(by_key[m["memory_key"]]["signals"]["authority_tier"] for m in c["members"]), c["reason"], c["conflict_key"],
+    )):
+        members = [by_key[m["memory_key"]] for m in entry["members"] if m["memory_key"] not in keys]
+        if per_section["conflicts_and_stale"] + len(members) > BUDGETS["conflicts_and_stale"]:
+            del sets[entry["conflict_key"]]
+            diag["truncated"]["conflict_sets"] += 1
+            continue
+        for member in members:
+            admit(member)
+    _settle(kept, sets, diag)
     for item in sorted(items, key=_sort_key):
+        if item["memory_key"] in in_conflict:
+            continue
         digest = statement_digest(item["text"])
         if item["memory_key"] in keys or (item.get("_group") is not None and item["_group"] in groups):
             diag["deduplicated"] += 1
@@ -491,8 +780,13 @@ def compose(items: list[dict[str, Any]], req: dict[str, Any], diagnostics: dict[
             digests[digest].setdefault("also_matched", []).append(item["memory_key"])
             diag["deduplicated"] += 1
             continue
-        keys.add(item["memory_key"])
+        if item["memory_class"] == "episode" and "failure" not in item["flags"] and any(
+            k in keys for k in cited.get(item["_ref"], ())
+        ):
+            diag["deduplicated_cited_episode"] += 1
+            continue
         digests[digest] = item
+        keys.add(item["memory_key"])
         if per_section[item["_section"]] >= BUDGETS[item["_section"]]:
             diag["truncated"]["section_budget"] += 1
             continue
@@ -500,9 +794,11 @@ def compose(items: list[dict[str, Any]], req: dict[str, Any], diagnostics: dict[
         if item.get("_group") is not None:
             groups.add(item["_group"])
         kept.append(item)
+    kept.sort(key=_sort_key)
     if len(kept) > MAX_ITEMS:
         diag["truncated"]["total_items"] = len(kept) - MAX_ITEMS
-        kept = kept[:MAX_ITEMS]
+        del kept[MAX_ITEMS:]
+        _settle(kept, sets, diag)
 
     def build(selected: list[dict[str, Any]], tokens: int) -> dict[str, Any]:
         sections = {name: [_public(i) for i in selected if i["_section"] == name] for name in SECTIONS}
@@ -512,22 +808,27 @@ def compose(items: list[dict[str, Any]], req: dict[str, Any], diagnostics: dict[
             "policy": POLICY,
             "request": {
                 "project_id": req["project_id"], "task_family": req["task_family"],
-                "capability_keys": req["capability_keys"], "temporal_intent": req["temporal_intent"],
+                "capability_keys": req["capability_keys"], "tags": req["tags"],
+                "temporal_intent": req["temporal_intent"],
                 "as_of": req["as_of"].astimezone(timezone.utc).isoformat() if req["as_of"] else None,
                 "include_candidates": req["include_candidates"],
             },
             "premises": req["premises"],
             **sections,
+            "conflicts": sorted(sets.values(), key=lambda c: (c["reason"], c["conflict_key"])),
             "abstained": empty,
             "reason": "no_eligible_experience" if empty else None,
             "diagnostics": diag,
-            "evidence_keys": sorted({e for i in selected for e in i["evidence"]}),
+            "evidence_keys": sorted(
+                {e for i in selected for e in i["evidence"]} | {e for c in sets.values() for e in c["evidence"]}
+            ),
             "estimated_tokens": tokens,
         }
 
     while kept and len(_canonical(build(kept, 9999)).encode("utf-8")) > MAX_PACK_BYTES:
         kept.pop()  # lowest priority item is last; never cut inside an item
         diag["truncated"]["pack_bytes"] += 1
+        _settle(kept, sets, diag)
     pack = build(kept, 9999)
     return build(kept, len(_canonical(pack).encode("utf-8")) // 4)
 
@@ -542,11 +843,31 @@ def _lexical(vec: str, text: str, tokens: list[str]) -> tuple[str, str]:
     )
 
 
+def _default_semantic(query: str, limit: int, project_id: int):
+    from .config import ConfigStore
+
+    if not ConfigStore().load().embeddings_enabled:
+        return None
+    from .embeddings import EmbeddingService
+
+    return EmbeddingService().semantic_search(query, limit=limit, project_id=project_id)
+
+
+def _positions(rows: list[dict[str, Any]], key: str) -> None:
+    """Assign 1-based lexical positions (ts_rank desc, key asc) to rows that matched lexically."""
+    hits = sorted((r for r in rows if _lexical_hit(r)), key=lambda r: (-_lex(r), r[key]))
+    for pos, row in enumerate(hits, 1):
+        row["lex_pos"] = pos
+
+
 class ExperienceRetrievalService:
     """Read-only. Every read runs in one READ ONLY transaction; nothing is written or observed."""
 
-    def __init__(self, connect_fn=None):
+    def __init__(self, connect_fn=None, semantic_fn=None):
         self._connect_fn = connect_fn
+        # semantic_fn(query, limit, project_id) -> list[chunk hit dicts with knowledge_id] | None (disabled).
+        # Default reuses the existing EmbeddingService (its own SELECT-only connection; no second embedding policy).
+        self._semantic_fn = semantic_fn or _default_semantic
 
     @contextmanager
     def _open(self):
@@ -565,8 +886,9 @@ class ExperienceRetrievalService:
         params = {
             "pid": req["project_id"], "task_key": req["task_key"], "family": req["task_family"],
             "tsq": " | ".join(f"'{t}'" for t in tokens), "phrase": req["query"].casefold(),
-            "hist": req["temporal_intent"] == "historical",
+            "hist": req["temporal_intent"] == "historical", "sem_ids": [],
         }
+        semantic, sem_diag = self._semantic(req)
         with self._open() as conn:
             if not conn.execute("SELECT 1 FROM vres.projects WHERE id=%(pid)s", params).fetchone():
                 raise ValueError("Retrieval project_id does not exist")
@@ -579,15 +901,22 @@ class ExperienceRetrievalService:
                 req["task_family"] = req["task_family"] or task["task_family"]
                 params["family"] = req["task_family"]
             now = conn.execute("SELECT now() AS n").fetchone()["n"]
-            diag = {"excluded_unapproved_company": 0}
+            diag = {"excluded_unapproved_company": 0, **sem_diag}
+            params["sem_ids"] = sorted(semantic)
             built: list[tuple[dict | None, str | None]] = []
-            for rows, builder in (
-                (self._decisions(conn, params), decision_item),
-                (self._procedures(conn, params, diag), procedure_item),
-                (self._knowledge(conn, params, tokens, diag), knowledge_item),
-                (self._episodes(conn, params), episode_item),
+            for rows, builder, key in (
+                (self._decisions(conn, params), decision_item, "decision_key"),
+                (self._procedures(conn, params, diag), procedure_item, "procedure_key"),
+                (self._knowledge(conn, params, tokens, diag), knowledge_item, "knowledge_key"),
+                (self._episodes(conn, params), episode_item, "episode_key"),
             ):
+                _positions(rows, key)
+                if builder is knowledge_item:
+                    for row in rows:
+                        row["sem_pos"] = semantic.get(row["id"])
                 built += [builder(row, req, now) for row in rows]
+            refs = sorted({i["_ref"] for i, _ in built if i is not None and i.get("_ref")})
+            edges = self._edges(conn, refs)
         counts = dict(diag)
         items = []
         for item, reason in built:
@@ -595,7 +924,43 @@ class ExperienceRetrievalService:
                 items.append(item)
             elif reason:
                 counts[reason] = counts.get(reason, 0) + 1
-        return compose(items, req, counts)
+        return compose(items, req, counts, edges)
+
+    def _semantic(self, req) -> tuple[dict[int, int], dict[str, Any]]:
+        """Optional semantic signal: {knowledge_id: 1-based position}. Never fails the retrieval, never trusted:
+        every id is re-resolved through the E3 eligibility SQL/gate."""
+        try:
+            hits = self._semantic_fn(req["query"], 50, req["project_id"])
+        except (EmbeddingUnavailable, psycopg.Error) as exc:
+            return {}, {"embedding": "unavailable", "embedding_error": type(exc).__name__}
+        if hits is None:
+            return {}, {"embedding": "disabled"}
+        positions: dict[int, int] = {}
+        for hit in hits:
+            kid = hit.get("knowledge_id") if isinstance(hit, dict) else None
+            if isinstance(kid, int) and not isinstance(kid, bool) and kid not in positions:
+                positions[kid] = len(positions) + 1
+        diag: dict[str, Any] = {"embedding": "used" if positions else "no_results"}
+        if any(isinstance(h, dict) and h.get("possibly_truncated") for h in hits):
+            diag["embedding_truncated"] = True
+        return positions, diag
+
+    @staticmethod
+    def _edges(conn, refs: list[str]) -> list[dict[str, Any]]:
+        """Direct relations whose BOTH endpoints are already-gated surviving items (no traversal, no leak)."""
+        if len(refs) < 2:
+            return []
+        return conn.execute(
+            """
+            SELECT r.id,r.source_kind,r.source_key,r.relation_type,r.target_kind,r.target_key,
+                   EXISTS(SELECT 1 FROM vres.relation_evidence e
+                           WHERE e.relation_id=r.id AND e.provenance LIKE '%%experience consolidation%%') AS consolidation_marked
+              FROM vres.relations r
+             WHERE (r.source_kind||':'||r.source_key)=ANY(%(refs)s) AND (r.target_kind||':'||r.target_key)=ANY(%(refs)s)
+             ORDER BY r.id LIMIT %(limit)s
+            """,
+            {"refs": refs, "limit": MAX_EDGES},
+        ).fetchall()
 
     @staticmethod
     def _decisions(conn, params):
@@ -604,7 +969,7 @@ class ExperienceRetrievalService:
         return conn.execute(
             f"""
             SELECT d.decision_key,d.text,d.status,d.source_kind,d.decided_at,d.recorded_at,d.superseded_at,
-                   d.retired_at,t.task_key,{rank} AS rank
+                   d.retired_at,t.task_key,{rank} AS rank,({match}) AS lex
               FROM vres.task_decisions d JOIN vres.tasks t ON t.id=d.task_id
              WHERE t.project_id=%(pid)s AND (d.status='active' OR %(hist)s)
                AND (t.task_key=%(task_key)s OR {match})
@@ -623,8 +988,8 @@ class ExperienceRetrievalService:
         return conn.execute(
             f"""
             SELECT p.procedure_key,p.name,p.description,p.task_family,p.project_id,p.status,p.preferred_version,
-                   p.updated_at,v.status AS version_status,(p.scope_approval_event_id IS NOT NULL) AS approved,
-                   {rank} AS rank
+                   p.updated_at,v.input_contract,v.status AS version_status,
+                   (p.scope_approval_event_id IS NOT NULL) AS approved,{rank} AS rank,({match}) AS lex
               FROM vres.procedures p
               JOIN vres.procedure_versions v
                 ON v.procedure_id=p.id AND v.version_no=p.preferred_version AND v.status='preferred'
@@ -641,17 +1006,18 @@ class ExperienceRetrievalService:
         match, rank = _lexical("k.search_vector", "k.title||' '||k.statement", tokens)
         diag["excluded_unapproved_company"] += conn.execute(
             f"SELECT count(*) AS n FROM vres.knowledge_items k WHERE k.project_id IS NULL "
-            f"AND k.scope_approval_event_id IS NULL AND k.status<>'rejected' AND {match}", params,
+            f"AND k.scope_approval_event_id IS NULL AND k.status<>'rejected' AND ({match} OR k.id=ANY(%(sem_ids)s))", params,
         ).fetchone()["n"]
         return conn.execute(
             f"""
-            SELECT k.knowledge_key,k.project_id,k.knowledge_type,k.title,k.statement,k.status,k.scope,k.confidence,
+            SELECT k.id,k.knowledge_key,k.project_id,k.knowledge_type,k.title,k.statement,k.status,k.scope,k.confidence,
                    k.valid_from,k.valid_to,k.last_verified_at,k.review_after,k.source_owner,k.updated_at,k.metadata,
-                   (k.scope_approval_event_id IS NOT NULL) AS approved,{rank} AS rank
+                   (k.scope_approval_event_id IS NOT NULL) AS approved,{rank} AS rank,({match}) AS lex
               FROM vres.knowledge_items k
              WHERE (k.project_id=%(pid)s OR (k.project_id IS NULL AND k.scope_approval_event_id IS NOT NULL))
-               AND k.status<>'rejected' AND (k.status<>'superseded' OR %(hist)s) AND {match}
-             ORDER BY rank DESC,k.knowledge_key LIMIT 200
+               AND k.status<>'rejected' AND (k.status<>'superseded' OR %(hist)s)
+               AND ({match} OR k.id=ANY(%(sem_ids)s))
+             ORDER BY (k.id=ANY(%(sem_ids)s)) DESC,rank DESC,k.knowledge_key LIMIT 200
             """,
             params,
         ).fetchall()
@@ -664,7 +1030,7 @@ class ExperienceRetrievalService:
             f"""
             SELECT e.episode_key,e.project_id,e.task_id,e.task_family,e.policy_version,p.policy_digest,
                    e.participation_class,e.trust_class,e.outcome_status,e.payload,e.source_digest,e.payload_digest,
-                   e.security_disposition,e.observed_at,{rank} AS rank
+                   e.security_disposition,e.observed_at,{rank} AS rank,({match}) AS lex
               FROM vres.experience_episodes e
               JOIN vres.experience_policy_versions p ON p.policy_version=e.policy_version
              WHERE e.project_id=%(pid)s

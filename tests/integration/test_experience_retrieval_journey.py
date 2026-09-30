@@ -123,7 +123,7 @@ def _keys(pack, *sections):
 
 
 def _all_keys(pack):
-    return [i["memory_key"] for k, v in pack.items() if isinstance(v, list) for i in v if isinstance(i, dict)]
+    return [i["memory_key"] for v in pack.values() if isinstance(v, list) for i in v if isinstance(i, dict) and "memory_key" in i]
 
 
 @pytest.fixture
@@ -159,7 +159,7 @@ def test_own_project_items_retrieved_and_pack_shape(pg_project):
     _procedure(f"P-{mk}", pg_project, mk)
     ep = _episode(pg_project, mk)
     pack = _retrieve(pg_project, mk, task_key=task)
-    assert pack["schema_version"] == "176.e3.v1" and pack["policy"] == {**pack["policy"], "version": "176.e3.v1", "chunk": 1}
+    assert pack["schema_version"] == "176.e3.v1" and pack["policy"] == {**pack["policy"], "version": "176.e3.v1", "chunk": 2}
     assert not pack["abstained"]
     assert _keys(pack, "current_decisions") == [f"D-{mk}"]
     assert pack["current_decisions"][0]["role"] == "instruction"
@@ -279,8 +279,9 @@ def test_lifecycle_current_vs_historical(pg_project):
     _knowledge(f"K-CHA-{mk}", pg_project, mk, status="challenged", statement=f"{mk} challenged fact")
     cur = _retrieve(pg_project, mk)
     assert _keys(cur, "validated_lessons") == [f"K-LIVE-{mk}"]
-    assert cur["diagnostics"]["deferred_challenged"] == 1
-    assert not any(k for k in _all_keys(cur) if k.startswith(("K-SUP", "K-EXP", "K-REJ", "K-CHA")))
+    assert _keys(cur, "conflicts_and_stale") == [f"K-CHA-{mk}"]  # chunk 2: challenged is surfaced, never as instruction
+    assert cur["conflicts_and_stale"][0]["role"] == "conflict"
+    assert not any(k for k in _all_keys(cur) if k.startswith(("K-SUP", "K-EXP", "K-REJ")))
     hist = _retrieve(pg_project, mk, temporal_intent="historical", as_of="2026-02-01T00:00:00+00:00")
     got = {i["memory_key"]: i for s in ("validated_lessons",) for i in hist[s]}
     assert {f"K-SUP-{mk}", f"K-EXP-{mk}"} <= set(got) and f"K-REJ-{mk}" not in got
@@ -397,3 +398,185 @@ def test_repeated_retrieval_is_byte_identical(pg_project):
     first, second = _retrieve(pg_project, mk), _retrieve(pg_project, mk)
     assert _canonical(first) == _canonical(second)
     assert _keys(first, "validated_lessons") == sorted(_keys(first, "validated_lessons"))
+
+
+# ======================================================================= E3 chunk 2 (real queries: relations, semantic, premises)
+
+def _relate(src, rel, dst, *, sk="knowledge", tk="knowledge", provenance=None):
+    with connect() as conn, conn.transaction():
+        rid = conn.execute(
+            "INSERT INTO vres.relations(source_kind,source_key,relation_type,target_kind,target_key,provenance) "
+            "VALUES (%s,%s,%s,%s,%s,%s) RETURNING id", (sk, src, rel, tk, dst, provenance)).fetchone()["id"]
+        if provenance:
+            conn.execute("INSERT INTO vres.relation_evidence(relation_id,provenance) VALUES (%s,%s)", (rid, provenance))
+    return rid
+
+
+@pytest.fixture
+def relations():
+    made: list[str] = []
+    yield made
+    with connect() as conn, conn.transaction():
+        conn.execute("DELETE FROM vres.relations WHERE source_key=ANY(%s) OR target_key=ANY(%s)", (made, made))
+
+
+E2_PROV = "176.e2.v1 experience consolidation EXPT-test"
+
+
+def test_c2_relation_conflict_surfaced_with_evidence_and_no_winner(pg_project, relations):
+    mk = _mk()
+    a, b = f"K-A-{mk}", f"K-B-{mk}"
+    _knowledge(a, pg_project, mk, statement=f"{mk} always enable the cache")
+    _knowledge(b, pg_project, mk, statement=f"{mk} never enable the cache")
+    relations += [a, b]
+    rid = _relate(a, "related_to", b, provenance=E2_PROV)
+    pack = _retrieve(pg_project, mk)
+    (conf,) = pack["conflicts"]
+    assert conf["reason"] == "related_to_conflict" and conf["evidence"] == [f"relation:{rid}"]
+    assert sorted(m["memory_key"] for m in conf["members"]) == sorted([a, b])
+    assert sorted(_keys(pack, "conflicts_and_stale")) == sorted([a, b]) and pack["validated_lessons"] == []
+    assert all(i["role"] == "conflict" for i in pack["conflicts_and_stale"])
+    assert "winner" not in _canonical(pack)
+    plain = f"K-C-{mk}"
+    _knowledge(plain, pg_project, mk)
+    other = f"K-D-{mk}"
+    _knowledge(other, pg_project, mk)
+    relations += [plain, other]
+    _relate(plain, "related_to", other)  # unmarked related_to is a relevance edge, not a conflict
+    again = _retrieve(pg_project, mk)
+    assert len(again["conflicts"]) == 1
+    assert {i["memory_key"] for i in again["validated_lessons"]} == {plain, other}
+    assert all("graph_related" in i["why_retrieved"] for i in again["validated_lessons"])
+
+
+def test_c2_cross_project_relation_cannot_leak(pg_project, other_project, relations):
+    mk = _mk()
+    mine, foreign = f"K-MINE-{mk}", f"K-FOREIGN-{mk}"
+    _knowledge(mine, pg_project, mk)
+    _knowledge(foreign, other_project, mk, statement=f"{mk} foreign secret rule")
+    relations += [mine, foreign]
+    _relate(mine, "related_to", foreign, provenance=E2_PROV)
+    _relate(foreign, "supersedes", mine)
+    pack = _retrieve(pg_project, mk)
+    assert _keys(pack, "validated_lessons") == [mine] and pack["conflicts"] == []
+    assert foreign not in _canonical(pack) and "foreign secret" not in _canonical(pack)
+
+
+def _stub_semantic(hits):
+    return lambda query, limit, project_id: hits
+
+
+def test_c2_semantic_available_adds_hit_and_is_regated(pg_project, other_project, company_rows):
+    mk = _mk()
+    lex = f"K-LEX-{mk}"
+    sem = f"K-SEM-{mk}"
+    foreign = f"K-FRN-{mk}"
+    unapproved = f"K-UNAP-{mk}"
+    company_rows["knowledge"].append(unapproved)
+    _knowledge(lex, pg_project, mk)
+    _knowledge(sem, pg_project, "unrelatedword", statement="semantically close but lexically different")
+    _knowledge(foreign, other_project, "unrelatedword", statement="foreign semantic hit")
+    _knowledge(unapproved, None, "unrelatedword", statement="unapproved company semantic hit")
+    with connect() as conn:
+        ids = {r["knowledge_key"]: r["id"] for r in conn.execute(
+            "SELECT id,knowledge_key FROM vres.knowledge_items WHERE knowledge_key=ANY(%s)", ([lex, sem, foreign, unapproved],))}
+    hits = [{"knowledge_id": ids[k]} for k in (foreign, unapproved, sem)] + [{"knowledge_id": 2**31}]
+    pack = ExperienceRetrievalService(semantic_fn=_stub_semantic(hits)).retrieve({"project_id": pg_project, "query": mk})
+    assert pack["diagnostics"]["embedding"] == "used"
+    got = {i["memory_key"]: i for i in pack["validated_lessons"]}
+    assert set(got) == {lex, sem}
+    assert "semantic_match" in got[sem]["why_retrieved"] and "lexical_match" not in got[sem]["why_retrieved"]
+    assert "foreign semantic" not in _canonical(pack) and "unapproved company" not in _canonical(pack)
+    assert pack["diagnostics"]["excluded_unapproved_company"] == 1
+
+
+def test_c2_semantic_unavailable_falls_back_to_lexical(pg_project):
+    from vres_os.embeddings import EmbeddingUnavailable
+
+    mk = _mk()
+    _knowledge(f"K-{mk}", pg_project, mk)
+
+    def boom(*a):
+        raise EmbeddingUnavailable("model missing")
+
+    pack = ExperienceRetrievalService(semantic_fn=boom).retrieve({"project_id": pg_project, "query": mk})
+    assert _keys(pack, "validated_lessons") == [f"K-{mk}"]
+    assert pack["diagnostics"]["embedding"] == "unavailable"
+    assert pack["diagnostics"]["embedding_error"] == "EmbeddingUnavailable"
+    off = ExperienceRetrievalService(semantic_fn=lambda *a: None).retrieve({"project_id": pg_project, "query": mk})
+    assert off["diagnostics"]["embedding"] == "disabled" and _keys(off, "validated_lessons") == [f"K-{mk}"]
+
+
+def test_c2_semantic_cannot_promote_lesson_over_validated_or_decision(pg_project):
+    mk = _mk()
+    task = _task(pg_project)
+    _decision(f"D-{mk}", task, f"{mk} plan")
+    _knowledge(f"K-V-{mk}", pg_project, mk)
+    _knowledge(f"K-L-{mk}", pg_project, mk, status="proposed", source_owner=E2_SOURCE_OWNER, statement=f"{mk} lesson text")
+    with connect() as conn:
+        lid = conn.execute("SELECT id FROM vres.knowledge_items WHERE knowledge_key=%s", (f"K-L-{mk}",)).fetchone()["id"]
+    pack = ExperienceRetrievalService(semantic_fn=_stub_semantic([{"knowledge_id": lid}])).retrieve(
+        {"project_id": pg_project, "query": mk, "task_key": task})
+    assert _keys(pack, "current_decisions") == [f"D-{mk}"]
+    assert _keys(pack, "validated_lessons") == [f"K-V-{mk}"]
+    assert _keys(pack, "candidate_lessons") == [f"K-L-{mk}"]
+    assert pack["candidate_lessons"][0]["role"] == "candidate"
+
+
+def test_c2_structured_applicability_and_premises_from_real_rows(pg_project):
+    mk = _mk()
+    _knowledge(f"K-PLAIN-{mk}", pg_project, mk, statement=f"{mk} plain words")
+    _knowledge(f"K-TAG-{mk}", pg_project, mk, statement=f"{mk} tagged words", metadata={"tags": ["redis"]})
+    _knowledge(f"K-EU-{mk}", pg_project, mk, statement=f"{mk} eu words", metadata={"premises": {"region": "eu"}})
+    _knowledge(f"K-US-{mk}", pg_project, mk, statement=f"{mk} us words", metadata={"premises": {"region": "us"}})
+    pack = _retrieve(pg_project, mk, tags=["redis"], premises={"region": "EU"})
+    assert _keys(pack, "validated_lessons")[0] == f"K-TAG-{mk}" or f"K-EU-{mk}" in _keys(pack, "validated_lessons")
+    by = {i["memory_key"]: i for s in ("validated_lessons", "conflicts_and_stale") for i in pack[s]}
+    assert by[f"K-EU-{mk}"]["role"] == "instruction" and by[f"K-EU-{mk}"]["applicability"]["premise_status"] == "match"
+    us = by[f"K-US-{mk}"]
+    assert us["role"] == "warning_example" and us["applicability"]["premise_mismatches"][0]["key"] == "region"
+    assert by[f"K-PLAIN-{mk}"]["applicability"]["premise_status"] == "unverified"
+    assert by[f"K-TAG-{mk}"]["signals"]["tag_overlap"] == 1
+
+
+def test_c2_challenged_and_stale_surface_as_warnings_only(pg_project):
+    mk = _mk()
+    _knowledge(f"K-CH-{mk}", pg_project, mk, status="challenged")
+    _knowledge(f"K-ST-{mk}", pg_project, mk)
+    with connect() as conn, conn.transaction():
+        conn.execute("UPDATE vres.knowledge_items SET review_after=now()-interval '1 day' WHERE knowledge_key=%s",
+                     (f"K-ST-{mk}",))
+    pack = _retrieve(pg_project, mk)
+    by = {i["memory_key"]: i for i in pack["conflicts_and_stale"]}
+    assert set(by) == {f"K-CH-{mk}", f"K-ST-{mk}"}
+    assert by[f"K-ST-{mk}"]["status"] == "validated" and "stale" in by[f"K-ST-{mk}"]["flags"]
+    assert by[f"K-CH-{mk}"]["status"] == "challenged" and by[f"K-CH-{mk}"]["role"] == "conflict"
+    with connect() as conn:  # nothing was changed by surfacing them
+        rows = {r["knowledge_key"]: r["status"] for r in conn.execute(
+            "SELECT knowledge_key,status FROM vres.knowledge_items WHERE knowledge_key LIKE %s", (f"%{mk}",))}
+    assert rows == {f"K-CH-{mk}": "challenged", f"K-ST-{mk}": "validated"}
+
+
+def test_c2_no_write_proof_with_signals_and_relations(pg_project, relations):
+    mk = _mk()
+    a, b = f"K-A-{mk}", f"K-B-{mk}"
+    _knowledge(a, pg_project, mk)
+    _knowledge(b, pg_project, mk, metadata={"tags": ["x"], "premises": {"region": "us"}})
+    relations += [a, b]
+    _relate(a, "related_to", b, provenance=E2_PROV)
+    with connect() as conn:
+        bid = conn.execute("SELECT id FROM vres.knowledge_items WHERE knowledge_key=%s", (b,)).fetchone()["id"]
+    before = _snapshot()
+    svc = ExperienceRetrievalService(semantic_fn=_stub_semantic([{"knowledge_id": bid}]))
+    packs = [svc.retrieve({"project_id": pg_project, "query": mk, "premises": {"region": "eu"}, "tags": ["x"]})
+             for _ in range(3)]
+    assert len({_canonical(p) for p in packs}) == 1  # byte-identical on unchanged state
+    assert packs[0]["conflicts"] and _snapshot() == before
+    with svc._open() as conn:
+        with pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
+            conn.execute("INSERT INTO vres.relations(source_kind,source_key,relation_type,target_kind,target_key) "
+                         "VALUES ('knowledge','x','related_to','knowledge','y')")
+    with svc._open() as conn:
+        with pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
+            conn.execute("UPDATE vres.relations SET confidence=0.1")
+    assert _snapshot() == before
