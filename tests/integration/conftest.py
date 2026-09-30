@@ -37,6 +37,7 @@ def pg_project(monkeypatch, tmp_path):
             conn.execute("SELECT set_config('vres.allow_decision_ledger_delete','on',true)")
             conn.execute("SELECT set_config('vres.allow_experience_ledger_delete','on',true)")
             conn.execute("DELETE FROM vres.experience_transitions WHERE project_id=%s", (pid,))
+            conn.execute("DELETE FROM vres.experience_lifecycle_events WHERE project_id=%s", (pid,))
             conn.execute(
                 "DELETE FROM vres.relation_evidence WHERE relation_id IN ("
                 "SELECT r.id FROM vres.relations r JOIN vres.knowledge_items k "

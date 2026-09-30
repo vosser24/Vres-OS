@@ -132,6 +132,7 @@ def test_migrator_resumes_023_without_database_create(monkeypatch):
             "036_protected_pass_supersedes_routine_route.sql",
             "037_experience_episode_ledger.sql",
             "038_experience_transitions.sql",
+            "039_experience_lifecycle_ledger.sql",
         ]
         assert db.migrate() == expected
 

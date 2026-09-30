@@ -240,3 +240,34 @@ def test_experience_transition_migration_is_append_only_versioned_and_idempotent
     assert "allow_experience_ledger_delete" in sql
     assert "RETURN NEW;" not in sql
     assert "176.e1.v1" not in sql
+
+
+def test_experience_lifecycle_ledger_migration_is_append_only_bounded_and_additive():
+    sql = _migration("039_experience_lifecycle_ledger.sql")
+    assert sql.count("CREATE TABLE") == 1
+    assert "CREATE TABLE IF NOT EXISTS vres.experience_lifecycle_events" in sql
+    assert "protect_experience_lifecycle_immutability" in sql
+    assert "BEFORE UPDATE ON vres.experience_lifecycle_events" in sql
+    assert "BEFORE DELETE ON vres.experience_lifecycle_events" in sql
+    assert "DROP TRIGGER IF EXISTS" in sql
+    # DELETE-only cleanup bypass, identical to 038; UPDATE always raises.
+    assert "TG_OP = 'DELETE'" in sql
+    assert "vres.allow_experience_ledger_delete" in sql
+    assert "RETURN OLD;" in sql
+    assert "RETURN NEW;" not in sql
+    assert "TRUNCATE" not in sql
+    assert "policy_version = '176.e4.v1'" in sql
+    # nine-value knowledge status vocabulary, drop/re-add without a data rewrite
+    assert "DROP CONSTRAINT IF EXISTS knowledge_items_status_check" in sql
+    assert (
+        "CHECK (status IN ('proposed','observed','validated','canonical','challenged',"
+        "'superseded','rejected','retired','revoked'))"
+    ) in sql
+    assert "UPDATE vres.knowledge_items" not in sql
+    # not touching earlier policy/objects, sources, sessions, retrieval or observation storage
+    assert "176.e1" not in sql and "176.e2" not in sql
+    assert "ALTER TABLE vres.sources" not in sql
+    assert "vres.sessions" not in sql
+    assert "embedding_jobs" not in sql
+    assert "experience_policy_versions" not in sql
+    assert "experience_transitions" not in sql and "experience_episodes" not in sql
