@@ -26,6 +26,7 @@ from .experience_lifecycle import (
     _connect,
     _lock_project,
     _utc_now,
+    episode_states,
     ledger_key,
     request_digest,
     validate_reason,
@@ -192,11 +193,7 @@ class _PgGraph:
         elif kind == "episode":
             row = self._one("SELECT project_id FROM vres.experience_episodes WHERE episode_key=%s", key)
             if row:  # episode rows are immutable; their derived state lives in the lifecycle ledger
-                last = self._one(
-                    "SELECT new_state FROM vres.experience_lifecycle_events WHERE target_kind='episode' "
-                    "AND target_key=%s AND project_id=%s AND action IN ('invalidate_derived','restore_derived') "
-                    "ORDER BY id DESC LIMIT 1", key, row["project_id"])
-                return NodeInfo(True, row["project_id"], last["new_state"] if last else "grounded")
+                return NodeInfo(True, row["project_id"], episode_states(self._conn, row["project_id"], [key])[key])
         else:
             row = None
         return NodeInfo(True, row["project_id"], row["status"]) if row else NodeInfo(False)

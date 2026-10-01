@@ -110,6 +110,32 @@ def _lock_project(conn, project_id: int) -> None:
     conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))", (f"vres.e4.lifecycle:{project_id}",))
 
 
+EPISODE_GROUNDED = "grounded"
+
+
+def episode_states(conn, project_id: int, keys) -> dict[str, str | None]:
+    """Effective ledger-derived state of each episode in one project (episode rows are immutable).
+
+    The latest invalidate/restore event of that project for that episode wins; no event means grounded.
+    The stored new_state is returned verbatim, so a corrupt value stays visible to episode_eligible().
+    """
+    keys = sorted(set(keys))
+    if not keys:
+        return {}
+    rows = conn.execute(
+        "SELECT DISTINCT ON (target_key) target_key,new_state FROM vres.experience_lifecycle_events "
+        "WHERE project_id=%s AND target_kind='episode' AND target_key=ANY(%s) "
+        "AND action IN ('invalidate_derived','restore_derived') ORDER BY target_key,id DESC",
+        (project_id, keys)).fetchall()
+    latest = {r["target_key"]: r["new_state"] for r in rows}
+    return {k: latest.get(k, EPISODE_GROUNDED) for k in keys}
+
+
+def episode_eligible(state: str | None) -> bool:
+    """Fail closed: only a grounded episode may support new derivation; revoked, NULL or unknown never can."""
+    return state == EPISODE_GROUNDED
+
+
 def _write_status(conn, knowledge_id: int, status: str) -> None:
     conn.execute("UPDATE vres.knowledge_items SET status=%s,updated_at=now() WHERE id=%s", (status, knowledge_id))
 
