@@ -26,6 +26,7 @@ from .experience_lifecycle import (
     _connect,
     _lock_project,
     _utc_now,
+    episode_eligible,
     episode_states,
     ledger_key,
     request_digest,
@@ -77,7 +78,7 @@ def _live(kind: str, status: str | None) -> bool:
     if kind == "knowledge":
         return status not in _DEAD_KNOWLEDGE
     if kind == "episode":
-        return status != REVOKED
+        return episode_eligible(status)  # fail closed: only 'grounded' supports; NULL/unknown/revoked never do
     return True  # artifacts pass support through to their source
 
 
@@ -148,6 +149,8 @@ def analyse(graph, source_node: Node, project_id: int) -> Outcome:
                         found = found or info.status == "active"
                     elif _live(t[0], info.status):
                         nxt_f.append(t)
+                    elif t[0] == "episode" and info.status != REVOKED:
+                        corrupt.add(("episode_state", t))  # NULL/unknown lifecycle state: counted, never support
             if found:
                 return True
             if not nxt_f:
