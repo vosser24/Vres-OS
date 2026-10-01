@@ -63,6 +63,26 @@ def source_publish_subject(
     }
 
 
+class SourceNotActive(ValueError):
+    """The source exists but is no longer active; nothing new may be attached to it."""
+
+
+def require_active_source(conn, source_id: int) -> str:
+    """Share-lock one source and refuse any status but active (#176 E4 attachment guard).
+
+    Every writer of evidence, locations, chunks or derived_from->source provenance calls this in its own
+    transaction, so it either commits before a concurrent revocation (which then sees it) or is refused after.
+    """
+    row = conn.execute("SELECT source_key,status FROM vres.sources WHERE id=%s FOR SHARE", (source_id,)).fetchone()
+    if not row:
+        raise KeyError(f"Unknown source id {source_id}")
+    if row["status"] != "active":
+        raise SourceNotActive(
+            f"source_not_active: source {row['source_key']} is {row['status']}; new evidence, locations, chunks "
+            "and provenance links are refused")
+    return row["source_key"]
+
+
 class SourceService:
     def register_in_conn(
         self, conn, *, source_type: str, title: str, origin: str | None = None,
@@ -103,7 +123,8 @@ class SourceService:
             existing = conn.execute(
                 "SELECT id,source_key FROM vres.sources WHERE content_hash=%s AND status='active' "
                 "AND project_id IS NOT DISTINCT FROM %s AND source_type=%s "
-                "AND authority_level IS NOT DISTINCT FROM %s AND version IS NOT DISTINCT FROM %s ORDER BY id LIMIT 1",
+                "AND authority_level IS NOT DISTINCT FROM %s AND version IS NOT DISTINCT FROM %s ORDER BY id LIMIT 1 "
+                "FOR SHARE",
                 (content_hash, project_id, source_type, authority_level, version),
             ).fetchone()
         if existing:
@@ -150,8 +171,7 @@ class SourceService:
         chunks = chunk_text(redact_text(text))
         if not chunks:
             return 0
-        if not conn.execute("SELECT 1 FROM vres.sources WHERE id=%s", (source_id,)).fetchone():
-            raise KeyError(f"Unknown source id {source_id}")
+        require_active_source(conn, source_id)
         count = 0
         for chunk in chunks:
             key = f"CHUNK-{uuid.uuid4().hex[:12]}"
@@ -203,6 +223,7 @@ class SourceService:
                 if source["project_id"] is not None and source["project_id"] != knowledge["project_id"]:
                     raise ValueError("Evidence source belongs to a different project")
                 source_id = source["id"]
+                require_active_source(conn, source_id)
             conn.execute(
                 """
                 INSERT INTO vres.knowledge_evidence(

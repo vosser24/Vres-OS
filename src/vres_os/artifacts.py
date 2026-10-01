@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .redaction import redact, redact_text
+from .sources import require_active_source
 
 
 def _connect():
@@ -76,6 +77,7 @@ class ArtifactService:
                 if project_id is not None and source["project_id"] not in (None, project_id):
                     raise ValueError("Artifact source belongs to a different project")
                 source_id = int(source["id"])
+                require_active_source(conn, source_id)
             conn.execute(
                 """
                 INSERT INTO vres.artifacts(

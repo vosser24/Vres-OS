@@ -6,6 +6,7 @@ from typing import Any
 from .db import connect
 from .experience import _HIDDEN_REASONING_KEYS, _canonical, _normalize_key, _sha256
 from .knowledge import KnowledgeService
+from .knowledge_status import exclude_non_use_sql
 from .relations import relate_in_conn
 from .sensitive_policy import (
     SENSITIVE_REVIEW_REQUIRED,
@@ -237,6 +238,9 @@ def _snapshot(episode: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# E4: retired/revoked lessons are history only; they must not absorb a fresh identical lesson.
+_USABLE = exclude_non_use_sql("status")
+
 _TRANSITION_COLUMNS = (
     "transition_key,project_id,policy_version,policy_digest,kind,polarity,trigger,subject_key,verdict,reason_codes,"
     "candidate,candidate_digest,before_digest,after_digest,source_episodes,knowledge_key,conflicts,checks,created_at"
@@ -436,11 +440,11 @@ class ExperienceConsolidationService:
     @staticmethod
     def _derived_items(conn, project_id: int) -> list[dict[str, Any]]:
         rows = conn.execute(
-            """
+            f"""
             SELECT knowledge_key,status,metadata
               FROM vres.knowledge_items
              WHERE project_id=%s AND knowledge_type='lesson'
-               AND status NOT IN ('rejected','superseded')
+               AND status NOT IN ('rejected','superseded') AND {_USABLE}
                AND metadata->>'experience_transition_key' IS NOT NULL
              ORDER BY id
             """,

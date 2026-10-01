@@ -59,9 +59,14 @@ def _check_action(action: str) -> None:
         raise ValueError(f"Unknown lifecycle action {action!r}")
 
 
+def ledger_key(action: str, target_kind: str, target: str, cause_key: str) -> str:
+    """Idempotency key of one lifecycle ledger event (shared by every E4 ledger writer)."""
+    return hashlib.sha256(f"{POLICY_VERSION}|{action}|{target_kind}|{target}|{cause_key}".encode()).hexdigest()
+
+
 def idempotency_key(action: str, target: str, cause_key: str) -> str:
     _check_action(action)
-    return hashlib.sha256(f"{POLICY_VERSION}|{action}|knowledge|{target}|{cause_key}".encode()).hexdigest()
+    return ledger_key(action, "knowledge", target, cause_key)
 
 
 def approval_subject(action: str, target_key: str, successor_key: str | None = None) -> str:
@@ -110,13 +115,15 @@ def _write_status(conn, knowledge_id: int, status: str) -> None:
 
 
 def _append_event(conn, event: dict[str, Any]) -> None:
+    """Append one immutable lifecycle event; target_kind/cause_kind default to knowledge/approval."""
     conn.execute(
         """INSERT INTO vres.experience_lifecycle_events(event_key,idempotency_key,project_id,policy_version,action,
            target_kind,target_key,prior_state,new_state,cause_kind,cause_key,approval_event_id,task_id,reason,detail)
-           VALUES (%(event_key)s,%(idempotency_key)s,%(project_id)s,%(policy_version)s,%(action)s,'knowledge',
-           %(target_key)s,%(prior_state)s,%(new_state)s,'approval',%(cause_key)s,%(approval_event_id)s,%(task_id)s,
+           VALUES (%(event_key)s,%(idempotency_key)s,%(project_id)s,%(policy_version)s,%(action)s,%(target_kind)s,
+           %(target_key)s,%(prior_state)s,%(new_state)s,%(cause_kind)s,%(cause_key)s,%(approval_event_id)s,%(task_id)s,
            %(reason)s,%(detail)s::jsonb)""",
-        {**event, "detail": json.dumps(event["detail"], sort_keys=True)},
+        {"target_kind": "knowledge", "cause_kind": "approval", **event,
+         "detail": json.dumps(event["detail"], sort_keys=True)},
     )
 
 

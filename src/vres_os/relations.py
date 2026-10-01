@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .redaction import redact_text
+from .sources import require_active_source
 
 _ALLOWED_KINDS = {
     "knowledge", "registry", "procedure", "source", "artifact", "task",
@@ -94,6 +95,8 @@ def relate_in_conn(
         and source["project_id"] != target["project_id"]
     ):
         raise ValueError("Cannot create a semantic relation across two different project-local objects")
+    if relation == "derived_from" and target_kind == "source":
+        require_active_source(conn, target["id"])
     edge = conn.execute(
         """
         INSERT INTO vres.relations(source_kind,source_key,relation_type,target_kind,target_key,provenance,confidence)
