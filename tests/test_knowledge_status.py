@@ -44,12 +44,22 @@ def _row(status):
 
 
 @pytest.mark.parametrize("status", ["retired", "revoked", "some_future_status"])
-@pytest.mark.parametrize("intent", [{}, {"include_candidates": True},
-                                    {"temporal_intent": "historical", "as_of": "2026-06-01T00:00:00+00:00",
-                                     "include_candidates": True}])
+@pytest.mark.parametrize("intent", [{}, {"include_candidates": True}])
 def test_e3_knowledge_item_fails_closed_for_non_use_and_unknown_status(status, intent):
     req = er.normalize_request({"project_id": 1, "query": "cache", **intent})
     assert er.knowledge_item(_row(status), req, NOW) == (None, None)
+
+
+def test_e3_historical_intent_shows_non_use_as_flagged_history_only():
+    """Chunk E: historical intent shows retired (flagged, never an instruction) and revoked (tombstone only);
+    an unknown status still fails closed."""
+    req = er.normalize_request({"project_id": 1, "query": "cache", "temporal_intent": "historical",
+                                "as_of": "2026-06-01T00:00:00+00:00", "include_candidates": True})
+    retired, _ = er.knowledge_item(_row("retired"), req, NOW)
+    assert retired["role"] == "evidence_ref" and {"retired", "not_current"} <= set(retired["flags"])
+    revoked, _ = er.knowledge_item(_row("revoked"), req, NOW)
+    assert revoked["text"] == "Revoked knowledge K-1; content withheld." and "revoked" in revoked["flags"]
+    assert er.knowledge_item(_row("some_future_status"), req, NOW) == (None, None)
 
 
 def test_e3_knowledge_item_legacy_classification_unchanged():

@@ -5,7 +5,15 @@ from datetime import datetime
 from typing import Any
 
 from .approvals import require_approval, require_company_approval
-from .knowledge_status import NON_USE_STATUSES, exclude_non_use_sql
+from .knowledge_status import (
+    CURRENT_KNOWLEDGE_STATUSES,
+    NON_USE_STATUSES,
+    REVOKED_STATUS,
+    chunk_eligible_sql,
+    is_revoked_sql,
+    revocation_reason_class,
+    status_in_sql,
+)
 from .redaction import redact, redact_text
 from .relations import relate as persist_relation
 
@@ -24,8 +32,9 @@ _TRANSITIONS = {
     "superseded": set(),
 }
 _RANK = {"proposed": 0, "observed": 1, "challenged": 1, "validated": 2, "canonical": 3}
-_USABLE = exclude_non_use_sql("status")
-_K_USABLE = exclude_non_use_sql("k.status")
+# #176 E4 Chunk E: the shared fail-closed allow-lists (NULL/unknown statuses never usable).
+_CURRENT = status_in_sql("status", CURRENT_KNOWLEDGE_STATUSES)
+_CHUNK_ELIGIBLE = chunk_eligible_sql("c", "s", "k")
 
 
 def _connect():
@@ -218,6 +227,19 @@ class KnowledgeService:
             ).fetchone()
             if not item:
                 raise KeyError(knowledge_key)
+            if item["status"] == REVOKED_STATUS:
+                # Revoked memory is a tombstone: key, state, time and reason class only (no statement/evidence).
+                event = conn.execute(
+                    "SELECT created_at,cause_kind FROM vres.experience_lifecycle_events WHERE id=("
+                    "SELECT max(id) FROM vres.experience_lifecycle_events WHERE target_kind='knowledge' "
+                    f"AND target_key=%s AND {is_revoked_sql('new_state')} AND project_id IS NOT DISTINCT FROM %s)",
+                    (knowledge_key, item["project_id"]),
+                ).fetchone()
+                return {
+                    "knowledge_key": item["knowledge_key"], "project_id": item["project_id"], "status": REVOKED_STATUS,
+                    "revoked_at": event["created_at"] if event else None,
+                    "reason_class": revocation_reason_class(event["cause_kind"] if event else None), "evidence": [],
+                }
             evidence = conn.execute(
                 """
                 SELECT e.id,e.evidence_type,e.locator,e.method,e.limitations,e.metrics,e.reproducible,e.created_at,
@@ -328,8 +350,7 @@ class KnowledgeService:
                        ts_rank(search_vector, plainto_tsquery('simple', %s)) AS rank
                   FROM vres.knowledge_items
                  WHERE (%s IS NULL OR project_id=%s OR project_id IS NULL)
-                   AND status NOT IN ('rejected','superseded')
-                   AND {_USABLE}
+                   AND {_CURRENT}
                    AND (search_vector @@ plainto_tsquery('simple', %s)
                         OR title ILIKE '%%' || %s || '%%' OR statement ILIKE '%%' || %s || '%%')
                  ORDER BY ts_rank(search_vector, plainto_tsquery('simple', %s)) DESC,
@@ -355,9 +376,7 @@ class KnowledgeService:
                   LEFT JOIN vres.sources s ON s.id=c.source_id
                   LEFT JOIN vres.knowledge_items k ON k.id=c.knowledge_id
                  WHERE c.search_vector @@ plainto_tsquery('simple',%s)
-                   AND (k.id IS NULL OR k.status NOT IN ('rejected','superseded','challenged'))
-                   AND (k.id IS NULL OR {_K_USABLE})
-                   AND (s.id IS NULL OR s.status='active')
+                   AND {_CHUNK_ELIGIBLE}
                    AND (
                      %s IS NULL
                      OR (k.id IS NOT NULL AND (k.project_id=%s OR k.project_id IS NULL))

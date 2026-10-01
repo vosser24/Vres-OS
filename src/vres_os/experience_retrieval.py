@@ -4,7 +4,8 @@ Reads decisions, accepted procedures, knowledge (incl. E2 proposed lessons) and 
 eligibility gate. Authority (tier/role) is structural and fixed BEFORE relevance ranking; lexical, optional
 semantic and graph signals only order items inside an authority tier and never change it. Chunk 2 adds premise
 comparison, conflict/staleness surfacing and pack composition. Chunk 3 adds a bounded, lexical-only raw-evidence
-fallback (knowledge_chunks) behind the same scope/lifecycle/#164 gate. Still absent: MCP tool.
+fallback (knowledge_chunks) behind the same scope/lifecycle/#164 gate. #176 E4 Chunk E makes it lifecycle-aware:
+one fail-closed status allow-list, ledger-derived as_of/episode state, revoked items as metadata-only tombstones.
 """
 
 from __future__ import annotations
@@ -21,16 +22,25 @@ import psycopg
 from .embeddings import EmbeddingUnavailable
 from .experience import _HIDDEN_REASONING_KEYS, _canonical, _normalize_key
 from .experience_consolidation import episode_payload_digest, statement_digest
-from .knowledge_status import exclude_non_use_sql
+from .experience_lifecycle import episode_eligible
+from .knowledge_status import (
+    CURRENT_KNOWLEDGE_STATUSES,
+    HISTORICAL_ONLY_KNOWLEDGE_STATUSES,
+    LIVE_KNOWLEDGE_STATUSES,
+    REVOKED_STATUS,
+    is_revoked_sql,
+    revocation_reason_class,
+    status_in_sql,
+)
 from .redaction import redact_text
 from .sensitive_policy import SENSITIVE_SANITIZED, sanitize_extracted_text
 
-SCHEMA_VERSION = "176.e3.v1"
-# Statuses this reader knows how to classify; any other (E4 `retired`/`revoked`, or unknown) fails closed.
-_CLASSIFIED_KNOWLEDGE_STATUSES = frozenset(
-    {"proposed", "observed", "validated", "canonical", "challenged", "superseded", "rejected"}
-)
-_K_USABLE = exclude_non_use_sql("k.status")
+SCHEMA_VERSION = "176.e4.v1"
+# One fail-closed allow-list (knowledge_status): current intent sees CURRENT only; historical intent additionally
+# sees superseded/retired (flagged) and revoked (tombstone). NULL/unknown/rejected never match.
+_K_CURRENT = status_in_sql("k.status", CURRENT_KNOWLEDGE_STATUSES)
+_K_HISTORICAL_ONLY = status_in_sql("k.status", HISTORICAL_ONLY_KNOWLEDGE_STATUSES)
+_K_STATUS_GATE = f"({_K_CURRENT} OR (%(hist)s AND {_K_HISTORICAL_ONLY}))"
 E2_SOURCE_OWNER = "experience:176.e2.v1"
 SECTIONS = (
     "current_decisions",
@@ -57,7 +67,7 @@ MAX_PACK_BYTES = 16 * 1024
 MAX_TEXT = 600
 POLICY = {
     "version": SCHEMA_VERSION,
-    "chunk": 3,
+    "chunk": "E",
     "retrieval_mode": "lexical+optional_semantic; raw_fallback=lexical_only",
     "rank_order": [
         "section", "authority_tier", "scope_rank", "task_family_or_capability_match", "fusion_rank_score",
@@ -396,33 +406,74 @@ def _bounded_premises(*sources: Any) -> dict[str, str]:
     return {}
 
 
+def _iso(value: Any) -> str | None:
+    return value.astimezone(timezone.utc).isoformat() if isinstance(value, datetime) else None
+
+
+def _tombstone(*, kind, key, memory_class, section, scope, project_id, revoked_at, cause, req, row) -> dict[str, Any]:
+    """Revoked memory: key, state, time and reason class ONLY. No statement/payload/premises/subject/dates."""
+    return _item(
+        section=section, kind=kind, memory_key=key, memory_class=memory_class, scope=scope, project_id=project_id,
+        authority_class=f"revoked_{kind}", status=REVOKED_STATUS, trust_class="unspecified", role="evidence_ref",
+        tier=_TIER_CANDIDATE, text=f"Revoked {kind} {key}; content withheld.", why=["revoked_tombstone"],
+        evidence=[f"{kind}:{key}"], flags={REVOKED_STATUS, "historical", "not_current"}, req=req, row=row,
+        provenance={"state": REVOKED_STATUS, "revoked_at": _iso(revoked_at), "reason_class": revocation_reason_class(cause)},
+        ref=f"{kind}:{key}",
+    )
+
+
 def knowledge_item(row: dict[str, Any], req: dict[str, Any], now: datetime) -> tuple[dict | None, str | None]:
-    """Gate + classify one knowledge row. Returns (item, drop_reason)."""
+    """Gate + classify one knowledge row. Returns (item, drop_reason).
+
+    Optional SQL-derived row fields: state_at_as_of (ledger state at as_of), revoked_at/revoked_cause (ledger),
+    superseded_by, support_active/support_inactive (company items: distinct active/inactive source roots)."""
     scope = _scope(row["project_id"], bool(row.get("approved")), req["project_id"])
     if scope is None:
         return None, None
     if scope == "unapproved_company":
         return None, "excluded_unapproved_company"
     status = row["status"]
-    if status == "rejected" or status not in _CLASSIFIED_KNOWLEDGE_STATUSES:
-        return None, None
+    historical_intent = req["temporal_intent"] == "historical"
+    if status not in CURRENT_KNOWLEDGE_STATUSES and not (
+        historical_intent and status in HISTORICAL_ONLY_KNOWLEDGE_STATUSES
+    ):
+        return None, None  # fail closed: NULL, unknown, rejected; non-current statuses under current intent
+    cls = "decision" if row["knowledge_type"] in {"decision", "rule"} else "semantic"
+    if status == REVOKED_STATUS:  # historical intent only (gated above); tombstone regardless of the validity window
+        return _tombstone(
+            kind="knowledge", key=row["knowledge_key"], memory_class=cls, section="conflicts_and_stale", scope=scope,
+            project_id=row["project_id"], revoked_at=row.get("revoked_at"), cause=row.get("revoked_cause"),
+            req=req, row=row,
+        ), None
+    if row.get("support_inactive") and not row.get("support_active"):
+        return None, "excluded_revoked_source"  # cross-scope: revoked project support is treated as absent
     challenged = status == "challenged"
-    eligible, hist = _temporal(row.get("valid_from"), row.get("valid_to"), status == "superseded", req, now)
+    retired = status == "retired" or (historical_intent and row.get("state_at_as_of") == "retired")
+    eligible, hist = _temporal(row.get("valid_from"), row.get("valid_to"), status in {"superseded", "retired"}, req, now)
     if not eligible:
         return None, None
     meta = row.get("metadata") or {}
     e2 = row.get("source_owner") == E2_SOURCE_OWNER or bool(meta.get("experience_transition_key"))
     external = meta.get("trust_class") == "external_untrusted_observation"
     validated = status in {"validated", "canonical"} or (status == "superseded" and hist)
-    if not validated and not (req["include_candidates"] or external or challenged):
+    if not (validated or retired) and not (req["include_candidates"] or external or challenged):
         return None, None
     ref = req["as_of"] or now if req["temporal_intent"] == "historical" else now
     stale = row.get("review_after") is not None and row["review_after"] <= ref
-    flags = {"historical"} if hist else set()
+    flags = {"historical", "not_current"} if hist else set()
+    if hist and row.get("valid_to") is not None and row["valid_to"] <= now:
+        flags.add("expired")
+    if row.get("support_inactive") and row.get("support_active"):
+        flags.add("cross_scope_unresolved")
     why = ["validated_status" if validated else "candidate_status"]
     if hist:
         why.append("historical_as_of")
+    if retired:
+        flags |= {"retired", "historical"}
+        why.append("retired_at_as_of" if row.get("state_at_as_of") == "retired" else "retired_after_as_of")
     lineage = [f"knowledge:{row['knowledge_key']}"]
+    if status == "superseded" and isinstance(row.get("superseded_by"), str):
+        lineage.append(f"successor:{_clean(row['superseded_by'], 120)}")
     if meta.get("experience_transition_key"):
         lineage.append(f"transition:{meta['experience_transition_key']}")
     for snap in (meta.get("source_episodes") or [])[:5]:
@@ -430,10 +481,11 @@ def knowledge_item(row: dict[str, Any], req: dict[str, Any], now: datetime) -> t
             lineage.append(f"episode:{_clean(snap['episode_key'], 80)}")
     if meta.get("statement_digest"):
         lineage.append(f"digest:{_clean(meta['statement_digest'], 80)}")
-    # memory_class is the frozen store class: decision/rule knowledge is `decision`, everything else `semantic`.
-    cls = "decision" if row["knowledge_type"] in {"decision", "rule"} else "semantic"
+    # memory_class (cls above) is the frozen store class: decision/rule knowledge is `decision`, else `semantic`.
     if external:
         section, role, tier, authority = "low_trust_observations", "low_trust_observation", _TIER_LOW_TRUST, "external_untrusted"
+    elif retired:  # use-forgetting: history stays visible, never an instruction or premise
+        section, role, tier, authority = "conflicts_and_stale", "evidence_ref", _TIER_CANDIDATE, "retired_knowledge"
     elif challenged:
         section, role, tier, authority = "conflicts_and_stale", "conflict", _TIER_CANDIDATE, "challenged_knowledge"
         flags, why = flags | {"challenged"}, ["challenged_status"]
@@ -452,14 +504,10 @@ def knowledge_item(row: dict[str, Any], req: dict[str, Any], now: datetime) -> t
     if stale:
         flags = flags | {"stale"}
     text = f"{row['title']}: {row['statement']}"
-    authoritative = validated and not external
+    authoritative = validated and not external and not retired
     if not authoritative and _INSTRUCTION_SHAPED.search(text):
         return None, "quarantined_injection"
     family, caps = _applicability(row.get("scope"), meta)
-
-    def iso(value: Any) -> str | None:
-        return value.astimezone(timezone.utc).isoformat() if isinstance(value, datetime) else None
-
     subject, polarity = meta.get("subject_key"), meta.get("polarity")
     return _item(
         section=section, kind="knowledge", memory_key=row["knowledge_key"], memory_class=cls, scope=scope,
@@ -468,7 +516,7 @@ def knowledge_item(row: dict[str, Any], req: dict[str, Any], now: datetime) -> t
         tier=tier, text=text, why=why, evidence=lineage, flags=flags, req=req, row=row,
         premises=_bounded_premises(row.get("scope"), meta), task_family=family, capability_keys=caps,
         stored_confidence=None if row.get("confidence") is None else float(row["confidence"]),
-        dates={"last_verified_at": iso(row.get("last_verified_at")), "review_after": iso(row.get("review_after"))},
+        dates={"last_verified_at": _iso(row.get("last_verified_at")), "review_after": _iso(row.get("review_after"))},
         recency=row.get("last_verified_at") or row.get("updated_at"), authoritative=authoritative,
         ref=f"knowledge:{row['knowledge_key']}", cmp_premises=_comparable_premises(row.get("scope"), meta),
         challenged=challenged, subject=subject if isinstance(subject, str) else None,
@@ -506,10 +554,12 @@ def decision_item(row: dict[str, Any], req: dict[str, Any], now: datetime) -> tu
     authoritative = row["source_kind"] in {"chairman", "user_instruction"}
     if not authoritative and _INSTRUCTION_SHAPED.search(row["text"]):
         return None, "quarantined_injection"
-    why, flags = [], {"historical"} if hist else set()
+    why, flags = [], {"historical", "not_current"} if hist else set()
     if hist:
         why.append("historical_as_of")
         authority, role, tier = "decision_historical", "evidence_ref", _TIER_CANDIDATE
+        if row["status"] == "retired":
+            flags.add("retired")
     elif current_task:
         why.append("current_task_decision")
         authority, role, tier = "decision_current_task", "instruction", _TIER_CURRENT_DECISION
@@ -535,6 +585,19 @@ def episode_item(row: dict[str, Any], req: dict[str, Any], now: datetime) -> tup
     validation status in bounded text; constraints in applicability; source/decision/procedure/capability keys as evidence)."""
     if row["project_id"] != req["project_id"]:
         return None, None  # episodes are project-local; never company
+    state = row.get("lifecycle_state")  # ledger-derived (see _episodes); missing/unknown fails closed
+    if state == REVOKED_STATUS:
+        if req["temporal_intent"] != "historical":
+            return None, None
+        return _tombstone(
+            kind="episode", key=row["episode_key"], memory_class="episodic", section="precedent_episodes",
+            scope="project", project_id=row["project_id"], revoked_at=row.get("lifecycle_at"),
+            cause=row.get("lifecycle_cause"), req=req, row=row,
+        ), None
+    if not episode_eligible(state):
+        return None, "rejected_corrupt"
+    if row.get("support_total") and not row.get("support_active"):
+        return None, "excluded_revoked_source"  # grounded only in sources that are no longer active
     payload = row.get("payload")
     try:
         ok = (
@@ -824,6 +887,8 @@ def compose(items: list[dict[str, Any]], req: dict[str, Any], diagnostics: dict[
     """
     diag = {
         "excluded_unapproved_company": 0, "rejected_corrupt": 0, "quarantined_injection": 0,
+        "excluded_retired": 0, "excluded_superseded": 0, "excluded_expired": 0, "excluded_revoked": 0,
+        "excluded_revoked_episode": 0, "excluded_revoked_source": 0,
         "embedding": "disabled", "raw_fallback": "not_needed" if req.get("raw_fallback", True) else "disabled",
         **diagnostics, "deduplicated": 0, "deduplicated_cited_episode": 0,
         "truncated": {"section_budget": 0, "total_items": 0, "pack_bytes": 0, "conflict_sets": 0},
@@ -993,7 +1058,7 @@ class ExperienceRetrievalService:
         params = {
             "pid": req["project_id"], "task_key": req["task_key"], "family": req["task_family"],
             "tsq": " | ".join(f"'{t}'" for t in tokens), "phrase": req["query"].casefold(),
-            "hist": req["temporal_intent"] == "historical", "sem_ids": [],
+            "hist": req["temporal_intent"] == "historical", "sem_ids": [], "as_of": req["as_of"],
         }
         semantic, sem_diag = self._semantic(req)
         with self._open() as conn:
@@ -1015,7 +1080,7 @@ class ExperienceRetrievalService:
                 (self._decisions(conn, params), decision_item, "decision_key"),
                 (self._procedures(conn, params, diag), procedure_item, "procedure_key"),
                 (self._knowledge(conn, params, tokens, diag), knowledge_item, "knowledge_key"),
-                (self._episodes(conn, params), episode_item, "episode_key"),
+                (self._episodes(conn, params, diag), episode_item, "episode_key"),
             ):
                 _positions(rows, key)
                 if builder is knowledge_item:
@@ -1113,20 +1178,68 @@ class ExperienceRetrievalService:
 
     @staticmethod
     def _knowledge(conn, params, tokens, diag):
+        """Status allow-list, validity window at the reference time and cross-scope support all gate BEFORE ranking.
+
+        Current intent counts what it excludes by status (retired/superseded/revoked); both intents count current-
+        status rows excluded by the validity window (expired: valid_to <= the reference time, now or as_of).
+        Company rows (project_id NULL) whose every support root (knowledge_evidence source or derived_from source) is
+        inactive are excluded under both intents (E4 never mutates company rows; their revoked support is absent).
+        """
         match, rank = _lexical("k.search_vector", "k.title||' '||k.statement", tokens)
-        diag["excluded_unapproved_company"] += conn.execute(
-            f"SELECT count(*) AS n FROM vres.knowledge_items k WHERE k.project_id IS NULL "
-            f"AND k.scope_approval_event_id IS NULL AND k.status<>'rejected' AND {_K_USABLE} "
-            f"AND ({match} OR k.id=ANY(%(sem_ids)s))", params,
-        ).fetchone()["n"]
+        params = {**params, "as_of": params.get("as_of")}
+        ref = "(CASE WHEN %(hist)s THEN coalesce(%(as_of)s::timestamptz, now()) ELSE now() END)"
+        window = f"({is_revoked_sql('k.status')} OR k.valid_to IS NULL OR k.valid_to>{ref})"
+        support = """
+              LEFT JOIN LATERAL (
+                SELECT count(*) FILTER (WHERE s.status='active') AS support_active,
+                       count(*) FILTER (WHERE s.status<>'active') AS support_inactive
+                  FROM vres.sources s
+                 WHERE k.project_id IS NULL
+                   AND (s.id IN (SELECT ev.source_id FROM vres.knowledge_evidence ev WHERE ev.knowledge_id=k.id)
+                        OR s.source_key IN (SELECT r.target_key FROM vres.relations r
+                                             WHERE r.source_kind='knowledge' AND r.source_key=k.knowledge_key
+                                               AND r.relation_type='derived_from' AND r.target_kind='source'))
+              ) sup ON true"""
+        dead = "(sup.support_active=0 AND sup.support_inactive>0)"
+        visible = "(k.project_id=%(pid)s OR k.scope_approval_event_id IS NOT NULL)"
+        current_only = f"{visible} AND NOT %(hist)s"
+        counts = conn.execute(
+            f"""
+            SELECT count(*) FILTER (WHERE k.project_id IS NULL AND k.scope_approval_event_id IS NULL
+                                      AND {_K_STATUS_GATE}) AS excluded_unapproved_company,
+                   count(*) FILTER (WHERE {current_only} AND k.status='retired') AS excluded_retired,
+                   count(*) FILTER (WHERE {current_only} AND k.status='superseded') AS excluded_superseded,
+                   count(*) FILTER (WHERE {current_only} AND {is_revoked_sql('k.status')}) AS excluded_revoked,
+                   count(*) FILTER (WHERE {visible} AND {_K_CURRENT} AND NOT {window}) AS excluded_expired,
+                   count(*) FILTER (WHERE {visible} AND {_K_STATUS_GATE} AND {window} AND {dead})
+                       AS excluded_revoked_source
+              FROM vres.knowledge_items k{support}
+             WHERE (k.project_id=%(pid)s OR k.project_id IS NULL) AND ({match} OR k.id=ANY(%(sem_ids)s))
+            """,
+            params,
+        ).fetchone()
+        for name in ("excluded_unapproved_company", "excluded_retired", "excluded_superseded", "excluded_revoked",
+                     "excluded_expired", "excluded_revoked_source"):
+            diag[name] = diag.get(name, 0) + counts[name]
+        # Ledger reads use max(id) (no ORDER BY in subqueries) and only this project's events.
         return conn.execute(
             f"""
             SELECT k.id,k.knowledge_key,k.project_id,k.knowledge_type,k.title,k.statement,k.status,k.scope,k.confidence,
                    k.valid_from,k.valid_to,k.last_verified_at,k.review_after,k.source_owner,k.updated_at,k.metadata,
+                   k.superseded_by,sup.support_active,sup.support_inactive,
+                   (SELECT e.new_state FROM vres.experience_lifecycle_events e WHERE e.id=(
+                        SELECT max(x.id) FROM vres.experience_lifecycle_events x
+                         WHERE x.project_id=%(pid)s AND x.target_kind='knowledge' AND x.target_key=k.knowledge_key
+                           AND x.created_at<={ref})) AS state_at_as_of,
+                   rv.created_at AS revoked_at,rv.cause_kind AS revoked_cause,
                    (k.scope_approval_event_id IS NOT NULL) AS approved,{rank} AS rank,({match}) AS lex
-              FROM vres.knowledge_items k
+              FROM vres.knowledge_items k{support}
+              LEFT JOIN vres.experience_lifecycle_events rv ON {is_revoked_sql('k.status')} AND rv.id=(
+                        SELECT max(x.id) FROM vres.experience_lifecycle_events x
+                         WHERE x.project_id=%(pid)s AND x.target_kind='knowledge' AND x.target_key=k.knowledge_key
+                           AND {is_revoked_sql('x.new_state')})
              WHERE (k.project_id=%(pid)s OR (k.project_id IS NULL AND k.scope_approval_event_id IS NOT NULL))
-               AND k.status<>'rejected' AND (k.status<>'superseded' OR %(hist)s) AND {_K_USABLE}
+               AND {_K_STATUS_GATE} AND {window} AND NOT {dead}
                AND ({match} OR k.id=ANY(%(sem_ids)s))
              ORDER BY (k.id=ANY(%(sem_ids)s)) DESC,rank DESC,k.knowledge_key LIMIT 200
             """,
@@ -1145,7 +1258,8 @@ class ExperienceRetrievalService:
         from query text. Historical: knowledge validity window is evaluated at ref, `superseded` knowledge is
         allowed (its window governs) and creation guards apply (chunk.created_at, source.ingested_at,
         knowledge.created_at all <= ref). Current: valid now, `superseded` excluded, no creation guards.
-        `rejected`/`challenged` knowledge is always excluded. Current source status/#164 gates are not
+        Knowledge status is the shared LIVE allow-list (plus `superseded` historically): rejected, challenged,
+        retired, revoked, NULL and unknown statuses are always excluded. Current source status/#164 gates are not
         reconstructed for the past.
 
         Provenance shapes (count and select share ONE gate definition `base`):
@@ -1159,9 +1273,11 @@ class ExperienceRetrievalService:
         sens = "('sensitive_excluded','sensitive_review_required')"
         params = {**params, "raw_at": raw_at}
         ref = "coalesce(%(raw_at)s::timestamptz, now())"
-        # k.status NOT IN ('rejected','challenged') below is deliberately stricter than the structured path: the E3 contract
-        # (raw fallback section: chunk's knowledge 'not rejected/superseded/challenged') keeps challenged knowledge out of raw
-        # evidence under current AND historical intent; it surfaces only as a structured conflict (role=conflict).
+        # The LIVE allow-list below is deliberately stricter than the structured path: the E3 contract (raw fallback
+        # section: chunk's knowledge 'not rejected/superseded/challenged') keeps challenged knowledge out of raw evidence
+        # under current AND historical intent; it surfaces only as a structured conflict (role=conflict). Retired and
+        # revoked owners never yield raw text under any intent (revoked is tombstone-only; retired is not evidence text).
+        live = status_in_sql("k.status", LIVE_KNOWLEDGE_STATUSES)
         base = f"""
              FROM vres.knowledge_chunks c
              LEFT JOIN vres.sources s ON s.id=c.source_id
@@ -1175,8 +1291,7 @@ class ExperienceRetrievalService:
                    AND (NOT %(hist)s OR s.ingested_at<={ref})))
               AND (c.knowledge_id IS NULL OR (
                        (k.project_id=%(pid)s OR k.project_id IS NULL)
-                   AND k.status NOT IN ('rejected','challenged') AND {_K_USABLE}
-                   AND (k.status<>'superseded' OR %(hist)s)
+                   AND ({live} OR (%(hist)s AND k.status='superseded'))
                    AND (k.valid_from IS NULL OR k.valid_from<={ref}) AND (k.valid_to IS NULL OR k.valid_to>{ref})
                    AND (NOT %(hist)s OR k.created_at<={ref})))
               AND {match}"""
@@ -1195,18 +1310,47 @@ class ExperienceRetrievalService:
         return rows, {"excluded_unapproved_company": unapproved, "possibly_truncated": len(rows) >= RAW_FETCH_LIMIT}
 
     @staticmethod
-    def _episodes(conn, params):
+    def _episodes(conn, params, diag):
+        """Episodes gated by the E4 ledger (latest invalidate/restore event of this project wins; none = grounded; a
+        corrupt state is passed through so episode_item fails it closed) and by the status of their derived_from
+        sources. Current intent excludes revoked and dead-support episodes BEFORE ranking and counts them."""
         text = "coalesce(e.task_family,'')||' '||coalesce(e.payload->>'objective','')"
         match, rank = _lexical(f"to_tsvector('simple',{text})", text, [])
+        base = f"""
+              FROM vres.experience_episodes e
+              JOIN vres.experience_policy_versions p ON p.policy_version=e.policy_version
+              LEFT JOIN vres.experience_lifecycle_events lc ON lc.id=(
+                        SELECT max(x.id) FROM vres.experience_lifecycle_events x
+                         WHERE x.project_id=e.project_id AND x.target_kind='episode' AND x.target_key=e.episode_key
+                           AND x.action IN ('invalidate_derived','restore_derived'))
+              LEFT JOIN LATERAL (
+                SELECT count(*) AS support_total, count(*) FILTER (WHERE s.status='active') AS support_active
+                  FROM vres.sources s
+                 WHERE s.source_key IN (SELECT r.target_key FROM vres.relations r
+                                         WHERE r.source_kind='episode' AND r.source_key=e.episode_key
+                                           AND r.relation_type='derived_from' AND r.target_kind='source')
+              ) sup ON true
+             WHERE e.project_id=%(pid)s
+               AND ({match} OR lower(e.task_family)=lower(%(family)s))"""
+        revoked = f"(lc.id IS NOT NULL AND {is_revoked_sql('lc.new_state')})"
+        dead = "(sup.support_total>0 AND sup.support_active=0)"
+        counts = conn.execute(
+            f"SELECT count(*) FILTER (WHERE {revoked}) AS excluded_revoked_episode, "
+            f"count(*) FILTER (WHERE NOT {revoked} AND {dead}) AS excluded_revoked_source {base} AND NOT %(hist)s",
+            params,
+        ).fetchone()
+        for name in ("excluded_revoked_episode", "excluded_revoked_source"):
+            diag[name] = diag.get(name, 0) + counts[name]
         return conn.execute(
             f"""
             SELECT e.episode_key,e.project_id,e.task_id,e.task_family,e.policy_version,p.policy_digest,
                    e.participation_class,e.trust_class,e.outcome_status,e.payload,e.source_digest,e.payload_digest,
-                   e.security_disposition,e.observed_at,{rank} AS rank,({match}) AS lex
-              FROM vres.experience_episodes e
-              JOIN vres.experience_policy_versions p ON p.policy_version=e.policy_version
-             WHERE e.project_id=%(pid)s
-               AND ({match} OR lower(e.task_family)=lower(%(family)s))
+                   e.security_disposition,e.observed_at,
+                   CASE WHEN lc.id IS NULL THEN 'grounded' ELSE lc.new_state END AS lifecycle_state,
+                   lc.created_at AS lifecycle_at,lc.cause_kind AS lifecycle_cause,sup.support_total,sup.support_active,
+                   {rank} AS rank,({match}) AS lex
+            {base}
+               AND (%(hist)s OR (NOT {revoked} AND NOT {dead}))
              ORDER BY rank DESC,e.observed_at DESC,e.episode_key LIMIT 50
             """,
             params,

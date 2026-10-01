@@ -41,6 +41,36 @@ def chunk_eligible_sql(chunk: str, source: str, knowledge: str) -> str:
     )
 
 
+# Chunk E: the ONE status allow-list for knowledge readers (search, chunk search, E3). Fail closed: an unknown or
+# NULL status is never in any list, so it is never usable. `challenged` stays current (shown only as a conflict);
+# superseded/retired/revoked are visible to historical intent only (revoked as a metadata tombstone).
+CURRENT_KNOWLEDGE_STATUSES = LIVE_KNOWLEDGE_STATUSES + ("challenged",)
+HISTORICAL_ONLY_KNOWLEDGE_STATUSES = ("superseded",) + NON_USE_STATUSES
+REVOKED_STATUS = NON_USE_STATUSES[1]
+KNOWN_KNOWLEDGE_STATUSES = CURRENT_KNOWLEDGE_STATUSES + HISTORICAL_ONLY_KNOWLEDGE_STATUSES + ("rejected",)
+
+
+def status_in_sql(column: str, statuses: tuple[str, ...]) -> str:
+    """Fail-closed allow-list predicate `column IN (...)`; NULL and unknown statuses never match."""
+    if not isinstance(column, str) or not _COLUMN.fullmatch(column):
+        raise ValueError(f"Unsafe status column reference {column!r}")
+    if not statuses or any(s not in KNOWN_KNOWLEDGE_STATUSES for s in statuses):
+        raise ValueError(f"Unknown knowledge status in {statuses!r}")
+    return f"{column} IN ({','.join(repr(s) for s in statuses)})"
+
+
+def is_revoked_sql(column: str) -> str:
+    """SQL predicate `column IN (<revoked>)` for a plain status/state column (keeps the vocabulary in this module)."""
+    if not isinstance(column, str) or not _COLUMN.fullmatch(column):
+        raise ValueError(f"Unsafe status column reference {column!r}")
+    return f"{column} IN ('{REVOKED_STATUS}')"
+
+
+def revocation_reason_class(cause_kind: str | None) -> str:
+    """Coarse, content-free reason class for a revoked tombstone."""
+    return "source_revoked" if cause_kind == "source" else "unknown"
+
+
 def chunk_ineligible_code_sql(chunk: str, source: str, knowledge: str) -> str:
     """SQL CASE giving a short reason code (never text) for a chunk that `chunk_eligible_sql` rejects."""
     chunk_eligible_sql(chunk, source, knowledge)  # same alias validation
