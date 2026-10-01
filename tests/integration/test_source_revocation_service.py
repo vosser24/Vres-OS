@@ -29,7 +29,7 @@ RESULT_KEYS = {"event_key", "action", "target_key", "prior_state", "new_state", 
                "revoked_knowledge", "revoked_episodes", "retained_with_support", "unresolved_cross_scope",
                "counts", "keys_digest_only"}
 COUNT_KEYS = {"revoked", "retained_with_support", "unresolved_cross_scope", "corrupt_provenance", "nodes_visited",
-              "chunks_cleared"}
+              "chunks_cleared", "sessions_marked"}
 
 
 @pytest.fixture
@@ -98,7 +98,7 @@ def test_a_single_source_revokes_dependent_and_keeps_history(pg_project):
         "revoke_source", s, "active", "revoked", False)
     assert out["revoked_knowledge"] == [k] and out["revoked_episodes"] == []
     assert out["counts"]["revoked"] == 1 and out["counts"]["corrupt_provenance"] == 0
-    assert out["counts"]["chunks_cleared"] == 0 and "sessions_marked" not in out["counts"]
+    assert out["counts"]["chunks_cleared"] == 0 and out["counts"]["sessions_marked"] == 0  # no open session
     assert source_status(s) == "revoked" and status(k) == "revoked"
     with connect() as conn:
         after = conn.execute("SELECT * FROM vres.knowledge_items WHERE knowledge_key=%s", (k,)).fetchone()
@@ -121,7 +121,8 @@ def test_a_single_source_revokes_dependent_and_keeps_history(pg_project):
         "approval", apr, approval_id, task_id)
     assert sev["idempotency_key"] == _ledger_key("revoke_source", "source", s, apr)
     assert sev["detail"]["request_digest"] == el.request_digest("source found poisoned")
-    assert sev["detail"]["counts"] == out["counts"] and sev["detail"]["revoked_knowledge"] == [k]
+    # sessions_marked is derived from the ledger's context_contaminated rows, not stored in the revoke detail
+    assert {**sev["detail"]["counts"], "sessions_marked": 0} == out["counts"] and sev["detail"]["revoked_knowledge"] == [k]
     assert "statement" not in str(sev["detail"])
     (kev,) = events(k)
     assert (kev["action"], kev["target_kind"], kev["prior_state"], kev["new_state"]) == (
@@ -552,4 +553,5 @@ def test_chunks_and_text_retained_embeddings_cleared_jobs_skipped_sessions_untou
                             (pg_project,)).fetchall() == sessions
         actions = {r["action"] for r in conn.execute(
             "SELECT action FROM vres.experience_lifecycle_events WHERE project_id=%s", (pg_project,)).fetchall()}
-    assert actions == {"revoke_source", "invalidate_derived"}
+    # Chunk F: the open session is marked in the ledger only; its sessions row stays unchanged (asserted above).
+    assert actions == {"revoke_source", "invalidate_derived", "context_contaminated"}

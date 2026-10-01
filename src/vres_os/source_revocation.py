@@ -36,6 +36,7 @@ from .experience_lifecycle import (
 from .experience_lifecycle import _append_event as append_ledger_event
 from .knowledge import lock_knowledge_rows
 from .relations import _ALLOWED_KINDS
+from .session_contamination import mark_open_sessions_contaminated
 
 __all__ = ["APPROVAL_TYPE", "MAX_DEPTH", "MAX_NODES", "NodeInfo", "ProvenanceBudgetExceeded",
            "SourceRevocationService", "analyse", "bounded_detail", "ledger_key"]
@@ -294,6 +295,10 @@ def _load_result(conn, event: dict[str, Any], replayed: bool) -> dict[str, Any]:
         "AND action='invalidate_derived' AND cause_kind='source' AND cause_key=%s AND detail->>'cause_event_key'=%s",
         (event["project_id"], event["target_key"], event["event_key"])).fetchall()
     nodes = [(r["target_kind"], r["target_key"]) for r in cascade]
+    marked = conn.execute(
+        "SELECT count(*) AS n FROM vres.experience_lifecycle_events WHERE project_id=%s AND action='context_contaminated' "
+        "AND cause_kind='source' AND cause_key=%s AND detail->>'cause_event_key'=%s",
+        (event["project_id"], event["target_key"], event["event_key"])).fetchone()["n"]
     digest_only = bool(detail.get("keys_digest_only"))
     return {
         "event_key": event["event_key"], "action": event["action"], "target_key": event["target_key"],
@@ -301,7 +306,7 @@ def _load_result(conn, event: dict[str, Any], replayed: bool) -> dict[str, Any]:
         "revoked_knowledge": _keys(nodes, "knowledge"), "revoked_episodes": _keys(nodes, "episode"),
         "retained_with_support": None if digest_only else detail["retained_with_support"],
         "unresolved_cross_scope": None if digest_only else detail["unresolved_cross_scope"],
-        "counts": detail["counts"], "keys_digest_only": digest_only,
+        "counts": {**detail["counts"], "sessions_marked": marked}, "keys_digest_only": digest_only,
     }
 
 
@@ -408,4 +413,9 @@ class SourceRevocationService:
                         "cause_kind": "source", "cause_key": source_key, "approval_event_id": approval_event_id,
                         "task_id": task_id, "reason": reason, "detail": cascade_detail,
                     })
+            # Chunk F: every open session of the project may hold the invalidated memory; mark it on THIS transaction.
+            mark_open_sessions_contaminated(
+                conn, project_id=project_id, source_key=source_key, approval_event_id=approval_event_id,
+                task_id=task_id, detail=bounded_detail({"cause_event_key": event["event_key"]},
+                                                       {"revoked_knowledge": revoked_k, "revoked_episodes": revoked_e}))
             return _load_result(conn, event, replayed=False)

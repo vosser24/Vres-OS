@@ -144,11 +144,12 @@ def _append_event(conn, event: dict[str, Any]) -> None:
     """Append one immutable lifecycle event; target_kind/cause_kind default to knowledge/approval."""
     conn.execute(
         """INSERT INTO vres.experience_lifecycle_events(event_key,idempotency_key,project_id,policy_version,action,
-           target_kind,target_key,prior_state,new_state,cause_kind,cause_key,approval_event_id,task_id,reason,detail)
+           target_kind,target_key,prior_state,new_state,cause_kind,cause_key,approval_event_id,task_id,reason,detail,
+           session_key)
            VALUES (%(event_key)s,%(idempotency_key)s,%(project_id)s,%(policy_version)s,%(action)s,%(target_kind)s,
            %(target_key)s,%(prior_state)s,%(new_state)s,%(cause_kind)s,%(cause_key)s,%(approval_event_id)s,%(task_id)s,
-           %(reason)s,%(detail)s::jsonb)""",
-        {"target_kind": "knowledge", "cause_kind": "approval", **event,
+           %(reason)s,%(detail)s::jsonb,%(session_key)s)""",
+        {"target_kind": "knowledge", "cause_kind": "approval", "session_key": None, **event,
          "detail": json.dumps(event["detail"], sort_keys=True)},
     )
 

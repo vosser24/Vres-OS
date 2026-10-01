@@ -9,6 +9,7 @@ from typing import Any
 from .db import connect
 from .project import ProjectIdentity
 from .redaction import redact
+from .session_contamination import contamination_notice
 from .validation import STATE_FIELDS
 
 _ACTIVE = ("active", "waiting_user", "blocked")
@@ -534,6 +535,7 @@ class Repository:
                 """,
                 (task_id,),
             ).fetchone()
+            notice = contamination_notice(conn, project_id, provider_session_id) if provider_session_id else None
         live_step = task.current_step
         live_state = task.state_summary
         live_next_action = task.next_action
@@ -582,4 +584,6 @@ class Repository:
             "latest_assistant_snapshot": snap["payload"] if snap else None,
             "recent_turns": self.recent_turns(task.task_key, limit=6),
         }
+        if notice:
+            state["contamination_notice"] = notice
         return _clip(state)
