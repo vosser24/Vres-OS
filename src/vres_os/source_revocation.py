@@ -17,6 +17,7 @@ from datetime import datetime
 from typing import Any, Callable
 
 from .approvals import require_approval
+from .embedding_lifecycle import invalidate_chunks
 from .experience_lifecycle import (
     APPROVAL_TYPE,
     POLICY_VERSION,
@@ -370,9 +371,14 @@ class SourceRevocationService:
             revoked_k, revoked_e = _keys(outcome.revoked, "knowledge"), _keys(outcome.revoked, "episode")
             retained = sorted(key for _, key in outcome.retained)
             unresolved = sorted(key for _, key in outcome.unresolved_cross_scope)
+            # Chunk D: derived embeddings of the source and of every revoked knowledge item are cleared on THIS
+            # transaction (owners are already locked; chunks then jobs follow in the global lock order).
+            chunks_cleared = invalidate_chunks(conn, source_ids=[source["id"]],
+                                               knowledge_ids=[locked[k]["id"] for k in revoked_k],
+                                               reason_code="source_revoked")
             counts = {"revoked": len(revoked_k) + len(revoked_e), "retained_with_support": len(retained),
                       "unresolved_cross_scope": len(unresolved), "corrupt_provenance": outcome.corrupt,
-                      "nodes_visited": outcome.nodes_visited}
+                      "nodes_visited": outcome.nodes_visited, "chunks_cleared": chunks_cleared}
             detail = bounded_detail(
                 {"request_digest": digest, "counts": counts, "refresh_recommended": bool(retained)},
                 {"revoked_knowledge": revoked_k, "revoked_episodes": revoked_e,

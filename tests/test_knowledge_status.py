@@ -21,6 +21,19 @@ def test_non_use_vocabulary_and_sql_fragment():
             exclude_non_use_sql(bad)
 
 
+def test_chunk_ineligible_code_sql_is_codes_only_and_alias_safe():
+    from vres_os.knowledge_status import chunk_ineligible_code_sql
+
+    sql = chunk_ineligible_code_sql("c", "s", "k")
+    for code in ("chunk_owner_invalid", "source_revoked", "source_ineligible", "knowledge_ineligible"):
+        assert f"'{code}'" in sql
+    assert "s.status IN ('revoked')" in sql and "content" not in sql
+    assert embeddings._INELIGIBLE_CODE == sql
+    for bad in ("", "c;", "c.x", "C", "1c"):
+        with pytest.raises(ValueError):
+            chunk_ineligible_code_sql(bad, "s", "k")
+
+
 def _row(status):
     return {
         "knowledge_key": "K-1", "project_id": 1, "knowledge_type": "lesson", "title": "t", "statement": "s",
@@ -74,5 +87,8 @@ def test_semantic_search_sql_excludes_non_use_on_both_paths(monkeypatch, vector)
     search_sql = [s for s in conn.sql if "FROM vres.knowledge_chunks" in s]
     assert len(search_sql) == 1
     assert ("embedding_vector <=>" in search_sql[0]) is vector
-    assert "k.status NOT IN ('retired','revoked')" in search_sql[0]
-    assert "k.status NOT IN ('rejected','superseded','challenged')" in search_sql[0]
+    # Chunk D: one shared fail-closed allow-list predicate replaces the per-reader deny-lists.
+    from vres_os.knowledge_status import chunk_eligible_sql
+    assert chunk_eligible_sql("c", "s", "k") in search_sql[0]
+    for dead in ("retired", "revoked", "rejected", "superseded", "challenged"):
+        assert f"'{dead}'" not in search_sql[0]

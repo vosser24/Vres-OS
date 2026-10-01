@@ -6,12 +6,18 @@ from functools import lru_cache
 from typing import Any
 
 from .config import ConfigStore
-from .knowledge_status import exclude_non_use_sql
+from .embedding_lifecycle import vector_enabled as _vector_enabled
+from .knowledge_status import chunk_eligible_sql, chunk_ineligible_code_sql
 from .redaction import redact_text
 
 MAX_ATTEMPTS = 3
 STALE_MINUTES = 20
-_K_USABLE = exclude_non_use_sql("k.status")
+# Chunk D: lifecycle eligibility precedes embedding state; an embedding is never authority. One shared predicate
+# gates queue, claim, the publish re-check and both semantic search paths.
+_ELIGIBLE = chunk_eligible_sql("c", "s", "k")
+_OWNERS = "LEFT JOIN vres.sources s ON s.id=c.source_id LEFT JOIN vres.knowledge_items k ON k.id=c.knowledge_id"
+_INELIGIBLE_CODE = chunk_ineligible_code_sql("c", "s", "k")
+_SKIP_JOB = "UPDATE vres.embedding_jobs SET status='skipped',error=%s,updated_at=now() WHERE id"
 
 
 class EmbeddingUnavailable(RuntimeError):
@@ -51,14 +57,6 @@ def _validate_vector(values) -> list[float]:
     return result
 
 
-def _vector_enabled(conn) -> bool:
-    return bool(conn.execute(
-        "SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname='vector') AND EXISTS("
-        "SELECT 1 FROM information_schema.columns WHERE table_schema='vres' AND table_name='knowledge_chunks' "
-        "AND column_name='embedding_vector') AS ok"
-    ).fetchone()["ok"])
-
-
 @lru_cache(maxsize=1)
 
 def _load_model(model_name: str):
@@ -91,12 +89,14 @@ class EmbeddingService:
         cfg = ConfigStore().load()
         model = model or cfg.embedding_model
         with _connect() as conn, conn.transaction():
+            # Only eligible chunks are (re)queued: a requeue of a completed/skipped job can only come from this
+            # eligible SELECT. queue_missing never writes lifecycle state; a stale snapshot is fenced at claim/publish.
             row = conn.execute(
-                """
+                f"""
                 WITH inserted AS (
                   INSERT INTO vres.embedding_jobs(chunk_id,model,status)
-                  SELECT c.id,%s,'pending' FROM vres.knowledge_chunks c
-                   WHERE (c.embedding_model IS DISTINCT FROM %s OR c.embedding IS NULL)
+                  SELECT c.id,%s,'pending' FROM vres.knowledge_chunks c {_OWNERS}
+                   WHERE (c.embedding_model IS DISTINCT FROM %s OR c.embedding IS NULL) AND {_ELIGIBLE}
                   ON CONFLICT(chunk_id,model) DO UPDATE SET status='pending',attempts=0,error=NULL,updated_at=now()
                   WHERE vres.embedding_jobs.status IN ('completed','skipped')
                   RETURNING 1
@@ -118,12 +118,28 @@ class EmbeddingService:
                 """,
                 (MAX_ATTEMPTS, STALE_MINUTES),
             )
+            # Ineligible pending jobs are skipped with a code (never text) and never claimed. Only job/chunk rows
+            # are locked here; owner rows are read, not locked (the publish fence re-checks under owner locks).
+            ineligible = conn.execute(
+                f"""
+                SELECT j.id,{_INELIGIBLE_CODE} AS code
+                  FROM vres.embedding_jobs j JOIN vres.knowledge_chunks c ON c.id=j.chunk_id {_OWNERS}
+                 WHERE j.status='pending' AND j.model=%s AND NOT {_ELIGIBLE}
+                 ORDER BY j.id FOR UPDATE OF j SKIP LOCKED
+                """,
+                (model,),
+            ).fetchall()
+            by_code: dict[str, list[int]] = {}
+            for r in ineligible:
+                by_code.setdefault(str(r["code"]), []).append(int(r["id"]))
+            for code, job_ids in sorted(by_code.items()):
+                conn.execute(f"{_SKIP_JOB}=ANY(%s)", (code, job_ids))
             rows = conn.execute(
-                """
+                f"""
                 SELECT j.id AS job_id,c.id AS chunk_id,c.content,j.attempts
-                  FROM vres.embedding_jobs j JOIN vres.knowledge_chunks c ON c.id=j.chunk_id
-                 WHERE j.status='pending' AND j.model=%s AND j.attempts < %s
-                 ORDER BY j.created_at,j.id FOR UPDATE SKIP LOCKED LIMIT %s
+                  FROM vres.embedding_jobs j JOIN vres.knowledge_chunks c ON c.id=j.chunk_id {_OWNERS}
+                 WHERE j.status='pending' AND j.model=%s AND j.attempts < %s AND {_ELIGIBLE}
+                 ORDER BY j.created_at,j.id FOR UPDATE OF j, c SKIP LOCKED LIMIT %s
                 """,
                 (model, MAX_ATTEMPTS, limit),
             ).fetchall()
@@ -172,10 +188,15 @@ class EmbeddingService:
                 current = ConfigStore().load()
                 if not current.embeddings_enabled or current.embedding_model != cfg.embedding_model:
                     raise EmbeddingUnavailable("Embedding configuration changed during the batch; old vectors were not published")
+                leases, gates = self._fence(conn, rows)
                 for row, vector in zip(rows, vectors, strict=True):
-                    lease = conn.execute("SELECT attempts,status FROM vres.embedding_jobs WHERE id=%s FOR UPDATE", (row["job_id"],)).fetchone()
+                    lease = leases.get(row["job_id"])
                     if not lease or lease["status"] != "running" or lease["attempts"] != row["claimed_attempt"]:
                         continue  # A newer claim owns this job. A stale worker must never overwrite its result.
+                    code = gates.get(row["chunk_id"], "chunk_owner_invalid")
+                    if code:  # lifecycle eligibility precedes embedding state: publish nothing, skip with a code
+                        conn.execute(f"{_SKIP_JOB}=%s", (code, row["job_id"]))
+                        continue
                     values = vector
                     if vector_enabled:
                         literal = "[" + ",".join(f"{x:.9g}" for x in values) + "]"
@@ -203,6 +224,36 @@ class EmbeddingService:
             self._fail(rows, exc)
             raise
         return {"enabled": True, "processed": processed, "model": cfg.embedding_model}
+
+    @staticmethod
+    def _fence(conn, rows: list[dict[str, Any]]) -> tuple[dict[int, dict[str, Any]], dict[int, str | None]]:
+        """Lock owners FOR SHARE, then chunks, then jobs (global order sources < knowledge < chunks < jobs) and
+        re-check eligibility under those locks. Returns job leases and, per chunk, a skip code or None."""
+        chunk_ids = sorted({int(r["chunk_id"]) for r in rows})
+        owners = {int(r["id"]): (r["source_id"], r["knowledge_id"]) for r in conn.execute(
+            "SELECT id,source_id,knowledge_id FROM vres.knowledge_chunks WHERE id=ANY(%s)", (chunk_ids,)).fetchall()}
+        source_ids = sorted({s for s, _ in owners.values() if s is not None})
+        knowledge_ids = sorted({k for _, k in owners.values() if k is not None})
+        if source_ids:
+            conn.execute("SELECT id FROM vres.sources WHERE id=ANY(%s) ORDER BY id FOR SHARE", (source_ids,)).fetchall()
+        if knowledge_ids:
+            conn.execute("SELECT id FROM vres.knowledge_items WHERE id=ANY(%s) ORDER BY id FOR SHARE",
+                         (knowledge_ids,)).fetchall()
+        conn.execute("SELECT id FROM vres.knowledge_chunks WHERE id=ANY(%s) ORDER BY id FOR UPDATE",
+                     (chunk_ids,)).fetchall()
+        leases = {int(r["id"]): r for r in conn.execute(
+            "SELECT id,attempts,status FROM vres.embedding_jobs WHERE id=ANY(%s) ORDER BY id FOR UPDATE",
+            (sorted({int(r["job_id"]) for r in rows}),)).fetchall()}
+        gates: dict[int, str | None] = {}
+        for r in conn.execute(
+                f"SELECT c.id,c.source_id,c.knowledge_id,{_ELIGIBLE} AS eligible,{_INELIGIBLE_CODE} AS code "
+                f"FROM vres.knowledge_chunks c {_OWNERS} WHERE c.id=ANY(%s)", (chunk_ids,)).fetchall():
+            cid = int(r["id"])
+            if owners.get(cid) != (r["source_id"], r["knowledge_id"]):
+                gates[cid] = "chunk_owner_invalid"  # the owner changed after the owner locks were chosen
+            else:
+                gates[cid] = None if r["eligible"] else str(r["code"])
+        return leases, gates
 
     def semantic_search(self, query: str, limit: int = 8, project_id: int | None = None) -> list[dict[str, Any]]:
         cfg = ConfigStore().load()
@@ -234,9 +285,7 @@ class EmbeddingService:
                       LEFT JOIN vres.sources s ON s.id=c.source_id
                       LEFT JOIN vres.knowledge_items k ON k.id=c.knowledge_id
                      WHERE c.embedding_vector IS NOT NULL AND c.embedding_model=%s AND c.embedding_dimensions=%s
-                       AND (s.id IS NULL OR s.status='active')
-                       AND (k.id IS NULL OR k.status NOT IN ('rejected','superseded','challenged'))
-                       AND (k.id IS NULL OR {_K_USABLE})
+                       AND {_ELIGIBLE}
                        AND (
                          %s IS NULL
                          OR (k.id IS NOT NULL AND (k.project_id=%s OR k.project_id IS NULL))
@@ -256,9 +305,7 @@ class EmbeddingService:
                   LEFT JOIN vres.sources s ON s.id=c.source_id
                   LEFT JOIN vres.knowledge_items k ON k.id=c.knowledge_id
                  WHERE c.embedding IS NOT NULL AND c.embedding_model=%s AND c.embedding_dimensions=%s
-                   AND (s.id IS NULL OR s.status='active')
-                   AND (k.id IS NULL OR k.status NOT IN ('rejected','superseded','challenged'))
-                   AND (k.id IS NULL OR {_K_USABLE})
+                   AND {_ELIGIBLE}
                    AND (
                      %s IS NULL
                      OR (k.id IS NOT NULL AND (k.project_id=%s OR k.project_id IS NULL))

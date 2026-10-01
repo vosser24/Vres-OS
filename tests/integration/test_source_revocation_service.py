@@ -28,7 +28,8 @@ from vres_os.sources import SourceNotActive, SourceService  # noqa: E402
 RESULT_KEYS = {"event_key", "action", "target_key", "prior_state", "new_state", "replayed",
                "revoked_knowledge", "revoked_episodes", "retained_with_support", "unresolved_cross_scope",
                "counts", "keys_digest_only"}
-COUNT_KEYS = {"revoked", "retained_with_support", "unresolved_cross_scope", "corrupt_provenance", "nodes_visited"}
+COUNT_KEYS = {"revoked", "retained_with_support", "unresolved_cross_scope", "corrupt_provenance", "nodes_visited",
+              "chunks_cleared"}
 
 
 @pytest.fixture
@@ -97,7 +98,7 @@ def test_a_single_source_revokes_dependent_and_keeps_history(pg_project):
         "revoke_source", s, "active", "revoked", False)
     assert out["revoked_knowledge"] == [k] and out["revoked_episodes"] == []
     assert out["counts"]["revoked"] == 1 and out["counts"]["corrupt_provenance"] == 0
-    assert "chunks_cleared" not in out["counts"] and "sessions_marked" not in out["counts"]
+    assert out["counts"]["chunks_cleared"] == 0 and "sessions_marked" not in out["counts"]
     assert source_status(s) == "revoked" and status(k) == "revoked"
     with connect() as conn:
         after = conn.execute("SELECT * FROM vres.knowledge_items WHERE knowledge_key=%s", (k,)).fetchone()
@@ -510,7 +511,8 @@ def test_any_failure_rolls_back_everything(pg_project, monkeypatch, point):
 
 # --- non-effects -----------------------------------------------------------------------------------------------------
 
-def test_chunks_embeddings_jobs_sessions_and_contamination_are_not_touched(pg_project):
+def test_chunks_and_text_retained_embeddings_cleared_jobs_skipped_sessions_untouched(pg_project):
+    """Chunk D: revocation clears only derived embedding state; chunk rows/text and sessions stay untouched."""
     s = source(pg_project)
     k = knowledge(pg_project)
     evidence(k, s)
@@ -534,10 +536,18 @@ def test_chunks_embeddings_jobs_sessions_and_contamination_are_not_touched(pg_pr
         jobs = conn.execute(snap_jobs, (sid,)).fetchall()
         sessions = conn.execute("SELECT * FROM vres.sessions WHERE project_id=%s ORDER BY id", (pg_project,)).fetchall()
     assert chunks and jobs and any(r["session_key"] == session_key for r in sessions)
-    revoke(pg_project, s)
+    out = revoke(pg_project, s)
+    derived_cols = {"embedding", "embedding_model", "embedding_dimensions", "embedded_at", "embedding_vector"}
     with connect() as conn:
-        assert conn.execute(snap_chunks, (sid, kid)).fetchall() == chunks
-        assert conn.execute(snap_jobs, (sid,)).fetchall() == jobs
+        after = conn.execute(snap_chunks, (sid, kid)).fetchall()
+        assert [r["id"] for r in after] == [r["id"] for r in chunks]
+        for new, old in zip(after, chunks, strict=True):
+            assert {c: new[c] for c in new if c not in derived_cols} == {c: old[c] for c in old if c not in derived_cols}
+            assert all(new.get(c) is None for c in derived_cols)
+        assert out["counts"]["chunks_cleared"] == 1  # only the one chunk that carried an embedding
+        new_jobs = conn.execute(snap_jobs, (sid,)).fetchall()
+        assert [r["id"] for r in new_jobs] == [r["id"] for r in jobs]
+        assert {(r["status"], r["error"]) for r in new_jobs} == {("skipped", "source_revoked")}
         assert conn.execute("SELECT * FROM vres.sessions WHERE project_id=%s ORDER BY id",
                             (pg_project,)).fetchall() == sessions
         actions = {r["action"] for r in conn.execute(
