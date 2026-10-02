@@ -20,12 +20,15 @@ def _addenda():
     return sorted(CONTRACT.parent.glob("EXPERIENCE-INTELLIGENCE-E4-CONTRACT-ADDENDUM-*.md"))
 
 
-def test_the_frozen_e4_contract_text_is_unchanged_unless_an_addendum_exists():
-    if _addenda():
-        pytest.skip("a dated E4 contract addendum exists; the change is governed by that addendum")
+def test_the_frozen_e4_contract_text_is_always_unchanged():
+    """An addendum never licenses editing the frozen file: amendments live only in the dated addendum."""
     assert _normalised_sha(CONTRACT.read_bytes()) == FROZEN_SHA256, (
         "the frozen E4 contract was edited; record post-freeze facts in the implementation notes or a dated "
         "EXPERIENCE-INTELLIGENCE-E4-CONTRACT-ADDENDUM-*.md instead")
+
+
+def test_the_migration_040_amendment_is_recorded_in_a_dated_addendum():
+    assert _addenda(), "migration 040 amends the frozen contract and requires its dated addendum"
 
 
 def test_the_embedded_digest_matches_the_frozen_commit_when_git_history_is_available():

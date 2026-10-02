@@ -16,6 +16,7 @@ from vres_os.db import connect
 from vres_os.repository import Repository
 
 MIGRATION = "039_experience_lifecycle_ledger.sql"
+M040 = "040_context_refresh_attestation.sql"  # the approved 2026-10-02 addendum migration (protected attestations)
 TABLE = "experience_lifecycle_events"
 LEGACY_STATUSES = ["proposed", "observed", "validated", "canonical", "challenged", "superseded", "rejected"]
 ALL_STATUSES = LEGACY_STATUSES + ["retired", "revoked"]
@@ -117,17 +118,30 @@ def test_table_columns_and_indexes_match_contract(pg_project):
         trg = {r["tgname"]: r["def"] for r in conn.execute(
             "SELECT tgname,pg_get_triggerdef(oid) AS def FROM pg_trigger "
             "WHERE tgrelid=%s::regclass AND NOT tgisinternal", (f"vres.{TABLE}",))}
-        assert len(trg) == 2
+        assert len(trg) == 3  # 039's two immutability triggers + 040's attested-refresh guard
         assert sum("BEFORE UPDATE" in d for d in trg.values()) == 1
         assert sum("BEFORE DELETE" in d for d in trg.values()) == 1
+        guard = trg.pop("trg_require_attested_context_refresh")
+        assert "AFTER INSERT" in guard and "FOR EACH ROW" in guard and "require_attested_context_refresh" in guard
         assert all("FOR EACH ROW" in d and "protect_experience_lifecycle_immutability" in d for d in trg.values())
+
+
+def _insert_shape(pid, values):
+    """Insert a shape-legal row. A context_refreshed row passes every 039 CHECK and then reaches migration 040's
+    AFTER INSERT guard, which refuses it without a consumed host-correlated attestation in the same transaction."""
+    if values["action"] != "context_refreshed":
+        with connect() as conn, conn.transaction():
+            _insert(conn, values)
+        return
+    with pytest.raises(pgerr.RaiseException, match="host-correlated attestation"):
+        with connect() as conn, conn.transaction():
+            _insert(conn, values)
 
 
 @pytest.mark.parametrize("action", sorted(TARGET_FOR))
 def test_every_valid_action_is_accepted_with_legal_shape(pg_project, action):
     _, aid = _approval(pg_project)
-    with connect() as conn, conn.transaction():
-        _insert(conn, _row(pg_project, action, aid))
+    _insert_shape(pg_project, _row(pg_project, action, aid))
 
 
 @pytest.mark.parametrize("action", ["invalidate_derived", "restore_derived"])
@@ -141,8 +155,7 @@ def test_derived_actions_accept_knowledge_or_episode(pg_project, action):
 @pytest.mark.parametrize("action", sorted(APPROVAL_OPTIONAL))
 def test_approval_optional_actions_accept_approval_when_present(pg_project, action):
     _, aid = _approval(pg_project)
-    with connect() as conn, conn.transaction():
-        _insert(conn, _row(pg_project, action, aid, approval_event_id=aid))
+    _insert_shape(pg_project, _row(pg_project, action, aid, approval_event_id=aid))
 
 
 def test_invalid_enumerations_digest_and_bounds_are_rejected(pg_project):
@@ -352,10 +365,14 @@ def test_upgrade_from_038_to_039_preserves_rows_and_adds_only_the_ledger(monkeyp
     src = real_resources.files("vres_os").joinpath("migrations")
     staged = tmp_path / "pkg" / "migrations"
     staged.mkdir(parents=True)
+    staged039 = tmp_path / "pkg039" / "migrations"
+    staged039.mkdir(parents=True)
     for p in sorted(src.iterdir()):
         if p.name.endswith(".sql") and p.name < MIGRATION:
             (staged / p.name).write_bytes(p.read_bytes())
-    assert len(list(staged.iterdir())) == 38
+        if p.name.endswith(".sql") and p.name <= MIGRATION:
+            (staged039 / p.name).write_bytes(p.read_bytes())
+    assert len(list(staged.iterdir())) == 38 and len(list(staged039.iterdir())) == 39
     with psycopg.connect(_dsn_for("postgres"), autocommit=True) as admin:
         assert admin.execute("SELECT 1 FROM pg_database WHERE datname=%s", (name,)).fetchone() is None, \
             f"{name} must not pre-exist"
@@ -364,7 +381,7 @@ def test_upgrade_from_038_to_039_preserves_rows_and_adds_only_the_ledger(monkeyp
         monkeypatch.setenv("VRES_DATABASE_URL", _dsn_for(name))
         monkeypatch.setattr(db, "resources", _Root(tmp_path / "pkg"))
         assert len(db.migrate()) == 38
-        monkeypatch.setattr(db, "resources", real_resources)
+        monkeypatch.setattr(db, "resources", _Root(tmp_path / "pkg039"))  # exactly the 038 -> 039 step
         watch = ["sessions", "embedding_jobs", "sources", "relations", "experience_episodes",
                  "experience_transitions", "experience_policy_versions"]
         ins = ("INSERT INTO vres.knowledge_items(knowledge_key,knowledge_type,title,statement,status) "
@@ -407,6 +424,17 @@ def test_upgrade_from_038_to_039_preserves_rows_and_adds_only_the_ledger(monkeyp
             assert conn.execute(
                 "SELECT conname FROM pg_constraint WHERE conrelid='vres.sources'::regclass AND contype='c' "
                 "AND pg_get_constraintdef(oid) ILIKE '%status%'").fetchall() == []
+        # then 039 -> 040 with the real package: only the protected attestation table is added; rows are unchanged
+        monkeypatch.setattr(db, "resources", real_resources)
+        assert db.migrate() == [M040]
+        assert db.migrate() == []
+        with connect() as conn:
+            assert conn.execute("SELECT count(*) AS n FROM vres.schema_migrations").fetchone()["n"] == 40
+            assert conn.execute(select_rows).fetchall()[:7] == rows_before
+            tables_040 = {r["table_name"] for r in conn.execute(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema='vres'")}
+            assert tables_040 - tables_after == {"context_refresh_attestations"}
+            assert _table_defs(conn, watch) == defs_before
     finally:
         monkeypatch.undo()
         with psycopg.connect(_dsn_for("postgres"), autocommit=True) as admin:

@@ -9,6 +9,7 @@ from .knowledge_status import (
     CURRENT_KNOWLEDGE_STATUSES,
     NON_USE_STATUSES,
     REVOKED_STATUS,
+    company_support_usable_sql,
     chunk_eligible_sql,
     is_revoked_sql,
     revocation_reason_class,
@@ -218,7 +219,8 @@ class KnowledgeService:
                 """
                 SELECT k.knowledge_key,k.project_id,k.knowledge_type,k.title,k.statement,k.status,k.scope,k.confidence,
                        k.valid_from,k.valid_to,k.last_verified_at,k.review_after,k.source_owner,k.superseded_by,
-                       k.created_at,k.updated_at,k.metadata,a.approval_key
+                       k.created_at,k.updated_at,k.metadata,a.approval_key,
+                       """ + company_support_usable_sql("k") + """ AS support_usable
                   FROM vres.knowledge_items k
                   LEFT JOIN vres.approval_events a ON a.id=k.approval_event_id
                  WHERE k.knowledge_key=%s
@@ -227,6 +229,8 @@ class KnowledgeService:
             ).fetchone()
             if not item:
                 raise KeyError(knowledge_key)
+            item = dict(item)
+            support_usable = item.pop("support_usable")
             if item["status"] == REVOKED_STATUS:
                 # Revoked memory is a tombstone: key, state, time and reason class only (no statement/evidence).
                 event = conn.execute(
@@ -240,6 +244,11 @@ class KnowledgeService:
                     "revoked_at": event["created_at"] if event else None,
                     "reason_class": revocation_reason_class(event["cause_kind"] if event else None), "evidence": [],
                 }
+            if support_usable is not True:
+                # Company knowledge whose only support is revoked/inactive (row never mutated): metadata tombstone.
+                return {"knowledge_key": item["knowledge_key"], "project_id": item["project_id"],
+                        "status": item["status"], "usable": False, "reason_class": "company_support_unusable",
+                        "evidence": []}
             evidence = conn.execute(
                 """
                 SELECT e.id,e.evidence_type,e.locator,e.method,e.limitations,e.metrics,e.reproducible,e.created_at,
@@ -251,7 +260,7 @@ class KnowledgeService:
                 """,
                 (knowledge_key,),
             ).fetchall()
-        return {**dict(item), "evidence": [dict(row) for row in evidence]}
+        return {**item, "evidence": [dict(row) for row in evidence]}
 
     def update(
         self,
@@ -348,9 +357,10 @@ class KnowledgeService:
                 SELECT knowledge_key,knowledge_type,title,statement,status,scope,confidence,
                        last_verified_at,review_after,
                        ts_rank(search_vector, plainto_tsquery('simple', %s)) AS rank
-                  FROM vres.knowledge_items
+                  FROM vres.knowledge_items k
                  WHERE (%s IS NULL OR project_id=%s OR project_id IS NULL)
                    AND {_CURRENT}
+                   AND {company_support_usable_sql("k")}
                    AND (search_vector @@ plainto_tsquery('simple', %s)
                         OR title ILIKE '%%' || %s || '%%' OR statement ILIKE '%%' || %s || '%%')
                  ORDER BY ts_rank(search_vector, plainto_tsquery('simple', %s)) DESC,

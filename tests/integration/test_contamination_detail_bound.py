@@ -8,13 +8,12 @@ import pytest
 
 pytest.importorskip("psycopg")
 
-from source_revocation_support import mk  # noqa: E402
+from source_revocation_support import mk, trusted_ack  # noqa: E402
 from vres_os import control_preflight  # noqa: E402
 from vres_os.db import connect  # noqa: E402
 from vres_os.experience_lifecycle import _lock_project  # noqa: E402
 from vres_os.repository import Repository  # noqa: E402
 from vres_os.session_contamination import (  # noqa: E402
-    ContextRefreshService,
     contamination_state,
     mark_open_sessions_contaminated,
 )
@@ -87,7 +86,7 @@ def _contaminate_and_ack(pid, monkeypatch, capsys, source_key, knowledge_keys, e
     assert "context refresh required" in reason and row["event_key"] in reason
     assert "KNOW-" not in reason and "EPI-" not in reason and source_key not in reason and "_sha256" not in reason
 
-    out = ContextRefreshService().acknowledge(pid, sid, contaminated_event_key=row["event_key"])
+    out = trusted_ack(pid, sid, row["event_key"])
     assert out["new_state"] == "clean" and out["replayed"] is False
     ack = _row(pid, session_key, "context_refreshed")
     expected = _sha({source_key, f"revoked_knowledge_sha256:{_sha(knowledge_keys)}",

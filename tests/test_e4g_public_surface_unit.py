@@ -33,7 +33,7 @@ def _server():
 
 
 def _payload(tool, *, sid="S-HOST", agent_id=None, request=None):
-    value = {"hook_event_name": "PreToolUse", "tool_name": tool, "session_id": sid}
+    value = {"hook_event_name": "PreToolUse", "tool_name": tool, "session_id": sid, "tool_use_id": "toolu_unit_9"}
     if agent_id is not None:
         value["agent_id"] = agent_id
     if request is not None:
@@ -52,13 +52,13 @@ def _reason(decision):
 
 
 def _own_attest(contaminations, calls=None):
-    """Stand-in for the hook's DB attestation: true only for this host session's own (latest) event key."""
+    """Stand-in for the hook's migration-040 DB mint: a nonce only for this host session's own (latest) event key."""
     own = {c["event_key"] for c in contaminations}
 
-    def attest(key):
+    def attest(key, tool_use_id):
         if calls is not None:
             calls.append(key)
-        return key in own
+        return "nonce-unit" if key in own and tool_use_id == "toolu_unit_9" else None
     return attest
 
 
@@ -142,8 +142,10 @@ def test_only_the_ack_is_recovery_and_only_with_exact_name_in_bare_or_prefixed_f
     own = [_contaminated()]
     calls = []
     for tool in (ACK, ACK_NAME):
-        assert control_preflight.evaluate_contamination_preflight(_payload(tool, request={"contaminated_event_key": C1}),
-                                                                  own, attest=_own_attest(own, calls)) is None, tool
+        decision = control_preflight.evaluate_contamination_preflight(
+            _payload(tool, request={"contaminated_event_key": C1}), own, attest=_own_attest(own, calls))
+        assert decision == {"hookSpecificOutput": {"hookEventName": "PreToolUse", "updatedInput": {
+            "request": {"contaminated_event_key": C1, "attestation": "nonce-unit"}}}}, tool
     assert calls == [C1, C1]
     for tool in (_VRES_PREFIX + "source_revoke", _VRES_PREFIX + "knowledge_lifecycle", "source_revoke",
                  "knowledge_lifecycle", _VRES_PREFIX + "context_refresh_ack2", ACK + "_and_more",
@@ -221,19 +223,27 @@ def test_hook_main_allows_the_parent_ack_of_its_own_event_and_denies_a_foreign_k
     monkeypatch.setattr(control_preflight, "contaminated_sessions_for_host_session",
                         lambda sid: [_contaminated()] if sid == "S-HOST" else [])
     attested = []
-    monkeypatch.setattr(control_preflight, "attest_refresh_ack",  # the DB attestation: own latest key only
-                        lambda sid, key: attested.append((sid, key)) or (sid == "S-HOST" and key == C1))
+
+    def issue(sid, key, tuid):  # the migration-040 DB mint: own latest key only
+        attested.append((sid, key, tuid))
+        return "nonce-unit" if (sid == "S-HOST" and key == C1) else None
+    monkeypatch.setattr(control_preflight, "issue_refresh_attestation", issue)
 
     def run(payload):
+        payload = {**payload, "tool_use_id": "toolu_unit_9"}
         monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
         code = control_preflight.main()
         return code, capsys.readouterr().out
-    assert run(_payload(ACK, request={"contaminated_event_key": C1})) == (0, "")
+    code, out = run(_payload(ACK, request={"contaminated_event_key": C1}))
+    assert code == 0 and json.loads(out)["hookSpecificOutput"] == {
+        "hookEventName": "PreToolUse",
+        "updatedInput": {"request": {"contaminated_event_key": C1, "attestation": "nonce-unit"}}}
     code, out = run(_payload(ACK, request={"contaminated_event_key": C2}))
     assert code == 0 and json.loads(out)["hookSpecificOutput"]["permissionDecision"] == "deny"
     code, out = run(_payload(ACK, sid="S-OTHER", request={"contaminated_event_key": C1}))
     assert json.loads(out)["hookSpecificOutput"]["permissionDecision"] == "deny"
-    assert attested == [("S-HOST", C1), ("S-HOST", C2), ("S-OTHER", C1)]  # always the host-observed session id
+    assert attested == [("S-HOST", C1, "toolu_unit_9"), ("S-HOST", C2, "toolu_unit_9"),
+                        ("S-OTHER", C1, "toolu_unit_9")]  # always the host-observed session and invocation id
 
 
 # --- bounded public result -------------------------------------------------------------------------------------------

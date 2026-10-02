@@ -28,6 +28,7 @@ from .knowledge_status import (
     HISTORICAL_ONLY_KNOWLEDGE_STATUSES,
     LIVE_KNOWLEDGE_STATUSES,
     REVOKED_STATUS,
+    company_support_usable_sql,
     is_revoked_sql,
     revocation_reason_class,
     status_in_sql,
@@ -1192,7 +1193,7 @@ class ExperienceRetrievalService:
         support = """
               LEFT JOIN LATERAL (
                 SELECT count(*) FILTER (WHERE s.status='active') AS support_active,
-                       count(*) FILTER (WHERE s.status<>'active') AS support_inactive
+                       count(*) FILTER (WHERE s.status IS DISTINCT FROM 'active') AS support_inactive
                   FROM vres.sources s
                  WHERE k.project_id IS NULL
                    AND (s.id IN (SELECT ev.source_id FROM vres.knowledge_evidence ev WHERE ev.knowledge_id=k.id)
@@ -1200,7 +1201,8 @@ class ExperienceRetrievalService:
                                              WHERE r.source_kind='knowledge' AND r.source_key=k.knowledge_key
                                                AND r.relation_type='derived_from' AND r.target_kind='source'))
               ) sup ON true"""
-        dead = "(sup.support_active=0 AND sup.support_inactive>0)"
+        # Migration-040 addendum: the ONE shared company-support rule (the lateral counts only label conflicts).
+        dead = f"(NOT {company_support_usable_sql('k')})"
         visible = "(k.project_id=%(pid)s OR k.scope_approval_event_id IS NOT NULL)"
         current_only = f"{visible} AND NOT %(hist)s"
         counts = conn.execute(
@@ -1278,14 +1280,9 @@ class ExperienceRetrievalService:
         # under current AND historical intent; it surfaces only as a structured conflict (role=conflict). Retired and
         # revoked owners never yield raw text under any intent (revoked is tombstone-only; retired is not evidence text).
         live = status_in_sql("k.status", LIVE_KNOWLEDGE_STATUSES)
-        # E4: a company item whose every support root (knowledge_evidence / derived_from source) is inactive yields no
-        # raw text either (same rule as `_knowledge`'s `dead`; company rows are never mutated, their support is gone).
-        support_src = ("SELECT 1 FROM vres.sources ss WHERE {cond} AND (ss.id IN (SELECT ev.source_id FROM "
-                       "vres.knowledge_evidence ev WHERE ev.knowledge_id=k.id) OR ss.source_key IN (SELECT r.target_key "
-                       "FROM vres.relations r WHERE r.source_kind='knowledge' AND r.source_key=k.knowledge_key "
-                       "AND r.relation_type='derived_from' AND r.target_kind='source'))")
-        dead_support = (f"EXISTS ({support_src.format(cond="ss.status<>'active'")}) AND "
-                        f"NOT EXISTS ({support_src.format(cond="ss.status='active'")})")
+        # E4 (migration-040 addendum): a company item whose only support roots are revoked/inactive yields no raw text
+        # either; the ONE shared rule also used by `_knowledge`, knowledge search/get and semantic search.
+        support_usable = company_support_usable_sql("k")
         base = f"""
              FROM vres.knowledge_chunks c
              LEFT JOIN vres.sources s ON s.id=c.source_id
@@ -1302,7 +1299,7 @@ class ExperienceRetrievalService:
                    AND ({live} OR (%(hist)s AND k.status='superseded'))
                    AND (k.valid_from IS NULL OR k.valid_from<={ref}) AND (k.valid_to IS NULL OR k.valid_to>{ref})
                    AND (NOT %(hist)s OR k.created_at<={ref})
-                   AND (k.project_id IS NOT NULL OR NOT ({dead_support}))))
+                   AND {support_usable}))
               AND {match}"""
         approved = ("(c.source_id IS NULL OR s.project_id IS NOT NULL OR s.scope_approval_event_id IS NOT NULL) AND "
                     "(c.knowledge_id IS NULL OR k.project_id IS NOT NULL OR k.scope_approval_event_id IS NOT NULL)")

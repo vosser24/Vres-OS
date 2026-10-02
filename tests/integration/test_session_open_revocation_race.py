@@ -11,13 +11,15 @@ import pytest
 pytest.importorskip("psycopg")
 
 from embedding_lifecycle_support import WAIT, Gate, GatedConn, Runner, gate_module, wait_blocked_by  # noqa: E402
-from source_revocation_support import approve, evidence, knowledge, mk, revoke, source, source_status  # noqa: E402
+from source_revocation_support import (  # noqa: E402
+    approve, evidence, knowledge, mk, revoke, source, source_status, trusted_ack,
+)
 from vres_os import db, repository  # noqa: E402
 from vres_os import source_revocation as sr  # noqa: E402
 from vres_os.db import connect  # noqa: E402
 from vres_os.experience_lifecycle import LifecycleDenied  # noqa: E402
 from vres_os.repository import Repository  # noqa: E402
-from vres_os.session_contamination import ContextRefreshService, contamination_state  # noqa: E402
+from vres_os.session_contamination import contamination_state  # noqa: E402
 
 INSERT = "INSERT INTO vres.sessions"  # the open's insert path (it then holds its session and project locks)
 SNAPSHOT = "FROM vres.sessions WHERE project_id=%s AND ended_at IS NULL"  # the revocation's open-session snapshot
@@ -47,7 +49,7 @@ def _open(pid, sid):
 
 
 def _ack(pid, sid, key):
-    return ContextRefreshService().acknowledge(pid, sid, contaminated_event_key=key)
+    return trusted_ack(pid, sid, key)
 
 
 def _state(pid, session_key):
@@ -216,12 +218,13 @@ def test_race_d_open_ack_and_second_revocation_never_let_an_old_ack_clear_a_late
     assert _marks(pg_project, key)[-1] == rev2["event_key"] and _marks(pg_project, late_key) == []
     with pytest.raises(LifecycleDenied) as late:
         _ack(pg_project, late_sid, c1)
-    assert late.value.code == "not_contaminated"
+    assert late.value.code == "refresh_not_attested"  # migration 040: c1 is not late_sid's, so nothing is minted
     _ack(pg_project, sid, st["event_key"])
     assert _state(pg_project, key)["contaminated"] is False
     with pytest.raises(LifecycleDenied) as old:
         _ack(pg_project, sid, c1)
-    assert old.value.code == "stale_contamination" and _state(pg_project, key)["contaminated"] is False
+    # migration 040: a no-longer-latest key is refused at mint (no attestation), so the tool never reaches stale checks
+    assert old.value.code == "refresh_not_attested" and _state(pg_project, key)["contaminated"] is False
 
 
 def test_reusing_an_open_session_takes_no_project_lock_and_is_not_held_by_a_revocation(pg_project, monkeypatch):

@@ -6,13 +6,13 @@ import pytest
 
 pytest.importorskip("psycopg")
 
-from source_revocation_support import evidence, knowledge, mk, revoke, source  # noqa: E402
+from source_revocation_support import evidence, knowledge, mk, revoke, source, trusted_ack  # noqa: E402
 from vres_os import control_preflight, hooks  # noqa: E402
 from vres_os.db import connect  # noqa: E402
 from vres_os.paths import logs_dir  # noqa: E402
 from vres_os.reply_guard import begin_reply_turn, confirm_reply_gate, inspect_stop_guard  # noqa: E402
 from vres_os.repository import Repository  # noqa: E402
-from vres_os.session_contamination import ContextRefreshService, contamination_state  # noqa: E402
+from vres_os.session_contamination import contamination_state  # noqa: E402
 from vres_os.session_prompts import stage_user_instruction  # noqa: E402
 from vres_os.validation import ValidationService  # noqa: E402
 
@@ -113,7 +113,7 @@ def test_contaminated_stop_reports_code_and_event_key_only_and_is_not_an_escape(
     # reporting never clears, synthesizes a refresh, or otherwise writes the ledger
     assert _session_events(pg_project) == before and _key(pg_project, session_key)["contaminated"] is True
     assert _pretool_denied(monkeypatch, capsys, sid)  # PreToolUse still denies after the Stop report
-    ContextRefreshService().acknowledge(pg_project, sid, contaminated_event_key=c)
+    trusted_ack(pg_project, sid, c)
     assert _stop(monkeypatch, capsys, pg_project, sid) is None
     assert not _pretool_denied(monkeypatch, capsys, sid)
 
@@ -190,7 +190,7 @@ def test_hold_and_contamination_are_reported_independently(pg_project, monkeypat
     _turn(pg_project, sid, task_key)
     _assert_report(_stop(monkeypatch, capsys, pg_project, sid)["systemMessage"], c1)  # both
     assert control_preflight.read_only_hold_for_session(sid)["active"] is True
-    ContextRefreshService().acknowledge(pg_project, sid, contaminated_event_key=c1)  # clears contamination only
+    trusted_ack(pg_project, sid, c1)  # clears contamination only
     _turn(pg_project, sid, task_key)
     assert _stop(monkeypatch, capsys, pg_project, sid) is None
     assert control_preflight.read_only_hold_for_session(sid)["active"] is True

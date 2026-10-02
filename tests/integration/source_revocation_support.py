@@ -19,6 +19,18 @@ def mk() -> str:
     return "zc" + uuid.uuid4().hex[:10]
 
 
+def trusted_ack(pid, sid, key, *, tool_use_id=None):
+    """The trusted host path without the hook process: mint for (host session `sid`, `key`, invocation) as the hook
+    does, then acknowledge with that nonce and the same host invocation id. A refused mint presents no attestation,
+    so the acknowledgement fails closed exactly as the tool does when the hook could not attest."""
+    from vres_os.session_contamination import ContextRefreshService, issue_refresh_attestation
+
+    tuid = tool_use_id or f"toolu_{uuid.uuid4().hex}"
+    nonce = issue_refresh_attestation(sid, key, tuid)
+    return ContextRefreshService().acknowledge_attested(pid, contaminated_event_key=key, attestation=nonce,
+                                                        tool_use_id=tuid)
+
+
 def svc() -> SourceRevocationService:
     return SourceRevocationService(clock=lambda: T0)
 

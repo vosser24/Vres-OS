@@ -5,6 +5,7 @@ import json
 import os
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -16,7 +17,7 @@ from embedding_lifecycle_support import (  # noqa: E402
     WAIT, Gate, Runner, chunk, chunk_state, gate_module, wait_blocked_by,
 )
 from source_revocation_support import (  # noqa: E402
-    approve, cleanup_project, events, evidence, knowledge, mk, revoke, source, source_status, status,
+    approve, cleanup_project, events, evidence, knowledge, mk, revoke, source, source_status, status, trusted_ack,
 )
 from vres_os import control_preflight  # noqa: E402
 from vres_os import source_revocation as sr  # noqa: E402
@@ -69,7 +70,7 @@ def _state(pid, session_key):
 
 
 def _ack(pid, sid, key):
-    return _sc().ContextRefreshService().acknowledge(pid, sid, contaminated_event_key=key)
+    return trusted_ack(pid, sid, key)
 
 
 def _poisoned(pid):
@@ -129,8 +130,10 @@ def test_state_is_derived_from_the_ledger_by_event_id_and_fails_closed_on_malfor
     s, _ = _poisoned(pg_project)
     revoke(pg_project, s)
     c = _latest_key(pg_project, key)
-    # a refresh row that acknowledges some other event never cleans the session
-    with connect() as conn, conn.transaction():
+    # migration 040: a refresh row without a consumed attestation is refused by the database
+    import psycopg
+
+    with pytest.raises(psycopg.errors.RaiseException), connect() as conn, conn.transaction():
         conn.execute(
             """INSERT INTO vres.experience_lifecycle_events(event_key,idempotency_key,project_id,policy_version,action,
                target_kind,target_key,new_state,cause_kind,cause_key,session_key,reason,detail)
@@ -174,14 +177,15 @@ def test_ack_rejections_leave_state_unchanged(pg_project, other_project):
     revoke(pg_project, s)
     ca, cb = _latest_key(pg_project, key_a), _latest_key(pg_project, key_b)
 
+    # migration 040: every non-matching (host session, project, key) is refused at mint or consumption
     cases = [
-        ((pg_project, sid_b, ca), "unknown_contamination"),   # another session's event
-        ((other_project, sid_a, ca), "unknown_session"),      # another project
-        ((other_project, sid_x, ca), "not_contaminated"),     # clean session in the other project
-        ((pg_project, sid_c, ca), "unknown_session"),         # closed session
-        ((pg_project, "no-such-host-session", ca), "unknown_session"),
+        ((pg_project, sid_b, ca), "refresh_not_attested"),    # another session's event
+        ((other_project, sid_a, ca), "refresh_not_attested"),  # another project
+        ((other_project, sid_x, ca), "refresh_not_attested"),  # clean session in the other project
+        ((pg_project, sid_c, ca), "refresh_not_attested"),    # closed session
+        ((pg_project, "no-such-host-session", ca), "refresh_not_attested"),
         ((pg_project, sid_a, "LCE-zz"), "malformed_event_key"),
-        ((pg_project, sid_a, "LCE-" + "0" * 32), "unknown_contamination"),
+        ((pg_project, sid_a, "LCE-" + "0" * 32), "refresh_not_attested"),
     ]
     for (pid, sid, key), code in cases:
         with pytest.raises(LifecycleDenied) as denied:
@@ -213,9 +217,9 @@ def test_new_revocation_after_ack_recontaminates_and_the_old_ack_cannot_cover_it
     revoke(pg_project, s2)
     st = _state(pg_project, key)
     assert st["contaminated"] is True and st["event_key"] != c1
-    with pytest.raises(LifecycleDenied) as denied:
+    with pytest.raises(LifecycleDenied) as denied:  # migration 040: a stale key is never even attested
         _ack(pg_project, sid, c1)
-    assert denied.value.code == "stale_contamination"
+    assert denied.value.code == "refresh_not_attested"
     assert len(_session_events(pg_project, "context_refreshed")) == 1
     _ack(pg_project, sid, st["event_key"])
     assert not _state(pg_project, key)["contaminated"]
@@ -348,11 +352,14 @@ class _ConfiguredStore:
         return type("C", (), {"configured": True})()
 
 
-def _host(monkeypatch, capsys, tool, sid, *, agent_id=None, tool_input=None):
-    """Model the host: run the PreToolUse hook; the tool body runs only when the hook did not deny."""
+def _host(monkeypatch, capsys, tool, sid, *, agent_id=None, tool_input=None, tool_use_id=None):
+    """Model the host: run the PreToolUse hook; the tool body runs only when the hook did not deny.
+
+    Returns (entered, reason); for an admitted input rewrite (migration 040) `reason` is the updatedInput."""
     monkeypatch.setattr(control_preflight, "ConfigStore", _ConfiguredStore)
     payload = {"hook_event_name": "PreToolUse", "tool_name": tool, "session_id": sid,
-               "tool_input": tool_input or {"command": "echo hi"}}
+               "tool_input": tool_input or {"command": "echo hi"},
+               "tool_use_id": tool_use_id or f"toolu_{uuid.uuid4().hex}"}
     if agent_id:
         payload["agent_id"] = agent_id
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
@@ -360,11 +367,12 @@ def _host(monkeypatch, capsys, tool, sid, *, agent_id=None, tool_input=None):
     out = capsys.readouterr().out
     assert code == 0
     entered = []
-    decision = json.loads(out) if out.strip() else None
-    if decision is None or decision["hookSpecificOutput"]["permissionDecision"] != "deny":
+    spec = json.loads(out)["hookSpecificOutput"] if out.strip() else None
+    if spec is None or spec.get("permissionDecision") != "deny":
         entered.append(tool)
-    reason = decision["hookSpecificOutput"]["permissionDecisionReason"] if decision else None
-    return entered, reason
+    if spec is not None and "permissionDecision" not in spec:
+        return entered, spec["updatedInput"]
+    return entered, spec["permissionDecisionReason"] if spec else None
 
 
 def test_hook_denies_mutation_while_contaminated_then_passes_after_ack(pg_project, monkeypatch, capsys):
@@ -388,15 +396,19 @@ def test_hook_denies_mutation_while_contaminated_then_passes_after_ack(pg_projec
         assert _host(monkeypatch, capsys, tool, sid)[0] == [tool]
     # E4 Chunk G: the recovery tool is admitted only with a contamination event key of this host session
     assert _host(monkeypatch, capsys, ACK, sid)[0] == []
-    assert _host(monkeypatch, capsys, ACK, sid, tool_input={"request": {"contaminated_event_key": c}})[0] == [ACK]
-    # the admitted public tool consumes the hook's attestation of this host session (no session id is supplied)
+    tuid = f"toolu_{uuid.uuid4().hex}"
+    entered, updated = _host(monkeypatch, capsys, ACK, sid, tool_input={"request": {"contaminated_event_key": c}},
+                             tool_use_id=tuid)
+    assert entered == [ACK] and set(updated["request"]) == {"contaminated_event_key", "attestation"}
+    # the admitted public tool consumes the hook's attestation for the same host invocation (request meta)
     from vres_os import mcp_server
 
     with connect() as conn:
         pkey = conn.execute("SELECT project_key FROM vres.projects WHERE id=%s", (pg_project,)).fetchone()["project_key"]
     monkeypatch.setattr(mcp_server, "discover_project",
                         lambda root=".": ProjectIdentity(Path("."), pkey, "Vres test", None, None))
-    assert mcp_server.context_refresh_ack({"contaminated_event_key": c})["acknowledged_event_key"] == c
+    ctx = SimpleNamespace(request_context=SimpleNamespace(meta=SimpleNamespace(**{"claudecode/toolUseId": tuid})))
+    assert mcp_server.context_refresh_ack(updated["request"], ctx=ctx)["acknowledged_event_key"] == c
     assert _host(monkeypatch, capsys, "Bash", sid) == (["Bash"], None)
 
 

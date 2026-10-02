@@ -245,11 +245,24 @@ decisions, E1 episodes, relations); it is not a second generic memory authority 
   was re-derived. Checkpoint prose and transcript text are not scanned, and artifacts already written are not cleansed.
 - While contaminated, the PreToolUse hook denies every Vres tool except the safe list and `context_refresh_ack`, and
   admits that call only for the latest contamination event of the host session (exact tool name, exact
-  `{"request": {"contaminated_event_key": ...}}` input, parent only). The admitted hook writes a single-use, 120-second
-  attestation on that host session; the MCP tool consumes it and fails closed (`refresh_not_attested`) without one, so
-  the tool cannot acknowledge another session by key. The trust root is the host hook's `session_id`; the runtime
-  database role could forge the attestation, as it could already append ledger rows. Denials and notices name up to
-  five revoked identifiers, or a count for larger cascades; the full cascade stays in the lifecycle ledger.
+  `{"request": {"contaminated_event_key": ...}}` input, parent only).
+  - The hook mints the attestation through the provenance writer role (migration 040). The attestation is single
+    use, lasts 120 seconds, is stored only as a hash, and is bound to the host session and the host `tool_use_id`.
+  - The hook passes the nonce through `updatedInput`.
+  - The MCP tool consumes the attestation using the host's `claudecode/toolUseId` request meta. Without a consumed
+    attestation the tool fails closed (`refresh_not_attested`).
+  - A ledger trigger refuses any `context_refreshed` row that lacks such a consumption in its transaction.
+  - So a key is not a credential, and a session cannot acknowledge another session's contamination.
+
+  Residual limits:
+  - The trust root is Claude Code's hook payload and request meta, observed on Claude Code 2.1.286. If either is
+    missing, the acknowledgement fails closed.
+  - The nonce and `tool_use_id` appear in the transcript. A same-OS-user process that also holds the runtime database
+    credential could replay them within 120 seconds, once, for that session's latest contamination.
+  - In a single-role database the runtime owns the table, so privilege separation is nominal there.
+
+  Denials and notices name up to five revoked identifiers, or a count for larger cascades. The full cascade stays in
+  the lifecycle ledger.
 - `source_revoke` results above 8 KiB return counts and sha256 digests instead of key lists. A cascade over 500
   nodes fails closed with no change. There is no `restore_source`; recovery is a new source plus approved reinstatement.
 - Lifecycle approvals are bound to the exact action and target and are project scope only. Company-scope lifecycle is
@@ -259,9 +272,13 @@ decisions, E1 episodes, relations); it is not a second generic memory authority 
 - Retrieval carry-over: episode lifecycle state in historical queries is the current ledger state, not the state at
   `as_of` (fail-closed); episode support considers direct `derived_from` sources only; `experience_consolidation`
   keeps a status deny-list that covers every status the schema allows. The raw-chunk fallback defect is fixed in the closure stage (`_raw` applies the same dead-support gate; pinned by
-  `test_raw_chunk_of_a_company_item_whose_only_support_is_revoked_is_never_returned`). Not covered by E4: the
-  `knowledge_search`/embedding readers still return a company item whose only support is revoked (outside the E3
-  retrieval-integration clause; future cleanup).
+  `test_raw_chunk_of_a_company_item_whose_only_support_is_revoked_is_never_returned`). A company item whose only
+  support is revoked or inactive is excluded from every reader by one shared rule. The readers are `knowledge_get`
+  (metadata-only tombstone), `knowledge_search`, chunk/hybrid and semantic search (JSON and pgvector), and E3. The
+  company row itself is not mutated.
+
+  The rule does not evaluate transitive company support. Evidence with a NULL `source_id` and dangling relations do
+  not count as support.
 
 ## Licensing and supply chain
 

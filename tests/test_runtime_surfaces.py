@@ -32,6 +32,7 @@ def surface(monkeypatch, tmp_path):
     for name in ('mcp', 'mcp.server', 'mcp.server.fastmcp'):
         monkeypatch.setitem(sys.modules, name, ModuleType(name))
     sys.modules['mcp.server.fastmcp'].FastMCP = FastMCPRegistrationOnly
+    sys.modules['mcp.server.fastmcp'].Context = type('Context', (), {})
     sys.modules.pop('vres_os.mcp_server', None)
     module = importlib.import_module('vres_os.mcp_server')
     monkeypatch.setattr(module, '_project', lambda root='.': (7, SimpleNamespace(root=tmp_path,key='P',name='test')))

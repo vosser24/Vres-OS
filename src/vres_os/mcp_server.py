@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 
 from .approvals import ApprovalService
 from .artifacts import ArtifactService
@@ -311,16 +311,30 @@ def knowledge_lifecycle(request: dict[str, Any]) -> dict:
 
 
 @mcp.tool()
-def context_refresh_ack(request: dict[str, Any]) -> dict:
+def context_refresh_ack(request: dict[str, Any], ctx: Context | None = None) -> dict:
     """Parent-session attestation that context was re-derived excluding invalidated memory (attestation, not proof).
     Request: contaminated_event_key only (the LCE- key named by the contamination notice). The key never selects the
-    session: the PreToolUse hook attests the host session for exactly this key, and this call consumes that
-    single-use attestation; without it the call fails closed."""
-    r = _closed_request("context_refresh_ack", request, {"contaminated_event_key"})
+    session: the PreToolUse hook mints a single-use attestation for this host session, invocation and key and adds
+    it to the request; this call consumes it with the host-supplied invocation id. Without both it fails closed."""
+    r = _closed_request("context_refresh_ack", request, {"contaminated_event_key"}, {"attestation"})
     key = r["contaminated_event_key"]
     if not valid_event_key(key):
         raise ValueError("contaminated_event_key is not a lifecycle event key")
-    return ContextRefreshService().acknowledge_attested(_trusted_project_id(), contaminated_event_key=key)
+    return ContextRefreshService().acknowledge_attested(
+        _trusted_project_id(), contaminated_event_key=key, attestation=r.get("attestation"),
+        tool_use_id=_host_tool_use_id(ctx))
+
+
+def _host_tool_use_id(ctx: Context | None) -> str | None:
+    """The Claude Code host invocation id from MCP request meta (never from model-supplied arguments)."""
+    if ctx is None:
+        return None
+    try:
+        meta = ctx.request_context.meta
+    except (AttributeError, LookupError, ValueError):
+        return None
+    value = getattr(meta, "claudecode/toolUseId", None) if meta is not None else None
+    return value if isinstance(value, str) else None
 
 
 @mcp.tool()

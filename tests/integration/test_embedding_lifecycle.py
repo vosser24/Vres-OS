@@ -120,7 +120,9 @@ def test_shared_eligibility_predicate_truth_table_fails_closed(pg_project, case,
         got = conn.execute(
             f"""SELECT {_pred()} AS ok FROM (VALUES (%s::bigint,%s::bigint)) AS c(source_id,knowledge_id)
                 LEFT JOIN (SELECT 1::bigint AS id, %s::text AS status WHERE %s) s ON s.id=c.source_id
-                LEFT JOIN (SELECT 2::bigint AS id, %s::text AS status WHERE %s) k ON k.id=c.knowledge_id""",
+                LEFT JOIN (SELECT 2::bigint AS id, 7::bigint AS project_id, 'K-TRUTH'::text AS knowledge_key,
+                                  %s::text AS status WHERE %s) k
+                       ON k.id=c.knowledge_id""",  # project-scoped knowledge: the 040 company-support clause is vacuous
             (*owners, s_status, s_status != "<missing>", k_status, k_status != "<missing>")).fetchone()["ok"]
     assert got is expected  # never NULL: unknown/corrupt/missing state is ineligible
 

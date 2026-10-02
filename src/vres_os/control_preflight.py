@@ -8,7 +8,7 @@ from typing import Any, Callable
 from .config import ConfigStore
 from .db import connect
 from .session_contamination import (
-    REFRESH_CODE, attest_refresh_ack, contaminated_sessions_for_host_session, revoked_phrase, valid_event_key,
+    REFRESH_CODE, contaminated_sessions_for_host_session, issue_refresh_attestation, revoked_phrase, valid_event_key,
 )
 from .session_prompts import read_only_hold_from_metadata
 
@@ -219,16 +219,23 @@ def _ack_key(payload: dict[str, Any]) -> str | None:
     return value if valid_event_key(value) else None
 
 
+def _tool_use_id(payload: dict[str, Any]) -> str | None:
+    """Host-observed invocation id (also delivered to the MCP server as request meta claudecode/toolUseId)."""
+    value = payload.get("tool_use_id")
+    return value if isinstance(value, str) and 1 <= len(value) <= 300 else None
+
+
 def evaluate_contamination_preflight(
     payload: dict[str, Any],
     contaminations: list[dict[str, Any]],
-    attest: Callable[[str], bool] | None = None,
+    attest: Callable[[str, str], str | None] | None = None,
 ) -> dict[str, Any] | None:
     """Deny all but read-only tools and the parent's refresh acknowledgement while the session is contaminated.
 
-    The acknowledgement (exact registered name only) is admitted only after ``attest`` has recorded a single-use
-    attestation that THIS host session (the host-observed session_id) asked to acknowledge exactly its own latest
-    contamination event key. No attestation, or any attestation failure, denies (fail closed).
+    The acknowledgement (exact registered name only) is admitted only after ``attest(key, tool_use_id)`` has minted a
+    single-use attestation (migration 040) that THIS host session asked, in THIS host invocation, to acknowledge
+    exactly its own latest contamination event key; the tool input is then rewritten to carry the returned nonce.
+    No attestation, or any attestation failure, denies (fail closed). A denial never carries the nonce.
     """
     if payload.get("hook_event_name") != "PreToolUse":
         return None
@@ -241,15 +248,17 @@ def evaluate_contamination_preflight(
                      "by a subagent.")
     if recovery:
         key = _ack_key(payload)
-        attested = False
-        if key is not None and attest is not None:
+        tool_use_id = _tool_use_id(payload)
+        nonce = None
+        if key is not None and tool_use_id is not None and attest is not None:
             try:
-                attested = bool(attest(key))
+                nonce = attest(key, tool_use_id)
             except Exception as exc:
                 return _deny(f"Vres [{REFRESH_CODE}]: could not attest the current host session for '{recovery}', "
                              f"so it is fail-closed. Tool did not execute ({type(exc).__name__}).")
-        if attested:
-            return None
+        if isinstance(nonce, str) and nonce:
+            return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "updatedInput": {
+                "request": {"contaminated_event_key": key, "attestation": nonce}}}}
         return _deny(
             f"Vres [{REFRESH_CODE}]: '{recovery}' may acknowledge only the latest contamination event of this host "
             "session, as request {\"contaminated_event_key\": ...}; the supplied key is missing, malformed or not "
@@ -329,7 +338,8 @@ def main() -> int:
                     )
                 else:
                     decision = evaluate_contamination_preflight(
-                        payload, contaminations, attest=lambda key: attest_refresh_ack(sid, key))
+                        payload, contaminations,
+                        attest=lambda key, tool_use_id: issue_refresh_attestation(sid, key, tool_use_id))
         if decision is not None:
             json.dump(decision, sys.stdout, separators=(",", ":"))
             sys.stdout.write("\n")

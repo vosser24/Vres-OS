@@ -28,6 +28,29 @@ _LIVE_SQL_LIST = ",".join(f"'{s}'" for s in LIVE_KNOWLEDGE_STATUSES)
 _ALIAS = re.compile(r"[a-z_][a-z0-9_]*")
 
 
+def company_support_usable_sql(knowledge: str) -> str:
+    """Migration-040 addendum: the ONE support-eligibility rule for company knowledge, shared by every reader.
+
+    True for project rows (their own status rule governs them). A company row (project_id NULL) is usable only if it
+    has no support root at all (legitimate company authority) or at least one support root whose source status is
+    exactly 'active'. Support roots are knowledge_evidence sources and derived_from source relations. Revoked,
+    inactive, NULL or unknown-status-only support fails closed. The company row itself is never mutated.
+    """
+    if not isinstance(knowledge, str) or not _ALIAS.fullmatch(knowledge):
+        raise ValueError(f"Unsafe table alias {knowledge!r}")
+    k = knowledge
+    root = (f"(csu_s.id IN (SELECT csu_e.source_id FROM vres.knowledge_evidence csu_e WHERE csu_e.knowledge_id={k}.id)"
+            f" OR csu_s.source_key IN (SELECT csu_r.target_key FROM vres.relations csu_r WHERE "
+            f"csu_r.source_kind='knowledge' AND csu_r.source_key={k}.knowledge_key "
+            f"AND csu_r.relation_type='derived_from' AND csu_r.target_kind='source'))")
+    return (
+        f"({k}.project_id IS NOT NULL"
+        f" OR EXISTS (SELECT 1 FROM vres.sources csu_s WHERE {root} AND csu_s.status='active')"
+        f" OR NOT EXISTS (SELECT 1 FROM vres.sources csu_s WHERE {root}"
+        f" AND csu_s.status IS DISTINCT FROM 'active'))"
+    )
+
+
 def chunk_eligible_sql(chunk: str, source: str, knowledge: str) -> str:
     """Fail-closed SQL predicate: may the chunk aliased `chunk` (LEFT JOINed to its owners) be embedded or used?"""
     for alias in (chunk, source, knowledge):
@@ -37,7 +60,8 @@ def chunk_eligible_sql(chunk: str, source: str, knowledge: str) -> str:
     return (
         f"COALESCE(({c}.source_id IS NOT NULL AND {c}.knowledge_id IS NULL AND {s}.id={c}.source_id "
         f"AND {s}.status='active') OR ({c}.knowledge_id IS NOT NULL AND {c}.source_id IS NULL "
-        f"AND {k}.id={c}.knowledge_id AND {k}.status IN ({_LIVE_SQL_LIST})), false)"
+        f"AND {k}.id={c}.knowledge_id AND {k}.status IN ({_LIVE_SQL_LIST}) "
+        f"AND {company_support_usable_sql(k)}), false)"
     )
 
 

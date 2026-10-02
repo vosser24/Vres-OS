@@ -142,9 +142,11 @@ def test_source_revocation_invalidates_on_its_own_transaction_and_imports_no_wor
     assert "\"chunks_cleared\"" in src
 
 
-def test_no_migration_040_and_no_new_schema_for_chunk_d():
+def test_no_new_schema_for_chunk_d_beyond_the_approved_040_addendum():
     names = sorted(p.name for p in (SRC_DIR / "migrations").glob("*.sql"))
-    assert names[-1].startswith("039_") and not any(n.startswith("040") for n in names)
+    assert names[-1] == "040_context_refresh_attestation.sql" and not any(n.startswith("041") for n in names)
+    sql = (SRC_DIR / "migrations" / "040_context_refresh_attestation.sql").read_text(encoding="utf-8")
+    assert "knowledge_chunks" not in sql and "embedding" not in sql  # 040 adds no chunk/embedding schema
 
 
 # --- queue / claim / publish / search use the shared rule ---------------------------------------------------------

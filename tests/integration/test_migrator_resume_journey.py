@@ -133,6 +133,7 @@ def test_migrator_resumes_023_without_database_create(monkeypatch):
             "037_experience_episode_ledger.sql",
             "038_experience_transitions.sql",
             "039_experience_lifecycle_ledger.sql",
+            "040_context_refresh_attestation.sql",
         ]
         assert db.migrate() == expected
 
@@ -195,7 +196,8 @@ def test_migrator_resumes_023_without_database_create(monkeypatch):
             versions = {
                 row["version"]
                 for row in admin.execute(
-                    "SELECT version FROM vres.schema_migrations WHERE version LIKE '02%' OR version LIKE '03%'"
+                    "SELECT version FROM vres.schema_migrations "
+                    "WHERE version LIKE '02%' OR version LIKE '03%' OR version LIKE '04%'"
                 ).fetchall()
             }
             assert set(expected) <= versions
