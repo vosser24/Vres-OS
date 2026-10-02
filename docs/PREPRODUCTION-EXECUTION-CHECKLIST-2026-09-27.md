@@ -2,7 +2,7 @@
 
 Date: 2026-10-02  
 Repository: `vosser24/Vres-OS`  
-Authoritative main after #176 E3: `ddb0719d130fd45b12b6bdc9e1682378ace7ae64`
+Authoritative main after #176 E4: `a0a2769b99f4893733568194c0aa68e78e73aeab`
 
 ## Governing rule
 
@@ -158,7 +158,7 @@ Those belong to #169 / the applicable live embedding-runtime acceptance and were
 ---
 
 ### 4. #176 — Experience Intelligence / Governed Agent Learning
-Status: **ACTIVE — E1/E2/E3 DONE; E4 implementation A–G + migration-040 pre-validation closure complete; final E4 acceptance pending**
+Status: **ACTIVE — E1/E2/E3/E4 DONE; E5 capability/procedure experience integration NEXT**
 
 Durable plan:
 - issue #176;
@@ -269,8 +269,8 @@ Current E3 checkpoint (local Windows worktree; not yet pushed):
 Implementation tranches:
 - [x] E1 contracts + episode ledger;
 - [x] E2 transition verifier + safe consolidation;
-- [ ] E3 unified experience retrieval;
-- [ ] E4 temporal lifecycle + revocation;
+- [x] E3 unified experience retrieval;
+- [x] E4 temporal lifecycle + revocation;
 - [ ] E5 capability/procedure experience integration;
 - [ ] E6 observability + experience utility evidence;
 - [ ] E7 benchmark + security ladder;
@@ -416,7 +416,7 @@ At the beginning of every future implementation session:
 
 ## Current next action
 
-**#176 E4 is the first unfinished implementation boundary. The final migration-040 docs-complete candidate is `ce9067ab36716cb1f729466db168d002e1029c93`, tree `5cf813f19feb36e23f59dc6ddf632c38ac09e869`, on branch `issue-176-e4-temporal-lifecycle-revocation`. The remote branch now exists at that exact SHA; no PR existed at the 2026-10-02 ChatGPT handoff check. Do not reopen E4 product development unless exact-head CI or protected validation exposes a real blocker. Next: create/verify the E4 PR, obtain exact-head CI + artifact evidence on `ce9067ab...`, make the one final Vres freeze checkpoint required before `validation_prepare`, run exactly one protected `vres-os:validator` acceptance, then guarded merge and post-merge main CI. Do not start E5 until E4 is merged, post-main CI is green, and the E4 task is durably closed.**
+**#176 E5 — capability/procedure experience integration is the first unfinished implementation boundary. E4 is accepted, protected-reviewed, merged, and green on authoritative main `a0a2769b99f4893733568194c0aa68e78e73aeab`. Start E5 only from that exact main after reading the frozen Experience Intelligence plan and section 13 below. E5 scope is capability-centric experience retrieval; procedure/episode/feedback links; validated success/failure history; no opaque self-certified expert score; and no automatic agent prompt rewriting. Freeze a bounded E5 contract before implementation and preserve the targeted-test/full-suite/release-gate/protected-validation cadence.**
 
 **Execution cadence from this boundary:** use targeted tests for bounded corrections; do not rerun the full suite/release gate without changed candidate bytes or a concrete evidence gap. ChatGPT becomes the primary architecture/code/repository/PR/CI/handoff coordinator. Local Claude Code is reserved for Windows/local PostgreSQL/pgvector/installed-runtime/Visual Studio/live acceptance and machine-specific corrections. Never edit the same branch concurrently: transfer ownership only at an exact clean/pushed SHA.
 ---
@@ -518,3 +518,129 @@ Full remaining frozen pipeline after E4:
 - #169 integrated Windows / Visual Studio live acceptance;
 - #170 production readiness / go-live;
 - post-#170 Organizational Architecture & Specialist Intelligence / full-team enhancement backlog.
+
+
+---
+
+### 13. 2026-10-02 authoritative continuation override — #176 E4 CLOSED / E5 NEXT
+Status: **E4 DONE — E5 IS THE ONLY NEXT #176 IMPLEMENTATION TRANCHE**
+
+This section supersedes section 12 and all older E3/E4 current-action text. Historical evidence remains historical and must not be rewritten.
+
+#### E4 accepted repository boundary
+
+- authoritative main before E4: `ddb0719d130fd45b12b6bdc9e1682378ace7ae64`;
+- E4 branch: `issue-176-e4-temporal-lifecycle-revocation`;
+- PR: **#182** — merged;
+- exact protected-reviewed head: `553e9d1398073b4cf0a4a4b282b2f3f3ff86ec2b`;
+- exact reviewed tree: `6eb856f2c075b2194ccabb59b4a6e906110e4a1d`;
+- full E4 review scope: **65 files — 41 added / 24 modified / 0 deleted**;
+- frozen E4 base contract commit: `a69b836fa3fbf6a97c00f830b05495c48c5af563`;
+- migration-040 addendum retained;
+- schema: 40 migrations, latest 040;
+- MCP surface: 51 tools.
+
+#### Exact-head CI
+
+- Vres-OS CI: **#470**;
+- run id: `37018126950`;
+- event: `pull_request`;
+- attempt: 1;
+- exact workflow head: `553e9d1398073b4cf0a4a4b282b2f3f3ff86ec2b`;
+- conclusion: **SUCCESS**;
+- full PostgreSQL-backed suite: **2196 passed / 3 skipped**;
+- installed-runtime smoke: **PASS**;
+- release gate: `PASSED_WITH_EXPLICIT_LIVE_GATES`;
+- release-gate unit/static suite: **1517 passed / 682 expected DB/live skips**;
+- evidence artifact: `11231412578`;
+- artifact name: `release-gate-evidence`;
+- artifact digest: `sha256:764ac4524c32681f96cc4e550ddffb54c4d48eca16832340105d5391324c1d5c`.
+
+CI discovered three acceptance-harness corrections after the earlier docs-complete candidate `ce9067ab...`. They changed only:
+- `tests/test_control_preflight.py`;
+- `tests/integration/test_validation_reply_guard_journey.py`.
+
+No E4 product/runtime file changed in those corrections.
+
+#### Protected validation
+
+Historical protected lifecycle failure is preserved:
+- checkpoint: `CP-20261002-ce4cd17ce2`;
+- request: `VAL-72e66d088bec405a`;
+- terminal status: **rejected**;
+- no E4 candidate defect established.
+
+Final protected acceptance:
+- retry freeze checkpoint: `CP-20261002-836cb0cf41`;
+- request: `VAL-4dbf9f69b1744e6b`;
+- result: **PASS**;
+- task validation status: **passed**;
+- completed_at: `2026-10-02T18:46:55+03:00`;
+- canonical validator: `vres-os:validator`;
+- host-observed model: **`claude-fable-5-1`**;
+- host agent id: `a757f62be54532130`;
+- report: **14/14 checks passed**, no failed or `not_run` checks;
+- all 65 reviewed artifact hashes matched the frozen candidate.
+
+The successful retry used a current-turn freeze checkpoint so the reply gate correctly returned `validation_in_flight`. The validator was instructed to avoid background/nested work and to return its canonical JSON report before terminal stop.
+
+#### Guarded merge and post-main acceptance
+
+- expected-head merge guard: `553e9d1398073b4cf0a4a4b282b2f3f3ff86ec2b`;
+- merge method: merge commit;
+- new authoritative main / merge commit: **`a0a2769b99f4893733568194c0aa68e78e73aeab`**;
+- post-merge Vres-OS CI: **#471**;
+- run id: `37029621024`;
+- event: **push**;
+- attempt: 1;
+- exact main head: `a0a2769b99f4893733568194c0aa68e78e73aeab`;
+- conclusion: **SUCCESS**;
+- full PostgreSQL-backed suite: **2196 passed / 3 skipped**;
+- installed-runtime smoke: **PASS**;
+- release gate: `PASSED_WITH_EXPLICIT_LIVE_GATES`;
+- release-gate unit/static suite: **1517 passed / 682 expected DB/live skips**;
+- release-gate git commit: `a0a2769b99f4893733568194c0aa68e78e73aeab`;
+- dirty: false;
+- evidence artifact: `11236608634`;
+- artifact name: `release-gate-evidence`;
+- artifact digest: `sha256:0da77dfb4357f4b6d1413702192365cc15c11c2d0aa0305fdac433ecc6690758`.
+
+#### E4 shipped boundary
+
+E4 now provides:
+- append-only temporal lifecycle audit;
+- retire/reinstate/challenge/supersession/refresh controls;
+- provenance-driven source revocation;
+- bounded multi-source survival analysis;
+- JSON + pgvector embedding invalidation/rebuild fencing;
+- lifecycle-aware E3 retrieval under `176.e4.v1`;
+- contaminated-session enforcement;
+- protected context-refresh attestation through migration 040;
+- revoked-only company-support exclusion across current reader paths;
+- MCP surfaces `source_revoke`, `knowledge_lifecycle`, and `context_refresh_ack`.
+
+Documented residual risks remain carried forward into E5–E8 / #169 / #170 as appropriate and do not reopen E4 unless new evidence proves a frozen-contract/security/data-integrity violation.
+
+#### E5 next boundary
+
+**E5 — capability/procedure experience integration is now the only allowed #176 implementation tranche.**
+
+Frozen-plan scope:
+- capability-centric experience retrieval;
+- procedure/episode/feedback links;
+- validated success/failure history;
+- no opaque self-certified expert score;
+- no automatic agent prompt rewriting.
+
+Execution requirements:
+1. start from authoritative main `a0a2769b99f4893733568194c0aa68e78e73aeab`;
+2. read issue #176 and the frozen Experience Intelligence plan before implementation;
+3. freeze a bounded E5 contract before code;
+4. preserve existing E1–E4 truth owners and authority boundaries;
+5. use targeted tests for bounded defects/corrections;
+6. run full suite + release gate once on the coherent final E5 candidate;
+7. use protected Fable/high acceptance if the E5 contract classifies the tranche as consequential governance/security;
+8. guarded merge + post-main CI before E6;
+9. do not begin E6 before E5 is fully accepted and closed.
+
+**#165 and later program items remain blocked until #176 E5–E8 are complete and E9 physical criteria are carried into #169.**
