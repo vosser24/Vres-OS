@@ -39,7 +39,7 @@ from .relations import _ALLOWED_KINDS
 from .session_contamination import mark_open_sessions_contaminated
 
 __all__ = ["APPROVAL_TYPE", "MAX_DEPTH", "MAX_NODES", "NodeInfo", "ProvenanceBudgetExceeded",
-           "SourceRevocationService", "analyse", "bounded_detail", "ledger_key"]
+           "SourceRevocationService", "analyse", "bound_public_result", "bounded_detail", "ledger_key"]
 
 MAX_DEPTH = 4
 MAX_NODES = 500
@@ -268,6 +268,23 @@ def bounded_detail(base: dict[str, Any], lists: dict[str, list[str]]) -> dict[st
         canonical = json.dumps(sorted(keys), separators=(",", ":"))
         detail[f"{name}_sha256"] = hashlib.sha256(canonical.encode()).hexdigest()
     return detail
+
+
+def bound_public_result(result: dict[str, Any], limit: int = MAX_DETAIL_BYTES) -> dict[str, Any]:
+    """Public (MCP) form of a revocation result: key lists are replaced by count + sha256 above the 8 KiB bound.
+
+    The full key lists stay in the ledger; a replay of the same request yields the same bounded form.
+    """
+    if len(json.dumps(result, sort_keys=True, default=str).encode()) <= limit:
+        return result
+    out = {k: v for k, v in result.items() if not isinstance(v, list)}
+    out["keys_digest_only"] = True
+    for name, value in result.items():
+        if isinstance(value, list):
+            canonical = json.dumps(sorted(map(str, value)), separators=(",", ":"))
+            out[f"{name}_count"] = len(value)
+            out[f"{name}_sha256"] = hashlib.sha256(canonical.encode()).hexdigest()
+    return out
 
 
 def _lock_source(conn, source_key: str) -> dict[str, Any] | None:

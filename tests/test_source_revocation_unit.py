@@ -247,4 +247,5 @@ def test_only_source_revocation_writes_the_revoked_status():
             readers.append((path.name, consts))
     assert offenders == []
     # The only other code-level use is the read-side exclusion tuple.
-    assert readers == [("knowledge_status.py", ["revoked"])]
+    # E4 Chunk G: session_contamination.py only words the revoked-identifier phrase shown to the user (no status write).
+    assert [r for r in readers if r[0] != "session_contamination.py"] == [("knowledge_status.py", ["revoked"])]

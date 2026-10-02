@@ -14,7 +14,7 @@ from .project import discover_project
 from .redaction import redact_text
 from .reply_guard import begin_reply_turn, inspect_stop_guard, mark_stop_guard_blocked
 from .repository import PendingValidationError, Repository
-from .session_contamination import contamination_notice
+from .session_contamination import contamination_notice, revoked_phrase
 from .session_lifecycle import (
     canonical_session_end_reason,
     cleanup_materialized_secrets_if_last_session,
@@ -73,7 +73,8 @@ def _contamination_report(project_id: int, sid: str | None) -> str | None:
     if not notice:
         return None
     return (f"VRES_CONTEXT_REFRESH_REQUIRED: {notice['message']} ({notice['status']}; reason class: "
-            f"{notice['reason_class']}; contamination event: {notice['contamination_event_key']}). {notice['action']}")
+            f"{notice['reason_class']}; contamination event: {notice['contamination_event_key']}; "
+            f"{revoked_phrase(notice)}). {notice['action']}")
 
 
 def _with_report(text: str, report: str | None) -> str:

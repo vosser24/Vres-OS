@@ -17,13 +17,16 @@ from .experience_lifecycle import _append_event as append_ledger_event
 from .knowledge_status import revocation_reason_class
 
 __all__ = ["ContextRefreshService", "contaminated_sessions_for_host_session", "contamination_notice",
-           "contamination_state", "is_contaminated", "mark_open_sessions_contaminated", "valid_event_key"]
+           "contamination_state", "is_contaminated", "mark_open_sessions_contaminated", "revoked_phrase",
+           "valid_event_key"]
 
 _EVENT_KEY = re.compile(r"LCE-[0-9a-f]{32}")
 _MARK_REASON = "Open session may have loaded memory affected by a source revocation."
 _ACK_REASON = "Parent session attested a context refresh excluding invalidated memory (attestation, not proof)."
 _LIST_FIELDS = ("revoked_knowledge", "revoked_episodes")
 REFRESH_CODE = "context_refresh_required"
+MAX_NAMED_REVOKED = 5
+_SAFE_KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}")
 
 
 def valid_event_key(value: Any) -> bool:
@@ -53,10 +56,34 @@ def _latest(conn, project_id: int, session_key: str) -> tuple[dict | None, dict 
     return by_action.get("context_contaminated"), by_action.get("context_refreshed")
 
 
+def _revoked_targets(conn, project_id: int, c: dict[str, Any] | None) -> dict[str, Any]:
+    """Safe revoked identifiers of one contamination: up to MAX_NAMED_REVOKED keys, else a count. Never content."""
+    detail = c["detail"] if c and isinstance(c["detail"], dict) else {}
+    keys = sorted({k for name in _LIST_FIELDS for k in detail.get(name) or []
+                   if isinstance(k, str) and _SAFE_KEY.fullmatch(k)})
+    if not detail.get("keys_digest_only") and len(keys) <= MAX_NAMED_REVOKED:
+        return {"revoked_keys": keys, "revoked_count": len(keys)}
+    count = len(keys)
+    cause = detail.get("cause_event_key")
+    if detail.get("keys_digest_only") and valid_event_key(cause):
+        count = conn.execute("SELECT count(*) AS n FROM vres.experience_lifecycle_events WHERE project_id=%s "
+                             "AND action='invalidate_derived' AND detail->>'cause_event_key'=%s",
+                             (project_id, cause)).fetchone()["n"]
+    return {"revoked_keys": [], "revoked_count": int(count)}
+
+
+def revoked_phrase(targets: dict[str, Any]) -> str:
+    keys, count = targets.get("revoked_keys") or [], int(targets.get("revoked_count") or 0)
+    if keys:
+        return "revoked: " + ", ".join(keys)
+    return f"{count} revoked memory items (identifiers omitted; see the lifecycle ledger)" if count else         "no derived memory was revoked"
+
+
 def contamination_state(conn, project_id: int, session_key: str) -> dict[str, Any]:
     c, r = _latest(conn, project_id, session_key)
     return {"contaminated": is_contaminated(c, r), "event_key": c["event_key"] if c else None,
-            "reason_class": revocation_reason_class(c["cause_kind"]) if c else None}
+            "reason_class": revocation_reason_class(c["cause_kind"]) if c else None,
+            **_revoked_targets(conn, project_id, c)}
 
 
 def mark_open_sessions_contaminated(conn, *, project_id: int, source_key: str, approval_event_id: int | None,
@@ -94,7 +121,8 @@ def contaminated_sessions_for_host_session(provider_session_id: str) -> list[dic
             state = contamination_state(conn, row["project_id"], row["session_key"])
             if state["contaminated"]:
                 out.append({"project_id": row["project_id"], "session_key": row["session_key"],
-                            "event_key": state["event_key"], "reason_class": state["reason_class"]})
+                            "event_key": state["event_key"], "reason_class": state["reason_class"],
+                            "revoked_keys": state["revoked_keys"], "revoked_count": state["revoked_count"]})
     return out
 
 
@@ -110,6 +138,7 @@ def contamination_notice(conn, project_id: int, provider_session_id: str) -> dic
         return None
     return {"status": REFRESH_CODE, "message": "context refresh required",
             "contamination_event_key": state["event_key"], "reason_class": state["reason_class"],
+            "revoked_keys": state["revoked_keys"], "revoked_count": state["revoked_count"],
             "action": "Re-read current knowledge, exclude invalidated memory, then acknowledge from the parent "
                       "session via context_refresh_ack with this contamination_event_key. Until then only "
                       "read-only tools run."}

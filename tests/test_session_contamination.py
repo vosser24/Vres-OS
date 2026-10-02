@@ -32,6 +32,10 @@ def _payload(tool, *, sid="S-HOST", agent_id=None, tool_input=None):
     return value
 
 
+def _ack(key=C1, **kw):
+    return _payload(ACK, tool_input={"request": {"contaminated_event_key": key}}, **kw)
+
+
 def _contaminated(event_key=C1, **extra):
     return {"project_id": 7, "session_key": "SESSION-abc", "event_key": event_key,
             "reason_class": "source_revoked", **extra}
@@ -90,7 +94,7 @@ def test_event_key_shape_is_validated():
 # --- pre-tool enforcement (pure) -------------------------------------------------------------------------------------
 
 def test_clean_session_allows_everything():
-    for tool in ("Bash", "Write", "Agent", ACK, _VRES_PREFIX + "task_checkpoint"):
+    for tool in ("Bash", "Write", "Agent", _VRES_PREFIX + "task_checkpoint"):
         assert control_preflight.evaluate_contamination_preflight(_payload(tool), []) is None
 
 
@@ -98,7 +102,8 @@ def test_contaminated_session_allows_only_existing_safe_tools_and_the_parent_rec
     contaminations = [_contaminated()]
     allowed = sorted(_SAFE_HOST_TOOLS) + [_VRES_PREFIX + t for t in sorted(_SAFE_VRES_TOOLS)] + [ACK]
     for tool in allowed:
-        assert control_preflight.evaluate_contamination_preflight(_payload(tool), contaminations) is None, tool
+        payload = _ack() if tool == ACK else _payload(tool)
+        assert control_preflight.evaluate_contamination_preflight(payload, contaminations) is None, tool
     denied = ["Bash", "Write", "Edit", "Agent", "WebFetch", "TaskStop", "NotebookEdit",
               _VRES_PREFIX + "task_checkpoint", _VRES_PREFIX + "knowledge_promote",
               _VRES_PREFIX + "knowledge_get", _VRES_PREFIX + "experience_retrieve"]
@@ -111,7 +116,7 @@ def test_contaminated_session_allows_only_existing_safe_tools_and_the_parent_rec
 @pytest.mark.parametrize("tool", [
     "Read2", "ReadWrite", "read", "mcp__other__Read", "mcp__plugin_vres-os_vres__vres_status_set",
     "mcp__plugin_vres-os_vres__context_refresh_ack_and_write", "mcp__plugin_vres-os_vres__",
-    "mcp__plugin_other__context_refresh_ack", "context_refresh_ack", "mcp__plugin_vres-os_vres__Read",
+    "mcp__plugin_other__context_refresh_ack", "mcp__plugin_vres-os_vres__Read",
 ])
 def test_harmless_looking_mutation_capable_names_are_denied(tool):
     _reason(control_preflight.evaluate_contamination_preflight(_payload(tool), [_contaminated()]))
@@ -156,7 +161,7 @@ def test_hold_and_contamination_are_independent():
     assert control_preflight.evaluate_control_preflight(_payload("Bash"), None) is None
     assert control_preflight.evaluate_contamination_preflight(_payload("Bash"), [_contaminated()]) is not None
     # the recovery tool is allowed by contamination but stays a mutation for the hold
-    assert control_preflight.evaluate_contamination_preflight(_payload(ACK), [_contaminated()]) is None
+    assert control_preflight.evaluate_contamination_preflight(_ack(), [_contaminated()]) is None
     assert control_preflight.evaluate_control_preflight(_payload(ACK), hold) is not None
 
 
@@ -198,8 +203,8 @@ def test_hook_denies_mutation_while_contaminated_using_the_host_session_id(monke
 
 def test_hook_allows_parent_recovery_tool_and_denies_subagent_recovery(monkeypatch, capsys):
     _wire(monkeypatch, contaminations=[_contaminated()])
-    assert _run_main(monkeypatch, capsys, _payload(ACK)) == (0, "", "")
-    code, out, _ = _run_main(monkeypatch, capsys, _payload(ACK, agent_id="agent-1"))
+    assert _run_main(monkeypatch, capsys, _ack()) == (0, "", "")
+    code, out, _ = _run_main(monkeypatch, capsys, _ack(agent_id="agent-1"))
     assert code == 0 and json.loads(out)["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
@@ -262,8 +267,10 @@ def test_contamination_module_writes_no_session_rows_or_metadata():
     assert "metadata" not in text
 
 
-def test_mcp_surface_unchanged_no_chunk_g_tools():
-    # Source scan (the served-tool registry is replaced by other tests in a full run); 48-tool count: runtime test.
-    src = "\n".join(p.read_text(encoding="utf-8") for p in Path("src/vres_os").glob("mcp*.py"))
+def test_chunk_g_registers_exactly_the_three_tools_as_thin_adapters():
+    # Source scan (the served-tool registry is replaced by other tests in a full run); real registry: surface test.
+    src = "".join(p.read_text(encoding="utf-8") for p in Path("src/vres_os").glob("mcp*.py"))
     for name in ("context_refresh_ack", "source_revoke", "knowledge_lifecycle"):
+        assert len(re.findall(rf"def {name}\(", src)) == 1
+    for name in ("knowledge_challenge", "knowledge_supersede_lifecycle", "context_contaminate", "context_refresh"):
         assert not re.search(rf"def {name}\(", src)

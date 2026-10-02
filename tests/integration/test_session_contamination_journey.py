@@ -375,7 +375,7 @@ def test_hook_denies_mutation_while_contaminated_then_passes_after_ack(pg_projec
     for tool in ("Bash", "Write", "Agent", _VRES_PREFIX + "task_checkpoint"):
         entered, reason = _host(monkeypatch, capsys, tool, sid)
         assert entered == [] and "context refresh required" in reason and c in reason
-        assert s not in reason and k not in reason and "TOPSECRETSTATEMENT" not in reason
+        assert k in reason and "TOPSECRETSTATEMENT" not in reason  # E4 Chunk G: revoked identifiers are named
     # a fake clean session id inside tool_input is ignored; only the host session_id counts
     _, clean_key = _open(pg_project, "clean-host-session")
     entered, _ = _host(monkeypatch, capsys, "Bash", sid, tool_input={"session_id": "clean-host-session"})
@@ -384,8 +384,11 @@ def test_hook_denies_mutation_while_contaminated_then_passes_after_ack(pg_projec
     assert _host(monkeypatch, capsys, "Bash", sid, agent_id="agent-9")[0] == []
     assert _host(monkeypatch, capsys, ACK, sid, agent_id="agent-9")[0] == []
     # safe tools and the parent recovery tool stay available
-    for tool in ("Read", _VRES_PREFIX + "vres_status", ACK):
+    for tool in ("Read", _VRES_PREFIX + "vres_status"):
         assert _host(monkeypatch, capsys, tool, sid)[0] == [tool]
+    # E4 Chunk G: the recovery tool is admitted only with a contamination event key of this host session
+    assert _host(monkeypatch, capsys, ACK, sid)[0] == []
+    assert _host(monkeypatch, capsys, ACK, sid, tool_input={"request": {"contaminated_event_key": c}})[0] == [ACK]
     _ack(pg_project, sid, c)
     assert _host(monkeypatch, capsys, "Bash", sid) == (["Bash"], None)
 
@@ -466,7 +469,7 @@ def test_resume_context_carries_a_read_only_contamination_notice(pg_project):
     notice = repo.resume_context(pg_project, provider_session_id=sid)["contamination_notice"]
     assert notice["status"] == "context_refresh_required" and notice["contamination_event_key"] == c
     assert notice["reason_class"] == "source_revoked" and "context_refresh_ack" in notice["action"]
-    assert s not in json.dumps(notice) and k not in json.dumps(notice)
+    assert k in json.dumps(notice) and "TOPSECRETSTATEMENT" not in json.dumps(notice)
     assert _session_events(pg_project) == before  # read-only
     _ack(pg_project, sid, c)
     assert "contamination_notice" not in repo.resume_context(pg_project, provider_session_id=sid)

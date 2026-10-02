@@ -235,6 +235,28 @@ decisions, E1 episodes, relations); it is not a second generic memory authority 
 - Live proof of the packaged tool on the target host is a separate gate; see the E3 handoff for what was and was
   not exercised.
 
+### Temporal lifecycle and revocation (#176 E4)
+
+- Forgetting controls use, not history: retire, supersede and revoke never delete sources, evidence, episodes or ledger
+  rows. Revoked memory is a metadata-only tombstone in historical retrieval; a tombstone still discloses that a
+  revoked item (by key) matched the query. Physical erasure of source bytes is not provided.
+- Contamination is an attestation, not proof. Vres records no consumption of context, so every open session of the
+  project is marked "may have loaded" on revocation; `context_refresh_ack` is the Chairman's attestation that context
+  was re-derived. Checkpoint prose and transcript text are not scanned, and artifacts already written are not cleansed.
+- While contaminated, the PreToolUse hook denies every Vres tool except the safe list and `context_refresh_ack`, and
+  admits that call only for a contamination event of the host session. Without the hook running, the MCP tool trusts
+  any valid contamination event key of the project. Denials and notices name up to five revoked identifiers, or a
+  count for larger cascades; the full cascade stays in the lifecycle ledger.
+- `source_revoke` results above 8 KiB return counts and sha256 digests instead of key lists. A cascade over 500
+  nodes fails closed with no change. There is no `restore_source`; recovery is a new source plus approved reinstatement.
+- Lifecycle approvals are bound to the exact action and target and are project scope only. Company-scope lifecycle is
+  deferred. Legacy `KnowledgeService.update/supersede` service methods remain callable internally without the project
+  lifecycle lock; the public `knowledge_promote(status='challenged')` and `knowledge_supersede` tools now route through
+  the ledgered lifecycle service and need an approval and a reason.
+- Retrieval carry-over: episode lifecycle state in historical queries is the current ledger state, not the state at
+  `as_of` (fail-closed); episode support considers direct `derived_from` sources only; `experience_consolidation`
+  keeps a status deny-list that covers every status the schema allows.
+
 ## Licensing and supply chain
 
 Vres source is MIT. Third-party packages/models have their own licenses; the PDF dependency is now pypdf,

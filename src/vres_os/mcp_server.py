@@ -17,6 +17,7 @@ from .codex_handoff import CodexHandoffService, HandoffError
 from .config import ConfigStore
 from .db import migrate
 from .embeddings import EmbeddingService
+from .experience_lifecycle import ExperienceLifecycleService
 from .experience_retrieval import ExperienceRetrievalService
 from .knowledge import KnowledgeService
 from .model_policy import ModelPolicyService
@@ -28,6 +29,8 @@ from .refresh import RefreshService
 from .registry import RegistryService
 from .review import ReviewQueueService
 from .repository import Repository
+from .session_contamination import ContextRefreshService, valid_event_key
+from .source_revocation import SourceRevocationService, bound_public_result
 from .sources import SourceService
 from .redaction import redact_text
 from .metrics import validate_metrics
@@ -255,6 +258,80 @@ def experience_retrieve(request: dict[str, Any]) -> dict:
     return ExperienceRetrievalService().retrieve({**request, "project_id": _trusted_project_id()})
 
 
+def _closed_request(tool: str, request: Any, required: set[str], optional: set[str] = frozenset()) -> dict[str, Any]:
+    """Closed request schema (FastMCP ignores extra flat arguments): unknown fields and project_id are rejected."""
+    if not isinstance(request, dict):
+        raise ValueError(f"{tool} takes a request object")
+    if "project_id" in request:
+        raise ValueError(f"{tool} binds the session project; project_id is not accepted")
+    unknown = sorted(str(k)[:40] for k in set(request) - required - optional)
+    if unknown:
+        raise ValueError(f"{tool}: unknown request field(s): {', '.join(unknown)}")
+    missing = sorted(required - set(request))
+    if missing:
+        raise ValueError(f"{tool}: missing required field(s): {', '.join(missing)}")
+    return request
+
+
+@mcp.tool()
+def source_revoke(request: dict[str, Any]) -> dict:
+    """Revoke a project source and cascade to derived memory (approval-bound, project scope, idempotent on
+    source_key + approval_key). Request: source_key, approval_key, reason (required), task_key. The approval must be
+    an e4_lifecycle approval for exactly revoke_source:<source_key>. Large results return counts and sha256 digests
+    instead of key lists (the full cascade stays in the lifecycle ledger)."""
+    r = _closed_request("source_revoke", request, {"source_key", "approval_key", "reason"}, {"task_key"})
+    result = SourceRevocationService().revoke_source(
+        r["source_key"], project_id=_trusted_project_id(), approval_key=r["approval_key"], reason=r["reason"],
+        task_key=r.get("task_key"))
+    return bound_public_result(result)
+
+
+@mcp.tool()
+def knowledge_lifecycle(request: dict[str, Any]) -> dict:
+    """Retire, reinstate or refresh project knowledge (approval-bound, project scope, idempotent). Request: action
+    (retire|reinstate|refresh), knowledge_key, approval_key, reason (required), task_key, review_after (ISO
+    timestamp with timezone; refresh only). Supersede and challenge stay on knowledge_supersede/knowledge_promote."""
+    r = _closed_request("knowledge_lifecycle", request, {"action", "knowledge_key", "approval_key", "reason"},
+                        {"task_key", "review_after"})
+    action = r["action"]
+    if action not in {"retire", "reinstate", "refresh"}:
+        raise ValueError("knowledge_lifecycle action must be retire, reinstate or refresh")
+    if (action == "refresh") != ("review_after" in r):
+        raise ValueError("review_after is required for refresh and accepted only for refresh")
+    kw = dict(project_id=_trusted_project_id(), approval_key=r["approval_key"], reason=r["reason"],
+              task_key=r.get("task_key"))
+    service = ExperienceLifecycleService()
+    if action == "refresh":
+        try:
+            review_after = datetime.fromisoformat(str(r["review_after"]))
+        except ValueError as exc:
+            raise ValueError("review_after must be an ISO timestamp with timezone") from exc
+        return service.refresh(r["knowledge_key"], review_after=review_after, **kw)
+    return getattr(service, action)(r["knowledge_key"], **kw)
+
+
+@mcp.tool()
+def context_refresh_ack(request: dict[str, Any]) -> dict:
+    """Parent-session attestation that context was re-derived excluding invalidated memory (attestation, not proof).
+    Request: contaminated_event_key only (the LCE- key named by the contamination notice). The session is resolved
+    from that event; the PreToolUse hook admits the call only when the key belongs to the host session."""
+    from .db import connect
+    r = _closed_request("context_refresh_ack", request, {"contaminated_event_key"})
+    key = r["contaminated_event_key"]
+    if not valid_event_key(key):
+        raise ValueError("contaminated_event_key is not a lifecycle event key")
+    pid = _trusted_project_id()
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT s.provider_session_id FROM vres.experience_lifecycle_events e JOIN vres.sessions s "
+            "ON s.project_id=e.project_id AND s.session_key=e.session_key AND s.provider='claude' "
+            "AND s.ended_at IS NULL WHERE e.project_id=%s AND e.event_key=%s AND e.action='context_contaminated'",
+            (pid, key)).fetchone()
+    if not row:
+        raise ValueError("unknown_contamination: no open session of this project has that contamination event")
+    return ContextRefreshService().acknowledge(pid, row["provider_session_id"], contaminated_event_key=key)
+
+
 @mcp.tool()
 def source_register(
     source_type: str,
@@ -331,9 +408,17 @@ def knowledge_promote(
     confidence: float | None = None,
     review_after: str | None = None,
     approval_key: str | None = None,
+    reason: str | None = None,
 ) -> dict:
-    """Promote/challenge/reject knowledge through the lifecycle; evidence/approval gates are enforced by the service."""
+    """Promote/reject knowledge through the lifecycle; evidence/approval gates are enforced by the service.
+    Challenge is an E4 lifecycle event: status='challenged' requires approval_key (e4_lifecycle) and reason."""
     _require_node("knowledge", knowledge_key, write=True)
+    if status == "challenged":
+        if not approval_key or not reason:
+            raise ValueError("challenge requires approval_key and reason (E4 lifecycle approval)")
+        ExperienceLifecycleService().challenge(
+            knowledge_key, project_id=_trusted_project_id(), approval_key=approval_key, reason=reason)
+        return KnowledgeService().get(knowledge_key)
     parsed = datetime.fromisoformat(review_after) if review_after else None
     return KnowledgeService().update(
         knowledge_key, status=status, confidence=confidence, review_after=parsed,
@@ -342,12 +427,17 @@ def knowledge_promote(
 
 
 @mcp.tool()
-def knowledge_supersede(old_key: str, new_key: str) -> dict:
-    """Replace knowledge without rewriting history. The replacement must be at least as mature and same scope/type."""
+def knowledge_supersede(old_key: str, new_key: str, approval_key: str | None = None, reason: str | None = None) -> dict:
+    """Replace knowledge without rewriting history (E4 lifecycle: ledgered, idempotent). Requires approval_key
+    (e4_lifecycle approval for supersede:<old_key>:<new_key>) and reason; the replacement must be at least as mature
+    and same scope/type."""
     _require_node("knowledge", old_key, write=True)
     _require_node("knowledge", new_key, write=True)
-    KnowledgeService().supersede(old_key, new_key)
-    return {"superseded": old_key, "replacement": new_key}
+    if not approval_key or not reason:
+        raise ValueError("supersession requires approval_key and reason (E4 lifecycle approval)")
+    result = ExperienceLifecycleService().supersede(
+        old_key, new_key, project_id=_trusted_project_id(), approval_key=approval_key, reason=reason)
+    return {"superseded": old_key, "replacement": new_key, **result}
 
 
 @mcp.tool()

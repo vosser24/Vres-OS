@@ -7,7 +7,7 @@ from typing import Any
 
 from .config import ConfigStore
 from .db import connect
-from .session_contamination import REFRESH_CODE, contaminated_sessions_for_host_session
+from .session_contamination import REFRESH_CODE, contaminated_sessions_for_host_session, revoked_phrase
 from .session_prompts import read_only_hold_from_metadata
 
 _SAFE_HOST_TOOLS = {
@@ -198,30 +198,57 @@ def evaluate_control_preflight(
     )
 
 
+def _recovery_name(tool_name: str) -> str | None:
+    """Bare or host-prefixed registered name when it is a recovery tool, else None (exact match only)."""
+    bare = tool_name[len(_VRES_PREFIX):] if tool_name.startswith(_VRES_PREFIX) else tool_name
+    return bare if bare in _CONTAMINATION_RECOVERY_TOOLS else None
+
+
+def _ack_key(payload: dict[str, Any]) -> str | None:
+    tool_input = payload.get("tool_input")
+    value = tool_input.get("contaminated_event_key") if isinstance(tool_input, dict) else None
+    if value is None and isinstance(tool_input, dict) and isinstance(tool_input.get("request"), dict):
+        value = tool_input["request"].get("contaminated_event_key")
+    return value if isinstance(value, str) else None
+
+
 def evaluate_contamination_preflight(
     payload: dict[str, Any],
     contaminations: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
-    """Deny all but read-only tools and the parent's refresh acknowledgement while the session is contaminated."""
+    """Deny all but read-only tools and the parent's refresh acknowledgement while the session is contaminated.
+
+    The acknowledgement is allowed only for a contamination event key that belongs to THIS host session
+    (the host-observed session_id); a key of another session, or any key while clean, is denied (fail closed).
+    """
     if payload.get("hook_event_name") != "PreToolUse":
         return None
     tool_name = str(payload.get("tool_name") or "").strip()
     if not tool_name or is_read_only_tool(tool_name):
         return None
-    recovery = tool_name.startswith(_VRES_PREFIX) and tool_name[len(_VRES_PREFIX):] in _CONTAMINATION_RECOVERY_TOOLS
+    recovery = _recovery_name(tool_name)
     if recovery and _host_agent_id(payload):
         return _deny("Vres context refresh acknowledgement is parent-session authority and cannot be invoked "
                      "by a subagent.")
-    if recovery or not contaminations:
+    if recovery:
+        own = {str(c.get("event_key")) for c in contaminations}
+        if _ack_key(payload) in own:
+            return None
+        return _deny(
+            f"Vres [{REFRESH_CODE}]: '{recovery}' may acknowledge only a contamination event of this host session; "
+            "the supplied key is missing or not this session's. Nothing executed.")
+    if not contaminations:
         return None
     keys = sorted({str(c.get("event_key")) for c in contaminations})
     classes = sorted({str(c.get("reason_class")) for c in contaminations})
+    revoked = "; ".join(sorted({revoked_phrase(c) for c in contaminations}))
     return _deny(
         f"Vres [{REFRESH_CODE}]: context refresh required. This session may have loaded memory that a later "
-        f"lifecycle change invalidated (reason class: {', '.join(classes)}; contamination event: {', '.join(keys)}). "
+        f"lifecycle change invalidated (reason class: {', '.join(classes)}; contamination event: {', '.join(keys)}; "
+        f"{revoked}). "
         f"Tool '{tool_name}' did not execute. Read-only inspection may continue; the parent session must re-read "
         "current knowledge, exclude the invalidated memory, and acknowledge the latest contamination event with "
-        "context_refresh_ack."
+        "the registered tool context_refresh_ack (argument contaminated_event_key)."
     )
 
 

@@ -88,8 +88,8 @@ def _turn(pid, sid, task_key, prompt=None, *, gate=True):
 def _assert_report(text, event_key, *secrets):
     assert REPORT in text and "context_refresh_required" in text and "source_revoked" in text
     assert event_key in text
-    for secret in ("TOPSECRETSTATEMENT", *secrets):
-        assert secret not in text
+    assert "TOPSECRETSTATEMENT" not in text  # content is never shown
+    assert not secrets or any(key in text for key in secrets)  # E4 Chunk G: revoked identifiers are named
 
 
 def test_clean_session_stop_reports_nothing(pg_project, monkeypatch, capsys):
@@ -214,6 +214,6 @@ def test_report_failure_is_logged_and_fails_open_for_reporting_only(pg_project, 
     size = log.stat().st_size if log.exists() else 0
     out = _stop(monkeypatch, capsys, pg_project, sid)
     assert out["decision"] == "block" and REPORT not in out["reason"]  # the existing block is unaltered
-    assert "StopContaminationReport: RuntimeError: injected report failure" in log.read_text("utf-8")[size:]
+    assert "StopContaminationReport: RuntimeError: injected report failure" in log.read_bytes()[size:].decode("utf-8", "replace")
     assert _key(pg_project, session_key)["contaminated"] is True
     assert _pretool_denied(monkeypatch, capsys, sid)  # enforcement is unaffected
