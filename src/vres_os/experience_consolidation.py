@@ -5,7 +5,9 @@ from typing import Any
 
 from .db import connect
 from .experience import _HIDDEN_REASONING_KEYS, _canonical, _normalize_key, _sha256
+from .experience_lifecycle import _lock_project, episode_eligible, episode_states
 from .knowledge import KnowledgeService
+from .knowledge_status import exclude_non_use_sql
 from .relations import relate_in_conn
 from .sensitive_policy import (
     SENSITIVE_REVIEW_REQUIRED,
@@ -237,6 +239,9 @@ def _snapshot(episode: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# E4: retired/revoked lessons are history only; they must not absorb a fresh identical lesson.
+_USABLE = exclude_non_use_sql("status")
+
 _TRANSITION_COLUMNS = (
     "transition_key,project_id,policy_version,policy_digest,kind,polarity,trigger,subject_key,verdict,reason_codes,"
     "candidate,candidate_digest,before_digest,after_digest,source_episodes,knowledge_key,conflicts,checks,created_at"
@@ -254,6 +259,8 @@ class ExperienceConsolidationService:
         digest = _sha256(normalized)
         project_id = normalized["project_id"]
         with connect() as conn, conn.transaction():
+            # E4: same project lock and order as source revocation, so the two serialize without deadlock.
+            _lock_project(conn, project_id)
             conn.execute(
                 "SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
                 (f"experience-consolidation:{project_id}:{digest}",),
@@ -273,8 +280,18 @@ class ExperienceConsolidationService:
                 raise RuntimeError("Experience policy version/digest does not match the E2 runtime contract")
 
             episodes = self._load_episodes(conn, project_id, {e["episode_key"] for e in normalized["evidence"]})
-            result = verify_transition(normalized, episodes)
-            checks = {**result["checks"], "sanitizer": "sanitized" if sanitized else "pass"}
+            # E4: lifecycle-revoked (or corrupt-state) episodes never support new derivation. Their evidence is
+            # dropped and the remainder must pass the full verifier on its own.
+            states = episode_states(conn, project_id, episodes)
+            excluded = {k for k, state in states.items() if not episode_eligible(state)}
+            kept = [e for e in normalized["evidence"] if e["episode_key"] not in excluded]
+            eligible = {**normalized, "evidence": kept}
+            if not eligible["evidence"]:
+                raise ValueError("Experience consolidation blocked: no cited episode is lifecycle-eligible")
+            episodes = {k: v for k, v in episodes.items() if k not in excluded}
+            result = verify_transition(eligible, episodes)
+            checks = {**result["checks"], "sanitizer": "sanitized" if sanitized else "pass",
+                      "episode_lifecycle": "excluded_revoked" if excluded else "pass"}
             reasons = list(result["quarantine_reasons"])
             statement_hash = statement_digest(normalized["statement"])
             rows = [episodes[k] for k in sorted(episodes)]
@@ -383,6 +400,8 @@ class ExperienceConsolidationService:
                     relate_in_conn(conn, "knowledge", knowledge_key, "related_to", "knowledge", other,
                                    provenance=provenance)
                 reasons.append("literal_support_verified")
+            if excluded:  # audit only, appended after the verdict so it never quarantines by itself
+                reasons.append("revoked_episode_excluded")
 
             conn.execute(
                 """
@@ -436,11 +455,11 @@ class ExperienceConsolidationService:
     @staticmethod
     def _derived_items(conn, project_id: int) -> list[dict[str, Any]]:
         rows = conn.execute(
-            """
+            f"""
             SELECT knowledge_key,status,metadata
               FROM vres.knowledge_items
              WHERE project_id=%s AND knowledge_type='lesson'
-               AND status NOT IN ('rejected','superseded')
+               AND status NOT IN ('rejected','superseded') AND {_USABLE}
                AND metadata->>'experience_transition_key' IS NOT NULL
              ORDER BY id
             """,

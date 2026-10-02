@@ -240,3 +240,64 @@ def test_experience_transition_migration_is_append_only_versioned_and_idempotent
     assert "allow_experience_ledger_delete" in sql
     assert "RETURN NEW;" not in sql
     assert "176.e1.v1" not in sql
+
+
+def test_experience_lifecycle_ledger_migration_is_append_only_bounded_and_additive():
+    sql = _migration("039_experience_lifecycle_ledger.sql")
+    assert sql.count("CREATE TABLE") == 1
+    assert "CREATE TABLE IF NOT EXISTS vres.experience_lifecycle_events" in sql
+    assert "protect_experience_lifecycle_immutability" in sql
+    assert "BEFORE UPDATE ON vres.experience_lifecycle_events" in sql
+    assert "BEFORE DELETE ON vres.experience_lifecycle_events" in sql
+    assert "DROP TRIGGER IF EXISTS" in sql
+    # No bypass: UPDATE and DELETE always raise (test cleanup disables the trigger as table owner).
+    assert "allow_experience_ledger_delete" not in sql
+    assert "current_setting" not in sql
+    assert "RETURN OLD" not in sql
+    assert "RETURN NEW" not in sql
+    assert "TRUNCATE" not in sql
+    assert "policy_version = '176.e4.v1'" in sql
+    # nine-value knowledge status vocabulary, drop/re-add without a data rewrite
+    assert "DROP CONSTRAINT IF EXISTS knowledge_items_status_check" in sql
+    assert (
+        "CHECK (status IN ('proposed','observed','validated','canonical','challenged',"
+        "'superseded','rejected','retired','revoked'))"
+    ) in sql
+    assert "UPDATE vres.knowledge_items" not in sql
+    # not touching earlier policy/objects, sources, sessions, retrieval or observation storage
+    assert "176.e1" not in sql and "176.e2" not in sql
+    assert "ALTER TABLE vres.sources" not in sql
+    assert "vres.sessions" not in sql
+    assert "embedding_jobs" not in sql
+    assert "experience_policy_versions" not in sql
+    assert "experience_transitions" not in sql and "experience_episodes" not in sql
+
+
+def test_context_refresh_attestation_migration_is_additive_protected_and_hash_only():
+    sql = _migration("040_context_refresh_attestation.sql")
+    assert sql.count("CREATE TABLE") == 1
+    assert "CREATE TABLE IF NOT EXISTS vres.context_refresh_attestations" in sql
+    assert "nonce_sha256 text NOT NULL UNIQUE" in sql and "nonce text" not in sql  # only a hash of the nonce
+    assert "UNIQUE (provider_session_id, tool_use_id)" in sql
+    assert "interval '120 seconds'" in sql
+    for fn in ("issue_context_refresh_attestation", "consume_context_refresh_attestation",
+               "require_attested_context_refresh"):
+        assert f"CREATE OR REPLACE FUNCTION vres.{fn}(" in sql
+    assert sql.count("SECURITY DEFINER") == 3
+    assert sql.count("SET search_path = pg_catalog, vres") == 3
+    assert "authority_key = 'user_event_writer'" in sql and "session_user" in sql  # writer-only mint
+    assert "AFTER INSERT ON vres.experience_lifecycle_events" in sql
+    assert "DROP TRIGGER IF EXISTS trg_require_attested_context_refresh" in sql
+    for obj in ("TABLE vres.context_refresh_attestations", "SEQUENCE vres.context_refresh_attestations_id_seq",
+                "FUNCTION vres.issue_context_refresh_attestation(text,text,text,text)",
+                "FUNCTION vres.consume_context_refresh_attestation(bigint,text,text,text)",
+                "FUNCTION vres.require_attested_context_refresh()"):
+        assert f"REVOKE ALL ON {obj} FROM PUBLIC;" in sql
+    assert "GRANT " not in sql  # grants belong to database_boundary.activate_boundary
+    # additive only: no sessions/metadata change, no edit to 029's protected-metadata trigger or the 039 ledger
+    code = "\n".join(line for line in sql.splitlines() if not line.lstrip().startswith("--"))
+    assert "ALTER TABLE" not in code and "metadata" not in code
+    assert "protect_user_input_metadata" not in code and "stage_user_input" not in code
+    assert "protect_experience_lifecycle_immutability" not in code
+    assert "UPDATE vres.experience_lifecycle_events" not in code and "DELETE FROM" not in code
+    assert "UPDATE vres.sessions" not in code and "INSERT INTO vres.sessions" not in code

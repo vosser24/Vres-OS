@@ -416,6 +416,7 @@ def test_hook_entrypoint_parent_protected_control_not_denied_by_new_rule(
 
     monkeypatch.setattr(control_preflight, "ConfigStore", _ConfiguredStore)
     monkeypatch.setattr(control_preflight, "read_only_hold_for_session", lambda sid: None)
+    monkeypatch.setattr(control_preflight, "contaminated_sessions_for_host_session", lambda sid: [])
     code, out, err = _run_main(monkeypatch, capsys, _payload(_PREPARE))
     assert (code, out, err) == (0, "", "")
 

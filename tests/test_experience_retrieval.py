@@ -20,7 +20,8 @@ PACK_KEYS = frozenset({"schema_version", "current_decisions", "accepted_procedur
 ITEM_KEYS = frozenset({"memory_key", "memory_class", "project_id", "scope", "authority_class", "status", "trust_class",
                        "role", "applicability", "why_retrieved", "evidence", "flags", "signals", "text"})
 ITEM_EXTENSIONS = frozenset({"stored_confidence", "last_verified_at", "review_after", "also_matched", "provenance"})
-FLAGS = frozenset({"stale", "conflict", "challenged", "historical", "premise_mismatch", "premise_unverified"})
+FLAGS = frozenset({"stale", "conflict", "challenged", "historical", "premise_mismatch", "premise_unverified",
+                   "retired", "revoked", "expired", "not_current", "cross_scope_unresolved"})  # E4 Chunk E
 ROLES = frozenset({"instruction", "candidate", "warning_example", "low_trust_observation", "conflict",
                    "stale_assumption", "evidence_ref"})
 MEMORY_CLASSES = frozenset({"decision", "procedural", "semantic", "episodic", "raw_evidence"})
@@ -183,6 +184,7 @@ def _episode_row(key="E-1", outcome="completed", trust="validated_runtime", part
         "payload": {"objective": "Fix the cache", "constraints": ["no downtime"], **payload},
     }
     row["payload_digest"] = er.episode_payload_digest(row)
+    row["lifecycle_state"] = "grounded"  # E4 Chunk E: no ledger event == grounded (as read by _episodes)
     return row
 
 
@@ -272,8 +274,8 @@ def test_dedupe_by_key_and_text_digest():
 def test_abstention_and_no_leak():
     pack = er.compose([], _req(), {"excluded_unapproved_company": 2})
     assert pack["abstained"] is True and pack["reason"] == "no_eligible_experience"
-    assert pack["schema_version"] == "176.e3.v1" and pack["policy"]["version"] == "176.e3.v1"
-    assert pack["policy"]["chunk"] == 3 and all(pack[s] == [] for s in er.SECTIONS)
+    assert pack["schema_version"] == "176.e4.v1" and pack["policy"]["version"] == "176.e4.v1"
+    assert pack["policy"]["chunk"] == "E" and all(pack[s] == [] for s in er.SECTIONS)
     assert "other_project" not in _canonical(pack["diagnostics"])
 
 
@@ -527,7 +529,7 @@ def test_raw_repeat_compose_byte_identical_and_inputs_unchanged():
 
 
 def test_policy_reflects_chunk3_raw_budget():
-    assert er.BUDGETS["raw_evidence_refs"] == 5 and "not_implemented" not in er.POLICY and er.POLICY["chunk"] == 3
+    assert er.BUDGETS["raw_evidence_refs"] == 5 and "not_implemented" not in er.POLICY and er.POLICY["chunk"] == "E"
     assert er.normalize_request({"project_id": 1, "query": "x"})["raw_fallback"] is True
 
 
@@ -917,8 +919,9 @@ def assert_pack_schema(pack, *, expect_items=None):
                 assert item["memory_class"] in {"decision", "semantic"} and item["stored_confidence"] is not None
             if "last_verified_at" in item or "review_after" in item:
                 assert item["memory_class"] in {"decision", "semantic"}
-            if "provenance" in item:
-                assert item["role"] == "low_trust_observation"
+            if "provenance" in item:  # E4: or a revoked tombstone carrying metadata only
+                assert item["role"] == "low_trust_observation" or (
+                    item["status"] == "revoked" and set(item["provenance"]) == {"state", "revoked_at", "reason_class"})
             if "constraints" in item["applicability"]:
                 assert item["memory_class"] == "episodic"
     if expect_items is not None:
@@ -993,7 +996,8 @@ def test_every_representative_pack_matches_the_closed_contract_schema(name):
     assert set(pack["diagnostics"]) <= {
         "excluded_unapproved_company", "rejected_corrupt", "quarantined_injection", "embedding", "embedding_truncated",
         "truncated", "embedding_error", "deduplicated", "deduplicated_cited_episode", "raw_fallback",
-        "raw_fallback_error", "raw_possibly_truncated"}
+        "raw_fallback_error", "raw_possibly_truncated", "excluded_retired", "excluded_superseded", "excluded_expired",
+        "excluded_revoked", "excluded_revoked_episode", "excluded_revoked_source"}
 
 
 def test_mixed_scenario_exercises_every_extension_and_class():
@@ -1183,7 +1187,9 @@ def test_c3h_1_to_5_raw_sql_count_and_select_share_one_gate_and_use_the_time_ref
         for sql in (count_sql, select_sql):
             flat = " ".join(sql.split())
             assert "coalesce(%(raw_at)s::timestamptz, now())" in flat and "now()<" not in flat
-            assert "k.status NOT IN ('rejected','challenged')" in flat and "(k.status<>'superseded' OR %(hist)s)" in flat
+            # E4 Chunk E: one fail-closed allow-list (live statuses; superseded only historically) replaces the deny-lists
+            assert "k.status IN ('proposed','observed','validated','canonical')" in flat
+            assert "(%(hist)s AND k.status='superseded')" in flat and "'challenged'" not in flat
             assert "s.ingested_at<=" in flat and "k.created_at<=" in flat and "c.created_at<=" in flat
             assert "(c.source_id IS NOT NULL OR c.knowledge_id IS NOT NULL)" in flat  # orphan excluded fail-closed
 
@@ -1202,7 +1208,8 @@ def test_c3s_1_raw_fallback_is_deliberately_stricter_than_structured_for_challen
         conn = _Conn()
         er.ExperienceRetrievalService._raw(conn, {"pid": 1, "hist": hist, "tsq": "'cache'", "phrase": "cache"}, ["cache"], raw_at)
         for sql, _params in conn.calls:
-            assert "k.status NOT IN ('rejected','challenged')" in " ".join(sql.split())
+            flat = " ".join(sql.split())
+            assert "k.status IN ('proposed','observed','validated','canonical')" in flat and "'challenged'" not in flat
 
 
 def test_c3s_2_historical_without_as_of_is_accepted_and_as_of_rules_are_unchanged():

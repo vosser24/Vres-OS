@@ -124,7 +124,8 @@ PACK_KEYS = frozenset({"schema_version", "current_decisions", "accepted_procedur
 ITEM_KEYS = frozenset({"memory_key", "memory_class", "project_id", "scope", "authority_class", "status", "trust_class",
                        "role", "applicability", "why_retrieved", "evidence", "flags", "signals", "text"})
 ITEM_EXTENSIONS = frozenset({"stored_confidence", "last_verified_at", "review_after", "also_matched", "provenance"})
-FLAGS = frozenset({"stale", "conflict", "challenged", "historical", "premise_mismatch", "premise_unverified"})
+FLAGS = frozenset({"stale", "conflict", "challenged", "historical", "premise_mismatch", "premise_unverified",
+                   "retired", "revoked", "expired", "not_current", "cross_scope_unresolved"})  # E4 Chunk E
 ROLES = frozenset({"instruction", "candidate", "warning_example", "low_trust_observation", "conflict",
                    "stale_assumption", "evidence_ref"})
 MEMORY_CLASSES = frozenset({"decision", "procedural", "semantic", "episodic", "raw_evidence"})
@@ -147,8 +148,9 @@ def assert_pack_schema(pack):
             assert item["role"] in ROLES and set(item["flags"]) <= FLAGS
             assert set(item["signals"]) == SIGNAL_KEYS and set(item["applicability"]) <= APPLICABILITY_KEYS
             assert item["why_retrieved"] and item["evidence"]
-            if "provenance" in item:
-                assert item["role"] == "low_trust_observation"
+            if "provenance" in item:  # E4: or a revoked tombstone carrying metadata only
+                assert item["role"] == "low_trust_observation" or (
+                    item["status"] == "revoked" and set(item["provenance"]) == {"state", "revoked_at", "reason_class"})
             if "stored_confidence" in item:
                 assert item["memory_class"] in {"decision", "semantic"} and item["stored_confidence"] is not None
             if "constraints" in item["applicability"]:
@@ -221,7 +223,7 @@ def test_own_project_items_retrieved_and_pack_shape(pg_project):
     _procedure(f"P-{mk}", pg_project, mk)
     ep = _episode(pg_project, mk)
     pack = _retrieve(pg_project, mk, task_key=task)
-    assert pack["schema_version"] == "176.e3.v1" and pack["policy"] == {**pack["policy"], "version": "176.e3.v1", "chunk": 3}
+    assert pack["schema_version"] == "176.e4.v1" and pack["policy"] == {**pack["policy"], "version": "176.e4.v1", "chunk": "E"}
     assert not pack["abstained"]
     assert _keys(pack, "current_decisions") == [f"D-{mk}"]
     assert pack["current_decisions"][0]["role"] == "instruction"

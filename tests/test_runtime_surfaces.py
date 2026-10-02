@@ -32,6 +32,7 @@ def surface(monkeypatch, tmp_path):
     for name in ('mcp', 'mcp.server', 'mcp.server.fastmcp'):
         monkeypatch.setitem(sys.modules, name, ModuleType(name))
     sys.modules['mcp.server.fastmcp'].FastMCP = FastMCPRegistrationOnly
+    sys.modules['mcp.server.fastmcp'].Context = type('Context', (), {})
     sys.modules.pop('vres_os.mcp_server', None)
     module = importlib.import_module('vres_os.mcp_server')
     monkeypatch.setattr(module, '_project', lambda root='.': (7, SimpleNamespace(root=tmp_path,key='P',name='test')))
@@ -40,9 +41,11 @@ def surface(monkeypatch, tmp_path):
 
 
 def test_mcp_registration_has_full_contract_and_no_pass_setter(surface):
-    assert len(surface.mcp.registered) == 48
+    assert len(surface.mcp.registered) == 51
     assert 'procedure_get' in surface.mcp.registered
     assert 'experience_retrieve' in surface.mcp.registered
+    for name in ('source_revoke', 'knowledge_lifecycle', 'context_refresh_ack'):
+        assert name in surface.mcp.registered
     assert 'artifact_get' in surface.mcp.registered
     assert 'validation_record' not in surface.mcp.registered
     assert 'optimization_gate' not in surface.mcp.registered

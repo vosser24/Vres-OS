@@ -357,3 +357,25 @@ def activate_boundary(conn, cfg: VresConfig) -> None:
             sql.SQL("GRANT EXECUTE ON FUNCTION {} TO {}").format(sql.SQL(signature), sql.Identifier(writer))
         )
     conn.execute(sql.SQL("GRANT USAGE ON SCHEMA vres TO {}").format(sql.Identifier(writer)))
+    _activate_context_refresh_attestations(conn, runtime, writer)
+
+
+def _activate_context_refresh_attestations(conn, runtime: str, writer: str) -> None:
+    """Migration 040: writer mints, runtime consumes; neither touches the table, sequence or trigger function."""
+    from psycopg import sql
+
+    row = conn.execute("SELECT to_regclass('vres.context_refresh_attestations') IS NOT NULL AS present").fetchone()
+    present = row["present"] if isinstance(row, dict) else row[0]
+    if not present:
+        return  # a package/database before migration 040
+    roles = [sql.SQL("PUBLIC"), sql.Identifier(runtime), sql.Identifier(writer)]
+    objects = [sql.SQL("TABLE vres.context_refresh_attestations"),
+               sql.SQL("SEQUENCE vres.context_refresh_attestations_id_seq"),
+               sql.SQL("FUNCTION vres.require_attested_context_refresh()")]
+    issue = sql.SQL("FUNCTION vres.issue_context_refresh_attestation(text,text,text,text)")
+    consume = sql.SQL("FUNCTION vres.consume_context_refresh_attestation(bigint,text,text,text)")
+    for obj in [*objects, issue, consume]:
+        for role in roles:
+            conn.execute(sql.SQL("REVOKE ALL ON {} FROM {}").format(obj, role))
+    conn.execute(sql.SQL("GRANT EXECUTE ON {} TO {}").format(issue, sql.Identifier(writer)))
+    conn.execute(sql.SQL("GRANT EXECUTE ON {} TO {}").format(consume, sql.Identifier(runtime)))

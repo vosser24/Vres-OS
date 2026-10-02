@@ -7,8 +7,10 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .db import connect
+from .experience_lifecycle import _lock_project
 from .project import ProjectIdentity
 from .redaction import redact
+from .session_contamination import contamination_notice
 from .validation import STATE_FIELDS
 
 _ACTIVE = ("active", "waiting_user", "blocked")
@@ -247,6 +249,10 @@ class Repository:
             ).fetchone()
             if row:
                 return str(row["session_key"])
+            # E4: a NEW open session serialises with source revocation on the project lifecycle lock (lock order
+            # session -> project; no holder of the project lock ever takes a session lock), so it is either in the
+            # revocation's open-session snapshot or created after that revocation committed. Reuse takes no lock.
+            _lock_project(conn, project_id)
             task_id = self._selected_task_id(conn, project_id, None)
             conn.execute(
                 """
@@ -534,6 +540,7 @@ class Repository:
                 """,
                 (task_id,),
             ).fetchone()
+            notice = contamination_notice(conn, project_id, provider_session_id) if provider_session_id else None
         live_step = task.current_step
         live_state = task.state_summary
         live_next_action = task.next_action
@@ -582,4 +589,6 @@ class Repository:
             "latest_assistant_snapshot": snap["payload"] if snap else None,
             "recent_turns": self.recent_turns(task.task_key, limit=6),
         }
+        if notice:
+            state["contamination_notice"] = notice
         return _clip(state)

@@ -185,7 +185,13 @@ def test_stale_embedding_worker_cannot_publish_over_newer_claim(monkeypatch):
     monkeypatch.setattr(svc, 'queue_missing', lambda *a: 1)
     monkeypatch.setattr(svc, '_claim', lambda *a: [{'job_id': 1, 'chunk_id': 2, 'content': 'hello', 'claimed_attempt': 1}])
     monkeypatch.setattr(embeddings, '_load_model', lambda *a: SimpleNamespace(encode=lambda *a, **kw: [[1.0, 0.0]]))
-    conn = ScriptedConnection([('pg_extension', {'ok': False}), ('SELECT attempts,status', {'attempts': 2, 'status': 'running'})])
+    # Chunk D publish fence: owners FOR SHARE -> chunks FOR UPDATE -> job leases FOR UPDATE -> eligibility re-check.
+    conn = ScriptedConnection([('pg_extension', {'ok': False}),
+                               ('SELECT id,source_id,knowledge_id FROM vres.knowledge_chunks', [{'id': 2, 'source_id': 5, 'knowledge_id': None}]),
+                               ('FOR SHARE', [{'id': 5}]),
+                               ('FROM vres.knowledge_chunks WHERE id=ANY(%s) ORDER BY id FOR UPDATE', [{'id': 2}]),
+                               ('SELECT id,attempts,status', [{'id': 1, 'attempts': 2, 'status': 'running'}]),
+                               ('AS eligible', [{'id': 2, 'source_id': 5, 'knowledge_id': None, 'eligible': True, 'code': None}])])
     monkeypatch.setattr(embeddings, '_connect', lambda: conn)
     result = svc.run_pending()
     assert result['processed'] == 0

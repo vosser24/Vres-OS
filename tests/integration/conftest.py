@@ -37,6 +37,17 @@ def pg_project(monkeypatch, tmp_path):
             conn.execute("SELECT set_config('vres.allow_decision_ledger_delete','on',true)")
             conn.execute("SELECT set_config('vres.allow_experience_ledger_delete','on',true)")
             conn.execute("DELETE FROM vres.experience_transitions WHERE project_id=%s", (pid,))
+            # The E4 lifecycle ledger has no bypass setting; the disposable test DB owner disables
+            # its delete trigger only inside this cleanup transaction.
+            conn.execute(
+                "ALTER TABLE vres.experience_lifecycle_events "
+                "DISABLE TRIGGER trg_protect_experience_lifecycle_delete"
+            )
+            conn.execute("DELETE FROM vres.experience_lifecycle_events WHERE project_id=%s", (pid,))
+            conn.execute(
+                "ALTER TABLE vres.experience_lifecycle_events "
+                "ENABLE TRIGGER trg_protect_experience_lifecycle_delete"
+            )
             conn.execute(
                 "DELETE FROM vres.relation_evidence WHERE relation_id IN ("
                 "SELECT r.id FROM vres.relations r JOIN vres.knowledge_items k "

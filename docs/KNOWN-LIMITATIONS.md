@@ -235,6 +235,51 @@ decisions, E1 episodes, relations); it is not a second generic memory authority 
 - Live proof of the packaged tool on the target host is a separate gate; see the E3 handoff for what was and was
   not exercised.
 
+### Temporal lifecycle and revocation (#176 E4)
+
+- Forgetting controls use, not history: retire, supersede and revoke never delete sources, evidence, episodes or ledger
+  rows. Revoked memory is a metadata-only tombstone in historical retrieval; a tombstone still discloses that a
+  revoked item (by key) matched the query. Physical erasure of source bytes is not provided.
+- Contamination is an attestation, not proof. Vres records no consumption of context, so every open session of the
+  project is marked "may have loaded" on revocation; `context_refresh_ack` is the Chairman's attestation that context
+  was re-derived. Checkpoint prose and transcript text are not scanned, and artifacts already written are not cleansed.
+- While contaminated, the PreToolUse hook denies every Vres tool except the safe list and `context_refresh_ack`, and
+  admits that call only for the latest contamination event of the host session (exact tool name, exact
+  `{"request": {"contaminated_event_key": ...}}` input, parent only).
+  - The hook mints the attestation through the provenance writer role (migration 040). The attestation is single
+    use, lasts 120 seconds, is stored only as a hash, and is bound to the host session and the host `tool_use_id`.
+  - The hook passes the nonce through `updatedInput`.
+  - The MCP tool consumes the attestation using the host's `claudecode/toolUseId` request meta. Without a consumed
+    attestation the tool fails closed (`refresh_not_attested`).
+  - A ledger trigger refuses any `context_refreshed` row that lacks such a consumption in its transaction.
+  - So a key is not a credential, and a session cannot acknowledge another session's contamination.
+
+  Residual limits:
+  - The trust root is Claude Code's hook payload and request meta, observed on Claude Code 2.1.286. If either is
+    missing, the acknowledgement fails closed.
+  - The nonce and `tool_use_id` appear in the transcript. A same-OS-user process that also holds the runtime database
+    credential could replay them within 120 seconds, once, for that session's latest contamination.
+  - In a single-role database the runtime owns the table, so privilege separation is nominal there.
+
+  Denials and notices name up to five revoked identifiers, or a count for larger cascades. The full cascade stays in
+  the lifecycle ledger.
+- `source_revoke` results above 8 KiB return counts and sha256 digests instead of key lists. A cascade over 500
+  nodes fails closed with no change. There is no `restore_source`; recovery is a new source plus approved reinstatement.
+- Lifecycle approvals are bound to the exact action and target and are project scope only. Company-scope lifecycle is
+  deferred. Legacy `KnowledgeService.update/supersede` service methods remain callable internally without the project
+  lifecycle lock; the public `knowledge_promote(status='challenged')` and `knowledge_supersede` tools now route through
+  the ledgered lifecycle service and need an approval and a reason.
+- Retrieval carry-over: episode lifecycle state in historical queries is the current ledger state, not the state at
+  `as_of` (fail-closed); episode support considers direct `derived_from` sources only; `experience_consolidation`
+  keeps a status deny-list that covers every status the schema allows. The raw-chunk fallback defect is fixed in the closure stage (`_raw` applies the same dead-support gate; pinned by
+  `test_raw_chunk_of_a_company_item_whose_only_support_is_revoked_is_never_returned`). A company item whose only
+  support is revoked or inactive is excluded from every reader by one shared rule. The readers are `knowledge_get`
+  (metadata-only tombstone), `knowledge_search`, chunk/hybrid and semantic search (JSON and pgvector), and E3. The
+  company row itself is not mutated.
+
+  The rule does not evaluate transitive company support. Evidence with a NULL `source_id` and dangling relations do
+  not count as support.
+
 ## Licensing and supply chain
 
 Vres source is MIT. Third-party packages/models have their own licenses; the PDF dependency is now pypdf,
