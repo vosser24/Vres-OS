@@ -1,8 +1,8 @@
 # Vres Preproduction Execution Checklist
 
-Date: 2026-09-29  
+Date: 2026-10-02  
 Repository: `vosser24/Vres-OS`  
-Authoritative main after #176 E2: `74c6445228a922db2622806f27e3c49a6c3454a7`
+Authoritative main after #176 E3: `ddb0719d130fd45b12b6bdc9e1682378ace7ae64`
 
 ## Governing rule
 
@@ -158,7 +158,7 @@ Those belong to #169 / the applicable live embedding-runtime acceptance and were
 ---
 
 ### 4. #176 — Experience Intelligence / Governed Agent Learning
-Status: **ACTIVE — E1 DONE; E2 DONE; E3 ACTIVE (contract + Chunk 1 committed locally; Chunk 1 hardening pending)**
+Status: **ACTIVE — E1/E2/E3 DONE; E4 implementation A–G + migration-040 pre-validation closure complete; final E4 acceptance pending**
 
 Durable plan:
 - issue #176;
@@ -416,8 +416,9 @@ At the beginning of every future implementation session:
 
 ## Current next action
 
-**#176 E3 is active. Resume the existing local E3 worktree/task; do not recreate the contract or Chunk 1. First finish and review the already-dispatched Chunk 1 hardening pass against contract `c03b2c269c4118d47b39c4c3236fc106412b4d3b` and Chunk 1 `ff025a8a738062c3453d34cb045c5abf005db7f3`. The immediate defect is the inappropriate reuse of E2's broad write-time `_INJECTION` regex as an E3 read-time suppression rule. Close that bounded defect, confirm procedure-query ownership, map all Chunk 1 requirements 1–20 to concrete tests, rerun the accepted isolated PostgreSQL/no-write methodology, and commit the hardening separately. Only then may E3 Chunk 2 begin. Do not push/open PR until the E3 tranche reaches the intended candidate gate. Do not begin E4 until E3 is fully accepted. Do not start #165 until #176 is fully DONE.**
+**#176 E4 is the first unfinished implementation boundary. The final migration-040 docs-complete candidate is `ce9067ab36716cb1f729466db168d002e1029c93`, tree `5cf813f19feb36e23f59dc6ddf632c38ac09e869`, on branch `issue-176-e4-temporal-lifecycle-revocation`. The remote branch now exists at that exact SHA; no PR existed at the 2026-10-02 ChatGPT handoff check. Do not reopen E4 product development unless exact-head CI or protected validation exposes a real blocker. Next: create/verify the E4 PR, obtain exact-head CI + artifact evidence on `ce9067ab...`, make the one final Vres freeze checkpoint required before `validation_prepare`, run exactly one protected `vres-os:validator` acceptance, then guarded merge and post-merge main CI. Do not start E5 until E4 is merged, post-main CI is green, and the E4 task is durably closed.**
 
+**Execution cadence from this boundary:** use targeted tests for bounded corrections; do not rerun the full suite/release gate without changed candidate bytes or a concrete evidence gap. ChatGPT becomes the primary architecture/code/repository/PR/CI/handoff coordinator. Local Claude Code is reserved for Windows/local PostgreSQL/pgvector/installed-runtime/Visual Studio/live acceptance and machine-specific corrections. Never edit the same branch concurrently: transfer ownership only at an exact clean/pushed SHA.
 ---
 
 ### 11. Post-#170 queued backlog — Organizational Architecture & Specialist Intelligence
@@ -440,3 +441,80 @@ Required backlog scope:
 - define when a recurring project specialist may be proposed for stable product-role graduation under explicit governance.
 
 This backlog item is **after #170** and must not alter #176/#165/#166/#167/#168/#169/#170 sequencing.
+
+
+---
+
+### 12. 2026-10-02 authoritative continuation override — #176 E4 pre-validation boundary
+Status: **ACTIVE — E4 PRODUCT DEVELOPMENT FROZEN; EXACT-HEAD CI / PROTECTED ACCEPTANCE NEXT**
+
+This section supersedes the older E3/E4 status text above for current execution state. Historical evidence remains valid and must not be deleted.
+
+Current product/repository boundary:
+- authoritative remote `main`: `ddb0719d130fd45b12b6bdc9e1682378ace7ae64` (E3 merge);
+- E4 branch: `issue-176-e4-temporal-lifecycle-revocation`;
+- remote E4 branch head verified by ChatGPT on 2026-10-02: `ce9067ab36716cb1f729466db168d002e1029c93`;
+- final E4 tree: `5cf813f19feb36e23f59dc6ddf632c38ac09e869`;
+- E4 Vres task: `TASK-20260930-2c7198e394`;
+- latest local Vres checkpoint: `CP-20261002-b2e09a2047`;
+- frozen E4 base contract remains byte-identical to commit `a69b836fa3fbf6a97c00f830b05495c48c5af563`;
+- dated E4 contract addendum authorizes migration 040 for protected context-refresh attestation;
+- schema: 40 migrations, latest 040;
+- MCP surface: 51 tools;
+- remote PR: none at the ChatGPT handoff check.
+
+Final local acceptance already completed on the candidate bytes:
+- JSON-backed full suite: real `PYTEST_EXIT=0`; only the known three Windows symlink skips plus one pgvector-only skip;
+- real-pgvector affected acceptance: company-support eligibility and affected vector-mode surfaces green; the known JSON-only `test_semantic_jsonb_path_and_hybrid_exclude_non_use` remains intentionally JSON-mode-specific and reproduces the same mismatch on the prior base when forced onto a pgvector DB;
+- targeted ACK/public-adapter/split-role security suite: 72 passed;
+- critical Ruff + `git diff --check`: green;
+- local release gate: exit 0 / `PASSED_WITH_EXPLICIT_LIVE_GATES`; its DB skips are not PostgreSQL acceptance evidence.
+
+Migration-040 closure owns two final security fixes:
+- context-refresh ACK requires a protected attestation row that ordinary runtime cannot mint plus host `claudecode/toolUseId` correlation; missing host correlation fails closed;
+- a company item whose only applicable support is revoked no longer re-enters current use through get/search/chunk-hybrid/JSON semantic/pgvector semantic/E3 structured/raw readers.
+
+Residual risks are evidence for validator/live/production review, not automatic new development loops unless they violate a frozen MUST/NEVER:
+- `toolUseId` host correlation was observed on Claude Code 2.1.286 and fails closed if absent;
+- a same-user process with transcript access plus runtime DB credential could replay the current nonce once within its short TTL;
+- runtime/writer credentials share the same OS credential store; single-role disposable DBs make role separation nominal;
+- transitive company-support analysis remains limited;
+- no fresh ACK latency re-measurement was required after the final closure.
+
+Remaining E4 acceptance sequence:
+- [ ] open/verify PR from exact E4 head;
+- [ ] exact-head CI SUCCESS on `ce9067ab...`;
+- [ ] capture CI run/id/steps/artifact/digest;
+- [ ] one final material Vres freeze checkpoint after CI and before `validation_prepare`;
+- [ ] exactly one protected `vres-os:validator` acceptance on the frozen exact candidate;
+- [ ] guarded expected-head merge;
+- [ ] post-merge push CI on the exact new main SHA;
+- [ ] durable E4 task/issue evidence closure;
+- [ ] only then begin E5.
+
+Accelerated execution policy:
+- targeted/unit/PostgreSQL tests for bounded corrections;
+- full suite once per coherent final candidate, not after every small fix;
+- local release gate once per coherent final candidate;
+- protected validation once per frozen exact-head candidate;
+- no automatic retry of protected validation;
+- no duplicate expensive evidence unless candidate bytes changed or a specific gap exists.
+
+Tool ownership / handoff rule:
+- **ChatGPT primary:** architecture decisions, repo/code changes when working against remote GitHub state, PR/CI/merge, documentation/checklist/handoff maintenance, evidence audit and tranche sequencing;
+- **Local Claude Code:** Windows-only/local machine execution, PostgreSQL/pgvector/installed-runtime proof, Credential Locker/Visual Studio/legacy-project/live acceptance, host-hook/session behavior, and bounded corrections that require the local environment;
+- **single writer:** ChatGPT and Claude must never edit the same branch concurrently. Before switching writers, commit/push/verify an exact clean SHA. The receiving side must fetch/read back that exact SHA before editing.
+
+Full remaining frozen pipeline after E4:
+- E5 capability/procedure experience integration;
+- E6 observability + experience utility evidence;
+- E7 benchmark + security ladder;
+- E8 Chairman integration + protected acceptance;
+- E9 physical Experience Intelligence criteria carried into #169;
+- #165 Chairman model policy;
+- #166;
+- #167;
+- #168 project adoption + canonical Claude scaffold;
+- #169 integrated Windows / Visual Studio live acceptance;
+- #170 production readiness / go-live;
+- post-#170 Organizational Architecture & Specialist Intelligence / full-team enhancement backlog.
