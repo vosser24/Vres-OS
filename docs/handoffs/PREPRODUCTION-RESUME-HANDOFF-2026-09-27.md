@@ -1702,3 +1702,303 @@ Working method:
 
 After E4: E5, E6, E7, E8, #165, #166, #167, #168, #169 live acceptance, #170 go-live, then the queued full-team Organizational Architecture & Specialist Intelligence enhancement.
 ```
+
+
+---
+
+# 29. 2026-10-02 #176 E4 closure / E5 continuation seal
+
+This is the newest authoritative handoff boundary. It supersedes section 28 and every older E3/E4 current-action instruction. Historical evidence remains historical and must not be rewritten.
+
+## A. Authoritative repository boundary
+
+Repository:
+`vosser24/Vres-OS`
+
+Authoritative product main after E4:
+`a0a2769b99f4893733568194c0aa68e78e73aeab`
+
+E4 branch:
+`issue-176-e4-temporal-lifecycle-revocation`
+
+E4 PR:
+`#182 — #176 E4 temporal lifecycle and revocation`
+
+PR state:
+**MERGED**
+
+Exact protected-reviewed E4 branch head:
+`553e9d1398073b4cf0a4a4b282b2f3f3ff86ec2b`
+
+Exact reviewed tree:
+`6eb856f2c075b2194ccabb59b4a6e906110e4a1d`
+
+Merge commit / new main:
+`a0a2769b99f4893733568194c0aa68e78e73aeab`
+
+E4 Vres task:
+`TASK-20260930-2c7198e394`
+
+At this handoff boundary the E4 task has a host-recorded protected PASS, but a subsequent explicit `task_complete` call has **not been confirmed back to ChatGPT**. Treat that as local lifecycle bookkeeping to close before opening the E5 task; do not rerun validation or create another checkpoint merely for completion.
+
+## B. Exact-head CI and review identity
+
+Final exact-head CI:
+- workflow: Vres-OS CI **#470**;
+- run id: `37018126950`;
+- event: `pull_request`;
+- attempt: 1;
+- exact head: `553e9d1398073b4cf0a4a4b282b2f3f3ff86ec2b`;
+- conclusion: **SUCCESS**;
+- full PostgreSQL-backed suite: **2196 passed / 3 skipped**;
+- installed-runtime smoke: **PASS**;
+- release gate: `PASSED_WITH_EXPLICIT_LIVE_GATES`;
+- release-gate static/unit result: **1517 passed / 682 expected DB/live skips**;
+- artifact: `11231412578`;
+- artifact name: `release-gate-evidence`;
+- artifact digest: `sha256:764ac4524c32681f96cc4e550ddffb54c4d48eca16832340105d5391324c1d5c`.
+
+The final E4 review scope was the complete base-to-head diff:
+- base: `ddb0719d130fd45b12b6bdc9e1682378ace7ae64`;
+- head: `553e9d1398073b4cf0a4a4b282b2f3f3ff86ec2b`;
+- **65 files**;
+- 41 added;
+- 24 modified;
+- 0 deleted.
+
+The prior docs-complete product candidate `ce9067ab36716cb1f729466db168d002e1029c93` advanced only through CI-discovered acceptance-harness corrections. Those corrections changed only:
+- `tests/test_control_preflight.py`;
+- `tests/integration/test_validation_reply_guard_journey.py`.
+
+No E4 product/runtime file changed after `ce9067ab...`.
+
+## C. Protected validation history
+
+Historical first protected lifecycle attempt:
+- freeze checkpoint: `CP-20261002-ce4cd17ce2`;
+- request: `VAL-72e66d088bec405a`;
+- status: **rejected**;
+- task remained pending;
+- no host model/report was attached before terminal rejection;
+- the later validator prose could not rescue the terminal request;
+- no E4 candidate defect was established.
+
+The first attempt exposed a protected-validation execution issue: the validator stopped before its own background work completed. The current Vres contract defers one no-report stop, but a subsequent no-report stop is terminal rejection.
+
+Final protected retry:
+- current-turn retry freeze: `CP-20261002-836cb0cf41`;
+- request: `VAL-4dbf9f69b1744e6b`;
+- status: **passed**;
+- task validation status: **passed**;
+- completed_at: `2026-10-02T18:46:55+03:00`;
+- canonical validator: `vres-os:validator`;
+- host-observed model: **`claude-fable-5-1`**;
+- host agent id: `a757f62be54532130`;
+- host session id: `04300332-0486-411f-8bd3-c9886c2edfbf`;
+- canonical report: **14/14 checks passed**, no `not_run`, no failed checks;
+- all 65 prepared artifact hashes matched;
+- state digest reported as `47152e7c…6920`;
+- while validation was pending the parent reply gate correctly returned `validation_in_flight`.
+
+The successful retry deliberately:
+- used a current-turn Chairman freeze checkpoint;
+- launched no validator background/nested agents;
+- required a canonical terminal JSON report before validator stop;
+- prohibited `outcome=passed` when any check was `not_run` or failed.
+
+## D. Guarded merge and post-main proof
+
+Merge:
+- expected-head guard: `553e9d1398073b4cf0a4a4b282b2f3f3ff86ec2b`;
+- merge method: merge commit;
+- PR #182 merged successfully;
+- merge/main SHA: `a0a2769b99f4893733568194c0aa68e78e73aeab`.
+
+Required post-merge main CI:
+- workflow: Vres-OS CI **#471**;
+- run id: `37029621024`;
+- event: **push**;
+- attempt: 1;
+- exact main head: `a0a2769b99f4893733568194c0aa68e78e73aeab`;
+- conclusion: **SUCCESS**;
+- full PostgreSQL-backed suite: **2196 passed / 3 skipped**;
+- installed-runtime smoke: **PASS**;
+- release gate: `PASSED_WITH_EXPLICIT_LIVE_GATES`;
+- release-gate static/unit result: **1517 passed / 682 expected DB/live skips**;
+- release-gate git commit: `a0a2769b99f4893733568194c0aa68e78e73aeab`;
+- dirty: false;
+- artifact: `11236608634`;
+- artifact name: `release-gate-evidence`;
+- artifact digest: `sha256:0da77dfb4357f4b6d1413702192365cc15c11c2d0aa0305fdac433ecc6690758`.
+
+Durable GitHub evidence was posted to issue #176 for:
+- exact-head CI;
+- rejected protected attempt;
+- final protected PASS;
+- merge + post-main closure.
+
+## E. Accepted E4 shipped boundary
+
+E4 is repository/protected-acceptance complete and now present on authoritative main.
+
+Accepted scope:
+- append-only experience lifecycle ledger;
+- temporal retire/reinstate/challenge/supersession/refresh controls;
+- provenance-driven source revocation;
+- bounded multi-source survival handling;
+- JSON + pgvector embedding invalidation/rebuild fencing and stale-worker protection;
+- E4 lifecycle-aware E3 retrieval / policy `176.e4.v1`;
+- contaminated-session enforcement and serialized session-open/revocation behavior;
+- protected context-refresh attestation via migration 040;
+- host `claudecode/toolUseId` correlation;
+- revoked-only company support suppression across current reader surfaces;
+- MCP tools `source_revoke`, `knowledge_lifecycle`, and `context_refresh_ack`.
+
+Residual risks remain explicit and do not reopen E4 absent a real frozen-contract/security/data-integrity violation:
+- host `toolUseId` / `updatedInput` behavior dependency;
+- 120-second same-user replay window with runtime DB credential;
+- writer/runtime credentials in the same OS credential store;
+- nominal privilege separation in single-role DB topology;
+- owner/superuser trigger authority;
+- no `restore_source`;
+- bounded/non-transitive company support;
+- Stop-hook contamination reporting fails open;
+- ACK-path latency was not re-measured after migration 040.
+
+The validator also observed a pre-existing custom-order test-isolation weakness involving runtime-surface stubs and control-preflight tests. It was reproduced as test isolation rather than an E4 runtime defect; canonical CI ordering and isolated execution are green.
+
+## F. Immediate local closure bookkeeping
+
+Before opening a new E5 Vres task, complete the accepted E4 Vres task exactly once if it is still active.
+
+From the correctly rooted E4 Claude/Vres session:
+1. read `validation_evidence` for `TASK-20260930-2c7198e394`;
+2. require latest request `VAL-4dbf9f69b1744e6b` is still `passed`;
+3. require task validation status is still `passed`;
+4. require branch/worktree bytes still match the reviewed E4 candidate manifest;
+5. call `task_complete` once with a concise E4 closure summary that records PR #182 merge and post-main CI #471 success;
+6. do not create another checkpoint;
+7. do not call `validation_prepare`, `validation_invalidate`, or `validation_abandon`;
+8. after completion, read back the task status and return the evidence.
+
+This is lifecycle bookkeeping only; it does not reopen E4 review.
+
+## G. E5 — only next #176 implementation tranche
+
+Frozen plan:
+`docs/architecture/EXPERIENCE-INTELLIGENCE-PLAN-2026-09-27.md`
+
+Plan commit:
+`34f45afa0fb8d5a6a90bef53dec58d9ecef1093d`
+
+E5 frozen-plan scope:
+- capability-centric experience retrieval;
+- procedure/episode/feedback links;
+- validated success/failure history;
+- no opaque self-certified expert score;
+- no automatic agent prompt rewriting.
+
+Do not infer a larger E5 from convenience. Read issue #176 and the frozen plan first, then freeze a bounded E5 contract before implementation.
+
+Required E5 start sequence:
+1. finish the E4 Vres task completion bookkeeping above if still pending;
+2. verify authoritative `origin/main == a0a2769b99f4893733568194c0aa68e78e73aeab`;
+3. create a fresh E5 worktree/branch from that exact main;
+4. create a fresh E5 Vres task;
+5. audit existing capability/procedure/episode/feedback truth owners before designing schema;
+6. freeze the E5 contract;
+7. only then implement E5 in bounded chunks.
+
+Do not begin E6 until E5 is fully accepted, merged and green on post-main CI.
+
+## H. Preserved execution methodology
+
+Continue the accepted cadence:
+- bounded defect: targeted red test -> bounded fix -> targeted load-bearing tests -> commit;
+- full suite once per coherent final candidate;
+- release gate once per coherent final candidate;
+- protected validation once per frozen exact-head candidate unless a terminal lifecycle failure is deliberately classified and a fresh request is explicitly authorized;
+- no repeated expensive evidence without changed bytes or a concrete evidence gap.
+
+Protected validator lifecycle lesson from E4:
+- the freeze checkpoint that anchors `validation_in_flight` must be an explicit Chairman checkpoint in the current user turn before `validation_prepare`;
+- validators must not terminal-stop before the canonical report exists;
+- `outcome=passed` requires every check status to be `passed`;
+- preserve rejected/stale/failed requests as history;
+- never use `validation_abandon` on an already terminal request;
+- never use `validation_invalidate` unless a current PASS is being explicitly reopened for real post-review changes.
+
+Responsibility split remains:
+- ChatGPT primary for architecture, repo/code, PR/CI/merge, durable docs and tranche sequencing;
+- local Claude Code for Windows/local PostgreSQL/pgvector/installed runtime/Visual Studio/host-session/live-machine operations;
+- single writer per branch, with ownership transferred only at a clean exact committed/pushed SHA.
+
+## I. Remaining frozen program
+
+After E5:
+1. E6 — observability + experience utility evidence;
+2. E7 — benchmark + security ladder;
+3. E8 — Chairman integration + protected acceptance;
+4. E9 physical Experience Intelligence criteria carried to #169;
+5. #165 Chairman model policy;
+6. #166;
+7. #167;
+8. #168 project adoption + canonical Claude scaffold;
+9. #169 integrated Windows / Visual Studio live acceptance;
+10. #170 production readiness/go-live;
+11. post-#170 Organizational Architecture & Specialist Intelligence / full-team enhancement.
+
+The post-#170 backlog remains mandatory and must not interrupt E5–#170.
+
+## J. Fresh-chat resume prompt
+
+```text
+Resume the Vres-OS preproduction program from the newest canonical durable handoff.
+
+Repository:
+vosser24/Vres-OS
+
+Canonical documentation branch:
+docs-execution-checklist-20260927
+
+Read first:
+docs/PREPRODUCTION-EXECUTION-CHECKLIST-2026-09-27.md
+docs/handoffs/PREPRODUCTION-RESUME-HANDOFF-2026-09-27.md
+
+Newest authoritative handoff boundary:
+
+# 29. 2026-10-02 #176 E4 closure / E5 continuation seal
+
+Do not resume from older E3/E4 instructions.
+
+AUTHORITATIVE MAIN:
+a0a2769b99f4893733568194c0aa68e78e73aeab
+
+E4:
+repository/protected acceptance DONE
+PR #182 merged
+exact reviewed head 553e9d1398073b4cf0a4a4b282b2f3f3ff86ec2b
+protected PASS VAL-4dbf9f69b1744e6b on host-observed claude-fable-5-1
+post-main CI #471 / run 37029621024 SUCCESS
+post-main artifact 11236608634
+digest sha256:0da77dfb4357f4b6d1413702192365cc15c11c2d0aa0305fdac433ecc6690758
+
+Before E5, if TASK-20260930-2c7198e394 is still active locally, complete it once with task_complete after re-reading the current PASS evidence. Do not checkpoint or revalidate merely for completion.
+
+E5 is the only next #176 implementation tranche:
+- capability-centric experience retrieval;
+- procedure/episode/feedback links;
+- validated success/failure history;
+- no opaque self-certified expert score;
+- no automatic agent prompt rewriting.
+
+Start E5 from exact main a0a2769b99f4893733568194c0aa68e78e73aeab.
+Read issue #176 and the frozen Experience Intelligence plan first.
+Freeze a bounded E5 contract before implementation.
+Preserve the targeted-test/full-suite/release-gate/protected-validation cadence.
+Do not begin E6 before E5 is accepted, merged and post-main green.
+
+ChatGPT remains primary for architecture/repository/PR/CI/docs.
+Local Claude is for Windows/local PostgreSQL/pgvector/installed-runtime/Visual Studio/host/live-machine work.
+Never edit the same branch concurrently.
+```
