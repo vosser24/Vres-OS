@@ -112,3 +112,12 @@ counts.
   - Replay through the hook returned `replayed=true`. A second tool call without the hook was denied.
   - After a second revocation, the old key was denied and the new key acknowledged.
   - Zero attestations were left.
+
+## Closure record (docs-complete candidate)
+
+- Original frozen E4 contract commit: `a69b836fa3fbf6a97c00f830b05495c48c5af563`; the contract file is byte-identical to it (no addendum; `tests/test_e4_frozen_contract_integrity.py`).
+- Chunk commits: A-E, F hardening `b6521b81e377d4ccdb8301540c33d52871d7234c`, G `4dbaccaf46997b9fb7397bff29bd9aa2815c8ce8`, security closure `c3636345588df4167f9414c96456f489daa78250` (tree `04c04856e84e28ef8a49278e58094023f7feb5ef`, parent `4dbaccaf`).
+- Evidence on the closure bytes: full suite on a fresh disposable `_test` DB, pytest exit 0 with only the 3 known symlink skips; local release gate exit 0 (`PASSED_WITH_EXPLICIT_LIVE_GATES`; DB tests skip by design in the gate and are not validation evidence there); ruff critical clean; 51 MCP tools; 39 migrations, no 040.
+- Real contract violation found and fixed in closure: `_raw` returned raw text of a company item whose only support was revoked.
+- Accepted limitations: see `docs/KNOWN-LIMITATIONS.md` (E4). Not covered: `knowledge_search`/embedding readers for company items with revoked support; ack trust root is the hook payload `session_id`; `ack_attestation` is an unprotected metadata key.
+- The final candidate SHA/tree is the commit containing this record; read it from git.
