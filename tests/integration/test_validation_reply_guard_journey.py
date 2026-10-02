@@ -686,7 +686,7 @@ def test_real_prepare_and_real_checkpoint_racing_never_leave_a_checkpoint_after_
                 (result["prepared"]["request_key"],),
             ).fetchone()
             checkpoint_count = conn.execute(
-                "SELECT count(*) AS n FROM vres.checkpoints WHERE task_id=%s",
+                "SELECT count(*) AS n FROM vres.checkpoints WHERE task_id=%s AND reason='material_transition'",
                 (row["task_id"],),
             ).fetchone()["n"]
         # PostgreSQL now() is the transaction-start timestamp, so created_at cannot order two
