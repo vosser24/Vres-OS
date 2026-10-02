@@ -682,13 +682,18 @@ def test_real_prepare_and_real_checkpoint_racing_never_leave_a_checkpoint_after_
                 (task,),
             ).fetchone()
             request = conn.execute(
-                "SELECT state_digest,created_at FROM vres.validation_requests WHERE request_key=%s",
+                "SELECT state_digest FROM vres.validation_requests WHERE request_key=%s",
                 (result["prepared"]["request_key"],),
             ).fetchone()
-            late = conn.execute(
-                "SELECT count(*) AS n FROM vres.checkpoints WHERE task_id=%s AND created_at>%s",
-                (row["task_id"], request["created_at"]),
+            checkpoint_count = conn.execute(
+                "SELECT count(*) AS n FROM vres.checkpoints WHERE task_id=%s",
+                (row["task_id"],),
             ).fetchone()["n"]
-        assert late == 0  # no checkpoint may land after the request froze the state
+        # PostgreSQL now() is the transaction-start timestamp, so created_at cannot order two
+        # transactions that serialize later on the task_state row lock. Prove the race outcome
+        # structurally instead: a successful checkpoint is the only checkpoint, a rejected one
+        # wrote none, and the frozen digest must still equal the final locked task state.
+        expected_checkpoints = 1 if result["checkpoint"] == "written" else 0
+        assert checkpoint_count == expected_checkpoints
         assert request["state_digest"] == state_digest(dict(row))  # frozen digest is still current
     assert outcomes <= {"written", "rejected"}
