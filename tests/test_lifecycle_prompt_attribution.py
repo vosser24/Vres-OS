@@ -78,6 +78,7 @@ def test_stop_commits_prompt_to_final_bound_task(monkeypatch):
     monkeypatch.setattr(hooks, "last_assistant_snapshot", lambda _payload: None)
     monkeypatch.setattr(hooks, "_observe_session", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(hooks, "inspect_stop_guard", lambda *_args, **_kwargs: {"allowed": True})
+    monkeypatch.setattr(hooks, "_contamination_report", lambda *_args, **_kwargs: None)  # keep this unit DB-free
 
     committed = []
     events = []

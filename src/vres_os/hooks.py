@@ -8,12 +8,13 @@ from typing import Any
 
 from .config import ConfigStore
 from .credential_broker import CredentialBroker, CredentialBrokerError, detect_high_confidence_credentials
-from .db import DatabaseUnavailable
+from .db import DatabaseUnavailable, connect
 from .paths import logs_dir
 from .project import discover_project
 from .redaction import redact_text
 from .reply_guard import begin_reply_turn, inspect_stop_guard, mark_stop_guard_blocked
 from .repository import PendingValidationError, Repository
+from .session_contamination import contamination_notice
 from .session_lifecycle import (
     canonical_session_end_reason,
     cleanup_materialized_secrets_if_last_session,
@@ -54,6 +55,29 @@ def _log_hook_error(event: str, exc: Exception) -> None:
             handle.write(f"{datetime.now(timezone.utc).isoformat()} {event}: {type(exc).__name__}: {redact_text(str(exc))}\n")
     except OSError:
         pass
+
+
+def _contamination_report(project_id: int, sid: str | None) -> str | None:
+    """Read-only Stop report for a contaminated session: code, reason class and event key, never content.
+
+    Reporting fails open (logged); PreToolUse stays the fail-closed enforcer.
+    """
+    if not sid:
+        return None
+    try:
+        with connect() as conn:
+            notice = contamination_notice(conn, project_id, sid)
+    except Exception as exc:
+        _log_hook_error("StopContaminationReport", exc)
+        return None
+    if not notice:
+        return None
+    return (f"VRES_CONTEXT_REFRESH_REQUIRED: {notice['message']} ({notice['status']}; reason class: "
+            f"{notice['reason_class']}; contamination event: {notice['contamination_event_key']}). {notice['action']}")
+
+
+def _with_report(text: str, report: str | None) -> str:
+    return f"{text}\n{report}" if report else text
 
 
 def _project_id(repo: Repository, payload: dict | None = None) -> int:
@@ -354,11 +378,13 @@ def stop() -> None:
         return
     if not ConfigStore().load().configured:
         return
+    report: str | None = None
     try:
         repo = Repository()
         project_id = _project_id(repo, payload)
         sid = _session_id(payload)
         _observe_session(project_id, sid)
+        report = _contamination_report(project_id, sid)
         task = repo.active_task(project_id, sid)
         if task:
             # Evaluate the turn-scoped reply gate before committing the staged user
@@ -379,12 +405,13 @@ def stop() -> None:
                         json.dumps(
                             {
                                 "decision": "block",
-                                "reason": (
+                                "reason": _with_report(
                                     f"Vres authoritative reply guard is not satisfied for {task.task_key} ({reason}). "
                                     "Before replying, call task_checkpoint first if this reply completes, invalidates, "
                                     "or advances persisted next_action/pending_work, then call task_reply_gate with "
                                     "advances_state=true. For a genuinely non-material reply, call task_reply_gate "
-                                    "with advances_state=false. Do not infer progress from the prior assistant draft."
+                                    "with advances_state=false. Do not infer progress from the prior assistant draft.",
+                                    report,
                                 ),
                             }
                         )
@@ -393,14 +420,16 @@ def stop() -> None:
                 sys.stdout.write(
                     json.dumps(
                         {
-                            "systemMessage": (
+                            "systemMessage": _with_report(
                                 f"VRES_REPLY_GUARD_WARNING: {task.task_key} reply guard remained unresolved "
                                 f"after one continuation ({reason}). The reply is being allowed to avoid a Stop loop; "
-                                "authoritative task state may still be stale."
+                                "authoritative task state may still be stale.",
+                                report,
                             )
                         }
                     )
                 )
+                report = None  # already carried by the single warning object
             commit_staged_user_instruction(project_id, sid, task.task_key)
             snap = last_assistant_snapshot(payload)
             if snap:
@@ -412,14 +441,17 @@ def stop() -> None:
                     sid,
                 )
             repo.record_event(task.task_key, "MODEL_STOP", "vres-lifecycle", {}, sid)
+        if report:
+            sys.stdout.write(json.dumps({"systemMessage": report}))
     except Exception as exc:
         _log_hook_error("Stop", exc)
         sys.stdout.write(
             json.dumps(
                 {
-                    "systemMessage": (
+                    "systemMessage": _with_report(
                         "VRES_REPLY_GUARD_WARNING: Vres could not verify the authoritative pre-reply gate. "
-                        "Persistence may be stale; inspect Vres task state before relying on continuity."
+                        "Persistence may be stale; inspect Vres task state before relying on continuity.",
+                        report,
                     )
                 }
             )
