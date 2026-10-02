@@ -389,7 +389,14 @@ def test_hook_denies_mutation_while_contaminated_then_passes_after_ack(pg_projec
     # E4 Chunk G: the recovery tool is admitted only with a contamination event key of this host session
     assert _host(monkeypatch, capsys, ACK, sid)[0] == []
     assert _host(monkeypatch, capsys, ACK, sid, tool_input={"request": {"contaminated_event_key": c}})[0] == [ACK]
-    _ack(pg_project, sid, c)
+    # the admitted public tool consumes the hook's attestation of this host session (no session id is supplied)
+    from vres_os import mcp_server
+
+    with connect() as conn:
+        pkey = conn.execute("SELECT project_key FROM vres.projects WHERE id=%s", (pg_project,)).fetchone()["project_key"]
+    monkeypatch.setattr(mcp_server, "discover_project",
+                        lambda root=".": ProjectIdentity(Path("."), pkey, "Vres test", None, None))
+    assert mcp_server.context_refresh_ack({"contaminated_event_key": c})["acknowledged_event_key"] == c
     assert _host(monkeypatch, capsys, "Bash", sid) == (["Bash"], None)
 
 

@@ -313,23 +313,14 @@ def knowledge_lifecycle(request: dict[str, Any]) -> dict:
 @mcp.tool()
 def context_refresh_ack(request: dict[str, Any]) -> dict:
     """Parent-session attestation that context was re-derived excluding invalidated memory (attestation, not proof).
-    Request: contaminated_event_key only (the LCE- key named by the contamination notice). The session is resolved
-    from that event; the PreToolUse hook admits the call only when the key belongs to the host session."""
-    from .db import connect
+    Request: contaminated_event_key only (the LCE- key named by the contamination notice). The key never selects the
+    session: the PreToolUse hook attests the host session for exactly this key, and this call consumes that
+    single-use attestation; without it the call fails closed."""
     r = _closed_request("context_refresh_ack", request, {"contaminated_event_key"})
     key = r["contaminated_event_key"]
     if not valid_event_key(key):
         raise ValueError("contaminated_event_key is not a lifecycle event key")
-    pid = _trusted_project_id()
-    with connect() as conn:
-        row = conn.execute(
-            "SELECT s.provider_session_id FROM vres.experience_lifecycle_events e JOIN vres.sessions s "
-            "ON s.project_id=e.project_id AND s.session_key=e.session_key AND s.provider='claude' "
-            "AND s.ended_at IS NULL WHERE e.project_id=%s AND e.event_key=%s AND e.action='context_contaminated'",
-            (pid, key)).fetchone()
-    if not row:
-        raise ValueError("unknown_contamination: no open session of this project has that contamination event")
-    return ContextRefreshService().acknowledge(pid, row["provider_session_id"], contaminated_event_key=key)
+    return ContextRefreshService().acknowledge_attested(_trusted_project_id(), contaminated_event_key=key)
 
 
 @mcp.tool()

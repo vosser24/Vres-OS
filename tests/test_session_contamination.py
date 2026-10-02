@@ -101,9 +101,14 @@ def test_clean_session_allows_everything():
 def test_contaminated_session_allows_only_existing_safe_tools_and_the_parent_recovery_tool():
     contaminations = [_contaminated()]
     allowed = sorted(_SAFE_HOST_TOOLS) + [_VRES_PREFIX + t for t in sorted(_SAFE_VRES_TOOLS)] + [ACK]
+    attested = []
     for tool in allowed:
         payload = _ack() if tool == ACK else _payload(tool)
-        assert control_preflight.evaluate_contamination_preflight(payload, contaminations) is None, tool
+        assert control_preflight.evaluate_contamination_preflight(
+            payload, contaminations, attest=lambda key: attested.append(key) or True) is None, tool
+    assert attested == [C1]  # only the recovery tool needs (and gets) the host-session attestation
+    # without an attestation the recovery tool is denied too (fail closed)
+    _reason(control_preflight.evaluate_contamination_preflight(_ack(), contaminations))
     denied = ["Bash", "Write", "Edit", "Agent", "WebFetch", "TaskStop", "NotebookEdit",
               _VRES_PREFIX + "task_checkpoint", _VRES_PREFIX + "knowledge_promote",
               _VRES_PREFIX + "knowledge_get", _VRES_PREFIX + "experience_retrieve"]
@@ -161,7 +166,8 @@ def test_hold_and_contamination_are_independent():
     assert control_preflight.evaluate_control_preflight(_payload("Bash"), None) is None
     assert control_preflight.evaluate_contamination_preflight(_payload("Bash"), [_contaminated()]) is not None
     # the recovery tool is allowed by contamination but stays a mutation for the hold
-    assert control_preflight.evaluate_contamination_preflight(_ack(), [_contaminated()]) is None
+    assert control_preflight.evaluate_contamination_preflight(_ack(), [_contaminated()],
+                                                              attest=lambda key: True) is None
     assert control_preflight.evaluate_control_preflight(_payload(ACK), hold) is not None
 
 
@@ -203,9 +209,13 @@ def test_hook_denies_mutation_while_contaminated_using_the_host_session_id(monke
 
 def test_hook_allows_parent_recovery_tool_and_denies_subagent_recovery(monkeypatch, capsys):
     _wire(monkeypatch, contaminations=[_contaminated()])
+    attested = []
+    monkeypatch.setattr(control_preflight, "attest_refresh_ack",
+                        lambda sid, key: attested.append((sid, key)) or True)
     assert _run_main(monkeypatch, capsys, _ack()) == (0, "", "")
     code, out, _ = _run_main(monkeypatch, capsys, _ack(agent_id="agent-1"))
     assert code == 0 and json.loads(out)["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert attested == [("S-HOST", C1)]  # the subagent never reached the attestation
 
 
 def test_hook_subagent_mutation_is_denied_because_it_carries_the_parent_session(monkeypatch, capsys):
@@ -262,9 +272,22 @@ def test_no_migration_040_and_no_sessions_column_or_e6_table():
 
 
 def test_contamination_module_writes_no_session_rows_or_metadata():
+    # Contamination STATE is ledger-derived: no session row is inserted/deleted, no contamination flag is stored, and
+    # the only sessions UPDATEs set/remove the single-use admission attestation key (not a migration-029 protected key).
+    import inspect
+
+    sc = _sc()
     text = (ROOT / "src" / "vres_os" / "session_contamination.py").read_text(encoding="utf-8")
-    assert not re.search(r"(UPDATE|INSERT\s+INTO|DELETE\s+FROM)\s+vres\.sessions", text, re.I)
-    assert "metadata" not in text
+    assert not re.search(r"(INSERT\s+INTO|DELETE\s+FROM)\s+vres\.sessions", text, re.I)
+    updates = re.findall(r"UPDATE vres\.sessions SET metadata=([^\n]*)", text)
+    assert len(updates) == len(re.findall(r"UPDATE\s+vres\.sessions", text, re.I)) == 2
+    assert "jsonb_set" in updates[0] and "ACK_ATTESTATION_KEY" in updates[0]
+    assert updates[1].startswith("metadata-'ack_attestation'")
+    assert sc.ACK_ATTESTATION_KEY == "ack_attestation"
+    for protected in ("pending_user_instruction", "committed_user_input_tool_ids", "vres_read_only_hold"):
+        assert protected not in text
+    for fn in (sc.is_contaminated, sc.contaminated_sessions_for_host_session, sc._latest):
+        assert "metadata" not in inspect.getsource(fn)  # state never reads the attestation
 
 
 def test_chunk_g_registers_exactly_the_three_tools_as_thin_adapters():

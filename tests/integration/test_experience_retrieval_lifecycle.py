@@ -432,3 +432,22 @@ def test_company_item_support_in_revoked_project_source_is_treated_as_absent(pg_
     assert pack["diagnostics"]["excluded_revoked_source"] == 1
     assert pack["diagnostics"]["excluded_unapproved_company"] == 1
     assert dead not in _canonical(pack) and srs.status(dead) == "validated" and srs.status(mixed) == "validated"
+
+
+def test_raw_chunk_of_a_company_item_whose_only_support_is_revoked_is_never_returned(
+        pg_project, company_rows, relations, raw_rows):
+    """Contract 'E3 retrieval integration': a lesson grounded only in revoked sources is excluded, and `_raw` gains the
+    same conditions; cross-scope support in a revoked project source is treated as absent (company row unmutated)."""
+    mk, pid = _mk(), pg_project
+    dead = f"K-CRD-{mk}"
+    _knowledge(dead, None, mk, approval=_company_approval(pid, _task(pid)), statement=f"{mk} company dead support")
+    company_rows["knowledge"].append(dead)
+    relations.append(dead)
+    s1 = srs.source(pid)
+    srs.derived("knowledge", dead, "source", s1)
+    _chunk(raw_rows, f"C-CRD-{mk}", knowledge_key=dead, content=f"{mk} raw text of company dead support")
+    assert sorted(srs.revoke(pid, s1)["unresolved_cross_scope"]) == [dead]
+    for pack in (_retrieve(pid, mk), _hist(pid, mk, datetime.now(timezone.utc))):
+        assert f"C-CRD-{mk}" not in [i["memory_key"] for i in pack["raw_evidence_refs"]]
+        assert "company dead support" not in _canonical(pack)
+    assert srs.status(dead) == "validated"

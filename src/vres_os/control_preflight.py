@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .config import ConfigStore
 from .db import connect
-from .session_contamination import REFRESH_CODE, contaminated_sessions_for_host_session, revoked_phrase
+from .session_contamination import (
+    REFRESH_CODE, attest_refresh_ack, contaminated_sessions_for_host_session, revoked_phrase, valid_event_key,
+)
 from .session_prompts import read_only_hold_from_metadata
 
 _SAFE_HOST_TOOLS = {
@@ -39,7 +41,8 @@ _SCOPED_FILE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 _PARENT_ONLY_VALIDATION_TOOLS = frozenset(
     {"validation_prepare", "validation_invalidate", "validation_abandon"}
 )
-# The only non-read-only tool a contaminated parent session may run: its context refresh acknowledgement.
+# The only non-read-only tool a contaminated parent session may run: its context refresh acknowledgement. It is an
+# exact-name recovery branch (never a _SAFE_VRES_TOOLS member), admitted only after the hook attests this host session.
 _CONTAMINATION_RECOVERY_TOOLS = frozenset({"context_refresh_ack"})
 
 
@@ -205,21 +208,27 @@ def _recovery_name(tool_name: str) -> str | None:
 
 
 def _ack_key(payload: dict[str, Any]) -> str | None:
+    """The key of an exact {"request": {"contaminated_event_key": K}} tool input, else None (nothing else accepted)."""
     tool_input = payload.get("tool_input")
-    value = tool_input.get("contaminated_event_key") if isinstance(tool_input, dict) else None
-    if value is None and isinstance(tool_input, dict) and isinstance(tool_input.get("request"), dict):
-        value = tool_input["request"].get("contaminated_event_key")
-    return value if isinstance(value, str) else None
+    if not isinstance(tool_input, dict) or set(tool_input) != {"request"}:
+        return None
+    request = tool_input["request"]
+    if not isinstance(request, dict) or set(request) != {"contaminated_event_key"}:
+        return None
+    value = request["contaminated_event_key"]
+    return value if valid_event_key(value) else None
 
 
 def evaluate_contamination_preflight(
     payload: dict[str, Any],
     contaminations: list[dict[str, Any]],
+    attest: Callable[[str], bool] | None = None,
 ) -> dict[str, Any] | None:
     """Deny all but read-only tools and the parent's refresh acknowledgement while the session is contaminated.
 
-    The acknowledgement is allowed only for a contamination event key that belongs to THIS host session
-    (the host-observed session_id); a key of another session, or any key while clean, is denied (fail closed).
+    The acknowledgement (exact registered name only) is admitted only after ``attest`` has recorded a single-use
+    attestation that THIS host session (the host-observed session_id) asked to acknowledge exactly its own latest
+    contamination event key. No attestation, or any attestation failure, denies (fail closed).
     """
     if payload.get("hook_event_name") != "PreToolUse":
         return None
@@ -231,12 +240,20 @@ def evaluate_contamination_preflight(
         return _deny("Vres context refresh acknowledgement is parent-session authority and cannot be invoked "
                      "by a subagent.")
     if recovery:
-        own = {str(c.get("event_key")) for c in contaminations}
-        if _ack_key(payload) in own:
+        key = _ack_key(payload)
+        attested = False
+        if key is not None and attest is not None:
+            try:
+                attested = bool(attest(key))
+            except Exception as exc:
+                return _deny(f"Vres [{REFRESH_CODE}]: could not attest the current host session for '{recovery}', "
+                             f"so it is fail-closed. Tool did not execute ({type(exc).__name__}).")
+        if attested:
             return None
         return _deny(
-            f"Vres [{REFRESH_CODE}]: '{recovery}' may acknowledge only a contamination event of this host session; "
-            "the supplied key is missing or not this session's. Nothing executed.")
+            f"Vres [{REFRESH_CODE}]: '{recovery}' may acknowledge only the latest contamination event of this host "
+            "session, as request {\"contaminated_event_key\": ...}; the supplied key is missing, malformed or not "
+            "this session's latest. Nothing executed; the tool did not execute.")
     if not contaminations:
         return None
     keys = sorted({str(c.get("event_key")) for c in contaminations})
@@ -311,7 +328,8 @@ def main() -> int:
                         f"Tool '{tool_name}' did not execute ({type(exc).__name__})."
                     )
                 else:
-                    decision = evaluate_contamination_preflight(payload, contaminations)
+                    decision = evaluate_contamination_preflight(
+                        payload, contaminations, attest=lambda key: attest_refresh_ack(sid, key))
         if decision is not None:
             json.dump(decision, sys.stdout, separators=(",", ":"))
             sys.stdout.write("\n")

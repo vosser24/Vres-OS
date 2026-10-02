@@ -223,48 +223,89 @@ def _contaminate(pid):
     return (sid_a, key_a, _sc_state(pid, key_a)["event_key"]), (sid_b, key_b, _sc_state(pid, key_b)["event_key"])
 
 
-def test_context_refresh_ack_adapter_acks_exactly_the_keys_session_and_is_idempotent(pg_project):
-    (_sa, key_a, ev_a), (_sb, key_b, ev_b) = _contaminate(pg_project)
-    out = mcp_server.context_refresh_ack({"contaminated_event_key": ev_a})
+class _ConfiguredStore:
+    def load(self):
+        return type("C", (), {"configured": True})()
+
+
+def _hook(monkeypatch, capsys, sid, key):
+    """The real PreToolUse hook for the parent ack of host session ``sid``: 'allow' (attested) or 'deny'."""
+    import io
+
+    from vres_os import control_preflight
+
+    monkeypatch.setattr(control_preflight, "ConfigStore", _ConfiguredStore)
+    payload = {"hook_event_name": "PreToolUse", "tool_name": control_preflight._VRES_PREFIX + "context_refresh_ack",
+               "session_id": sid, "tool_input": {"request": {"contaminated_event_key": key}}}
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
+    assert control_preflight.main() == 0
+    out = capsys.readouterr().out
+    return json.loads(out)["hookSpecificOutput"]["permissionDecision"] if out else "allow"
+
+
+def _host_ack(monkeypatch, capsys, sid, key):
+    """What the host does: run the hook, then the public tool only if the hook admitted it."""
+    assert _hook(monkeypatch, capsys, sid, key) == "allow"
+    return mcp_server.context_refresh_ack({"contaminated_event_key": key})
+
+
+def test_context_refresh_ack_adapter_acks_exactly_the_keys_session_and_is_idempotent(pg_project, monkeypatch, capsys):
+    (sid_a, key_a, ev_a), (_sb, key_b, ev_b) = _contaminate(pg_project)
+    with pytest.raises(ValueError):  # the public tool alone (no hook attestation) fails closed
+        mcp_server.context_refresh_ack({"contaminated_event_key": ev_a})
+    assert _sc_state(pg_project, key_a)["contaminated"] is True
+    out = _host_ack(monkeypatch, capsys, sid_a, ev_a)
     assert out["new_state"] == "clean" and out["acknowledged_event_key"] == ev_a and out["replayed"] is False
     assert _sc_state(pg_project, key_a)["contaminated"] is False
     assert _sc_state(pg_project, key_b)["contaminated"] is True  # the other session is untouched
     n = len(_ledger(pg_project, "context_refreshed"))
-    again = mcp_server.context_refresh_ack({"contaminated_event_key": ev_a})
+    again = _host_ack(monkeypatch, capsys, sid_a, ev_a)
     assert again["replayed"] is True and again["event_key"] == out["event_key"]
     assert len(_ledger(pg_project, "context_refreshed")) == n
     assert ev_b != ev_a
 
 
-def test_context_refresh_ack_negatives_unknown_foreign_project_wrong_action_and_ended_session(pg_project, other_project):
-    (_sa, key_a, ev_a), _b = _contaminate(pg_project)
-    (_oa, key_o, ev_o), _ob = _contaminate(other_project)
+def test_context_refresh_ack_negatives_unknown_foreign_project_wrong_action_and_ended_session(
+        pg_project, other_project, monkeypatch, capsys):
+    (sid_a, key_a, ev_a), _b = _contaminate(pg_project)
+    (sid_o, key_o, ev_o), _ob = _contaminate(other_project)
+    unknown = "LCE-" + "0" * 32
+    assert _hook(monkeypatch, capsys, sid_a, unknown) == "deny"
     with pytest.raises(ValueError):
-        mcp_server.context_refresh_ack({"contaminated_event_key": "LCE-" + "0" * 32})
-    with pytest.raises(ValueError):  # a contamination event of ANOTHER project is not resolvable from this one
+        mcp_server.context_refresh_ack({"contaminated_event_key": unknown})
+    assert _hook(monkeypatch, capsys, sid_a, ev_o) == "deny"
+    # a contamination event of ANOTHER project is not resolvable from this one, even with that session's attestation
+    assert _hook(monkeypatch, capsys, sid_o, ev_o) == "allow"
+    with pytest.raises(ValueError):
         mcp_server.context_refresh_ack({"contaminated_event_key": ev_o})
     assert _sc_state(other_project, key_o)["contaminated"] is True
     refreshed = None
-    mcp_server.context_refresh_ack({"contaminated_event_key": ev_a})
+    _host_ack(monkeypatch, capsys, sid_a, ev_a)
     refreshed = _ledger(pg_project, "context_refreshed")[-1]["event_key"]
+    assert _hook(monkeypatch, capsys, sid_a, refreshed) == "deny"
     with pytest.raises(ValueError):  # a context_refreshed event key is not a contamination key
         mcp_server.context_refresh_ack({"contaminated_event_key": refreshed})
     with connect() as conn, conn.transaction():
         conn.execute("UPDATE vres.sessions SET ended_at=now() WHERE session_key=%s", (_b[1],))
+    assert _hook(monkeypatch, capsys, _b[0], _b[2]) == "deny"
     with pytest.raises(ValueError):
         mcp_server.context_refresh_ack({"contaminated_event_key": _b[2]})
 
 
-def test_a_stale_contamination_key_cannot_acknowledge_after_a_second_revocation(pg_project):
-    (_sa, key_a, ev_first), _b = _contaminate(pg_project)
+def test_a_stale_contamination_key_cannot_acknowledge_after_a_second_revocation(pg_project, monkeypatch, capsys):
+    (sid_a, key_a, ev_first), _b = _contaminate(pg_project)
+    assert _hook(monkeypatch, capsys, sid_a, ev_first) == "allow"  # attested while it was still the latest
     s2, _ = _poisoned(pg_project)
     _revoke(pg_project, s2)
     latest = _sc_state(pg_project, key_a)["event_key"]
     assert latest != ev_first
+    with pytest.raises(ValueError):  # the in-flight attestation is consumed but the stale key is still rejected
+        mcp_server.context_refresh_ack({"contaminated_event_key": ev_first})
+    assert _hook(monkeypatch, capsys, sid_a, ev_first) == "deny"
     with pytest.raises(ValueError):
         mcp_server.context_refresh_ack({"contaminated_event_key": ev_first})
     assert _sc_state(pg_project, key_a)["contaminated"] is True
-    assert mcp_server.context_refresh_ack({"contaminated_event_key": latest})["new_state"] == "clean"
+    assert _host_ack(monkeypatch, capsys, sid_a, latest)["new_state"] == "clean"
 
 
 # --- legacy bypass audit (one test per path) -------------------------------------------------------------------------
@@ -416,6 +457,12 @@ def test_hook_binds_the_ack_to_the_host_session_end_to_end(pg_project, monkeypat
         out = capsys.readouterr().out
         return json.loads(out)["hookSpecificOutput"]["permissionDecision"] if out else "allow"
     assert decide(sid_a, ev_a) == "allow"
+    assert mcp_server.context_refresh_ack({"contaminated_event_key": ev_a})["acknowledged_event_key"] == ev_a
     assert decide(sid_a, ev_b) == "deny"  # session A may not acknowledge session B's contamination
+    with pytest.raises(ValueError):
+        mcp_server.context_refresh_ack({"contaminated_event_key": ev_b})
+    assert _sc_state(pg_project, _kb)["contaminated"] is True
     assert decide(sid_b, ev_a) == "deny"
     assert decide(sid_b, ev_b) == "allow"
+    assert mcp_server.context_refresh_ack({"contaminated_event_key": ev_b})["acknowledged_event_key"] == ev_b
+    assert _sc_state(pg_project, _ka)["contaminated"] is False and _sc_state(pg_project, _kb)["contaminated"] is False

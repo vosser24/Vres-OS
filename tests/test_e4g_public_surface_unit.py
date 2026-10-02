@@ -51,6 +51,17 @@ def _reason(decision):
     return decision["hookSpecificOutput"]["permissionDecisionReason"]
 
 
+def _own_attest(contaminations, calls=None):
+    """Stand-in for the hook's DB attestation: true only for this host session's own (latest) event key."""
+    own = {c["event_key"] for c in contaminations}
+
+    def attest(key):
+        if calls is not None:
+            calls.append(key)
+        return key in own
+    return attest
+
+
 # --- registry ---------------------------------------------------------------------------------------------------------
 
 def test_real_registry_has_each_new_tool_exactly_once_and_no_extra_lifecycle_tools():
@@ -129,35 +140,42 @@ def test_matcher_delivers_the_three_new_tools_and_no_safe_list_widening():
 
 def test_only_the_ack_is_recovery_and_only_with_exact_name_in_bare_or_prefixed_form():
     own = [_contaminated()]
+    calls = []
     for tool in (ACK, ACK_NAME):
         assert control_preflight.evaluate_contamination_preflight(_payload(tool, request={"contaminated_event_key": C1}),
-                                                                  own) is None, tool
+                                                                  own, attest=_own_attest(own, calls)) is None, tool
+    assert calls == [C1, C1]
     for tool in (_VRES_PREFIX + "source_revoke", _VRES_PREFIX + "knowledge_lifecycle", "source_revoke",
                  "knowledge_lifecycle", _VRES_PREFIX + "context_refresh_ack2", ACK + "_and_more",
                  "mcp__plugin_other__context_refresh_ack", "Context_Refresh_Ack"):
         decision = control_preflight.evaluate_contamination_preflight(
-            _payload(tool, request={"contaminated_event_key": C1}), own)
+            _payload(tool, request={"contaminated_event_key": C1}), own, attest=_own_attest(own, calls))
         assert "context refresh required" in _reason(decision), tool
+    assert calls == [C1, C1]  # near names never reach the attestation
 
 
 @pytest.mark.parametrize("request_", [None, {}, {"contaminated_event_key": C2}, {"contaminated_event_key": None},
                                       {"contaminated_event_key": ["x", C1]}, {"contaminated_event_key": C1.lower() + " "}])
 def test_ack_is_denied_unless_the_key_is_one_of_this_host_sessions_contamination_events(request_):
-    reason = _reason(control_preflight.evaluate_contamination_preflight(_payload(ACK, request=request_),
-                                                                         [_contaminated()]))
+    own = [_contaminated()]
+    reason = _reason(control_preflight.evaluate_contamination_preflight(_payload(ACK, request=request_), own,
+                                                                         attest=_own_attest(own)))
     assert "this host session" in reason and "Nothing executed" in reason
 
 
 def test_ack_with_a_foreign_key_while_this_session_is_clean_is_denied():
     # the attack: a clean (or other) session acknowledging another session's contamination event
     assert "this host session" in _reason(control_preflight.evaluate_contamination_preflight(
-        _payload(ACK, request={"contaminated_event_key": C2}), []))
+        _payload(ACK, request={"contaminated_event_key": C2}), [], attest=_own_attest([])))
 
 
-def test_flat_tool_input_key_is_also_read_for_the_binding():
+def test_flat_tool_input_key_is_not_accepted_for_the_binding():
+    # the tool's schema is one closed request object; a flat key is never read, so it never reaches the attestation
+    own, calls = [_contaminated()], []
     p = _payload(ACK)
     p["tool_input"] = {"contaminated_event_key": C1}
-    assert control_preflight.evaluate_contamination_preflight(p, [_contaminated()]) is None
+    reason = _reason(control_preflight.evaluate_contamination_preflight(p, own, attest=_own_attest(own, calls)))
+    assert "this host session" in reason and "Nothing executed" in reason and calls == []
 
 
 def test_denial_text_names_the_registered_tool_that_exists_in_the_real_registry():
@@ -202,6 +220,9 @@ def test_hook_main_allows_the_parent_ack_of_its_own_event_and_denies_a_foreign_k
     monkeypatch.setattr(control_preflight, "read_only_hold_for_session", lambda sid: None)
     monkeypatch.setattr(control_preflight, "contaminated_sessions_for_host_session",
                         lambda sid: [_contaminated()] if sid == "S-HOST" else [])
+    attested = []
+    monkeypatch.setattr(control_preflight, "attest_refresh_ack",  # the DB attestation: own latest key only
+                        lambda sid, key: attested.append((sid, key)) or (sid == "S-HOST" and key == C1))
 
     def run(payload):
         monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
@@ -212,6 +233,7 @@ def test_hook_main_allows_the_parent_ack_of_its_own_event_and_denies_a_foreign_k
     assert code == 0 and json.loads(out)["hookSpecificOutput"]["permissionDecision"] == "deny"
     code, out = run(_payload(ACK, sid="S-OTHER", request={"contaminated_event_key": C1}))
     assert json.loads(out)["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert attested == [("S-HOST", C1), ("S-HOST", C2), ("S-OTHER", C1)]  # always the host-observed session id
 
 
 # --- bounded public result -------------------------------------------------------------------------------------------

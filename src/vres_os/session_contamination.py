@@ -3,6 +3,10 @@
 State is derived only from the append-only lifecycle ledger (no sessions column, no cache). A session is clean
 iff it has no context_contaminated event, or its latest context_refreshed event comes after the latest
 contamination, is 'clean', and acknowledges exactly that contamination's event key. Anything else fails closed.
+
+The public acknowledgement is bound to the trusted host session by a short-lived, single-use admission attestation
+(sessions.metadata key ``ack_attestation``) that only the PreToolUse hook writes and the MCP tool consumes. It gates
+admission only; contamination state never reads it.
 """
 from __future__ import annotations
 
@@ -10,13 +14,14 @@ import hashlib
 import json
 import re
 import uuid
+from datetime import datetime, timedelta
 from typing import Any
 
 from .experience_lifecycle import POLICY_VERSION, LifecycleDenied, _connect, _lock_project, ledger_key
 from .experience_lifecycle import _append_event as append_ledger_event
 from .knowledge_status import revocation_reason_class
 
-__all__ = ["ContextRefreshService", "contaminated_sessions_for_host_session", "contamination_notice",
+__all__ = ["ContextRefreshService", "attest_refresh_ack", "contaminated_sessions_for_host_session", "contamination_notice",
            "contamination_state", "is_contaminated", "mark_open_sessions_contaminated", "revoked_phrase",
            "valid_event_key"]
 
@@ -27,6 +32,9 @@ _LIST_FIELDS = ("revoked_knowledge", "revoked_episodes")
 REFRESH_CODE = "context_refresh_required"
 MAX_NAMED_REVOKED = 5
 _SAFE_KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}")
+ACK_ATTESTATION_KEY = "ack_attestation"
+ACK_ATTESTATION_TTL_SECONDS = 120
+_NOT_ATTESTED = "lifecycle/current-session context must be refreshed; retry"
 
 
 def valid_event_key(value: Any) -> bool:
@@ -126,6 +134,58 @@ def contaminated_sessions_for_host_session(provider_session_id: str) -> list[dic
     return out
 
 
+def attest_refresh_ack(provider_session_id: str, event_key: str) -> bool:
+    """PreToolUse hook only: attest that THIS host session asked to acknowledge exactly ``event_key``.
+
+    Writes a short-lived, single-use admission attestation (event_key + server issued_at) into the one open Claude
+    session row of this host session whose LATEST contamination is ``event_key``. Returns False, writing nothing,
+    otherwise. Contamination state is never written here; it stays derived from the ledger.
+    """
+    if not isinstance(provider_session_id, str) or not provider_session_id or not valid_event_key(event_key):
+        return False
+    with _connect() as conn, conn.transaction():
+        rows = conn.execute(
+            """SELECT s.id,s.project_id,s.session_key FROM vres.experience_lifecycle_events e
+                 JOIN vres.sessions s ON s.project_id=e.project_id AND s.session_key=e.session_key
+                WHERE e.event_key=%s AND e.action='context_contaminated' AND e.target_kind='session'
+                  AND s.provider='claude' AND s.provider_session_id=%s AND s.ended_at IS NULL""",
+            (event_key, provider_session_id)).fetchall()
+        if len(rows) != 1:
+            return False
+        row = rows[0]
+        latest, _refreshed = _latest(conn, row["project_id"], row["session_key"])
+        if latest is None or latest["event_key"] != event_key:
+            return False
+        conn.execute(
+            "UPDATE vres.sessions SET metadata=jsonb_set(COALESCE(metadata,'{}'::jsonb),'{" + ACK_ATTESTATION_KEY
+            + "}',jsonb_build_object('event_key',%s::text,'issued_at',clock_timestamp()),true) WHERE id=%s",
+            (event_key, row["id"]))
+    return True
+
+
+def _consume_attestation(conn, project_id: int, event_key: str) -> str:
+    """Remove every attestation for ``event_key`` in the project (single use); return the one fresh session_key."""
+    rows = conn.execute(
+        "SELECT id,session_key,metadata->'ack_attestation'->>'issued_at' AS issued_at,clock_timestamp() AS now "
+        "FROM vres.sessions WHERE project_id=%s AND provider='claude' AND ended_at IS NULL "
+        "AND metadata->'ack_attestation'->>'event_key'=%s FOR UPDATE",
+        (project_id, event_key)).fetchall()
+    if rows:
+        conn.execute("UPDATE vres.sessions SET metadata=metadata-'ack_attestation' WHERE id=ANY(%s)",
+                     ([r["id"] for r in rows],))
+    if len(rows) != 1:
+        raise LifecycleDenied("refresh_not_attested", _NOT_ATTESTED)
+    row = rows[0]
+    try:
+        issued = datetime.fromisoformat(str(row["issued_at"]))
+        fresh = row["now"] - timedelta(seconds=ACK_ATTESTATION_TTL_SECONDS) <= issued <= row["now"]
+    except (TypeError, ValueError):
+        fresh = False
+    if not fresh:
+        raise LifecycleDenied("refresh_not_attested", _NOT_ATTESTED)
+    return row["session_key"]
+
+
 def contamination_notice(conn, project_id: int, provider_session_id: str) -> dict[str, Any] | None:
     """Read-only resume notice for a contaminated open session of this project; None when clean."""
     row = conn.execute("SELECT session_key FROM vres.sessions WHERE provider='claude' AND project_id=%s "
@@ -169,11 +229,8 @@ def _ack_result(event: dict[str, Any], replayed: bool) -> dict[str, Any]:
 
 class ContextRefreshService:
     def acknowledge(self, project_id: int, provider_session_id: str, *, contaminated_event_key: str) -> dict:
-        """Record the parent session's attested refresh for its latest contamination (one transaction)."""
-        if isinstance(project_id, bool) or not isinstance(project_id, int) or project_id <= 0:
-            raise ValueError("project_id must be a positive integer")
-        if not valid_event_key(contaminated_event_key):
-            raise LifecycleDenied("malformed_event_key", "contaminated_event_key is not a lifecycle event key")
+        """Internal/trusted API: the caller has already established the host session id (one transaction)."""
+        _validate(project_id, contaminated_event_key)
         if not isinstance(provider_session_id, str) or not provider_session_id:
             raise LifecycleDenied("unknown_session", "no open session for this host session")
         with _connect() as conn, conn.transaction():
@@ -184,34 +241,61 @@ class ContextRefreshService:
             if len(rows) != 1:
                 code = "unknown_session" if not rows else "ambiguous_session"
                 raise LifecycleDenied(code, "no single open session for this host session in this project")
-            session_key = rows[0]["session_key"]
-            c, r = _latest(conn, project_id, session_key)
-            if c is None:
-                raise LifecycleDenied("not_contaminated", "this session has no contamination to acknowledge")
-            if contaminated_event_key != c["event_key"]:
-                older = conn.execute(
-                    "SELECT 1 FROM vres.experience_lifecycle_events WHERE project_id=%s AND target_kind='session' "
-                    "AND session_key=%s AND action='context_contaminated' AND event_key=%s",
-                    (project_id, session_key, contaminated_event_key)).fetchone()
-                code = "stale_contamination" if older else "unknown_contamination"
-                raise LifecycleDenied(code, "contaminated_event_key is not this session's latest contamination")
-            idem = ledger_key("context_refreshed", "session", session_key, contaminated_event_key)
-            if not is_contaminated(c, r):
-                prior = conn.execute("SELECT * FROM vres.experience_lifecycle_events WHERE idempotency_key=%s",
-                                     (idem,)).fetchone()
-                if prior is None:
-                    raise LifecycleDenied("not_contaminated", "this session is not contaminated")
-                return _ack_result(prior, replayed=True)
-            since = r["id"] if r and r["id"] < c["id"] else 0  # a malformed later refresh never narrows the list
-            n_events, n_keys, digest = _exclusion_digest(conn, project_id, session_key, since, c["id"])
-            event = {
-                "event_key": f"LCE-{uuid.uuid4().hex}", "idempotency_key": idem, "project_id": project_id,
-                "policy_version": POLICY_VERSION, "action": "context_refreshed", "target_kind": "session",
-                "target_key": session_key, "session_key": session_key, "prior_state": "contaminated",
-                "new_state": "clean", "cause_kind": "session", "cause_key": session_key, "approval_event_id": None,
-                "task_id": None, "reason": _ACK_REASON,
-                "detail": {"acknowledged_event_key": contaminated_event_key, "acknowledged_events": n_events,
-                           "exclusion_count": n_keys, "exclusion_sha256": digest, "attestation": True},
-            }
-            append_ledger_event(conn, event)
-            return _ack_result(event, replayed=False)
+            return _acknowledge_locked(conn, project_id, rows[0]["session_key"], contaminated_event_key)
+
+    def acknowledge_attested(self, project_id: int, *, contaminated_event_key: str) -> dict:
+        """Public path: consume the hook's single-use attestation for this key, then acknowledge that session.
+
+        The key never selects the session by itself. No fresh attestation fails closed; a consumed attestation stays
+        consumed even when the acknowledgement is then denied (e.g. stale after a newer revocation).
+        """
+        _validate(project_id, contaminated_event_key)
+        with _connect() as conn, conn.transaction():
+            _lock_project(conn, project_id)  # same lock as revocation and the internal acknowledge
+            try:
+                session_key = _consume_attestation(conn, project_id, contaminated_event_key)
+                return _acknowledge_locked(conn, project_id, session_key, contaminated_event_key)
+            except LifecycleDenied as exc:
+                denied = exc  # leave the block normally so the consumption commits, then deny
+        raise denied
+
+
+def _validate(project_id: int, contaminated_event_key: str) -> None:
+    if isinstance(project_id, bool) or not isinstance(project_id, int) or project_id <= 0:
+        raise ValueError("project_id must be a positive integer")
+    if not valid_event_key(contaminated_event_key):
+        raise LifecycleDenied("malformed_event_key", "contaminated_event_key is not a lifecycle event key")
+
+
+def _acknowledge_locked(conn, project_id: int, session_key: str, contaminated_event_key: str) -> dict:
+    """Shared core on the caller's transaction, after the project lock: acknowledge exactly the latest contamination."""
+    c, r = _latest(conn, project_id, session_key)
+    if c is None:
+        raise LifecycleDenied("not_contaminated", "this session has no contamination to acknowledge")
+    if contaminated_event_key != c["event_key"]:
+        older = conn.execute(
+            "SELECT 1 FROM vres.experience_lifecycle_events WHERE project_id=%s AND target_kind='session' "
+            "AND session_key=%s AND action='context_contaminated' AND event_key=%s",
+            (project_id, session_key, contaminated_event_key)).fetchone()
+        code = "stale_contamination" if older else "unknown_contamination"
+        raise LifecycleDenied(code, "contaminated_event_key is not this session's latest contamination")
+    idem = ledger_key("context_refreshed", "session", session_key, contaminated_event_key)
+    if not is_contaminated(c, r):
+        prior = conn.execute("SELECT * FROM vres.experience_lifecycle_events WHERE idempotency_key=%s",
+                             (idem,)).fetchone()
+        if prior is None:
+            raise LifecycleDenied("not_contaminated", "this session is not contaminated")
+        return _ack_result(prior, replayed=True)
+    since = r["id"] if r and r["id"] < c["id"] else 0  # a malformed later refresh never narrows the list
+    n_events, n_keys, digest = _exclusion_digest(conn, project_id, session_key, since, c["id"])
+    event = {
+        "event_key": f"LCE-{uuid.uuid4().hex}", "idempotency_key": idem, "project_id": project_id,
+        "policy_version": POLICY_VERSION, "action": "context_refreshed", "target_kind": "session",
+        "target_key": session_key, "session_key": session_key, "prior_state": "contaminated",
+        "new_state": "clean", "cause_kind": "session", "cause_key": session_key, "approval_event_id": None,
+        "task_id": None, "reason": _ACK_REASON,
+        "detail": {"acknowledged_event_key": contaminated_event_key, "acknowledged_events": n_events,
+                   "exclusion_count": n_keys, "exclusion_sha256": digest, "attestation": True},
+    }
+    append_ledger_event(conn, event)
+    return _ack_result(event, replayed=False)

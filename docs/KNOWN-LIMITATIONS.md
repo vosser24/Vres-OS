@@ -244,9 +244,12 @@ decisions, E1 episodes, relations); it is not a second generic memory authority 
   project is marked "may have loaded" on revocation; `context_refresh_ack` is the Chairman's attestation that context
   was re-derived. Checkpoint prose and transcript text are not scanned, and artifacts already written are not cleansed.
 - While contaminated, the PreToolUse hook denies every Vres tool except the safe list and `context_refresh_ack`, and
-  admits that call only for a contamination event of the host session. Without the hook running, the MCP tool trusts
-  any valid contamination event key of the project. Denials and notices name up to five revoked identifiers, or a
-  count for larger cascades; the full cascade stays in the lifecycle ledger.
+  admits that call only for the latest contamination event of the host session (exact tool name, exact
+  `{"request": {"contaminated_event_key": ...}}` input, parent only). The admitted hook writes a single-use, 120-second
+  attestation on that host session; the MCP tool consumes it and fails closed (`refresh_not_attested`) without one, so
+  the tool cannot acknowledge another session by key. The trust root is the host hook's `session_id`; the runtime
+  database role could forge the attestation, as it could already append ledger rows. Denials and notices name up to
+  five revoked identifiers, or a count for larger cascades; the full cascade stays in the lifecycle ledger.
 - `source_revoke` results above 8 KiB return counts and sha256 digests instead of key lists. A cascade over 500
   nodes fails closed with no change. There is no `restore_source`; recovery is a new source plus approved reinstatement.
 - Lifecycle approvals are bound to the exact action and target and are project scope only. Company-scope lifecycle is
@@ -255,7 +258,10 @@ decisions, E1 episodes, relations); it is not a second generic memory authority 
   the ledgered lifecycle service and need an approval and a reason.
 - Retrieval carry-over: episode lifecycle state in historical queries is the current ledger state, not the state at
   `as_of` (fail-closed); episode support considers direct `derived_from` sources only; `experience_consolidation`
-  keeps a status deny-list that covers every status the schema allows.
+  keeps a status deny-list that covers every status the schema allows. The raw-chunk fallback defect is fixed in the closure stage (`_raw` applies the same dead-support gate; pinned by
+  `test_raw_chunk_of_a_company_item_whose_only_support_is_revoked_is_never_returned`). Not covered by E4: the
+  `knowledge_search`/embedding readers still return a company item whose only support is revoked (outside the E3
+  retrieval-integration clause; future cleanup).
 
 ## Licensing and supply chain
 

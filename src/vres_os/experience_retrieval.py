@@ -1278,6 +1278,14 @@ class ExperienceRetrievalService:
         # under current AND historical intent; it surfaces only as a structured conflict (role=conflict). Retired and
         # revoked owners never yield raw text under any intent (revoked is tombstone-only; retired is not evidence text).
         live = status_in_sql("k.status", LIVE_KNOWLEDGE_STATUSES)
+        # E4: a company item whose every support root (knowledge_evidence / derived_from source) is inactive yields no
+        # raw text either (same rule as `_knowledge`'s `dead`; company rows are never mutated, their support is gone).
+        support_src = ("SELECT 1 FROM vres.sources ss WHERE {cond} AND (ss.id IN (SELECT ev.source_id FROM "
+                       "vres.knowledge_evidence ev WHERE ev.knowledge_id=k.id) OR ss.source_key IN (SELECT r.target_key "
+                       "FROM vres.relations r WHERE r.source_kind='knowledge' AND r.source_key=k.knowledge_key "
+                       "AND r.relation_type='derived_from' AND r.target_kind='source'))")
+        dead_support = (f"EXISTS ({support_src.format(cond="ss.status<>'active'")}) AND "
+                        f"NOT EXISTS ({support_src.format(cond="ss.status='active'")})")
         base = f"""
              FROM vres.knowledge_chunks c
              LEFT JOIN vres.sources s ON s.id=c.source_id
@@ -1293,7 +1301,8 @@ class ExperienceRetrievalService:
                        (k.project_id=%(pid)s OR k.project_id IS NULL)
                    AND ({live} OR (%(hist)s AND k.status='superseded'))
                    AND (k.valid_from IS NULL OR k.valid_from<={ref}) AND (k.valid_to IS NULL OR k.valid_to>{ref})
-                   AND (NOT %(hist)s OR k.created_at<={ref})))
+                   AND (NOT %(hist)s OR k.created_at<={ref})
+                   AND (k.project_id IS NOT NULL OR NOT ({dead_support}))))
               AND {match}"""
         approved = ("(c.source_id IS NULL OR s.project_id IS NOT NULL OR s.scope_approval_event_id IS NOT NULL) AND "
                     "(c.knowledge_id IS NULL OR k.project_id IS NOT NULL OR k.scope_approval_event_id IS NOT NULL)")

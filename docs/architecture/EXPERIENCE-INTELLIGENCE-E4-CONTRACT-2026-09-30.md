@@ -134,7 +134,7 @@ New tools (registered count 48 → 51):
 - `knowledge_lifecycle` (`action`: retire|reinstate|refresh; mutating, approval-bound except `refresh` by an authorised project owner with approval)
 - `context_refresh_ack` (mutating ledger append; allowed while contaminated)
 
-Existing `knowledge_supersede` is hardened (not renamed). Implemented as: `knowledge_supersede` and `knowledge_promote(status='challenged')` route through `ExperienceLifecycleService` and require `approval_key` and `reason`; the three new tools take one closed `request` object; `context_refresh_ack` is admitted by the hook only for a contamination event key of the host session. `experience_retrieve` keeps its contract with the new schema. New tools are added to the hooks matcher; only `context_refresh_ack` joins `_SAFE_VRES_TOOLS`.
+Existing `knowledge_supersede` is hardened (not renamed). `experience_retrieve` keeps its contract with the new schema. New tools are added to the hooks matcher; only `context_refresh_ack` joins `_SAFE_VRES_TOOLS`.
 
 ## Security / injection / secrets
 
