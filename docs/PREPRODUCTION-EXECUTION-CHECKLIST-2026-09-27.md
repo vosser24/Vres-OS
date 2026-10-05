@@ -1270,3 +1270,86 @@ Recommended opening sequence:
 
 Do not widen E6 into E7 benchmark/security work or E8 Chairman automatic injection.
 
+---
+
+### 19. 2026-10-05 #176 E6 contract frozen / Chunk 1 not started
+Status: **E6 CONTRACT FROZEN — IMPLEMENTATION BLOCKED UNTIL LOCAL CHECKPOINT**
+
+This section supersedes section 18 for current execution state.
+
+Authoritative product main:
+`6af7bddf246e0f628c3e52add9528742e85189ca`
+
+E6 branch:
+`issue-176-e6-observability-utility`
+
+E6 Vres task:
+`TASK-20261005-abb88a1f0e`
+
+Frozen E6 contract commit:
+**`fe6cfcfe0d87cd6920303242a1d647975aa3bf22`**
+
+Frozen E6 contract tree:
+**`49b017914948eb76fc27c9cbdd550f1d80c12009`**
+
+Contract:
+`docs/architecture/EXPERIENCE-INTELLIGENCE-E6-CONTRACT-2026-10-05.md`
+
+Base→freeze delta:
+- exactly one commit ahead of accepted E5 main;
+- exactly one added file;
+- **913 additions / 0 deletions**;
+- no implementation, migration, hook or test bytes changed.
+
+E6 policy target:
+`176.e6.v1`
+
+Frozen policy digest:
+`d61f60d31182085748bb613ef3c160274f1a1a5a2384854f36e52b4cdfecc5e5`
+
+Frozen existing E5 retrieval-policy digest:
+`7572cafc632d4f56571adbe5f59baceedf15c56a07d5a3ca35e4b05448a982e9`
+
+Migration target:
+`041_experience_retrieval_observability.sql`
+
+Architecture:
+- normal E5 retrieval remains READ ONLY and public schema stays `176.e5.v1`;
+- successful retrieval observation occurs only after host `PostToolUse`;
+- host observation/reference writes use the existing provenance-writer role through protected SECURITY DEFINER functions;
+- no raw query/premise/memory text/transcript/private reasoning persists in the E6 ledger;
+- explicit-reference absence means `not_observed`, never `unused`;
+- downstream task/validation/episode evidence is joined read-only;
+- every E6 utility/replay result states `causal_credit='not_established'`;
+- no opaque utility/expertise score;
+- paired baseline/candidate policy replay uses one REPEATABLE READ / READ ONLY snapshot and one hard-gated candidate universe;
+- candidate replay cannot alter project/company/capability/lifecycle/revocation/security/authority gates;
+- no policy winner/activation/promotion in E6.
+
+Implementation chunks:
+1. migration 041 + host retrieval observation;
+2. explicit-reference capture + utility evidence;
+3. paired retrieval-policy replay.
+
+Before any implementation:
+1. local E6 worktree must fast-forward to exact `fe6cfcfe...`;
+2. require branch/head/tree/origin identity and clean worktree;
+3. read the frozen contract;
+4. create exactly one intentional E6 contract-freeze Chairman checkpoint recording base/branch/contract/task;
+5. do not modify the frozen contract after that checkpoint;
+6. only then begin Chunk 1 with targeted red tests first.
+
+Final E6 acceptance requires:
+- one coherent full fresh PostgreSQL suite;
+- migration count 41 / latest 041 on the acceptance DB;
+- isolated `VRES_DATA_DIR`;
+- release gate and exact wheel/source proof;
+- installed runtime + hook smoke;
+- exact-head PR CI;
+- protected `vres-os:validator` Fable/high with zero `not_run`;
+- guarded merge;
+- exact post-main CI;
+- E6 task completion exactly once.
+
+Do not begin E7/E8 during E6.
+
