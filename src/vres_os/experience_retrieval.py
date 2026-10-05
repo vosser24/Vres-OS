@@ -1115,11 +1115,22 @@ class ExperienceRetrievalService:
             _positions(episode_rows, "episode_key")
             episode_built = [episode_item(row, req, now) for row in episode_rows]
             procedure_links = self._procedure_capability_links(conn, episode_built, req)
+            procedure_rows = self._procedures(conn, params, diag, procedure_links)
+            procedure_history = self._procedure_experience_history(
+                conn,
+                [str(row["procedure_key"]) for row in procedure_rows],
+                req,
+                now,
+            )
+            for row in procedure_rows:
+                history = procedure_history.get(str(row["procedure_key"]))
+                if history is not None:
+                    row["experience_history"] = history
 
             built: list[tuple[dict | None, str | None]] = []
             for rows, builder, key in (
                 (self._decisions(conn, params), decision_item, "decision_key"),
-                (self._procedures(conn, params, diag, procedure_links), procedure_item, "procedure_key"),
+                (procedure_rows, procedure_item, "procedure_key"),
                 (self._knowledge(conn, params, tokens, diag), knowledge_item, "knowledge_key"),
             ):
                 _positions(rows, key)
