@@ -223,7 +223,7 @@ def test_own_project_items_retrieved_and_pack_shape(pg_project):
     _procedure(f"P-{mk}", pg_project, mk)
     ep = _episode(pg_project, mk)
     pack = _retrieve(pg_project, mk, task_key=task)
-    assert pack["schema_version"] == "176.e4.v1" and pack["policy"] == {**pack["policy"], "version": "176.e4.v1", "chunk": "E"}
+    assert pack["schema_version"] == "176.e5.v1" and pack["policy"] == {**pack["policy"], "version": "176.e5.v1", "chunk": "E5"}
     assert not pack["abstained"]
     assert _keys(pack, "current_decisions") == [f"D-{mk}"]
     assert pack["current_decisions"][0]["role"] == "instruction"
