@@ -886,3 +886,120 @@ If the pending local output reports any full-suite/release-gate/package failure:
 - classify the exact defect and make only a bounded correction if it is real.
 
 **Do not rerun Chunks 1–3 targeted ladders unless candidate bytes change or a concrete evidence gap is identified.**
+
+---
+
+### 16. 2026-10-05 #176 E5 bounded full-suite fix / reacceptance boundary
+Status: **E5 FINAL CANDIDATE SUPERSEDED BY ONE-LINE BOUNDED FIX — REACCEPTANCE REQUIRED**
+
+This section supersedes section 15 for current E5 execution state.
+
+Authoritative main/base remains:
+`a0a2769b99f4893733568194c0aa68e78e73aeab`
+
+E5 branch:
+`issue-176-e5-capability-procedure-experience`
+
+E5 task:
+`TASK-20261005-dc0e7a9e38`
+
+Frozen E5 contract remains:
+`a06d32801a22a9c17439a0e03c081dae57ba2367`
+
+Superseded coherent candidate:
+`d39fabb22484a664e863c1603e2054d1ef0723c4`
+tree:
+`fd00975275a1f8cc697bd4c570f994812e49f3b9`
+
+New corrected candidate:
+**`230c4fdb5a7674fe13518796be68a77848ff0561`**
+
+New corrected tree:
+**`97f98e2ad666df014bbc22270cc677aacd65a21f`**
+
+Change from the superseded candidate:
+- exactly one source line in `src/vres_os/experience_retrieval.py`;
+- hardcoded `"revoked"` in the E5 structural-capability helper replaced with imported canonical `REVOKED_STATUS`;
+- 1 insertion / 1 deletion;
+- no test change;
+- no migration;
+- no contract change;
+- no MCP/authority/routing/model/prompt change.
+
+#### Why the full-suite failure was real
+
+The first full PostgreSQL acceptance run on `d39fabb...` produced:
+- **2205 passed**;
+- **4 skipped**;
+- **1 failed**;
+- approximately 21m32s.
+
+Failure:
+`tests/test_source_revocation_unit.py::test_only_source_revocation_writes_the_revoked_status`
+
+The static governance test correctly detected that E5 introduced a new literal reader of the revoked status.
+
+The repository's authority rule is:
+- `source_revocation.py` is the only revoked-status writer;
+- `knowledge_status.py` owns the canonical read-side literal;
+- other readers use the imported canonical constant rather than hardcoding `"revoked"`.
+
+E4 main already imported `REVOKED_STATUS`; E5 Chunk 1 introduced the violating literal only in the new `disallowed_flags` set.
+
+Therefore:
+- this was **not** a stale test;
+- this was **not** an environment issue;
+- this was a real but bounded E5 code defect;
+- the test must remain unchanged.
+
+#### Evidence already proven by the failed full run
+
+Before the failing assertion:
+- exact branch/head/tree/remote/main checks passed;
+- frozen contract unchanged;
+- repository-wide critical Ruff passed;
+- `git diff --check a06d328... HEAD` passed;
+- baseline→candidate diff-check excluding the frozen contract passed;
+- the frozen-contract Markdown hard-break waiver remains valid and unchanged;
+- fresh acceptance DB was created and isolated;
+- same acceptance DB had **40 migrations**, latest `040_context_refresh_attestation.sql`;
+- `ISOLATED_VRES_CONFIG=PASS`;
+- DB was dropped;
+- original drifted DB was untouched;
+- worktree remained clean;
+- no checkpoint or protected validation request was created.
+
+Known four skips:
+- pgvector-only company-support eligibility test;
+- Claude experiment symbolic-link availability on Windows;
+- local-secrets Windows symlink privilege;
+- release-boundary Windows symlink privilege.
+
+#### Reacceptance cadence after the one-line fix
+
+Because candidate bytes changed, exact acceptance identity changed.
+
+Do NOT rerun the entire Chunk 1–3 targeted ladder.
+
+First run a bounded correction proof on exact `230c4fdb...`:
+- `tests/test_source_revocation_unit.py::test_only_source_revocation_writes_the_revoked_status`;
+- focused E5 capability/procedure retrieval tests;
+- critical Ruff on changed surfaces;
+- post-freeze and non-contract diff-checks.
+
+If that passes, rerun exactly one coherent final acceptance cycle:
+- fresh disposable PostgreSQL full suite;
+- same-DB migration/isolation proof;
+- release gate once;
+- candidate wheel build/install/import smoke;
+- exact Git identity;
+- one final-local-acceptance checkpoint.
+
+Do not create a PR until that exact new candidate is locally green.
+
+Protected validation remains blocked until:
+1. local final acceptance green;
+2. PR exists;
+3. exact-head CI green on the exact corrected SHA.
+
+No E6 work may begin.
