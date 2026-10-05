@@ -2011,3 +2011,206 @@ ChatGPT remains primary for architecture/repository/PR/CI/docs.
 Local Claude is for Windows/local PostgreSQL/pgvector/installed-runtime/Visual Studio/host/live-machine work.
 Never edit the same branch concurrently.
 ```
+
+
+---
+
+# 30. 2026-10-05 #176 E5 frozen contract / implementation continuation seal
+
+This is the newest authoritative handoff boundary. It supersedes section 29 for current execution state. Historical E4 evidence remains authoritative history and must not be rewritten.
+
+## A. Product/main boundary
+
+Repository:
+`vosser24/Vres-OS`
+
+Authoritative main:
+`a0a2769b99f4893733568194c0aa68e78e73aeab`
+
+E4:
+**DONE**, including:
+- protected PASS;
+- guarded PR #182 merge;
+- post-main CI #471;
+- final Vres task completion on 2026-10-05T08:47:49+03:00.
+
+No E4 action remains.
+
+## B. E5 frozen boundary
+
+E5 branch:
+`issue-176-e5-capability-procedure-experience`
+
+Frozen contract commit:
+`a06d32801a22a9c17439a0e03c081dae57ba2367`
+
+Tree:
+`5cd55b7f4cd6bf9885187af5f179db18018f29c8`
+
+Frozen contract:
+`docs/architecture/EXPERIENCE-INTELLIGENCE-E5-CONTRACT-2026-10-05.md`
+
+Parent/base:
+`a0a2769b99f4893733568194c0aa68e78e73aeab`
+
+Retrieval schema target:
+`176.e5.v1`
+
+E5 implementation has **not** started.
+
+## C. E5 architecture decision
+
+**No migration.**
+
+Verified existing truth owners already contain the required durable evidence:
+- `capabilities` / `capability_proofs`;
+- `procedures` / `procedure_versions`;
+- `procedure_runs` / `procedure_feedback`;
+- immutable `experience_episodes`;
+- deterministic E1 relations `episode uses capability` and `episode uses procedure`;
+- task linkage through `task_id`;
+- E4 lifecycle/revocation gates.
+
+The missing E5 capability is read-time integration, not another durable ledger.
+
+## D. Frozen E5 scope
+
+Implement:
+- capability-centric experience retrieval;
+- procedure/episode/feedback links;
+- validated success/failure history.
+
+Never implement in E5:
+- opaque expert score;
+- success probability;
+- authority from run/feedback/proof counts;
+- model-specific expertise memory;
+- automatic agent/Chairman prompt rewriting;
+- automatic procedure promotion/rewrite;
+- automatic lifecycle challenge/retire;
+- E6 retrieval-observation writes;
+- new generic experience tables.
+
+## E. Key retrieval rules
+
+Explicit `capability_keys` become a structured candidate-source signal.
+
+An episode may be sourced structurally through:
+- direct `episode uses capability`; or
+- accepted `capability_proof` task identity.
+
+An accepted procedure may be sourced structurally when an eligible episode:
+- directly uses that procedure; and
+- structurally matches the requested capability.
+
+Capability structure can improve candidate coverage/relevance only. It never changes scope/authority/lifecycle/preferred version.
+
+Procedure items may expose one bounded `experience_history` extension with:
+- validated success episode keys;
+- validated failure episode keys;
+- other failure episode keys;
+- task-backed feedback tied to a current-eligible same-task episode using that procedure;
+- latest validated evidence time.
+
+No counts/ratios become authority or scores.
+
+Validated procedure success/failure means the procedure `accepted` flag is captured inside an immutable task-level `validated_runtime` episode whose task passed required validation. It does not claim causality or optimality.
+
+Feedback is evidence-only:
+- task-backed;
+- same-task eligible episode;
+- same procedure;
+- redacted/bounded;
+- injection-shaped text omitted;
+- never approval/instruction authority.
+
+## F. Expected implementation surface
+
+Prefer:
+- `src/vres_os/experience_retrieval.py`;
+- `tests/test_experience_retrieval.py`;
+- focused new PostgreSQL E5 integration tests.
+
+Do not modify migrations, procedure/capability write authority, MCP registration or unrelated systems unless a frozen requirement cannot otherwise be met. Stop for explicit review before such scope expansion.
+
+## G. Immediate next action
+
+Local Claude/Vres must create the fresh E5 task from a correctly rooted E5 worktree before implementation.
+
+Local Claude responsibilities for this handoff step only:
+1. create/fetch a clean E5 worktree on exact branch `issue-176-e5-capability-procedure-experience`;
+2. verify HEAD `a06d32801a22a9c17439a0e03c081dae57ba2367` and tree `5cd55b7f4cd6bf9885187af5f179db18018f29c8`;
+3. start Vres from that E5 root;
+4. create one new E5 Vres task for #176 capability/procedure experience integration;
+5. checkpoint the frozen base/contract/branch boundary;
+6. do not edit code;
+7. return the task key + checkpoint to ChatGPT.
+
+After that, ChatGPT resumes primary implementation ownership on the remote E5 branch.
+
+## H. E5 acceptance cadence
+
+Development:
+- targeted red test;
+- bounded fix;
+- targeted load-bearing unit/PostgreSQL/security/E1–E4 regression;
+- coherent commits.
+
+Final:
+- fresh isolated full PostgreSQL suite once;
+- critical lint/diff hygiene;
+- installed-runtime smoke;
+- release gate;
+- exact-head CI;
+- current-turn freeze checkpoint;
+- protected Fable/high;
+- guarded merge;
+- post-main CI;
+- Vres task completion;
+- then E6.
+
+## I. Fresh-chat resume prompt
+
+```text
+Resume the Vres-OS preproduction program from the newest canonical durable handoff.
+
+Repository:
+vosser24/Vres-OS
+
+Canonical documentation branch:
+docs-execution-checklist-20260927
+
+Read first:
+docs/PREPRODUCTION-EXECUTION-CHECKLIST-2026-09-27.md
+docs/handoffs/PREPRODUCTION-RESUME-HANDOFF-2026-09-27.md
+
+Newest authoritative boundary:
+# 30. 2026-10-05 #176 E5 frozen contract / implementation continuation seal
+
+AUTHORITATIVE MAIN:
+a0a2769b99f4893733568194c0aa68e78e73aeab
+
+E5 BRANCH:
+issue-176-e5-capability-procedure-experience
+
+FROZEN E5 CONTRACT:
+a06d32801a22a9c17439a0e03c081dae57ba2367
+
+E5 TREE:
+5cd55b7f4cd6bf9885187af5f179db18018f29c8
+
+CONTRACT FILE:
+docs/architecture/EXPERIENCE-INTELLIGENCE-E5-CONTRACT-2026-10-05.md
+
+E5 architecture:
+- no migration;
+- capability-centric structured retrieval;
+- procedure/episode/feedback evidence integration;
+- validated success/failure history;
+- no expert score;
+- no model-specific memory;
+- no automatic prompt rewriting;
+- no E6 observation writes.
+
+If the fresh E5 Vres task/checkpoint has not yet been created, do that locally first from the exact E5 worktree without editing code. Then return task/checkpoint to ChatGPT. ChatGPT remains primary for E5 implementation/repository/PR/CI/docs.
+```
