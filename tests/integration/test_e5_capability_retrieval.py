@@ -142,6 +142,74 @@ def _linked_episode(project_id: int, capability_key: str, *, procedure_key: str 
     return episode_key
 
 
+def _proof_sourced_episode(project_id: int, capability_key: str) -> str:
+    task_key = Repository().begin_task(
+        project_id,
+        "E5 capability proof precedent",
+        "Synthetic proof-backed E5 retrieval evidence",
+        None,
+        "chairman",
+    )
+    episode_key = _key("EXP-E5-PROOF")
+    payload = {
+        "objective": "Proof-backed precedent with unrelated text",
+        "constraints": [],
+        "procedures": [],
+        "capability_keys": [capability_key],
+        "validation": {"request_key": _key("VAL-E5"), "status": "passed"},
+        "source_keys": [],
+        "failure_classification": "success",
+        "applicability": {"task_family": None, "project_id": project_id},
+    }
+    source_digest = uuid.uuid4().hex * 2
+    digest_row = {
+        "policy_version": E1_VERSION,
+        "policy_digest": E1_DIGEST,
+        "participation_class": "participated",
+        "trust_class": "validated_runtime",
+        "security_disposition": "sanitized",
+        "source_digest": source_digest,
+        "payload": payload,
+    }
+    payload_digest = episode_payload_digest(digest_row)
+    with connect() as conn, conn.transaction():
+        task_id = conn.execute(
+            "SELECT id FROM vres.tasks WHERE task_key=%s",
+            (task_key,),
+        ).fetchone()["id"]
+        capability_id = conn.execute(
+            "SELECT id FROM vres.capabilities WHERE capability_key=%s",
+            (capability_key,),
+        ).fetchone()["id"]
+        conn.execute(
+            """
+            INSERT INTO vres.experience_episodes(
+              episode_key,project_id,task_id,task_family,policy_version,
+              participation_class,trust_class,outcome_status,payload,source_digest,
+              payload_digest,security_disposition,observed_at
+            ) VALUES (%s,%s,%s,NULL,%s,'participated','validated_runtime','completed',
+                      %s::jsonb,%s,%s,'sanitized',now())
+            """,
+            (
+                episode_key,
+                project_id,
+                task_id,
+                E1_VERSION,
+                json.dumps(payload),
+                source_digest,
+                payload_digest,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO vres.capability_proofs(capability_id,task_id,accepted,evidence)
+            VALUES (%s,%s,true,'{"source":"e5-retrieval-test"}'::jsonb)
+            """,
+            (capability_id, task_id),
+        )
+    return episode_key
+
+
 @pytest.fixture
 def e5_capabilities(pg_project):
     keys: list[str] = []
@@ -211,6 +279,37 @@ def test_explicit_capability_sources_accepted_procedure_through_current_episode_
     assert item["signals"]["capability_match"] is True
     assert item["applicability"]["capability_keys"] == [capability_key]
     assert f"episode:{episode_key}" in item["evidence"]
+    assert f"capability:{capability_key}" in item["evidence"]
+
+
+def test_accepted_capability_proof_sources_task_episode_without_relation_or_proven_count(
+    pg_project, e5_capabilities
+):
+    capability_key = _key("CAP-E5-PROOF")
+    e5_capabilities.append(capability_key)
+    _capability(pg_project, capability_key)
+    episode_key = _proof_sourced_episode(pg_project, capability_key)
+
+    with connect() as conn:
+        cap = conn.execute(
+            "SELECT proven_count FROM vres.capabilities WHERE capability_key=%s",
+            (capability_key,),
+        ).fetchone()
+    assert cap["proven_count"] == 0
+
+    pack = ExperienceRetrievalService().retrieve(
+        {
+            "project_id": pg_project,
+            "query": _query_token(),
+            "capability_keys": [capability_key],
+            "raw_fallback": False,
+        }
+    )
+
+    item = next(i for i in pack["precedent_episodes"] if i["memory_key"] == episode_key)
+    assert item["signals"]["capability_match"] is True
+    assert "capability_match" in item["why_retrieved"]
+    assert item["applicability"]["capability_keys"] == [capability_key]
     assert f"capability:{capability_key}" in item["evidence"]
 
 
