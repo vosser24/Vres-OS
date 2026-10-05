@@ -19,7 +19,7 @@ PACK_KEYS = frozenset({"schema_version", "current_decisions", "accepted_procedur
                        "estimated_tokens", "policy"})
 ITEM_KEYS = frozenset({"memory_key", "memory_class", "project_id", "scope", "authority_class", "status", "trust_class",
                        "role", "applicability", "why_retrieved", "evidence", "flags", "signals", "text"})
-ITEM_EXTENSIONS = frozenset({"stored_confidence", "last_verified_at", "review_after", "also_matched", "provenance"})
+ITEM_EXTENSIONS = frozenset({"stored_confidence", "last_verified_at", "review_after", "also_matched", "provenance", "experience_history"})
 FLAGS = frozenset({"stale", "conflict", "challenged", "historical", "premise_mismatch", "premise_unverified",
                    "retired", "revoked", "expired", "not_current", "cross_scope_unresolved"})  # E4 Chunk E
 ROLES = frozenset({"instruction", "candidate", "warning_example", "low_trust_observation", "conflict",
