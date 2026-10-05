@@ -1212,28 +1212,23 @@ class ExperienceRetrievalService:
 
         rows = conn.execute(
             """
-            SELECT source_key,target_kind,target_key
+            SELECT source_key,target_key
               FROM vres.relations
              WHERE source_kind='episode'
                AND source_key=ANY(%s)
                AND relation_type='uses'
-               AND target_kind IN ('capability','procedure')
+               AND target_kind='procedure'
              ORDER BY id
             """,
             (sorted(eligible),),
         ).fetchall()
-        relation_caps: dict[str, set[str]] = {}
         relation_procedures: dict[str, set[str]] = {}
         for row in rows:
-            target = str(row["target_key"])
-            bucket = relation_caps if row["target_kind"] == "capability" else relation_procedures
-            bucket.setdefault(str(row["source_key"]), set()).add(target)
+            relation_procedures.setdefault(str(row["source_key"]), set()).add(str(row["target_key"]))
 
         linked: dict[str, dict[str, set[str]]] = {}
         for episode_key, data in eligible.items():
-            caps = data["caps"] & relation_caps.get(episode_key, set())
-            if not caps:
-                continue
+            caps = data["caps"]
             item = data["item"]
             payload_procedures = {
                 ref.split(":", 1)[1]
@@ -1473,16 +1468,30 @@ class ExperienceRetrievalService:
         text = "coalesce(e.task_family,'')||' '||coalesce(e.payload->>'objective','')"
         match, rank = _lexical(f"to_tsvector('simple',{text})", text, [])
         capability_match = """
-            EXISTS (
-                SELECT 1
-                  FROM vres.relations cr
-                 WHERE cr.source_kind='episode'
-                   AND cr.source_key=e.episode_key
-                   AND cr.relation_type='uses'
-                   AND cr.target_kind='capability'
-                   AND cr.target_key=ANY(%(caps)s)
-                   AND jsonb_typeof(e.payload->'capability_keys')='array'
-                   AND (e.payload->'capability_keys') ? cr.target_key
+            (
+                EXISTS (
+                    SELECT 1
+                      FROM vres.relations cr
+                     WHERE cr.source_kind='episode'
+                       AND cr.source_key=e.episode_key
+                       AND cr.relation_type='uses'
+                       AND cr.target_kind='capability'
+                       AND cr.target_key=ANY(%(caps)s)
+                       AND jsonb_typeof(e.payload->'capability_keys')='array'
+                       AND (e.payload->'capability_keys') ? cr.target_key
+                )
+                OR EXISTS (
+                    SELECT 1
+                      FROM vres.capability_proofs cp
+                      JOIN vres.capabilities c ON c.id=cp.capability_id
+                     WHERE cp.task_id=e.task_id
+                       AND cp.accepted=true
+                       AND c.status='active'
+                       AND c.capability_key=ANY(%(caps)s)
+                       AND (c.project_id=%(pid)s OR c.project_id IS NULL)
+                       AND jsonb_typeof(e.payload->'capability_keys')='array'
+                       AND (e.payload->'capability_keys') ? c.capability_key
+                )
             )
         """
         base = f"""
