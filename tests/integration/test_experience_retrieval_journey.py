@@ -124,6 +124,10 @@ PACK_KEYS = frozenset({"schema_version", "current_decisions", "accepted_procedur
 ITEM_KEYS = frozenset({"memory_key", "memory_class", "project_id", "scope", "authority_class", "status", "trust_class",
                        "role", "applicability", "why_retrieved", "evidence", "flags", "signals", "text"})
 ITEM_EXTENSIONS = frozenset({"stored_confidence", "last_verified_at", "review_after", "also_matched", "provenance", "experience_history"})
+EXPERIENCE_HISTORY_KEYS = frozenset({
+    "validated_success_episode_keys", "validated_failure_episode_keys", "failure_episode_keys",
+    "feedback", "latest_validated_at",
+})
 FLAGS = frozenset({"stale", "conflict", "challenged", "historical", "premise_mismatch", "premise_unverified",
                    "retired", "revoked", "expired", "not_current", "cross_scope_unresolved"})  # E4 Chunk E
 ROLES = frozenset({"instruction", "candidate", "warning_example", "low_trust_observation", "conflict",
@@ -148,6 +152,15 @@ def assert_pack_schema(pack):
             assert item["role"] in ROLES and set(item["flags"]) <= FLAGS
             assert set(item["signals"]) == SIGNAL_KEYS and set(item["applicability"]) <= APPLICABILITY_KEYS
             assert item["why_retrieved"] and item["evidence"]
+            if "experience_history" in item:
+                assert item["memory_class"] == "procedural"
+                history = item["experience_history"]
+                assert set(history) == EXPERIENCE_HISTORY_KEYS
+                assert len(history["validated_success_episode_keys"]) <= 3
+                assert len(history["validated_failure_episode_keys"]) <= 3
+                assert len(history["failure_episode_keys"]) <= 3
+                assert len(history["feedback"]) <= 3
+                assert history["latest_validated_at"] is None or isinstance(history["latest_validated_at"], str)
             if "provenance" in item:  # E4: or a revoked tombstone carrying metadata only
                 assert item["role"] == "low_trust_observation" or (
                     item["status"] == "revoked" and set(item["provenance"]) == {"state", "revoked_at", "reason_class"})
