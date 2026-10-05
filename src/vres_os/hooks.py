@@ -515,28 +515,38 @@ def validator_stop() -> None:
         )
 
 
+_OBSERVE_GAP_OUTCOMES = frozenset({"session_not_found", "session_ambiguous"})
+
+
 def experience_observe() -> None:
     """PostToolUse for the exact experience_retrieve tool: record a structural observation, never alter the result.
 
-    Prints nothing, always returns normally and logs only a bounded code (never payload, query or memory text).
+    Prints nothing, always returns normally and logs only a fixed bounded code (never payload, ids, query, memory text
+    or exception bodies). Telemetry gaps are visible as codes; ``recorded`` and ``duplicate`` are not errors.
     """
     from .experience_observability import ObservationRejected, observe_retrieval
 
     try:
         payload = _input()
-        if not payload or not ConfigStore().load().configured:
+        if not payload:
+            code = "host_payload_unavailable"
+        elif not ConfigStore().load().configured:
             return
-        project = discover_project(payload.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR", "."))
-        with connect() as conn:
-            row = conn.execute("SELECT id FROM vres.projects WHERE project_key=%s", (project.key,)).fetchone()
-        if row is None:
-            raise ObservationRejected("project_not_found")
-        project_id = row["id"] if isinstance(row, dict) else row[0]
-        observe_retrieval(payload, project_id)
+        else:
+            project = discover_project(payload.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR", "."))
+            with connect() as conn:
+                row = conn.execute("SELECT id FROM vres.projects WHERE project_key=%s", (project.key,)).fetchone()
+            if row is None:
+                raise ObservationRejected("project_not_found")
+            project_id = row["id"] if isinstance(row, dict) else row[0]
+            outcome = observe_retrieval(payload, project_id).get("outcome")
+            if outcome in ("recorded", "duplicate"):
+                return
+            code = f"observation_{outcome}" if outcome in _OBSERVE_GAP_OUTCOMES else "observation_outcome_unexpected"
     except Exception as exc:  # telemetry must never break the host turn
         code = exc.code if isinstance(exc, ObservationRejected) else type(exc).__name__
-        try:
-            with (logs_dir() / "hook-errors.log").open("a", encoding="utf-8") as handle:
-                handle.write(f"{datetime.now(timezone.utc).isoformat()} event=ExperienceObserve code={code}\n")
-        except OSError:
-            pass
+    try:
+        with (logs_dir() / "hook-errors.log").open("a", encoding="utf-8") as handle:
+            handle.write(f"{datetime.now(timezone.utc).isoformat()} event=ExperienceObserve code={code}\n")
+    except OSError:
+        pass

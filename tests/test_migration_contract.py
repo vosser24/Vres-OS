@@ -319,3 +319,15 @@ def test_experience_retrieval_observability_migration_041_contract():
     for forbidden in ("query_text text", "memory_text text", "raw_query", "tool_response jsonb", "premises jsonb", "text_body"):
         assert forbidden not in code
     assert "ALTER TABLE" not in code and "UPDATE vres.sessions" not in code and "DELETE FROM" not in code
+
+
+def test_migration_041_work_unit_attribution_and_policy_row_are_strict():
+    sql = _migration("041_experience_retrieval_observability.sql")
+    code = "\n".join(line for line in sql.splitlines() if not line.lstrip().startswith("--"))
+    flat = " ".join(code.split())
+    predicate = "w.task_id = task_row AND w.host_agent_id = p_agent_id AND w.status = 'running'"
+    assert flat.count(predicate) == 2  # the COUNT and the key lookup use the identical current-unit predicate
+    assert "p_agent_id IS NOT NULL AND (p_agent_type IS NULL OR char_length(p_agent_type) NOT BETWEEN 1 AND 200)" in flat
+    # the post-insert verification compares the exact frozen policy JSON, not just version/schema/digest
+    verify = flat.split("DO $vres_e6$", 1)[1].split("END", 1)[0]
+    assert "policy='{" in verify and '"policy_version":"176.e6.v1"' in verify

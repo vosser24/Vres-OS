@@ -14,10 +14,13 @@ from psycopg.conninfo import conninfo_to_dict, make_conninfo  # noqa: E402
 from psycopg.rows import dict_row  # noqa: E402
 
 from vres_os import experience_observability as eo  # noqa: E402
+from vres_os import db  # noqa: E402
 from vres_os.database_boundary import _activate_experience_observability  # noqa: E402
 from vres_os.db import connect, migrate  # noqa: E402
 from vres_os.project import ProjectIdentity  # noqa: E402
 from vres_os.repository import Repository  # noqa: E402
+
+from test_experience_lifecycle_schema import _dsn_for, _Root, _seed_episode, _table_defs  # noqa: E402
 
 HEX = "a" * 64
 RECORD_ARGS = "(bigint,text,text,text,text,jsonb,jsonb)"
@@ -174,3 +177,140 @@ def test_boundary_runtime_reads_but_cannot_write_or_record(db_ready):
         with psycopg.connect(base, autocommit=True) as admin:
             admin.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role)))
             admin.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(role)))
+
+
+_ACL_SQL = """
+SELECT format('%%s|%%s|%%s', c.oid::regclass, pg_get_userbyid(a.grantee), a.privilege_type) AS acl
+  FROM pg_class c, aclexplode(c.relacl) a
+ WHERE c.oid IN ('vres.experience_retrieval_observations'::regclass, 'vres.experience_retrieval_items'::regclass,
+                 'vres.experience_retrieval_observations_id_seq'::regclass, 'vres.experience_retrieval_items_id_seq'::regclass)
+   AND a.grantee <> c.relowner
+UNION ALL
+SELECT format('%%s|%%s|%%s', p.oid::regprocedure, pg_get_userbyid(a.grantee), a.privilege_type)
+  FROM pg_proc p, aclexplode(p.proacl) a
+ WHERE p.oid IN ('vres.record_experience_retrieval_observation(bigint,text,text,text,text,jsonb,jsonb)'::regprocedure,
+                 'vres.protect_experience_retrieval_immutability()'::regprocedure)
+   AND a.grantee <> p.proowner
+"""
+
+
+def test_n_boundary_activation_is_repeatable_without_broadening_grants(db_ready):
+    base = os.environ["VRES_TEST_DATABASE_URL"]
+    runtime, writer = f"vres_e6_rt_{uuid.uuid4().hex[:8]}", f"vres_e6_wr_{uuid.uuid4().hex[:8]}"
+    with psycopg.connect(base, autocommit=True, row_factory=dict_row) as admin:
+        for role in (runtime, writer):
+            admin.execute(sql.SQL("CREATE ROLE {} NOLOGIN").format(sql.Identifier(role)))
+            admin.execute(sql.SQL("GRANT USAGE ON SCHEMA vres TO {}").format(sql.Identifier(role)))
+        try:
+            snapshots = []
+            for _ in range(3):
+                _activate_experience_observability(admin, runtime, writer)
+                snapshots.append(sorted(r["acl"] for r in admin.execute(_ACL_SQL.replace("%%", "%")).fetchall()))
+            assert snapshots[0] == snapshots[1] == snapshots[2]
+            mine = sorted(a for a in snapshots[0] if f"|{runtime}|" in a or f"|{writer}|" in a)
+            assert mine == sorted([
+                f"vres.experience_retrieval_observations|{runtime}|SELECT",
+                f"vres.experience_retrieval_items|{runtime}|SELECT",
+                f"vres.record_experience_retrieval_observation(bigint,text,text,text,text,jsonb,jsonb)|{writer}|EXECUTE",
+            ])
+            assert all(a.split("|")[1] in (runtime, writer) for a in snapshots[0])  # nothing for PUBLIC or anyone else
+        finally:
+            for role in (runtime, writer):
+                admin.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role)))
+                admin.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(role)))
+
+
+@pytest.fixture
+def disposable_040(monkeypatch, tmp_path):
+    """A uniquely named disposable database migrated to exactly 040, independent of any other test or database."""
+    if not os.environ.get("VRES_TEST_DATABASE_URL"):
+        pytest.skip("VRES_TEST_DATABASE_URL is not set")
+    if os.environ.get("VRES_ALLOW_TEST_DB") != "1":
+        pytest.fail("Set VRES_ALLOW_TEST_DB=1 only for a disposable test database")
+    name = f"vres_e6c1h_{uuid.uuid4().hex[:10]}_test"
+    assert conninfo_to_dict(_dsn_for(name))["dbname"] == name
+    real = db.resources
+    src = real.files("vres_os").joinpath("migrations")
+    staged = tmp_path / "pkg040" / "migrations"
+    staged.mkdir(parents=True)
+    for p in sorted(src.iterdir()):
+        if p.name.endswith(".sql") and p.name < "041_":
+            (staged / p.name).write_bytes(p.read_bytes())
+    assert len(list(staged.iterdir())) == 40
+    with psycopg.connect(_dsn_for("postgres"), autocommit=True) as admin:
+        assert admin.execute("SELECT 1 FROM pg_database WHERE datname=%s", (name,)).fetchone() is None
+        admin.execute(f'CREATE DATABASE "{name}"')
+    try:
+        monkeypatch.setenv("VRES_DATABASE_URL", _dsn_for(name))
+        monkeypatch.setattr(db, "resources", _Root(tmp_path / "pkg040"))
+        assert len(db.migrate()) == 40
+        monkeypatch.setattr(db, "resources", real)
+        yield name
+    finally:
+        monkeypatch.undo()
+        with psycopg.connect(_dsn_for("postgres"), autocommit=True) as admin:
+            admin.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname=%s", (name,))
+            admin.execute(f'DROP DATABASE IF EXISTS "{name}"')
+            dropped = admin.execute("SELECT count(*) FROM pg_database WHERE datname=%s", (name,)).fetchone()[0] == 0
+        print(f"DB {name} DROPPED={dropped}")
+        assert dropped is True
+
+
+_SEED_WATCH = ["sessions", "tasks", "knowledge_items", "experience_episodes", "experience_policy_versions"]
+_SEED_SELECT = {
+    "sessions": "SELECT session_key,provider,provider_session_id,project_id,task_id,ended_at FROM vres.sessions ORDER BY id",
+    "tasks": "SELECT task_key,project_id,title,objective FROM vres.tasks ORDER BY id",
+    "knowledge_items": "SELECT knowledge_key,status,title,statement,updated_at FROM vres.knowledge_items ORDER BY id",
+    "experience_episodes": "SELECT episode_key,project_id,task_id,outcome_status,payload_digest FROM vres.experience_episodes ORDER BY id",
+    "experience_policy_versions": "SELECT policy_version,schema_version,policy_digest,policy FROM vres.experience_policy_versions ORDER BY policy_version",
+}
+
+
+def test_k_real_040_to_041_upgrade_preserves_seeded_state(disposable_040):
+    with connect() as conn:
+        assert conn.execute("SELECT current_database() AS d").fetchone()["d"] == disposable_040
+        assert conn.execute("SELECT count(*) AS n FROM vres.schema_migrations").fetchone()["n"] == 40
+        assert conn.execute("SELECT to_regclass('vres.experience_retrieval_observations') IS NULL AS absent").fetchone()["absent"]
+    pid = Repository().ensure_project(ProjectIdentity(Path("."), f"pytest:e6up:{uuid.uuid4().hex}", "upgrade", None, None))
+    with connect() as conn, conn.transaction():
+        _insert_session(conn, pid)
+        _seed_episode(conn, pid)
+        conn.execute("INSERT INTO vres.knowledge_items(knowledge_key,knowledge_type,title,statement,status) "
+                     "VALUES ('K-e6up','lesson','t','s','proposed')")
+    with connect() as conn:
+        tables_before = {r["table_name"] for r in conn.execute(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema='vres'")}
+        state_before = {t: conn.execute(q).fetchall() for t, q in _SEED_SELECT.items()}
+        defs_before = _table_defs(conn, _SEED_WATCH)
+    assert len(state_before["sessions"]) == 1 and len(state_before["experience_episodes"]) == 1
+    assert db.migrate() == ["041_experience_retrieval_observability.sql"]
+    with connect() as conn:
+        assert conn.execute("SELECT count(*) AS n FROM vres.schema_migrations").fetchone()["n"] == 41
+        assert conn.execute("SELECT max(version) AS v FROM vres.schema_migrations").fetchone()["v"] == \
+            "041_experience_retrieval_observability.sql"
+        tables_after = {r["table_name"] for r in conn.execute(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema='vres'")}
+        assert tables_after - tables_before == {"experience_retrieval_observations", "experience_retrieval_items"}
+        assert tables_before - tables_after == set()
+        state_after = {t: conn.execute(q).fetchall() for t, q in _SEED_SELECT.items()}
+        policies_after = state_after.pop("experience_policy_versions")
+        policies_before = state_before.pop("experience_policy_versions")
+        assert state_after == state_before
+        assert [p for p in policies_after if p["policy_version"] != "176.e6.v1"] == policies_before
+        assert [p["policy"] for p in policies_after if p["policy_version"] == "176.e6.v1"] == [eo.E6_POLICY]
+        assert _table_defs(conn, [t for t in _SEED_WATCH if t != "experience_policy_versions"]) == \
+            {t: d for t, d in defs_before.items() if t != "experience_policy_versions"}
+        assert conn.execute("SELECT count(*) AS n FROM vres.experience_retrieval_observations").fetchone()["n"] == 0
+    assert db.migrate() == []
+
+
+def test_m_same_version_policy_row_with_wrong_json_fails_the_migration(disposable_040):
+    wrong = '{"authority":"promote_anything","policy_version":"176.e6.v1","schema_version":1}'
+    with connect() as conn:
+        conn.execute("INSERT INTO vres.experience_policy_versions(policy_version,schema_version,policy_digest,policy) "
+                     "VALUES ('176.e6.v1',1,%s,%s::jsonb)", (eo.E6_POLICY_DIGEST, wrong))
+    with pytest.raises(psycopg.Error):
+        db.migrate()
+    with connect() as conn:
+        assert conn.execute("SELECT count(*) AS n FROM vres.schema_migrations").fetchone()["n"] == 40
+        assert conn.execute("SELECT to_regclass('vres.experience_retrieval_observations') IS NULL AS absent").fetchone()["absent"]

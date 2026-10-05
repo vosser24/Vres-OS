@@ -37,6 +37,7 @@ RETRIEVAL_POLICY_DIGEST = _sha256(POLICY)  # computed from the existing E5 const
 FROZEN_RETRIEVAL_POLICY_DIGEST = "7572cafc632d4f56571adbe5f59baceedf15c56a07d5a3ca35e4b05448a982e9"
 
 MAX_DURATION_MS = 86_400_000
+MAX_AGENT_TYPE = 200
 _PACK_KEYS = {"schema_version", "policy", *SECTIONS, "abstained", "reason", "diagnostics", "evidence_keys", "estimated_tokens"}
 _ITEM_REQUIRED = {
     "memory_key", "memory_class", "project_id", "scope", "authority_class", "status", "trust_class", "role",
@@ -338,6 +339,8 @@ def observe_retrieval(payload: dict[str, Any], project_id: int, *, connect=None)
         raise _reject("host_identity_missing")
     agent_id = _opt_text(payload.get("agent_id"))
     agent_type = _opt_text(payload.get("agent_type")) if agent_id else None
+    if agent_id and (agent_type is None or len(agent_type) > MAX_AGENT_TYPE):
+        raise _reject("agent_type_invalid")  # a host agent without a bounded type is never recorded or invented
     from psycopg.types.json import Jsonb
 
     with (connect or (lambda: db.connect(purpose="writer")))() as conn, conn.transaction():

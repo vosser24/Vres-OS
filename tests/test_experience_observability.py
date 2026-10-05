@@ -198,3 +198,34 @@ def test_observe_passes_agent_identity_and_requires_host_ids():
     for key in ("session_id", "tool_use_id"):
         with pytest.raises(eo.ObservationRejected):
             eo.observe_retrieval(_payload(**{key: None}), PID, connect=lambda: _Conn())
+
+
+class _NeverConn(_Conn):
+    def __init__(self):
+        super().__init__()
+        self.opened = False
+
+    def __enter__(self):
+        self.opened = True
+        return self
+
+
+@pytest.mark.parametrize("agent_type", [None, "", "x" * 201, 5])
+def test_agent_id_requires_a_bounded_non_empty_agent_type_before_any_database_call(agent_type):
+    conn = _NeverConn()
+    extra = {"agent_id": "a1"}
+    if agent_type is not None:
+        extra["agent_type"] = agent_type
+    with pytest.raises(eo.ObservationRejected) as caught:
+        eo.observe_retrieval(_payload(**extra), PID, connect=lambda: conn)
+    assert caught.value.code == "agent_type_invalid"
+    assert conn.opened is False and conn.calls == []
+
+
+def test_agent_type_at_the_frozen_bound_is_accepted_and_main_thread_never_gets_one():
+    conn = _Conn()
+    eo.observe_retrieval(_payload(agent_id="a1", agent_type="x" * 200), PID, connect=lambda: conn)
+    assert conn.calls[0][1][2:4] == ("a1", "x" * 200)
+    conn = _Conn()
+    eo.observe_retrieval(_payload(agent_type="vres-os:sonnet-expert"), PID, connect=lambda: conn)
+    assert conn.calls[0][1][2:4] == (None, None)

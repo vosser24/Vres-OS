@@ -3,6 +3,8 @@ import io
 import json
 from pathlib import Path
 
+import pytest
+
 from vres_os import experience_observability as eo
 from vres_os import hooks
 
@@ -90,3 +92,50 @@ def test_hook_success_prints_nothing_and_passes_resolved_project(monkeypatch, ca
 
     out = _run(monkeypatch, capsys, {"cwd": str(tmp_path)}, tmp_path, ok)
     assert out.out == "" and seen["pid"] == 5
+
+
+def _run_raw(monkeypatch, capsys, raw, tmp_path):
+    monkeypatch.setattr(hooks.sys, "stdin", io.StringIO(raw))
+    monkeypatch.setattr(hooks, "logs_dir", lambda: tmp_path)
+    cfg = type("Cfg", (), {"configured": True})()
+    monkeypatch.setattr(hooks, "ConfigStore", lambda: type("S", (), {"load": lambda self: cfg})())
+    monkeypatch.setattr(hooks, "connect", lambda: _Conn())
+    monkeypatch.setattr(eo, "observe_retrieval", lambda payload, project_id: pytest.fail("observer must not run"))
+    hooks.experience_observe()
+    return capsys.readouterr()
+
+
+@pytest.mark.parametrize("raw", ["", "   ", "{not json PRIVATE-RAW-xyz", "[1, 2]", "null"])
+def test_unusable_host_payload_logs_only_the_fixed_code(monkeypatch, capsys, tmp_path, raw):
+    out = _run_raw(monkeypatch, capsys, raw, tmp_path)
+    assert out.out == "" and out.err == ""
+    lines = (tmp_path / "hook-errors.log").read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1 and lines[0].endswith("event=ExperienceObserve code=host_payload_unavailable")
+    assert "PRIVATE-RAW" not in lines[0] and "JSON" not in lines[0]
+
+
+@pytest.mark.parametrize("outcome", ["session_not_found", "session_ambiguous"])
+def test_bounded_non_success_outcome_leaves_a_fixed_diagnostic(monkeypatch, capsys, tmp_path, outcome):
+    def observer(payload, project_id):
+        return {"outcome": outcome, "observation_key": None, "attribution_state": None, "item_count": 1}
+
+    out = _run(monkeypatch, capsys, {"cwd": str(tmp_path), "session_id": "SESSION-ID-xyz", "tool_use_id": "TOOLUSE-xyz"},
+               tmp_path, observer)
+    assert out.out == "" and out.err == ""
+    lines = (tmp_path / "hook-errors.log").read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1 and lines[0].endswith(f"event=ExperienceObserve code=observation_{outcome}")
+    assert "SESSION-ID" not in lines[0] and "TOOLUSE" not in lines[0] and str(tmp_path) not in lines[0]
+
+
+@pytest.mark.parametrize("outcome", ["recorded", "duplicate"])
+def test_recorded_and_duplicate_are_not_errors(monkeypatch, capsys, tmp_path, outcome):
+    out = _run(monkeypatch, capsys, {"cwd": str(tmp_path)}, tmp_path,
+               lambda payload, project_id: {"outcome": outcome, "observation_key": "ERO-" + "0" * 32})
+    assert out.out == "" and out.err == ""
+    assert not (tmp_path / "hook-errors.log").exists()
+
+
+def test_unknown_outcome_is_bounded_to_a_fixed_code(monkeypatch, capsys, tmp_path):
+    _run(monkeypatch, capsys, {"cwd": str(tmp_path)}, tmp_path, lambda payload, project_id: {"outcome": "PRIVATE-OUTCOME-xyz"})
+    log = (tmp_path / "hook-errors.log").read_text(encoding="utf-8")
+    assert "code=observation_outcome_unexpected" in log and "PRIVATE-OUTCOME" not in log

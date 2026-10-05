@@ -20,8 +20,9 @@ BEGIN
          WHERE policy_version='176.e6.v1'
            AND schema_version=1
            AND policy_digest='d61f60d31182085748bb613ef3c160274f1a1a5a2384854f36e52b4cdfecc5e5'
+           AND policy='{"authority":"no_promotion","capture":"host_posttooluse_successful_experience_retrieve_only","payload":"digest_structural_no_memory_text_no_query_text_no_private_reasoning","policy_version":"176.e6.v1","reference":"exact_returned_memory_key_reference_only","replay":"same_snapshot_hard_gate_frozen_post_gate_variants_only","schema_version":1,"utility":"descriptive_join_no_causal_credit","writer":"trusted_provenance_writer"}'::jsonb
     ) THEN
-        RAISE EXCEPTION 'Experience E6 policy version/digest mismatch';
+        RAISE EXCEPTION 'Experience E6 policy version/digest/policy mismatch';
     END IF;
 END
 $vres_e6$;
@@ -143,7 +144,7 @@ FOR EACH STATEMENT EXECUTE FUNCTION vres.protect_experience_retrieval_immutabili
 
 -- Writer-only recorder. The host hook passes structural digests only; the project is resolved by the hook from the host
 -- cwd and the open Claude session is matched EXACTLY by (project, provider, provider_session_id). The task comes only
--- from sessions.task_id (NULL when unbound); a work unit is attributed only when exactly one work unit of that task is
+-- from sessions.task_id (NULL when unbound); a work unit is attributed only when exactly one RUNNING work unit of that task is
 -- bound to the host agent id. Duplicate delivery is idempotent; a duplicate with different digests fails closed.
 CREATE OR REPLACE FUNCTION vres.record_experience_retrieval_observation(
     p_project_id bigint, p_provider_session_id text, p_agent_id text, p_agent_type text, p_tool_use_id text,
@@ -176,7 +177,8 @@ BEGIN
        OR char_length(p_provider_session_id) NOT BETWEEN 1 AND 300
        OR p_tool_use_id IS NULL OR char_length(p_tool_use_id) NOT BETWEEN 1 AND 300
        OR (p_agent_id IS NOT NULL AND char_length(p_agent_id) NOT BETWEEN 1 AND 300)
-       OR (p_agent_type IS NOT NULL AND (p_agent_id IS NULL OR char_length(p_agent_type) NOT BETWEEN 1 AND 200))
+       OR (p_agent_id IS NOT NULL AND (p_agent_type IS NULL OR char_length(p_agent_type) NOT BETWEEN 1 AND 200))
+       OR (p_agent_id IS NULL AND p_agent_type IS NOT NULL)
        OR p_observation IS NULL OR jsonb_typeof(p_observation) <> 'object'
        OR p_items IS NULL OR jsonb_typeof(p_items) <> 'array' THEN
         RAISE EXCEPTION 'invalid experience retrieval observation arguments' USING ERRCODE = 'P0001';
@@ -208,10 +210,10 @@ BEGIN
         attribution := 'unattributed_host_agent';
         IF task_row IS NOT NULL THEN
             SELECT count(*) INTO wu_count FROM vres.orchestration_work_units w
-             WHERE w.task_id = task_row AND w.host_agent_id = p_agent_id;
+             WHERE w.task_id = task_row AND w.host_agent_id = p_agent_id AND w.status = 'running';
             IF wu_count = 1 THEN
                 SELECT w.work_unit_key INTO wu_key FROM vres.orchestration_work_units w
-                 WHERE w.task_id = task_row AND w.host_agent_id = p_agent_id;
+                 WHERE w.task_id = task_row AND w.host_agent_id = p_agent_id AND w.status = 'running';
                 attribution := 'work_unit';
             END IF;
         END IF;
