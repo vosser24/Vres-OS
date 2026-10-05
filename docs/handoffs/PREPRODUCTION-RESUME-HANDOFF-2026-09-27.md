@@ -3102,3 +3102,335 @@ Do not rerun all historical Chunk 1–3 ladders.
 Do not edit the frozen contract.
 Preserve the frozen-contract Markdown hard-break waiver exactly as section #32 describes.
 ```
+
+---
+
+# 33. 2026-10-05 #176 E5 protected PASS / guarded merge / post-main acceptance seal
+
+This is the newest authoritative handoff boundary. It supersedes section #32 for current execution state.
+
+## A. Exact accepted repository boundary
+
+Repository:
+`vosser24/Vres-OS`
+
+E5 frozen contract:
+`a06d32801a22a9c17439a0e03c081dae57ba2367`
+
+Final E5 candidate:
+`230c4fdb5a7674fe13518796be68a77848ff0561`
+
+Accepted E5 tree:
+`97f98e2ad666df014bbc22270cc677aacd65a21f`
+
+PR:
+`#183`
+
+Authoritative product main after guarded merge:
+**`6af7bddf246e0f628c3e52add9528742e85189ca`**
+
+E5 Vres task:
+`TASK-20261005-dc0e7a9e38`
+
+Task status at this seal:
+**active; repository/acceptance closure complete; local task_complete still required exactly once.**
+
+## B. Final local acceptance evidence
+
+Final-local checkpoint:
+`CP-20261005-949900c05d`
+
+Corrected candidate full Windows/PostgreSQL suite:
+- **2206 passed**;
+- **4 skipped**;
+- **0 failed**;
+- **0 errors**;
+- **0 warnings**;
+- fresh isolated DB;
+- migrations 40 / latest 040;
+- `ISOLATED_VRES_CONFIG=PASS`;
+- `DROPPED=True`;
+- historical drifted DB untouched.
+
+Local release gate:
+- `PASSED_WITH_EXPLICIT_LIVE_GATES`;
+- candidate identity clean;
+- candidate wheel build/install/import and exact Python/SQL byte comparison PASS;
+- wheel SHA256 `91d47125e14aa52cf8bced8355fb212802ff1f158413b3339597316e8080b180`.
+
+Do not rerun this evidence unless bytes change or a concrete gap is discovered.
+
+## C. PR CI evidence
+
+PR #183 exact accepted head:
+`230c4fdb5a7674fe13518796be68a77848ff0561`
+
+CI #472 / run:
+`37339979267`
+
+Result:
+- SUCCESS;
+- full suite: **2207 passed / 3 skipped**;
+- installed runtime smoke PASS;
+- release gate PASS;
+- artifact digest:
+  `sha256:49c5a001f9f90bd2c6013a43ce03fc9bdb4320c98df96194fce9dd8228ce6748`.
+
+GitHub's pull_request checkout synthetic merge:
+`70abf6d95a44fa92b086c61308641bcb96007a90`
+
+This synthetic object introduced zero file changes relative to the accepted candidate and shared exact tree:
+`97f98e2ad666df014bbc22270cc677aacd65a21f`.
+
+Treat this as PR checkout metadata, not candidate mutation.
+
+## D. Protected validation history
+
+Cycle 1:
+- checkpoint: `CP-20261005-fe30d00bec`;
+- request: `VAL-afdb8d037183467e`;
+- protected Fable/high;
+- outcome failed because **2 checks were not_run**;
+- **0 checks failed**;
+- evidence gaps only: PostgreSQL runtime proof and independent CI readback.
+
+No automatic retry occurred.
+
+Cycle 2 was explicitly authorized on unchanged candidate bytes.
+
+Cycle 2:
+- checkpoint: `CP-20261005-c9c6ca275f`;
+- request: `VAL-21170237cd6a482c`;
+- validator: `vres-os:validator`;
+- host-observed model: `claude-fable-5-1`;
+- effort: high;
+- host-recorded outcome: **passed**;
+- **15/15 checks passed**;
+- **0 failed**;
+- **0 not_run**.
+
+Direct validator PostgreSQL proof:
+- DB `vres_e5_val2_e1fe5557c98c_test`;
+- 40 migrations / latest 040;
+- isolated config PASS;
+- four required integration files: **111 passed**;
+- exit 0;
+- `DROPPED=True`;
+- drifted DB untouched.
+
+Direct validator GitHub REST proof:
+- PR head/base exact;
+- CI #472 exact accepted head and success;
+- all seven required CI steps success;
+- artifact digest exact;
+- synthetic merge zero changed files.
+
+No repository mutation occurred during either protected cycle.
+
+## E. Guarded merge
+
+ChatGPT reverified immediately before merge:
+- main = `a0a2769b99f4893733568194c0aa68e78e73aeab`;
+- E5 branch = exact final candidate;
+- PR #183 open/mergeable;
+- PR head exact.
+
+Merge used expected-head protection against:
+`230c4fdb5a7674fe13518796be68a77848ff0561`
+
+GitHub merge result:
+- merged = true;
+- new main:
+  **`6af7bddf246e0f628c3e52add9528742e85189ca`**.
+
+## F. Post-main push CI
+
+Mandatory post-merge push CI:
+- CI #473;
+- run id `37346476024`;
+- event: push;
+- branch: main;
+- exact head:
+  `6af7bddf246e0f628c3e52add9528742e85189ca`;
+- job `111886190218`;
+- conclusion: SUCCESS.
+
+All substantive steps passed:
+- install runtime;
+- repository-wide critical lint;
+- strict architecture-governance lint;
+- strict authority/model-evidence lint;
+- full PostgreSQL suite;
+- installed-runtime import smoke;
+- local release gate;
+- evidence upload.
+
+Full suite:
+**2207 passed / 3 skipped**
+
+Release gate:
+- `PASSED_WITH_EXPLICIT_LIVE_GATES`;
+- `git_commit=6af7bddf246e0f628c3e52add9528742e85189ca`;
+- `git_tree=97f98e2ad666df014bbc22270cc677aacd65a21f`;
+- `dirty=false`;
+- `error=null`;
+- release-gate unit/static tests: **1520 passed / 690 skipped**;
+- coverage: **55.34% lines / 46.93% branches**;
+- migrations: **40**;
+- evidence file count: **410**.
+
+Post-main artifact:
+- id `11360229051`;
+- name `release-gate-evidence`;
+- digest:
+  `sha256:a8837251697e4a23c944b18e9a71a319a8560873867fe258baf51c92a7b4e076`;
+- expired=false;
+- bound to exact new main.
+
+Post-main release-gate wheel:
+- `vres_os-0.2.0a1-py3-none-any.whl`;
+- SHA256:
+  `4d3ccc33df642db4c804142586725686b65a6329f9d829bd1cac508c3b561649`;
+- bytes: **382832**;
+- exact Python/SQL source-byte proof PASS;
+- installed import smoke PASS.
+
+The PostgreSQL service log contains expected ERROR/FATAL entries generated by negative/fail-closed tests; the actual test and gate conclusions are green.
+
+## G. Issue / audit references
+
+Relevant durable records:
+- frozen-contract Markdown hard-break waiver: issue comment `5994173149`;
+- one-line canonical-status fix classification: issue comment `5997730568`;
+- PR CI synthetic-merge exact-tree classification: PR comment `5998674253`;
+- protected-validation cycle-1 bounded recovery authorization: PR comment `5999110178`;
+- protected validation PASS record summary: PR comment `5999333268`.
+
+## H. E5 result
+
+E5's implementation and acceptance objectives are complete:
+- capability-centric experience retrieval;
+- procedure/episode/feedback links;
+- validated success/failure history;
+- E4 revocation integration;
+- read-only deterministic retrieval;
+- no opaque expertise score;
+- no automatic prompt rewrite;
+- no E6 observation writes.
+
+No migration was added by E5.
+
+Accepted truth owners remain the existing capabilities/proofs, procedures/versions/runs/feedback, immutable experience episodes, relations, task identity and validation/source/artifact evidence.
+
+## I. Carry-forward observations — not E5 blockers
+
+Carry into E7 benchmark/security hardening rather than reopening the accepted E5 candidate:
+- strict-ruleset Ruff observations UP017/B007/B905 reported by the validator but not enforced by current CI;
+- first protected attempt noted E5 contract cases 15, 16 and 24 do not have dedicated one-test-per-criterion coverage, although the complete protected cycle later passed with direct runtime/source evidence.
+
+Do not mutate E5 solely for those observations.
+
+## J. Exact next action — LOCAL VRES TASK COMPLETION ONLY
+
+Before E6 begins, return to the same local E5 Vres host/session and complete:
+
+`TASK-20261005-dc0e7a9e38`
+
+exactly once.
+
+Preconditions are already satisfied:
+- protected validation current PASS:
+  `VAL-21170237cd6a482c`;
+- candidate files unchanged since protected PASS;
+- guarded PR merge complete;
+- post-main push CI #473 green;
+- canonical issue/checklist/handoff closure recorded.
+
+Local completion instructions:
+1. do not edit repository files;
+2. do not invalidate protected validation;
+3. do not rerun tests/release gate/validator;
+4. read back current task and validation evidence;
+5. call `task_complete` exactly once;
+6. read task back and require status=completed / completion timestamp present;
+7. return task-completion evidence to ChatGPT.
+
+If `task_complete` refuses because validation is stale or task state changed:
+STOP and return exact evidence.
+Do not repair or revalidate automatically.
+
+**E6 MUST NOT START BEFORE SUCCESSFUL E5 TASK COMPLETION.**
+
+## K. Remaining program after E5 task completion
+
+Next tranche:
+**E6 — observability + experience utility evidence**
+
+Then:
+- E7 — benchmark + security ladder;
+- E8 — Chairman integration + protected acceptance;
+- E9 criteria carried into #169;
+- #165;
+- #166;
+- #167;
+- #168;
+- #169 integrated Windows / Visual Studio acceptance;
+- #170 production readiness / go-live;
+- post-#170 Organizational Architecture & Specialist Intelligence / full-team enhancement.
+
+## L. Fresh-chat resume prompt
+
+```text
+Resume the Vres-OS preproduction program from the newest canonical durable handoff.
+
+Repository:
+vosser24/Vres-OS
+
+Canonical documentation branch:
+docs-execution-checklist-20260927
+
+Read first:
+docs/PREPRODUCTION-EXECUTION-CHECKLIST-2026-09-27.md
+docs/handoffs/PREPRODUCTION-RESUME-HANDOFF-2026-09-27.md
+
+Newest authoritative handoff boundary:
+# 33. 2026-10-05 #176 E5 protected PASS / guarded merge / post-main acceptance seal
+
+Newest authoritative checklist boundary:
+### 17. 2026-10-05 #176 E5 merged / post-main accepted — local Vres task completion only
+
+AUTHORITATIVE PRODUCT MAIN:
+6af7bddf246e0f628c3e52add9528742e85189ca
+
+E5 FINAL CANDIDATE:
+230c4fdb5a7674fe13518796be68a77848ff0561
+
+E5 ACCEPTED TREE:
+97f98e2ad666df014bbc22270cc677aacd65a21f
+
+E5 PR:
+#183 MERGED
+
+PROTECTED PASS:
+VAL-21170237cd6a482c
+15/15 passed, 0 failed, 0 not_run
+Fable/high
+
+POST-MAIN CI:
+#473 / run 37346476024
+SUCCESS
+2207 passed / 3 skipped
+release gate PASSED_WITH_EXPLICIT_LIVE_GATES
+artifact digest sha256:a8837251697e4a23c944b18e9a71a319a8560873867fe258baf51c92a7b4e076
+
+E5 VRES TASK:
+TASK-20261005-dc0e7a9e38
+
+CURRENT ACTION:
+Complete that E5 Vres task exactly once on the existing local host/session.
+Do not edit code, rerun tests, rerun validation, or start E6 first.
+
+After successful task_complete readback, return evidence to ChatGPT.
+Only then start E6.
+```
+
