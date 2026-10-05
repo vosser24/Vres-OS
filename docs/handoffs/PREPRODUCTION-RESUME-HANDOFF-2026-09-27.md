@@ -1739,7 +1739,18 @@ Merge commit / new main:
 E4 Vres task:
 `TASK-20260930-2c7198e394`
 
-At this handoff boundary the E4 task has a host-recorded protected PASS, but a subsequent explicit `task_complete` call has **not been confirmed back to ChatGPT**. Treat that as local lifecycle bookkeeping to close before opening the E5 task; do not rerun validation or create another checkpoint merely for completion.
+The E4 Vres task is now **completed**. Local read-back after exactly one `task_complete` call confirmed:
+- task: `TASK-20260930-2c7198e394`;
+- final status: `completed`;
+- completed_at: `2026-10-05T08:47:49+03:00`;
+- validation status: `passed`;
+- `completion_after_latest_passed_validation=true`;
+- latest protected request remains `VAL-4dbf9f69b1744e6b` / `passed` / host-observed `claude-fable-5-1`;
+- historical `VAL-72e66d088bec405a` remains `rejected`;
+- no checkpoint, validation request, code, Git or PR mutation was created by completion;
+- the reviewed E4 worktree remained clean at `553e9d1398073b4cf0a4a4b282b2f3f3ff86ec2b`, tree `6eb856f2c075b2194ccabb59b4a6e906110e4a1d`.
+
+No further E4 local lifecycle action is pending.
 
 ## B. Exact-head CI and review identity
 
@@ -1867,21 +1878,19 @@ Residual risks remain explicit and do not reopen E4 absent a real frozen-contrac
 
 The validator also observed a pre-existing custom-order test-isolation weakness involving runtime-surface stubs and control-preflight tests. It was reproduced as test isolation rather than an E4 runtime defect; canonical CI ordering and isolated execution are green.
 
-## F. Immediate local closure bookkeeping
+## F. E4 local lifecycle closure — DONE
 
-Before opening a new E5 Vres task, complete the accepted E4 Vres task exactly once if it is still active.
+The accepted E4 Vres task was completed exactly once after protected PASS and repository/post-main closure.
 
-From the correctly rooted E4 Claude/Vres session:
-1. read `validation_evidence` for `TASK-20260930-2c7198e394`;
-2. require latest request `VAL-4dbf9f69b1744e6b` is still `passed`;
-3. require task validation status is still `passed`;
-4. require branch/worktree bytes still match the reviewed E4 candidate manifest;
-5. call `task_complete` once with a concise E4 closure summary that records PR #182 merge and post-main CI #471 success;
-6. do not create another checkpoint;
-7. do not call `validation_prepare`, `validation_invalidate`, or `validation_abandon`;
-8. after completion, read back the task status and return the evidence.
+- task: `TASK-20260930-2c7198e394`;
+- completed_at: `2026-10-05T08:47:49+03:00`;
+- final validation status: `passed`;
+- latest accepted request: `VAL-4dbf9f69b1744e6b`;
+- historical rejected request preserved: `VAL-72e66d088bec405a`;
+- no completion checkpoint or new validation request was created;
+- the final `task_reply_gate` error after completion (“requires ... unfinished task”) is expected and is not a defect.
 
-This is lifecycle bookkeeping only; it does not reopen E4 review.
+E4 has no remaining local lifecycle bookkeeping.
 
 ## G. E5 — only next #176 implementation tranche
 
