@@ -174,4 +174,3 @@ def test_boundary_runtime_reads_but_cannot_write_or_record(db_ready):
         with psycopg.connect(base, autocommit=True) as admin:
             admin.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role)))
             admin.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(role)))
-
