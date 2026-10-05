@@ -952,6 +952,36 @@ def test_e5_procedure_structural_capability_evidence_changes_relevance_not_autho
         assert forbidden not in item
 
 
+def test_e5_procedure_history_is_closed_bounded_and_never_changes_authority():
+    row = _proc_row()
+    row["experience_history"] = {
+        "validated_success_episode_keys": ["E-S4", "E-S3", "E-S2", "E-S1"],
+        "validated_failure_episode_keys": ["E-F4", "E-F3", "E-F2", "E-F1"],
+        "failure_episode_keys": ["E-X4", "E-X3", "E-X2", "E-X1"],
+        "feedback": [],
+        "latest_validated_at": "2026-10-05T06:00:00+00:00",
+        "expert_score": 99,
+    }
+    item = er.procedure_item(row, _req(), NOW)[0]
+    assert item["authority_class"] == "accepted_procedure"
+    assert item["role"] == "instruction"
+    assert item["signals"]["authority_tier"] == er._TIER_PROCEDURE
+    history = item["experience_history"]
+    assert set(history) == {
+        "validated_success_episode_keys",
+        "validated_failure_episode_keys",
+        "failure_episode_keys",
+        "feedback",
+        "latest_validated_at",
+    }
+    assert history["validated_success_episode_keys"] == ["E-S4", "E-S3", "E-S2"]
+    assert history["validated_failure_episode_keys"] == ["E-F4", "E-F3", "E-F2"]
+    assert history["failure_episode_keys"] == ["E-X4", "E-X3", "E-X2"]
+    assert history["feedback"] == []
+    assert "expert_score" not in history
+    assert "expert_score" not in item
+
+
 def _scenarios():
     """Representative packs covering every emitting path."""
     scen = {}
