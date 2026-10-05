@@ -1174,3 +1174,99 @@ Carry-forward non-blocking observations into E7/security-hardening work rather t
 - first validation cycle noted contract cases 15/16/24 lacked dedicated E5 tests, while behavior was inspected and the eventual protected cycle passed the complete frozen contract;
 - do not mutate the accepted E5 candidate solely for these follow-up observations.
 
+---
+
+### 18. 2026-10-05 #176 E5 DONE / E6 NEXT
+Status: **E5 COMPLETE — E6 MAY BEGIN**
+
+This section supersedes section 17 for current execution state.
+
+#### E5 final closure
+
+Authoritative product main:
+**`6af7bddf246e0f628c3e52add9528742e85189ca`**
+
+Final E5 candidate:
+`230c4fdb5a7674fe13518796be68a77848ff0561`
+
+Accepted tree:
+`97f98e2ad666df014bbc22270cc677aacd65a21f`
+
+PR:
+`#183` — merged.
+
+Protected validation:
+- request: `VAL-21170237cd6a482c`;
+- host-observed protected validator: `claude-fable-5-1`;
+- effort: high;
+- outcome: **passed**;
+- **15 passed / 0 failed / 0 not_run**.
+
+Post-main CI:
+- CI #473 / run `37346476024`;
+- exact main head: `6af7bddf246e0f628c3e52add9528742e85189ca`;
+- **2207 passed / 3 skipped**;
+- installed-runtime smoke PASS;
+- release gate `PASSED_WITH_EXPLICIT_LIVE_GATES`;
+- artifact digest:
+  `sha256:a8837251697e4a23c944b18e9a71a319a8560873867fe258baf51c92a7b4e076`.
+
+E5 Vres task:
+`TASK-20261005-dc0e7a9e38`
+
+Final task completion:
+- `task_complete` called exactly once;
+- result: `{"completed": true}`;
+- final status: **completed**;
+- completed_at:
+  **`2026-10-05T20:25:13.691161+03:00`**;
+- completion occurred after the latest passed protected validation;
+- protected validation remains associated with the task;
+- candidate worktree remained clean at exact HEAD/tree;
+- no E6 work was started before completion.
+
+The earlier failed protected request `VAL-afdb8d037183467e` remains preserved as failed evidence and was not rewritten.
+
+#### E5 acceptance is closed
+
+No further E5 action is pending.
+
+Do not rerun E5 local acceptance, PR CI, post-main CI, release gate or protected validation unless:
+- accepted E5 bytes change; or
+- a concrete regression/evidence gap is discovered.
+
+Carry-forward non-blocking observations remain assigned to later hardening:
+- strict-ruleset Ruff observations UP017/B007/B905;
+- dedicated one-test-per-contract-criterion gaps previously noted for E5 cases 15/16/24.
+
+These do not reopen E5.
+
+#### Next tranche
+
+Next:
+**E6 — observability + experience utility evidence**
+
+E6 scope from #176:
+- retrieval observations;
+- cited/used memory evidence;
+- outcome/validation joins;
+- no causal-credit overclaim;
+- baseline/candidate retrieval-policy replay.
+
+At this seal:
+- no E6 implementation branch is authoritative yet;
+- no E6 Vres task has been created by this closure step;
+- no E6 contract has been frozen yet.
+
+E6 must begin from exact accepted main:
+`6af7bddf246e0f628c3e52add9528742e85189ca`
+
+Recommended opening sequence:
+1. create/bind the E6 Vres task on the new tranche;
+2. perform read-only discovery against current E1–E5 truth owners and retrieval surfaces;
+3. draft the bounded E6 contract with explicit observability/write authority, privacy/security, replay and no-causal-overclaim invariants;
+4. freeze/protect the E6 contract before implementation;
+5. implement in bounded chunks with the established fresh PostgreSQL / isolated-config / exact-head CI / protected-validation methodology.
+
+Do not widen E6 into E7 benchmark/security work or E8 Chairman automatic injection.
+
