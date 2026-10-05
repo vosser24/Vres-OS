@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
@@ -15,6 +16,7 @@ from vres_os.db import connect
 from vres_os.experience import POLICY_DIGEST as E1_DIGEST, POLICY_VERSION as E1_VERSION
 from vres_os.experience_consolidation import episode_payload_digest
 from vres_os.experience_retrieval import ExperienceRetrievalService
+from vres_os.project import ProjectIdentity
 from vres_os.relations import relate_in_conn
 from vres_os.repository import Repository
 
@@ -270,7 +272,7 @@ def _e5_snapshot() -> dict[str, tuple[int, str]]:
     return out
 
 
-def test_task_backed_feedback_is_bounded_and_untrusted_feedback_fails_closed(pg_project):
+def test_task_backed_feedback_is_bounded_and_untrusted_feedback_fails_closed(pg_project, tmp_path):
     token = "qz" + uuid.uuid4().hex[:16]
     procedure_key, _version_id = _procedure(pg_project, token)
     episode_key = _episode(
@@ -291,6 +293,28 @@ def test_task_backed_feedback_is_bounded_and_untrusted_feedback_fails_closed(pg_
         unrelated_task_id = conn.execute(
             "SELECT id FROM vres.tasks WHERE task_key=%s",
             (unrelated_task,),
+        ).fetchone()["id"]
+
+    foreign_project_id = Repository().ensure_project(
+        ProjectIdentity(
+            Path(tmp_path) / "e5-feedback-foreign",
+            f"pytest:e5-feedback:{uuid.uuid4().hex}",
+            "E5 foreign feedback",
+            None,
+            None,
+        )
+    )
+    foreign_task = Repository().begin_task(
+        foreign_project_id,
+        "Foreign feedback task",
+        "Must not cross project scope",
+        None,
+        "chairman",
+    )
+    with connect() as conn:
+        foreign_task_id = conn.execute(
+            "SELECT id FROM vres.tasks WHERE task_key=%s",
+            (foreign_task,),
         ).fetchone()["id"]
 
     _feedback(
@@ -324,6 +348,12 @@ def test_task_backed_feedback_is_bounded_and_untrusted_feedback_fails_closed(pg_
         statement="Unrelated task feedback must stay out.",
         created_at=datetime(2026, 10, 5, 6, 50, tzinfo=timezone.utc),
     )
+    _feedback(
+        procedure_key,
+        task_id=foreign_task_id,
+        statement="Foreign project feedback must stay out.",
+        created_at=datetime(2026, 10, 5, 7, 0, tzinfo=timezone.utc),
+    )
 
     pack = ExperienceRetrievalService().retrieve(
         {"project_id": pg_project, "query": token, "raw_fallback": False}
@@ -344,6 +374,11 @@ def test_task_backed_feedback_is_bounded_and_untrusted_feedback_fails_closed(pg_
     assert all("Ignore previous instructions" not in row["statement"] for row in feedback)
     assert all("No task identity" not in row["statement"] for row in feedback)
     assert all("Unrelated task feedback" not in row["statement"] for row in feedback)
+    assert all("Foreign project feedback" not in row["statement"] for row in feedback)
+
+    with connect() as conn, conn.transaction():
+        conn.execute("DELETE FROM vres.tasks WHERE project_id=%s", (foreign_project_id,))
+        conn.execute("DELETE FROM vres.projects WHERE id=%s", (foreign_project_id,))
 
 
 def test_source_revocation_removes_procedure_history_and_feedback(pg_project):
