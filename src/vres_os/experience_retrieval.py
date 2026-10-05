@@ -36,7 +36,7 @@ from .knowledge_status import (
 from .redaction import redact_text
 from .sensitive_policy import SENSITIVE_SANITIZED, sanitize_extracted_text
 
-SCHEMA_VERSION = "176.e4.v1"
+SCHEMA_VERSION = "176.e5.v1"
 # One fail-closed allow-list (knowledge_status): current intent sees CURRENT only; historical intent additionally
 # sees superseded/retired (flagged) and revoked (tombstone). NULL/unknown/rejected never match.
 _K_CURRENT = status_in_sql("k.status", CURRENT_KNOWLEDGE_STATUSES)
@@ -68,7 +68,7 @@ MAX_PACK_BYTES = 16 * 1024
 MAX_TEXT = 600
 POLICY = {
     "version": SCHEMA_VERSION,
-    "chunk": "E",
+    "chunk": "E5",
     "retrieval_mode": "lexical+optional_semantic; raw_fallback=lexical_only",
     "rank_order": [
         "section", "authority_tier", "scope_rank", "task_family_or_capability_match", "fusion_rank_score",
@@ -533,14 +533,17 @@ def procedure_item(row: dict[str, Any], req: dict[str, Any], now: datetime) -> t
         return None, "excluded_unapproved_company"
     if row["status"] != "active" or row.get("preferred_version") is None or row.get("version_status") != "preferred":
         return None, None
+    structural_caps = _strs(row.get("capability_keys"))
+    structural_evidence = _strs(row.get("experience_evidence"), 10, 160)
     return _item(
         section="accepted_procedures", kind="procedure", memory_key=row["procedure_key"], memory_class="procedural",
         scope=scope, project_id=row["project_id"], authority_class="accepted_procedure", status="active",
         trust_class="unspecified", role="instruction", tier=_TIER_PROCEDURE,
         text=f"{row['name']}: {row['description']}", why=["preferred_procedure_version"],
-        evidence=[f"procedure:{row['procedure_key']}@v{row['preferred_version']}"], flags=set(), req=req, row=row,
-        task_family=row.get("task_family"), recency=row.get("updated_at"), authoritative=True,
-        ref=f"procedure:{row['procedure_key']}", premises=_bounded_premises(row.get("input_contract")),
+        evidence=[f"procedure:{row['procedure_key']}@v{row['preferred_version']}"] + structural_evidence,
+        flags=set(), req=req, row=row, task_family=row.get("task_family"), capability_keys=structural_caps,
+        recency=row.get("updated_at"), authoritative=True, ref=f"procedure:{row['procedure_key']}",
+        premises=_bounded_premises(row.get("input_contract")),
         cmp_premises=_comparable_premises(row.get("input_contract")),
     ), None
 
