@@ -1003,3 +1003,174 @@ Protected validation remains blocked until:
 3. exact-head CI green on the exact corrected SHA.
 
 No E6 work may begin.
+
+---
+
+### 17. 2026-10-05 #176 E5 merged / post-main accepted — local Vres task completion only
+Status: **E5 PRODUCT/REPOSITORY ACCEPTANCE COMPLETE — TASK COMPLETION PENDING ON LOCAL VRES HOST**
+
+This section supersedes sections 15 and 16 for current E5 state.
+
+#### Final accepted identities
+
+Frozen E5 contract:
+`a06d32801a22a9c17439a0e03c081dae57ba2367`
+
+Final corrected candidate:
+`230c4fdb5a7674fe13518796be68a77848ff0561`
+
+Candidate/final tree:
+`97f98e2ad666df014bbc22270cc677aacd65a21f`
+
+PR:
+`#183`
+
+Merged main:
+**`6af7bddf246e0f628c3e52add9528742e85189ca`**
+
+E5 task:
+`TASK-20261005-dc0e7a9e38`
+
+#### Final local acceptance
+
+Bounded one-line correction proof on the corrected candidate:
+- formerly failing revoked-status governance test: **1 passed**;
+- `tests/test_experience_retrieval.py`: **115 passed**;
+- focused E5 PostgreSQL integration: **8 passed**;
+- critical Ruff: PASS;
+- post-freeze diff-check: PASS;
+- baseline→candidate excluding the frozen contract: PASS.
+
+Full corrected-candidate Windows/PostgreSQL acceptance:
+- fresh disposable DB: `vres_e5_c4full_3e3cc4d677c4_test`;
+- `ISOLATED_VRES_CONFIG=PASS`;
+- migration count: **40**;
+- highest migration: `040_context_refresh_attestation.sql`;
+- **2206 passed / 4 skipped / 0 failed / 0 errors / 0 warnings**;
+- disposable DB dropped: `DROPPED=True`;
+- original drifted DB untouched.
+
+Local release gate:
+- status: `PASSED_WITH_EXPLICIT_LIVE_GATES`;
+- candidate commit/tree exact and clean;
+- wheel build / exact Python+SQL bytes / temporary install / import smoke: PASS;
+- wheel: `vres_os-0.2.0a1-py3-none-any.whl`;
+- SHA256: `91d47125e14aa52cf8bced8355fb212802ff1f158413b3339597316e8080b180`;
+- bytes: **385391**;
+- source files compared: **134**.
+
+Final-local-acceptance checkpoint:
+`CP-20261005-949900c05d`
+
+#### PR exact-candidate-tree CI
+
+PR #183 pull_request CI:
+- workflow run: `37339979267` / CI #472;
+- PR head: `230c4fdb5a7674fe13518796be68a77848ff0561`;
+- full suite: **2207 passed / 3 skipped**;
+- installed-runtime smoke: PASS;
+- release gate: PASS;
+- artifact digest:
+  `sha256:49c5a001f9f90bd2c6013a43ce03fc9bdb4320c98df96194fce9dd8228ce6748`.
+
+GitHub's pull_request checkout used synthetic merge commit
+`70abf6d95a44fa92b086c61308641bcb96007a90`.
+This was accepted only after verifying:
+- the run is bound to PR head `230c4fdb...`;
+- release-gate tree = exact candidate tree `97f98e2...`;
+- compare candidate→synthetic merge is one metadata merge commit ahead with **zero changed files**.
+
+Durable PR evidence comment:
+`5998674253`
+
+#### Protected validation
+
+Cycle 1:
+- freeze checkpoint: `CP-20261005-fe30d00bec`;
+- request: `VAL-afdb8d037183467e`;
+- host-observed protected Fable/high;
+- result: FAILED because **11 passed / 0 failed / 2 not_run**;
+- not_run gaps were PostgreSQL evidence access and GitHub CI readback;
+- no candidate defect was reported;
+- no automatic retry occurred.
+
+Bounded recovery was explicitly authorized with unchanged candidate bytes.
+
+Cycle 2:
+- retry freeze checkpoint: `CP-20261005-c9c6ca275f`;
+- request: `VAL-21170237cd6a482c`;
+- validator: `vres-os:validator`;
+- host-observed model: `claude-fable-5-1`;
+- prepared effort: high;
+- canonical outcome: **passed**;
+- **15 checks passed / 0 failed / 0 not_run**.
+
+Cycle-2 direct PostgreSQL proof:
+- fresh DB: `vres_e5_val2_e1fe5557c98c_test`;
+- isolated config PASS;
+- 40 migrations / latest 040;
+- required four E5/retrieval integration files: **111 passed**;
+- pytest exit 0;
+- DB drop proof: `DROPPED=True`;
+- no DSN printed;
+- original drifted DB untouched.
+
+Cycle-2 direct GitHub REST proof independently verified:
+- PR #183 exact head/base;
+- CI #472 completed/success;
+- required CI steps success;
+- release artifact digest exact;
+- synthetic merge had zero file changes.
+
+Durable protected-PASS PR comment:
+`5999333268`
+
+#### Guarded merge and post-main acceptance
+
+PR #183 was merged with expected-head protection against exact:
+`230c4fdb5a7674fe13518796be68a77848ff0561`
+
+Merge/main SHA:
+**`6af7bddf246e0f628c3e52add9528742e85189ca`**
+
+Post-merge push CI:
+- run: `37346476024` / CI #473;
+- exact head: `6af7bddf246e0f628c3e52add9528742e85189ca`;
+- job `111886190218`: SUCCESS;
+- all substantive steps: SUCCESS;
+- full PostgreSQL suite: **2207 passed / 3 skipped**;
+- installed-runtime smoke: PASS;
+- release gate: `PASSED_WITH_EXPLICIT_LIVE_GATES`;
+- release-gate `git_commit`: exact new main;
+- release-gate `git_tree`: `97f98e2ad666df014bbc22270cc677aacd65a21f`;
+- `dirty=false`;
+- `error=null`;
+- artifact id: `11360229051`;
+- artifact digest:
+  `sha256:a8837251697e4a23c944b18e9a71a319a8560873867fe258baf51c92a7b4e076`;
+- release-gate wheel SHA256:
+  `4d3ccc33df642db4c804142586725686b65a6329f9d829bd1cac508c3b561649`;
+- wheel bytes: **382832**;
+- evidence file count: **410**;
+- migrations: **40**.
+
+The logged PostgreSQL ERROR/FATAL lines in the CI service output are expected negative-test evidence; the pytest job itself completed green.
+
+#### E5 closure status and exact next action
+
+Repository/product acceptance for E5 is complete.
+
+One governance action remains before E6:
+- complete `TASK-20261005-dc0e7a9e38` exactly once through the existing local Vres host/session, using the current host-recorded protected PASS;
+- do not invalidate validation;
+- do not create another checkpoint unless the host contract requires one;
+- do not rerun tests/release gate/protected validation;
+- make no repository edits.
+
+**E6 MUST NOT START until that task completion succeeds and is read back.**
+
+Carry-forward non-blocking observations into E7/security-hardening work rather than reopening E5:
+- validator noted strict-ruleset Ruff observations UP017/B007/B905 on E5 files not enforced by current CI;
+- first validation cycle noted contract cases 15/16/24 lacked dedicated E5 tests, while behavior was inspected and the eventual protected cycle passed the complete frozen contract;
+- do not mutate the accepted E5 candidate solely for these follow-up observations.
+
