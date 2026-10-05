@@ -3434,3 +3434,234 @@ After successful task_complete readback, return evidence to ChatGPT.
 Only then start E6.
 ```
 
+---
+
+# 34. 2026-10-05 #176 E5 DONE / E6 NEXT seal
+
+This is the newest authoritative handoff boundary. It supersedes section #33.
+
+## A. E5 is fully complete
+
+Repository:
+`vosser24/Vres-OS`
+
+Authoritative product main:
+**`6af7bddf246e0f628c3e52add9528742e85189ca`**
+
+Final E5 candidate:
+`230c4fdb5a7674fe13518796be68a77848ff0561`
+
+Accepted tree:
+`97f98e2ad666df014bbc22270cc677aacd65a21f`
+
+PR:
+`#183` — merged.
+
+Protected PASS:
+- request `VAL-21170237cd6a482c`;
+- checkpoint `CP-20261005-c9c6ca275f`;
+- validator `vres-os:validator`;
+- host-observed model `claude-fable-5-1`;
+- effort high;
+- **15/15 passed**;
+- **0 failed**;
+- **0 not_run**.
+
+Post-main CI:
+- CI #473;
+- run `37346476024`;
+- exact main head `6af7bddf246e0f628c3e52add9528742e85189ca`;
+- SUCCESS;
+- **2207 passed / 3 skipped**;
+- installed-runtime smoke PASS;
+- release gate `PASSED_WITH_EXPLICIT_LIVE_GATES`;
+- artifact `11360229051`;
+- digest:
+  `sha256:a8837251697e4a23c944b18e9a71a319a8560873867fe258baf51c92a7b4e076`.
+
+## B. E5 Vres task completion
+
+Task:
+`TASK-20261005-dc0e7a9e38`
+
+Completion:
+- `task_complete` called exactly once;
+- result: `{"completed": true}`;
+- final task status: **completed**;
+- completed_at:
+  **`2026-10-05T20:25:13.691161+03:00`**;
+- host reports completion after the latest passed validation;
+- validation status remains passed;
+- latest protected PASS remains `VAL-21170237cd6a482c`;
+- earlier failed request `VAL-afdb8d037183467e` remains preserved as failed history;
+- local candidate HEAD/tree remained exact;
+- worktree remained clean;
+- no E6 work was started before E5 completion.
+
+The post-completion reply-gate refusal to bind an unfinished task is expected because the task is now terminal completed. It is not an E5 blocker.
+
+## C. Final E5 result
+
+E5 delivered and accepted:
+- capability-centric experience retrieval;
+- procedure/episode/feedback structural links;
+- validated procedure success/failure history;
+- task-backed sanitized feedback;
+- E4 revocation-aware current history;
+- read-only deterministic retrieval;
+- no opaque expertise/self-certification score;
+- no automatic prompt rewrite;
+- no automatic procedure lifecycle mutation;
+- no E6 observation writes.
+
+No E5 migration was added.
+
+Do not reopen E5 or duplicate its expensive acceptance evidence unless accepted bytes change or a concrete regression/evidence gap appears.
+
+## D. Carry-forward observations
+
+These are non-blocking and belong to later hardening:
+- strict-ruleset Ruff observations UP017/B007/B905;
+- previously noted lack of dedicated one-test-per-criterion coverage for E5 contract cases 15/16/24.
+
+Carry them into E7/security and benchmark hardening unless E6 directly touches the affected behavior.
+
+Do not mutate accepted E5 solely to address these observations.
+
+## E. E6 next boundary
+
+Next tranche:
+**E6 — observability + experience utility evidence**
+
+Issue #176 defines E6 as:
+- retrieval observations;
+- cited/used memory;
+- outcome/validation joins;
+- no causal-credit overclaim;
+- baseline/candidate retrieval-policy replay.
+
+At this seal:
+- no E6 branch is authoritative yet;
+- no E6 Vres task has been created by the E5 closure flow;
+- no E6 contract has been frozen;
+- no E6 implementation work has started.
+
+Start E6 from exact product main:
+`6af7bddf246e0f628c3e52add9528742e85189ca`
+
+## F. E6 opening methodology
+
+Preserve the established discipline.
+
+Before implementation:
+1. sync to exact authoritative main;
+2. start/bind a fresh E6 Vres task;
+3. perform read-only discovery over the current E1–E5 schema/services/retrieval surfaces;
+4. identify the single truth owner for retrieval observations and utility evidence;
+5. define explicit privacy/security boundaries for recorded retrieval/use evidence;
+6. define what can be observed mechanically versus inferred;
+7. prohibit causal-credit claims from correlation/retrieval alone;
+8. define bounded replay evidence and retention/budget behavior;
+9. freeze an E6 contract before implementation.
+
+Implementation should remain bounded and must not prematurely add:
+- E7 benchmark/security corpus;
+- E8 automatic Chairman experience-pack injection;
+- general self-modification;
+- opaque utility/expertise scoring;
+- company-wide promotion authority.
+
+Testing methodology remains:
+- targeted unit/static checks;
+- fresh isolated disposable PostgreSQL DBs for durable-write/integration proof;
+- exact migration identity;
+- isolated `VRES_DATA_DIR`;
+- no credential/DSN printing;
+- bounded diff hygiene;
+- one coherent local final acceptance;
+- exact-head PR CI;
+- protected validation when required by the frozen E6 contract/governance impact;
+- guarded merge;
+- exact post-main CI.
+
+Do not rerun old E5 acceptance without changed bytes or a concrete gap.
+
+## G. Remaining program
+
+After E6:
+- E7 — benchmark + security ladder;
+- E8 — Chairman integration + protected acceptance;
+- E9 acceptance criteria carried into #169;
+- #165;
+- #166;
+- #167;
+- #168;
+- #169 integrated Windows / Visual Studio acceptance;
+- #170 production readiness / go-live;
+- post-#170 Organizational Architecture & Specialist Intelligence / full-team enhancement.
+
+## H. Fresh-chat resume prompt
+
+```text
+Resume the Vres-OS preproduction program from the newest canonical durable handoff.
+
+Repository:
+vosser24/Vres-OS
+
+Canonical documentation branch:
+docs-execution-checklist-20260927
+
+Read first:
+docs/PREPRODUCTION-EXECUTION-CHECKLIST-2026-09-27.md
+docs/handoffs/PREPRODUCTION-RESUME-HANDOFF-2026-09-27.md
+
+Newest authoritative checklist boundary:
+### 18. 2026-10-05 #176 E5 DONE / E6 NEXT
+
+Newest authoritative handoff boundary:
+# 34. 2026-10-05 #176 E5 DONE / E6 NEXT seal
+
+AUTHORITATIVE PRODUCT MAIN:
+6af7bddf246e0f628c3e52add9528742e85189ca
+
+E5:
+DONE
+
+E5 FINAL CANDIDATE:
+230c4fdb5a7674fe13518796be68a77848ff0561
+
+E5 ACCEPTED TREE:
+97f98e2ad666df014bbc22270cc677aacd65a21f
+
+E5 PR:
+#183 MERGED
+
+E5 PROTECTED PASS:
+VAL-21170237cd6a482c
+15/15 passed
+0 failed
+0 not_run
+Fable/high
+
+E5 POST-MAIN CI:
+#473 / run 37346476024
+SUCCESS
+2207 passed / 3 skipped
+release gate PASSED_WITH_EXPLICIT_LIVE_GATES
+
+E5 TASK:
+TASK-20261005-dc0e7a9e38
+COMPLETED at 2026-10-05T20:25:13.691161+03:00
+
+NEXT:
+E6 — observability + experience utility evidence
+
+E6 has not been started yet.
+No E6 branch/task/frozen contract is authoritative at this boundary.
+
+Begin E6 from exact main 6af7bddf...
+First perform read-only discovery, create/bind the E6 Vres task, draft and freeze the bounded E6 contract, then implement with the established methodology.
+
+Do not reopen E5 unless accepted bytes change or a concrete regression/evidence gap exists.
+```
+
