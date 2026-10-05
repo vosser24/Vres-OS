@@ -2214,3 +2214,532 @@ E5 architecture:
 
 If the fresh E5 Vres task/checkpoint has not yet been created, do that locally first from the exact E5 worktree without editing code. Then return task/checkpoint to ChatGPT. ChatGPT remains primary for E5 implementation/repository/PR/CI/docs.
 ```
+
+
+---
+
+# 31. 2026-10-05 #176 E5 coherent candidate / final-local-acceptance pending seal
+
+This is the newest authoritative handoff boundary. It supersedes section 30 for current E5 execution state. Historical E4 and E5 contract-freeze evidence remains authoritative history and must not be rewritten.
+
+## A. Repository and program identity
+
+Repository:
+`vosser24/Vres-OS`
+
+Authoritative product main:
+`a0a2769b99f4893733568194c0aa68e78e73aeab`
+
+E5 branch:
+`issue-176-e5-capability-procedure-experience`
+
+E5 Vres task:
+`TASK-20261005-dc0e7a9e38`
+
+Frozen E5 contract:
+`docs/architecture/EXPERIENCE-INTELLIGENCE-E5-CONTRACT-2026-10-05.md`
+
+Frozen contract commit:
+`a06d32801a22a9c17439a0e03c081dae57ba2367`
+
+Frozen contract tree:
+`5cd55b7f4cd6bf9885187af5f179db18018f29c8`
+
+Coherent final E5 candidate HEAD:
+**`d39fabb22484a664e863c1603e2054d1ef0723c4`**
+
+Coherent final E5 candidate tree:
+**`fd00975275a1f8cc697bd4c570f994812e49f3b9`**
+
+Remote branch state at this seal:
+- branch exists exactly at `d39fabb...`;
+- authoritative `main` remains `a0a2769...`;
+- branch is 28 commits ahead of main;
+- PR for E5: **none yet**;
+- product branch bytes are fully committed/pushed; no ChatGPT-side uncommitted product changes exist;
+- local E5 worktree was reported clean at the exact candidate after targeted acceptance.
+
+Canonical documentation branch at the start of this seal:
+`docs-execution-checklist-20260927`
+
+Section 15 of the execution checklist is the matching E5 current-state override.
+
+## B. E5 frozen architecture — do not redesign
+
+E5 scope is exactly:
+- capability-centric experience retrieval;
+- procedure/episode/feedback evidence integration;
+- validated success/failure history;
+- no opaque self-certified expert score;
+- no automatic agent/Chairman prompt rewriting.
+
+Architecture decision remains:
+**NO migration.**
+
+Existing truth owners remain authoritative:
+- `capabilities` / `capability_proofs`;
+- `procedures` / `procedure_versions`;
+- `procedure_runs` / `procedure_feedback`;
+- immutable `experience_episodes`;
+- `relations`;
+- E4 lifecycle/revocation state;
+- task/validation/source evidence.
+
+E5 must never introduce:
+- generic capability-experience score table;
+- model-specific expertise memory;
+- procedure-experience cache/ledger;
+- success/confidence probability;
+- authority from counts/quality/retrieval frequency;
+- automatic prompt rewrite;
+- automatic procedure promotion/demotion;
+- automatic lifecycle mutation;
+- E6 retrieval-observation writes.
+
+## C. Exact implementation delta
+
+Base-to-candidate delta from authoritative main is exactly eight files:
+1. `docs/architecture/EXPERIENCE-INTELLIGENCE-E5-CONTRACT-2026-10-05.md` — new frozen contract;
+2. `src/vres_os/experience_retrieval.py`;
+3. `tests/integration/test_e5_capability_retrieval.py` — new;
+4. `tests/integration/test_e5_procedure_history.py` — new;
+5. `tests/integration/test_experience_retrieval_journey.py`;
+6. `tests/integration/test_experience_retrieve_surface.py`;
+7. `tests/test_experience_retrieval.py`;
+8. `tests/test_experience_retrieval_e4.py`.
+
+No migration, MCP registration, capability/procedure writer, routing/model policy, prompt surface or E6 observation surface changed.
+
+## D. Implemented E5 behavior
+
+Retrieval schema:
+`176.e5.v1`
+
+Capability-centric retrieval:
+- explicit `capability_keys` are validated against active project-visible capabilities;
+- direct immutable E1 `episode -> uses -> capability` evidence can source an episode even without lexical overlap;
+- accepted `capability_proofs` can source the proof task's eligible episode only when the immutable episode payload already names that capability;
+- `proven_count` is not used as retrieval authority or expertise evidence;
+- foreign/inaccessible capability keys fail closed without cross-project disclosure.
+
+Procedure sourcing:
+- an accepted procedure may be structurally sourced only through an already integrity/lifecycle-gated episode that directly uses that procedure and structurally matches the requested capability;
+- structural evidence improves candidate coverage/same-tier relevance only;
+- it never changes preferred-version authority, scope, lifecycle state or company approval.
+
+Procedure `experience_history`:
+- bounded validated success episode keys;
+- bounded validated failure episode keys;
+- bounded other failed/cancelled episode keys;
+- bounded task-backed feedback;
+- latest validated evidence timestamp;
+- no success rate, quality grade, expert score or probability.
+
+Validated success/failure semantics:
+- only task-level immutable episodes;
+- episode current-eligible under E4;
+- `trust_class='validated_runtime'`;
+- immutable payload validation status `passed`;
+- immutable payload names the same procedure and its recorded `accepted=true/false` value;
+- raw `procedure_runs.quality_score`, run count, model/provider and replay counts do not establish history authority.
+
+Feedback semantics:
+- `procedure_feedback.task_id` must map to a current-eligible task episode in the requested project;
+- that episode must directly use the same procedure and its immutable payload must identify the procedure;
+- feedback text is run through the existing #164 sanitizer;
+- sanitized text only; <=300 chars;
+- instruction-shaped feedback is omitted;
+- null-task, unrelated-task and foreign-task feedback is omitted;
+- feedback is evidence-only, never an approval/instruction/promotion channel.
+
+E4 revocation integration:
+- if the only supporting source for an episode is revoked through the real E4 source-revocation path, the episode stops contributing current procedure history and feedback;
+- accepted procedure authority itself remains governed by the existing procedure owner;
+- history/evidence is not physically erased.
+
+Read-only/determinism:
+- repeated E5 retrieval of the same request produced identical packs;
+- row-count+digest snapshots proved no writes across capability/proof/procedure/run/feedback/episode/lifecycle/relation truth owners.
+
+## E. E5 Vres task/checkpoint history
+
+Task:
+`TASK-20261005-dc0e7a9e38`
+
+Initial E5 boundary:
+- initial checkpoint `CP-20261005-6b9c6acbb3` was superseded during the setup turn;
+- latest intended start-boundary checkpoint became `CP-20261005-d9dd95b696`;
+- objective and frozen scope remained unchanged.
+
+Chunk 1:
+- explicit checkpoint `CP-20261005-60dd993356`.
+
+Chunk 2:
+- explicit Chairman checkpoint `CP-20261005-8e70bf99ac`;
+- later `CP-20261005-bb0d29c4e5` has reason `pre_compact` and the same material Chunk-2 state;
+- treat `CP-20261005-bb0d29c4e5` as host compaction/lifecycle bookkeeping, not an intentional second Chairman material checkpoint.
+
+Chunk 3 / targeted-development closure:
+- explicit Chairman checkpoint `CP-20261005-8fe3a4f070`.
+
+At this seal the task remains unfinished and has **not** entered protected validation.
+
+## F. Targeted evidence — Chunk 1
+
+Candidate:
+- head `a0b15d53ec96b1fd196dbb7778c3c42a853a45af`;
+- tree `9772552df25f67bf9746c2b004f9d7aaa97d1f56`.
+
+Evidence:
+- 165 unit/static tests passed;
+- critical Ruff PASS;
+- diff-check PASS;
+- 3 focused E5 PostgreSQL tests passed;
+- 122 E3/E4 retrieval regression tests passed;
+- 19 E1 linkage regression tests passed;
+- zero local repository mutation.
+
+Fresh PostgreSQL lesson:
+- the old database behind `pg_issue163_test_dsn` contained migration drift and was correctly rejected as acceptance evidence;
+- a fresh database was created on the same server;
+- the machine's production Vres config caused an initial provenance-writer mismatch in the single-role test DB;
+- empty isolated `VRES_DATA_DIR` fixed the environment and is now mandatory methodology;
+- final Chunk-1 B/C/D all passed;
+- fresh DB dropped; original drifted DB untouched.
+
+## G. Targeted evidence — Chunk 2
+
+Candidate:
+- head `747997c2dd40ddf551a9bf17726ea573ef805258`;
+- tree `187dea9addde9f97f53908148e59309a85a4e3ea`.
+
+Evidence:
+- A: 166 passed;
+- critical Ruff PASS;
+- diff-check PASS;
+- B: 5 focused E5 tests passed;
+- C: 122 E3/E4 regression tests passed;
+- original requested D mixed ordering: 24 passed + 1 setup error because `pg_project` fixture was not discovered;
+- reordered D with integration files first: 25 passed / 0 failed;
+- no skips/warnings;
+- fresh disposable DBs dropped;
+- isolated config PASS.
+
+Do not hide the D caveat. Classification:
+- affected test is in `tests/integration/test_project_capability_resolve_scope.py`;
+- fixture is defined only in `tests/integration/conftest.py`;
+- same test passed in C and in integration-first D;
+- no product assertion failed;
+- treat as pytest file-argument collection topology, not an E5 runtime failure.
+
+## H. Targeted evidence — Chunk 3 / coherent candidate closure
+
+Candidate:
+- head `d39fabb22484a664e863c1603e2054d1ef0723c4`;
+- tree `fd00975275a1f8cc697bd4c570f994812e49f3b9`.
+
+Evidence:
+- A: **235 passed**;
+- repository-bounded critical Ruff PASS;
+- Chunk-3 diff-check PASS;
+- B: **8 passed** focused E5 capability/history/feedback/revocation/read-only tests;
+- C: **122 passed** E3/E4 retrieval regression;
+- D1: **6 passed** integration episode/project-capability authority;
+- D2: **19 passed** experience/procedure/capability unit authority;
+- E: **39 passed** source-revocation/retrieval lifecycle regression;
+- skips/warnings: **0**;
+- no local code/file mutation.
+
+Fresh acceptance DB:
+`vres_e5_c3_3635d6ac64bf_test`
+
+It was created fresh, used for B–E, and dropped afterward.
+
+Separate throwaway verification established:
+- migration count = 40;
+- highest = `040_context_refresh_attestation.sql`;
+- `ISOLATED_VRES_CONFIG=PASS`;
+- `provenance_writer_user=''`;
+- `migration_user=''`.
+
+Note: the migration count was not read directly from the main Chunk-3 acceptance DB; it was separately verified on a fresh throwaway DB. The final full-suite run is explicitly required to read migration count/highest from the SAME acceptance database before running pytest.
+
+## I. Machine/local acceptance methodology — preserve exactly
+
+Python:
+`C:\Users\User\AppData\Local\Programs\Python\Python312\python.exe`
+
+Do not use the machine's default Python 3.11; it lacks the required pytest/ruff environment.
+
+PostgreSQL:
+- `pg_issue163_test_dsn` is only an administrative/server credential source;
+- never run tests against its historical drifted database;
+- never repair its migration ledger/digest;
+- create a fresh unique database ending `_test`;
+- use `psycopg.sql.Identifier` for CREATE/DROP DB identifiers;
+- `VRES_ALLOW_TEST_DB=1`;
+- child receives only the fresh test DSN;
+- empty isolated `VRES_DATA_DIR` is mandatory;
+- verify empty provenance writer and migration user;
+- drop the temp DB in `finally` after evidence capture;
+- never expose password/DSN in chat/logs.
+
+Release gate:
+- output directory must be fresh and outside checkout;
+- isolate `VRES_DATA_DIR`;
+- do not inject DB variables;
+- `scripts/release_gate.py` already builds the exact candidate wheel, compares packaged `.py`/`.sql` bytes, installs it into a fresh target and runs `wheel-import-smoke`;
+- do not overwrite/global-install Vres merely for E5 smoke.
+
+## J. Frozen-contract whitespace waiver
+
+During final local acceptance, repository-wide critical Ruff passed, but baseline→candidate `git diff --check` reported 9 trailing-whitespace lines in the frozen contract.
+
+Verified exact lines:
+- 3–7;
+- 39;
+- 52–54.
+
+Each line ends in exactly two spaces, intentionally used as Markdown hard line breaks.
+
+Those exact bytes were already present in frozen contract commit `a06d32801a22a9c17439a0e03c081dae57ba2367`.
+
+Authoritative decision:
+- do NOT edit the frozen contract;
+- do NOT create new product bytes for formatting-only normalization;
+- baseline→candidate diff-check is waived ONLY for those 9 frozen-contract hard-break lines;
+- `git diff --check a06d328... HEAD` must remain clean;
+- baseline→candidate excluding the frozen contract must remain clean;
+- no other diff-check warning is waived.
+
+Durable issue #176 waiver comment:
+`5994173149`
+
+## K. Final local acceptance status — CURRENT LIVE BOUNDARY
+
+First attempt:
+- an inspection-only hold blocked the very first Bash command;
+- no shell command/test/database/checkpoint ran;
+- repository/task state unchanged.
+
+A later real user prompt explicitly replaced/cleared the hold and authorized acceptance-only shell/test/temp-DB/temp-evidence actions while preserving repository immutability.
+
+That next attempt reached:
+- Stage 0 identity/frozen-contract/migration checks: PASS;
+- repository-wide critical Ruff: PASS;
+- worktree clean;
+- exact candidate/origin/main identities correct;
+- frozen contract unchanged since `a06d328...`;
+- migration count from worktree = 40 / latest 040;
+- then stopped at baseline→candidate diff-check because of the 9 frozen Markdown hard breaks;
+- PostgreSQL full suite, release gate, wheel smoke and final-local checkpoint were not run in that stopped attempt.
+
+ChatGPT then issued the explicit formatting waiver and a continuation prompt that requires before Stage 2:
+1. `git diff --check a06d32801a22a9c17439a0e03c081dae57ba2367 HEAD` = clean;
+2. baseline→candidate excluding `docs/architecture/EXPERIENCE-INTELLIGENCE-E5-CONTRACT-2026-10-05.md` = clean.
+
+Then the same local run must perform:
+- one fresh full PostgreSQL suite on a same-run `_test` DB;
+- same-DB migration count/highest proof before pytest;
+- isolated config proof;
+- exact pass/skip/fail/error counts and skip reasons;
+- DB drop proof;
+- release gate once;
+- wheel-build/install/import-smoke evidence;
+- final exact Git identity;
+- exactly one explicit final-local-acceptance Chairman checkpoint.
+
+**At the moment of this handoff seal, the user has not yet supplied that resumed local acceptance result. Treat it as PENDING. Do not claim it passed.**
+
+## L. Diff hygiene classification for the pending final acceptance
+
+Already proven:
+- repo-wide critical Ruff: PASS;
+- frozen contract unchanged from `a06d328...`;
+- post-freeze diff-check was reported clean in the stopped run.
+
+Still required in the resumed run:
+- repeat/confirm post-freeze diff-check clean;
+- baseline→candidate excluding frozen contract clean.
+
+Final report must classify baseline→candidate diff-check as:
+`PASS WITH EXPLICIT FROZEN-CONTRACT FORMATTING WAIVER`
+
+only if the two bounded checks above are clean.
+
+## M. What to do with the next local Claude reply
+
+If the user supplies a green final-local-acceptance result:
+1. verify HEAD = `d39fabb22484a664e863c1603e2054d1ef0723c4`;
+2. verify tree = `fd00975275a1f8cc697bd4c570f994812e49f3b9`;
+3. verify worktree clean;
+4. verify same acceptance DB had 40 migrations / highest 040 before suite;
+5. verify `ISOLATED_VRES_CONFIG=PASS`;
+6. verify full suite has zero failures/errors and classify every skip;
+7. verify acceptance DB was dropped and original drifted DB untouched;
+8. verify release gate = `PASSED_WITH_EXPLICIT_LIVE_GATES`;
+9. verify gate commit/tree/dirty match exact candidate;
+10. verify wheel filename/SHA256/bytes/source compare count and wheel-import-smoke PASS;
+11. verify one final-local-acceptance checkpoint exists;
+12. verify no protected validation request exists.
+
+If any of those are missing or failed:
+- STOP;
+- do not open PR;
+- do not call protected validation;
+- classify the exact evidence gap/defect.
+
+If all are green:
+- ChatGPT rechecks remote E5 head has not moved;
+- create PR from `issue-176-e5-capability-procedure-experience` to `main`;
+- require exact-head pull_request CI on `d39fabb...`;
+- inspect all jobs/steps and release-gate artifact/digest;
+- do not protect-validate before exact-head CI is green.
+
+## N. Protected validation protocol after exact-head CI
+
+Only after exact-head PR CI succeeds on unchanged `d39fabb...`:
+1. local Claude returns to correctly rooted E5 worktree;
+2. read-only reverify task/candidate/CI evidence;
+3. create ONE explicit current-user-turn Chairman freeze checkpoint; do not reuse old Chunk checkpoints as the mechanical reply-gate anchor;
+4. compute complete E5 base→head review scope;
+5. call `validation_prepare` exactly once;
+6. delegate exactly `vres-os:validator`, no model override;
+7. protected host must select Fable/high;
+8. validator must NOT launch background/nested agents;
+9. validator's first terminal stop must contain the complete canonical JSON report;
+10. `outcome=passed` requires every reported check status = `passed`;
+11. while pending, parent may only make non-advancing reply-gate calls and must obtain `mode=validation_in_flight`;
+12. after completion, trust host/Vres evidence first, not prose.
+
+Required PASS evidence:
+- terminal request status `passed`;
+- task validation status `passed`;
+- host-observed Fable-family model;
+- agent/session identity;
+- completed_at;
+- exact SHA/tree;
+- exact manifest/hashes/state digest;
+- no material mutation while pending.
+
+No automatic retry on rejected/stale/failed/wrong-model/wrong-SHA/wrong-scope/non-terminal result.
+
+## O. Merge / closure sequence after protected PASS
+
+On clean host-recorded E5 PASS:
+- do not merge locally;
+- ChatGPT re-verifies PR exact head;
+- guarded expected-head merge;
+- capture new authoritative main SHA;
+- require separate post-merge `push` CI on that exact main SHA;
+- inspect suite/release-gate/artifact evidence;
+- durably mark E5 DONE in checklist/handoff/issue;
+- complete E5 Vres task exactly once after current protected PASS and post-main closure;
+- only then start E6.
+
+## P. Remaining program after E5
+
+1. E6 — observability + experience utility evidence;
+2. E7 — benchmark + security ladder;
+3. E8 — Chairman integration + protected acceptance;
+4. E9 physical Experience Intelligence criteria carried into #169;
+5. #165 Chairman model policy;
+6. #166;
+7. #167;
+8. #168 project adoption + canonical Claude scaffold;
+9. #169 integrated Windows / Visual Studio live acceptance;
+10. #170 production readiness/go-live;
+11. post-#170 Organizational Architecture & Specialist Intelligence/full-team enhancement.
+
+Do not let the post-#170 backlog interrupt E5–#170.
+
+## Q. Fresh-chat resume prompt
+
+```text
+Resume the Vres-OS preproduction program from the newest canonical durable handoff.
+
+Repository:
+vosser24/Vres-OS
+
+Canonical documentation branch:
+docs-execution-checklist-20260927
+
+Read first:
+docs/PREPRODUCTION-EXECUTION-CHECKLIST-2026-09-27.md
+docs/handoffs/PREPRODUCTION-RESUME-HANDOFF-2026-09-27.md
+
+Newest authoritative boundary:
+# 31. 2026-10-05 #176 E5 coherent candidate / final-local-acceptance pending seal
+
+Do not resume from section #30 or older E5-start instructions.
+
+AUTHORITATIVE MAIN:
+a0a2769b99f4893733568194c0aa68e78e73aeab
+
+E5 BRANCH:
+issue-176-e5-capability-procedure-experience
+
+E5 TASK:
+TASK-20261005-dc0e7a9e38
+
+FROZEN E5 CONTRACT:
+a06d32801a22a9c17439a0e03c081dae57ba2367
+
+COHERENT FINAL E5 CANDIDATE:
+d39fabb22484a664e863c1603e2054d1ef0723c4
+
+E5 TREE:
+fd00975275a1f8cc697bd4c570f994812e49f3b9
+
+PR:
+none yet
+
+E5 Chunks 1–3 are implemented and targeted-green.
+Do not rerun their targeted ladders unless bytes change or a concrete evidence gap is found.
+
+Important targeted evidence:
+- Chunk 1 checkpoint CP-20261005-60dd993356
+- Chunk 2 checkpoint CP-20261005-8e70bf99ac
+- host pre-compact bookkeeping CP-20261005-bb0d29c4e5
+- Chunk 3 checkpoint CP-20261005-8fe3a4f070
+- Chunk 3: 235 unit/static + 8 focused E5 + 122 E3/E4 + 6 D1 + 19 D2 + 39 E4 revocation, zero skips/warnings
+
+Frozen-contract formatting waiver:
+- lines 3–7, 39, 52–54 contain intentional two-space Markdown hard breaks already present at a06d328
+- do not edit the frozen contract
+- baseline diff-check is waived only for those nine lines
+- post-freeze diff-check and baseline-excluding-contract diff-check must be clean
+- durable issue comment id 5994173149
+
+CURRENT LIVE STATE:
+A resumed local final-acceptance run was instructed after the waiver, but its result has NOT yet been supplied in this handoff.
+Do not assume PASS.
+
+When the user supplies the local Claude result:
+- audit full fresh PostgreSQL suite evidence
+- audit same-DB migration count/highest
+- audit isolated VRES_DATA_DIR proof
+- audit release gate and candidate-wheel build/install/import smoke
+- audit exact SHA/tree/clean worktree
+- audit one explicit final-local-acceptance checkpoint
+- require no protected validation request yet
+
+If all final-local evidence is green:
+1. verify remote head remains d39fabb22484a664e863c1603e2054d1ef0723c4
+2. create the E5 PR
+3. require exact-head pull_request CI and artifact evidence
+4. only then run one current-turn protected validation freeze/prepare/vres-os:validator Fable-high sequence
+5. on host-recorded PASS, guarded merge
+6. require post-main push CI on exact merge SHA
+7. close E5 and complete the Vres task
+8. only then start E6
+
+If final-local acceptance failed:
+STOP and classify the exact defect. Do not create PR or protected validation.
+
+Methodology:
+- ChatGPT primary for architecture/repo/PR/CI/docs
+- local Claude for Windows/local PostgreSQL/installed runtime/host/live-machine proof
+- single writer per branch
+- no duplicate expensive full-suite/release-gate/protected-validation evidence without changed bytes or a concrete gap
+```
