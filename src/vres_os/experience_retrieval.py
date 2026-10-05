@@ -1063,11 +1063,13 @@ class ExperienceRetrievalService:
             "pid": req["project_id"], "task_key": req["task_key"], "family": req["task_family"],
             "tsq": " | ".join(f"'{t}'" for t in tokens), "phrase": req["query"].casefold(),
             "hist": req["temporal_intent"] == "historical", "sem_ids": [], "as_of": req["as_of"],
+            "caps": req["capability_keys"],
         }
         semantic, sem_diag = self._semantic(req)
         with self._open() as conn:
             if not conn.execute("SELECT 1 FROM vres.projects WHERE id=%(pid)s", params).fetchone():
                 raise ValueError("Retrieval project_id does not exist")
+            self._require_capabilities(conn, req["project_id"], req["capability_keys"])
             if req["task_key"]:
                 task = conn.execute(
                     "SELECT project_id,task_family FROM vres.tasks WHERE task_key=%(task_key)s", params
@@ -1079,18 +1081,27 @@ class ExperienceRetrievalService:
             now = conn.execute("SELECT now() AS n").fetchone()["n"]
             diag = {"excluded_unapproved_company": 0, **sem_diag}
             params["sem_ids"] = sorted(semantic)
+
+            # E5 resolves episodes first so already-gated, integrity-checked capability precedents can source
+            # accepted procedures structurally. This never changes either item's authority tier.
+            episode_rows = self._episodes(conn, params, diag)
+            _positions(episode_rows, "episode_key")
+            episode_built = [episode_item(row, req, now) for row in episode_rows]
+            procedure_links = self._procedure_capability_links(conn, episode_built, req)
+
             built: list[tuple[dict | None, str | None]] = []
             for rows, builder, key in (
                 (self._decisions(conn, params), decision_item, "decision_key"),
-                (self._procedures(conn, params, diag), procedure_item, "procedure_key"),
+                (self._procedures(conn, params, diag, procedure_links), procedure_item, "procedure_key"),
                 (self._knowledge(conn, params, tokens, diag), knowledge_item, "knowledge_key"),
-                (self._episodes(conn, params, diag), episode_item, "episode_key"),
             ):
                 _positions(rows, key)
                 if builder is knowledge_item:
                     for row in rows:
                         row["sem_pos"] = semantic.get(row["id"])
                 built += [builder(row, req, now) for row in rows]
+            built += episode_built
+
             refs = sorted({i["_ref"] for i, _ in built if i is not None and i.get("_ref")})
             edges = self._edges(conn, refs)
             counts = dict(diag)
@@ -1123,6 +1134,98 @@ class ExperienceRetrievalService:
         if any(isinstance(h, dict) and h.get("possibly_truncated") for h in hits):
             diag["embedding_truncated"] = True
         return positions, diag
+
+    @staticmethod
+    def _require_capabilities(conn, project_id: int, capability_keys: list[str]) -> None:
+        """Fail closed before retrieval if any explicit capability is inactive or outside the project-visible scope."""
+        if not capability_keys:
+            return
+        rows = conn.execute(
+            """
+            SELECT capability_key
+              FROM vres.capabilities
+             WHERE capability_key=ANY(%s)
+               AND status='active'
+               AND (project_id=%s OR project_id IS NULL)
+            """,
+            (capability_keys, project_id),
+        ).fetchall()
+        if {str(row["capability_key"]) for row in rows} != set(capability_keys):
+            raise ValueError("Retrieval capability key is unknown or inaccessible")
+
+    @staticmethod
+    def _procedure_capability_links(
+        conn,
+        episodes: list[tuple[dict | None, str | None]],
+        req: dict[str, Any],
+    ) -> dict[str, dict[str, list[str]]]:
+        """Direct E1 episode relations may source accepted procedures only after episode gating/integrity checks.
+
+        No traversal and no count-based scoring: the result is bounded provenance metadata used only for candidate
+        coverage and same-tier capability relevance.
+        """
+        requested = set(req["capability_keys"])
+        if not requested:
+            return {}
+        eligible: dict[str, dict[str, Any]] = {}
+        disallowed_flags = {"historical", "not_current", "revoked", "retired", "expired"}
+        for item, _reason in episodes:
+            if (
+                item is None
+                or item.get("_kind") != "episode"
+                or not item["signals"].get("capability_match")
+                or set(item.get("flags") or ()) & disallowed_flags
+            ):
+                continue
+            caps = set(item["applicability"].get("capability_keys") or ()) & requested
+            if caps:
+                eligible[str(item["memory_key"])] = {"item": item, "caps": caps}
+        if not eligible:
+            return {}
+
+        rows = conn.execute(
+            """
+            SELECT source_key,target_kind,target_key
+              FROM vres.relations
+             WHERE source_kind='episode'
+               AND source_key=ANY(%s)
+               AND relation_type='uses'
+               AND target_kind IN ('capability','procedure')
+             ORDER BY id
+            """,
+            (sorted(eligible),),
+        ).fetchall()
+        relation_caps: dict[str, set[str]] = {}
+        relation_procedures: dict[str, set[str]] = {}
+        for row in rows:
+            target = str(row["target_key"])
+            bucket = relation_caps if row["target_kind"] == "capability" else relation_procedures
+            bucket.setdefault(str(row["source_key"]), set()).add(target)
+
+        linked: dict[str, dict[str, set[str]]] = {}
+        for episode_key, data in eligible.items():
+            caps = data["caps"] & relation_caps.get(episode_key, set())
+            if not caps:
+                continue
+            item = data["item"]
+            payload_procedures = {
+                ref.split(":", 1)[1]
+                for ref in item.get("evidence") or ()
+                if isinstance(ref, str) and ref.startswith("procedure:")
+            }
+            procedures = relation_procedures.get(episode_key, set()) & payload_procedures
+            for procedure_key in procedures:
+                entry = linked.setdefault(procedure_key, {"capability_keys": set(), "episode_keys": set()})
+                entry["capability_keys"].update(caps)
+                entry["episode_keys"].add(episode_key)
+
+        return {
+            key: {
+                "capability_keys": sorted(value["capability_keys"]),
+                "episode_keys": sorted(value["episode_keys"]),
+            }
+            for key, value in sorted(linked.items())
+        }
 
     @staticmethod
     def _edges(conn, refs: list[str]) -> list[dict[str, Any]]:
@@ -1158,13 +1261,21 @@ class ExperienceRetrievalService:
         ).fetchall()
 
     @staticmethod
-    def _procedures(conn, params, diag):
+    def _procedures(conn, params, diag, structural=None):
         match, rank = _lexical("to_tsvector('simple',p.name||' '||p.description)", "p.name||' '||p.description", [])
+        structural = structural or {}
+        structural_keys = sorted(structural)
+        query_params = {**params, "structural_procedures": structural_keys}
+        candidate = (
+            f"({match} OR p.procedure_key=ANY(%(structural_procedures)s))"
+            if structural_keys
+            else match
+        )
         diag["excluded_unapproved_company"] += conn.execute(
             f"SELECT count(*) AS n FROM vres.procedures p WHERE p.project_id IS NULL AND p.status='active' "
-            f"AND p.scope_approval_event_id IS NULL AND {match}", params,
+            f"AND p.scope_approval_event_id IS NULL AND {candidate}", query_params,
         ).fetchone()["n"]
-        return conn.execute(
+        rows = conn.execute(
             f"""
             SELECT p.procedure_key,p.name,p.description,p.task_family,p.project_id,p.status,p.preferred_version,
                    p.updated_at,v.input_contract,v.status AS version_status,
@@ -1174,11 +1285,20 @@ class ExperienceRetrievalService:
                 ON v.procedure_id=p.id AND v.version_no=p.preferred_version AND v.status='preferred'
              WHERE p.status='active'
                AND (p.project_id=%(pid)s OR (p.project_id IS NULL AND p.scope_approval_event_id IS NOT NULL))
-               AND {match}
+               AND {candidate}
              ORDER BY p.procedure_key LIMIT 200
             """,
-            params,
+            query_params,
         ).fetchall()
+        for row in rows:
+            evidence = structural.get(str(row["procedure_key"]))
+            if evidence:
+                row["capability_keys"] = evidence["capability_keys"]
+                row["experience_evidence"] = (
+                    [f"episode:{key}" for key in evidence["episode_keys"]]
+                    + [f"capability:{key}" for key in evidence["capability_keys"]]
+                )
+        return rows
 
     @staticmethod
     def _knowledge(conn, params, tokens, diag):
@@ -1325,6 +1445,19 @@ class ExperienceRetrievalService:
         sources. Current intent excludes revoked and dead-support episodes BEFORE ranking and counts them."""
         text = "coalesce(e.task_family,'')||' '||coalesce(e.payload->>'objective','')"
         match, rank = _lexical(f"to_tsvector('simple',{text})", text, [])
+        capability_match = """
+            EXISTS (
+                SELECT 1
+                  FROM vres.relations cr
+                 WHERE cr.source_kind='episode'
+                   AND cr.source_key=e.episode_key
+                   AND cr.relation_type='uses'
+                   AND cr.target_kind='capability'
+                   AND cr.target_key=ANY(%(caps)s)
+                   AND jsonb_typeof(e.payload->'capability_keys')='array'
+                   AND (e.payload->'capability_keys') ? cr.target_key
+            )
+        """
         base = f"""
               FROM vres.experience_episodes e
               JOIN vres.experience_policy_versions p ON p.policy_version=e.policy_version
@@ -1340,7 +1473,7 @@ class ExperienceRetrievalService:
                                            AND r.relation_type='derived_from' AND r.target_kind='source')
               ) sup ON true
              WHERE e.project_id=%(pid)s
-               AND ({match} OR lower(e.task_family)=lower(%(family)s))"""
+               AND ({match} OR lower(e.task_family)=lower(%(family)s) OR {capability_match})"""
         revoked = f"(lc.id IS NOT NULL AND {is_revoked_sql('lc.new_state')})"
         dead = "(sup.support_total>0 AND sup.support_active=0)"
         counts = conn.execute(
