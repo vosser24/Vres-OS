@@ -123,7 +123,12 @@ PACK_KEYS = frozenset({"schema_version", "current_decisions", "accepted_procedur
                        "estimated_tokens", "policy"})
 ITEM_KEYS = frozenset({"memory_key", "memory_class", "project_id", "scope", "authority_class", "status", "trust_class",
                        "role", "applicability", "why_retrieved", "evidence", "flags", "signals", "text"})
-ITEM_EXTENSIONS = frozenset({"stored_confidence", "last_verified_at", "review_after", "also_matched", "provenance"})
+ITEM_EXTENSIONS = frozenset({"stored_confidence", "last_verified_at", "review_after", "also_matched", "provenance", "experience_history"})
+EXPERIENCE_HISTORY_KEYS = frozenset({
+    "validated_success_episode_keys", "validated_failure_episode_keys", "failure_episode_keys",
+    "feedback", "latest_validated_at",
+})
+FEEDBACK_KEYS = frozenset({"feedback_type", "statement", "episode_key"})
 FLAGS = frozenset({"stale", "conflict", "challenged", "historical", "premise_mismatch", "premise_unverified",
                    "retired", "revoked", "expired", "not_current", "cross_scope_unresolved"})  # E4 Chunk E
 ROLES = frozenset({"instruction", "candidate", "warning_example", "low_trust_observation", "conflict",
@@ -148,6 +153,17 @@ def assert_pack_schema(pack):
             assert item["role"] in ROLES and set(item["flags"]) <= FLAGS
             assert set(item["signals"]) == SIGNAL_KEYS and set(item["applicability"]) <= APPLICABILITY_KEYS
             assert item["why_retrieved"] and item["evidence"]
+            if "experience_history" in item:
+                assert item["memory_class"] == "procedural"
+                history = item["experience_history"]
+                assert set(history) == EXPERIENCE_HISTORY_KEYS
+                assert len(history["validated_success_episode_keys"]) <= 3
+                assert len(history["validated_failure_episode_keys"]) <= 3
+                assert len(history["failure_episode_keys"]) <= 3
+                assert len(history["feedback"]) <= 3
+                assert all(set(entry) == FEEDBACK_KEYS for entry in history["feedback"])
+                assert all(len(entry["statement"]) <= 300 for entry in history["feedback"])
+                assert history["latest_validated_at"] is None or isinstance(history["latest_validated_at"], str)
             if "provenance" in item:  # E4: or a revoked tombstone carrying metadata only
                 assert item["role"] == "low_trust_observation" or (
                     item["status"] == "revoked" and set(item["provenance"]) == {"state", "revoked_at", "reason_class"})
@@ -223,7 +239,7 @@ def test_own_project_items_retrieved_and_pack_shape(pg_project):
     _procedure(f"P-{mk}", pg_project, mk)
     ep = _episode(pg_project, mk)
     pack = _retrieve(pg_project, mk, task_key=task)
-    assert pack["schema_version"] == "176.e4.v1" and pack["policy"] == {**pack["policy"], "version": "176.e4.v1", "chunk": "E"}
+    assert pack["schema_version"] == "176.e5.v1" and pack["policy"] == {**pack["policy"], "version": "176.e5.v1", "chunk": "E5"}
     assert not pack["abstained"]
     assert _keys(pack, "current_decisions") == [f"D-{mk}"]
     assert pack["current_decisions"][0]["role"] == "instruction"

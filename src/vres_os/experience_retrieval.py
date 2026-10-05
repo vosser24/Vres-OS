@@ -36,7 +36,7 @@ from .knowledge_status import (
 from .redaction import redact_text
 from .sensitive_policy import SENSITIVE_SANITIZED, sanitize_extracted_text
 
-SCHEMA_VERSION = "176.e4.v1"
+SCHEMA_VERSION = "176.e5.v1"
 # One fail-closed allow-list (knowledge_status): current intent sees CURRENT only; historical intent additionally
 # sees superseded/retired (flagged) and revoked (tombstone). NULL/unknown/rejected never match.
 _K_CURRENT = status_in_sql("k.status", CURRENT_KNOWLEDGE_STATUSES)
@@ -68,7 +68,7 @@ MAX_PACK_BYTES = 16 * 1024
 MAX_TEXT = 600
 POLICY = {
     "version": SCHEMA_VERSION,
-    "chunk": "E",
+    "chunk": "E5",
     "retrieval_mode": "lexical+optional_semantic; raw_fallback=lexical_only",
     "rank_order": [
         "section", "authority_tier", "scope_rank", "task_family_or_capability_match", "fusion_rank_score",
@@ -525,6 +525,64 @@ def knowledge_item(row: dict[str, Any], req: dict[str, Any], now: datetime) -> t
     ), None
 
 
+def _bounded_feedback_entry(value: Any) -> dict[str, str] | None:
+    """Sanitize one evidence-only procedure feedback item into the closed E5 public shape."""
+    if not isinstance(value, dict):
+        return None
+    feedback_type = value.get("feedback_type")
+    statement = value.get("statement")
+    episode_key = value.get("episode_key")
+    if not all(isinstance(v, str) and v.strip() for v in (feedback_type, statement, episode_key)):
+        return None
+    disposition = sanitize_extracted_text(statement)
+    if disposition.status is None:
+        text = disposition.text
+    elif disposition.status == SENSITIVE_SANITIZED:
+        text = disposition.text
+    else:
+        return None
+    text = _clean(text, 300)
+    if not text or _INSTRUCTION_SHAPED.search(text):
+        return None
+    return {
+        "feedback_type": _clean(feedback_type, 80),
+        "statement": text,
+        "episode_key": _clean(episode_key, 120),
+    }
+
+
+def _bounded_experience_history(value: Any) -> dict[str, Any] | None:
+    """Closed E5 procedure-history shape. Counts/scores/model identity are deliberately not accepted."""
+    if not isinstance(value, dict):
+        return None
+    feedback: list[dict[str, str]] = []
+    raw_feedback = value.get("feedback")
+    if isinstance(raw_feedback, list):
+        for raw in raw_feedback:
+            entry = _bounded_feedback_entry(raw)
+            if entry is None:
+                continue
+            feedback.append(entry)
+            if len(feedback) >= 3:
+                break
+    history = {
+        "validated_success_episode_keys": _strs(value.get("validated_success_episode_keys"), 3),
+        "validated_failure_episode_keys": _strs(value.get("validated_failure_episode_keys"), 3),
+        "failure_episode_keys": _strs(value.get("failure_episode_keys"), 3),
+        "feedback": feedback,
+        "latest_validated_at": (
+            _clean(value["latest_validated_at"], 80)
+            if isinstance(value.get("latest_validated_at"), str)
+            else None
+        ),
+    }
+    if not any(history[name] for name in (
+        "validated_success_episode_keys", "validated_failure_episode_keys", "failure_episode_keys", "feedback"
+    )) and history["latest_validated_at"] is None:
+        return None
+    return history
+
+
 def procedure_item(row: dict[str, Any], req: dict[str, Any], now: datetime) -> tuple[dict | None, str | None]:
     scope = _scope(row["project_id"], bool(row.get("approved")), req["project_id"])
     if scope is None:
@@ -533,16 +591,23 @@ def procedure_item(row: dict[str, Any], req: dict[str, Any], now: datetime) -> t
         return None, "excluded_unapproved_company"
     if row["status"] != "active" or row.get("preferred_version") is None or row.get("version_status") != "preferred":
         return None, None
-    return _item(
+    structural_caps = _strs(row.get("capability_keys"))
+    structural_evidence = _strs(row.get("experience_evidence"), 10, 160)
+    item = _item(
         section="accepted_procedures", kind="procedure", memory_key=row["procedure_key"], memory_class="procedural",
         scope=scope, project_id=row["project_id"], authority_class="accepted_procedure", status="active",
         trust_class="unspecified", role="instruction", tier=_TIER_PROCEDURE,
         text=f"{row['name']}: {row['description']}", why=["preferred_procedure_version"],
-        evidence=[f"procedure:{row['procedure_key']}@v{row['preferred_version']}"], flags=set(), req=req, row=row,
-        task_family=row.get("task_family"), recency=row.get("updated_at"), authoritative=True,
-        ref=f"procedure:{row['procedure_key']}", premises=_bounded_premises(row.get("input_contract")),
+        evidence=[f"procedure:{row['procedure_key']}@v{row['preferred_version']}"] + structural_evidence,
+        flags=set(), req=req, row=row, task_family=row.get("task_family"), capability_keys=structural_caps,
+        recency=row.get("updated_at"), authoritative=True, ref=f"procedure:{row['procedure_key']}",
+        premises=_bounded_premises(row.get("input_contract")),
         cmp_premises=_comparable_premises(row.get("input_contract")),
-    ), None
+    )
+    history = _bounded_experience_history(row.get("experience_history"))
+    if history is not None:
+        item["experience_history"] = history
+    return item, None
 
 
 def decision_item(row: dict[str, Any], req: dict[str, Any], now: datetime) -> tuple[dict | None, str | None]:
@@ -1060,11 +1125,13 @@ class ExperienceRetrievalService:
             "pid": req["project_id"], "task_key": req["task_key"], "family": req["task_family"],
             "tsq": " | ".join(f"'{t}'" for t in tokens), "phrase": req["query"].casefold(),
             "hist": req["temporal_intent"] == "historical", "sem_ids": [], "as_of": req["as_of"],
+            "caps": req["capability_keys"],
         }
         semantic, sem_diag = self._semantic(req)
         with self._open() as conn:
             if not conn.execute("SELECT 1 FROM vres.projects WHERE id=%(pid)s", params).fetchone():
                 raise ValueError("Retrieval project_id does not exist")
+            self._require_capabilities(conn, req["project_id"], req["capability_keys"])
             if req["task_key"]:
                 task = conn.execute(
                     "SELECT project_id,task_family FROM vres.tasks WHERE task_key=%(task_key)s", params
@@ -1076,18 +1143,38 @@ class ExperienceRetrievalService:
             now = conn.execute("SELECT now() AS n").fetchone()["n"]
             diag = {"excluded_unapproved_company": 0, **sem_diag}
             params["sem_ids"] = sorted(semantic)
+
+            # E5 resolves episodes first so already-gated, integrity-checked capability precedents can source
+            # accepted procedures structurally. This never changes either item's authority tier.
+            episode_rows = self._episodes(conn, params, diag)
+            _positions(episode_rows, "episode_key")
+            episode_built = [episode_item(row, req, now) for row in episode_rows]
+            procedure_links = self._procedure_capability_links(conn, episode_built, req)
+            procedure_rows = self._procedures(conn, params, diag, procedure_links)
+            procedure_history = self._procedure_experience_history(
+                conn,
+                [str(row["procedure_key"]) for row in procedure_rows],
+                req,
+                now,
+            )
+            for row in procedure_rows:
+                history = procedure_history.get(str(row["procedure_key"]))
+                if history is not None:
+                    row["experience_history"] = history
+
             built: list[tuple[dict | None, str | None]] = []
             for rows, builder, key in (
                 (self._decisions(conn, params), decision_item, "decision_key"),
-                (self._procedures(conn, params, diag), procedure_item, "procedure_key"),
+                (procedure_rows, procedure_item, "procedure_key"),
                 (self._knowledge(conn, params, tokens, diag), knowledge_item, "knowledge_key"),
-                (self._episodes(conn, params, diag), episode_item, "episode_key"),
             ):
                 _positions(rows, key)
                 if builder is knowledge_item:
                     for row in rows:
                         row["sem_pos"] = semantic.get(row["id"])
                 built += [builder(row, req, now) for row in rows]
+            built += episode_built
+
             refs = sorted({i["_ref"] for i, _ in built if i is not None and i.get("_ref")})
             edges = self._edges(conn, refs)
             counts = dict(diag)
@@ -1120,6 +1207,287 @@ class ExperienceRetrievalService:
         if any(isinstance(h, dict) and h.get("possibly_truncated") for h in hits):
             diag["embedding_truncated"] = True
         return positions, diag
+
+    @staticmethod
+    def _require_capabilities(conn, project_id: int, capability_keys: list[str]) -> None:
+        """Fail closed before retrieval if any explicit capability is inactive or outside the project-visible scope."""
+        if not capability_keys:
+            return
+        rows = conn.execute(
+            """
+            SELECT capability_key
+              FROM vres.capabilities
+             WHERE capability_key=ANY(%s)
+               AND status='active'
+               AND (project_id=%s OR project_id IS NULL)
+            """,
+            (capability_keys, project_id),
+        ).fetchall()
+        if {str(row["capability_key"]) for row in rows} != set(capability_keys):
+            raise ValueError("Retrieval capability key is unknown or inaccessible")
+
+    @staticmethod
+    def _procedure_capability_links(
+        conn,
+        episodes: list[tuple[dict | None, str | None]],
+        req: dict[str, Any],
+    ) -> dict[str, dict[str, list[str]]]:
+        """Direct E1 episode relations may source accepted procedures only after episode gating/integrity checks.
+
+        No traversal and no count-based scoring: the result is bounded provenance metadata used only for candidate
+        coverage and same-tier capability relevance.
+        """
+        requested = set(req["capability_keys"])
+        if not requested:
+            return {}
+        eligible: dict[str, dict[str, Any]] = {}
+        disallowed_flags = {"historical", "not_current", REVOKED_STATUS, "retired", "expired"}
+        for item, _reason in episodes:
+            if (
+                item is None
+                or item.get("_kind") != "episode"
+                or not item["signals"].get("capability_match")
+                or set(item.get("flags") or ()) & disallowed_flags
+            ):
+                continue
+            caps = set(item["applicability"].get("capability_keys") or ()) & requested
+            if caps:
+                eligible[str(item["memory_key"])] = {"item": item, "caps": caps}
+        if not eligible:
+            return {}
+
+        rows = conn.execute(
+            """
+            SELECT source_key,target_key
+              FROM vres.relations
+             WHERE source_kind='episode'
+               AND source_key=ANY(%s)
+               AND relation_type='uses'
+               AND target_kind='procedure'
+             ORDER BY id
+            """,
+            (sorted(eligible),),
+        ).fetchall()
+        relation_procedures: dict[str, set[str]] = {}
+        for row in rows:
+            relation_procedures.setdefault(str(row["source_key"]), set()).add(str(row["target_key"]))
+
+        linked: dict[str, dict[str, set[str]]] = {}
+        for episode_key, data in eligible.items():
+            caps = data["caps"]
+            item = data["item"]
+            payload_procedures = {
+                ref.split(":", 1)[1]
+                for ref in item.get("evidence") or ()
+                if isinstance(ref, str) and ref.startswith("procedure:")
+            }
+            procedures = relation_procedures.get(episode_key, set()) & payload_procedures
+            for procedure_key in procedures:
+                entry = linked.setdefault(procedure_key, {"capability_keys": set(), "episode_keys": set()})
+                entry["capability_keys"].update(caps)
+                entry["episode_keys"].add(episode_key)
+
+        return {
+            key: {
+                "capability_keys": sorted(value["capability_keys"]),
+                "episode_keys": sorted(value["episode_keys"]),
+            }
+            for key, value in sorted(linked.items())
+        }
+
+    @staticmethod
+    def _procedure_experience_history(
+        conn,
+        procedure_keys: list[str],
+        req: dict[str, Any],
+        now: datetime,
+    ) -> dict[str, dict[str, Any]]:
+        """Bounded evidence-only history from current-eligible task episodes.
+
+        Procedure-run counts/quality/model fields are intentionally not read. Direct episode->procedure provenance
+        and immutable episode payload evidence must agree before an episode can classify the procedure.
+        """
+        if not procedure_keys:
+            return {}
+        revoked = f"(lc.id IS NOT NULL AND {is_revoked_sql('lc.new_state')})"
+        dead = "(sup.support_total>0 AND sup.support_active=0)"
+        rows = conn.execute(
+            f"""
+            WITH ranked AS (
+                SELECT pr.target_key AS history_procedure_key,
+                       e.episode_key,e.project_id,e.task_id,e.work_unit_key,e.task_family,e.policy_version,
+                       p.policy_digest,e.participation_class,e.trust_class,e.outcome_status,e.payload,
+                       e.source_digest,e.payload_digest,e.security_disposition,e.observed_at,
+                       CASE WHEN lc.id IS NULL THEN 'grounded' ELSE lc.new_state END AS lifecycle_state,
+                       lc.created_at AS lifecycle_at,lc.cause_kind AS lifecycle_cause,
+                       sup.support_total,sup.support_active,FALSE AS lex,0::double precision AS rank,
+                       row_number() OVER (
+                           PARTITION BY pr.target_key
+                           ORDER BY e.observed_at DESC,e.episode_key
+                       ) AS history_rank
+                  FROM vres.relations pr
+                  JOIN vres.experience_episodes e
+                    ON pr.source_kind='episode' AND pr.source_key=e.episode_key
+                   AND pr.relation_type='uses' AND pr.target_kind='procedure'
+                  JOIN vres.experience_policy_versions p ON p.policy_version=e.policy_version
+                  LEFT JOIN vres.experience_lifecycle_events lc ON lc.id=(
+                            SELECT max(x.id) FROM vres.experience_lifecycle_events x
+                             WHERE x.project_id=e.project_id
+                               AND x.target_kind='episode' AND x.target_key=e.episode_key
+                               AND x.action IN ('invalidate_derived','restore_derived'))
+                  LEFT JOIN LATERAL (
+                    SELECT count(*) AS support_total,
+                           count(*) FILTER (WHERE s.status='active') AS support_active
+                      FROM vres.sources s
+                     WHERE s.source_key IN (
+                           SELECT sr.target_key FROM vres.relations sr
+                            WHERE sr.source_kind='episode' AND sr.source_key=e.episode_key
+                              AND sr.relation_type='derived_from' AND sr.target_kind='source')
+                  ) sup ON true
+                 WHERE pr.target_key=ANY(%s)
+                   AND e.project_id=%s
+                   AND e.work_unit_key IS NULL
+                   AND NOT {revoked}
+                   AND NOT {dead}
+            )
+            SELECT *
+              FROM ranked
+             WHERE history_rank<=20
+             ORDER BY history_procedure_key,observed_at DESC,episode_key
+            """,
+            (sorted(set(procedure_keys)), req["project_id"]),
+        ).fetchall()
+
+        history_req = {**req, "temporal_intent": "current", "as_of": None}
+        gathered: dict[str, dict[str, Any]] = {}
+
+        def validation_time(row: dict[str, Any]) -> tuple[float, str]:
+            validation = row["payload"].get("validation") if isinstance(row.get("payload"), dict) else None
+            raw = validation.get("completed_at") if isinstance(validation, dict) else None
+            if isinstance(raw, str):
+                try:
+                    parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                    if parsed.tzinfo is None:
+                        parsed = parsed.replace(tzinfo=timezone.utc)
+                    parsed = parsed.astimezone(timezone.utc)
+                    return parsed.timestamp(), parsed.isoformat()
+                except ValueError:
+                    pass
+            observed = row.get("observed_at")
+            if isinstance(observed, datetime):
+                observed = observed.astimezone(timezone.utc)
+                return observed.timestamp(), observed.isoformat()
+            return 0.0, ""
+
+        for raw_row in rows:
+            row = dict(raw_row)
+            procedure_key = str(row["history_procedure_key"])
+            item, _reason = episode_item(row, history_req, now)
+            if item is None:
+                continue
+
+            payload = row.get("payload")
+            procedures = payload.get("procedures") if isinstance(payload, dict) else None
+            accepted_values = {
+                entry.get("accepted")
+                for entry in procedures or []
+                if isinstance(entry, dict)
+                and entry.get("procedure_key") == procedure_key
+                and type(entry.get("accepted")) is bool
+            }
+            if not accepted_values:
+                continue  # relation alone cannot classify a procedure; immutable payload must agree.
+
+            state = gathered.setdefault(
+                procedure_key,
+                {
+                    "success": [],
+                    "validated_failure": [],
+                    "failure": [],
+                    "validated_times": [],
+                    "feedback_tasks": {},
+                    "feedback": [],
+                },
+            )
+            observed_epoch = _epoch(row.get("observed_at"))
+            episode_key = str(row["episode_key"])
+            state["feedback_tasks"][int(row["task_id"])] = episode_key
+            validation = payload.get("validation") if isinstance(payload, dict) else None
+            validated = (
+                row.get("trust_class") == "validated_runtime"
+                and isinstance(validation, dict)
+                and validation.get("status") == "passed"
+            )
+            classified_validated = False
+            if validated and accepted_values == {True}:
+                state["success"].append((observed_epoch, episode_key))
+                classified_validated = True
+            elif validated and accepted_values == {False}:
+                state["validated_failure"].append((observed_epoch, episode_key))
+                classified_validated = True
+
+            if classified_validated:
+                state["validated_times"].append(validation_time(row))
+            elif row.get("outcome_status") in _FAILED:
+                state["failure"].append((observed_epoch, episode_key))
+
+        feedback_task_ids = sorted({
+            task_id
+            for state in gathered.values()
+            for task_id in state["feedback_tasks"]
+        })
+        if feedback_task_ids:
+            feedback_rows = conn.execute(
+                """
+                SELECT p.procedure_key,f.task_id,f.feedback_type,f.statement,f.created_at,f.id
+                  FROM vres.procedure_feedback f
+                  JOIN vres.procedures p ON p.id=f.procedure_id
+                 WHERE p.procedure_key=ANY(%s)
+                   AND f.task_id=ANY(%s)
+                 ORDER BY p.procedure_key,f.created_at DESC,f.id
+                """,
+                (sorted(gathered), feedback_task_ids),
+            ).fetchall()
+            for feedback_row in feedback_rows:
+                procedure_key = str(feedback_row["procedure_key"])
+                state = gathered.get(procedure_key)
+                if state is None:
+                    continue
+                episode_key = state["feedback_tasks"].get(int(feedback_row["task_id"]))
+                if episode_key is None:
+                    continue
+                entry = _bounded_feedback_entry({
+                    "feedback_type": feedback_row["feedback_type"],
+                    "statement": feedback_row["statement"],
+                    "episode_key": episode_key,
+                })
+                if entry is None:
+                    continue
+                created_at = feedback_row.get("created_at")
+                created_epoch = _epoch(created_at)
+                state["feedback"].append((created_epoch, int(feedback_row["id"]), entry))
+
+        result: dict[str, dict[str, Any]] = {}
+        for procedure_key, state in sorted(gathered.items()):
+            def newest(values):
+                return [key for _epoch_value, key in sorted(values, key=lambda pair: (-pair[0], pair[1]))[:3]]
+
+            times = [pair for pair in state["validated_times"] if pair[1]]
+            latest = max(times, key=lambda pair: (pair[0], pair[1]))[1] if times else None
+            feedback = [
+                entry
+                for _epoch_value, _stable_id, entry in sorted(
+                    state["feedback"], key=lambda value: (-value[0], value[1])
+                )[:3]
+            ]
+            result[procedure_key] = {
+                "validated_success_episode_keys": newest(state["success"]),
+                "validated_failure_episode_keys": newest(state["validated_failure"]),
+                "failure_episode_keys": newest(state["failure"]),
+                "feedback": feedback,
+                "latest_validated_at": latest,
+            }
+        return result
 
     @staticmethod
     def _edges(conn, refs: list[str]) -> list[dict[str, Any]]:
@@ -1155,13 +1523,21 @@ class ExperienceRetrievalService:
         ).fetchall()
 
     @staticmethod
-    def _procedures(conn, params, diag):
+    def _procedures(conn, params, diag, structural=None):
         match, rank = _lexical("to_tsvector('simple',p.name||' '||p.description)", "p.name||' '||p.description", [])
+        structural = structural or {}
+        structural_keys = sorted(structural)
+        query_params = {**params, "structural_procedures": structural_keys}
+        candidate = (
+            f"({match} OR p.procedure_key=ANY(%(structural_procedures)s))"
+            if structural_keys
+            else match
+        )
         diag["excluded_unapproved_company"] += conn.execute(
             f"SELECT count(*) AS n FROM vres.procedures p WHERE p.project_id IS NULL AND p.status='active' "
-            f"AND p.scope_approval_event_id IS NULL AND {match}", params,
+            f"AND p.scope_approval_event_id IS NULL AND {candidate}", query_params,
         ).fetchone()["n"]
-        return conn.execute(
+        rows = conn.execute(
             f"""
             SELECT p.procedure_key,p.name,p.description,p.task_family,p.project_id,p.status,p.preferred_version,
                    p.updated_at,v.input_contract,v.status AS version_status,
@@ -1171,11 +1547,20 @@ class ExperienceRetrievalService:
                 ON v.procedure_id=p.id AND v.version_no=p.preferred_version AND v.status='preferred'
              WHERE p.status='active'
                AND (p.project_id=%(pid)s OR (p.project_id IS NULL AND p.scope_approval_event_id IS NOT NULL))
-               AND {match}
+               AND {candidate}
              ORDER BY p.procedure_key LIMIT 200
             """,
-            params,
+            query_params,
         ).fetchall()
+        for row in rows:
+            evidence = structural.get(str(row["procedure_key"]))
+            if evidence:
+                row["capability_keys"] = evidence["capability_keys"]
+                row["experience_evidence"] = (
+                    [f"episode:{key}" for key in evidence["episode_keys"]]
+                    + [f"capability:{key}" for key in evidence["capability_keys"]]
+                )
+        return rows
 
     @staticmethod
     def _knowledge(conn, params, tokens, diag):
@@ -1322,6 +1707,33 @@ class ExperienceRetrievalService:
         sources. Current intent excludes revoked and dead-support episodes BEFORE ranking and counts them."""
         text = "coalesce(e.task_family,'')||' '||coalesce(e.payload->>'objective','')"
         match, rank = _lexical(f"to_tsvector('simple',{text})", text, [])
+        capability_match = """
+            (
+                EXISTS (
+                    SELECT 1
+                      FROM vres.relations cr
+                     WHERE cr.source_kind='episode'
+                       AND cr.source_key=e.episode_key
+                       AND cr.relation_type='uses'
+                       AND cr.target_kind='capability'
+                       AND cr.target_key=ANY(%(caps)s)
+                       AND jsonb_typeof(e.payload->'capability_keys')='array'
+                       AND (e.payload->'capability_keys') ? cr.target_key
+                )
+                OR EXISTS (
+                    SELECT 1
+                      FROM vres.capability_proofs cp
+                      JOIN vres.capabilities c ON c.id=cp.capability_id
+                     WHERE cp.task_id=e.task_id
+                       AND cp.accepted=true
+                       AND c.status='active'
+                       AND c.capability_key=ANY(%(caps)s)
+                       AND (c.project_id=%(pid)s OR c.project_id IS NULL)
+                       AND jsonb_typeof(e.payload->'capability_keys')='array'
+                       AND (e.payload->'capability_keys') ? c.capability_key
+                )
+            )
+        """
         base = f"""
               FROM vres.experience_episodes e
               JOIN vres.experience_policy_versions p ON p.policy_version=e.policy_version
@@ -1337,7 +1749,7 @@ class ExperienceRetrievalService:
                                            AND r.relation_type='derived_from' AND r.target_kind='source')
               ) sup ON true
              WHERE e.project_id=%(pid)s
-               AND ({match} OR lower(e.task_family)=lower(%(family)s))"""
+               AND ({match} OR lower(e.task_family)=lower(%(family)s) OR {capability_match})"""
         revoked = f"(lc.id IS NOT NULL AND {is_revoked_sql('lc.new_state')})"
         dead = "(sup.support_total>0 AND sup.support_active=0)"
         counts = conn.execute(
