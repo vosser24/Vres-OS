@@ -274,8 +274,8 @@ def test_dedupe_by_key_and_text_digest():
 def test_abstention_and_no_leak():
     pack = er.compose([], _req(), {"excluded_unapproved_company": 2})
     assert pack["abstained"] is True and pack["reason"] == "no_eligible_experience"
-    assert pack["schema_version"] == "176.e4.v1" and pack["policy"]["version"] == "176.e4.v1"
-    assert pack["policy"]["chunk"] == "E" and all(pack[s] == [] for s in er.SECTIONS)
+    assert pack["schema_version"] == "176.e5.v1" and pack["policy"]["version"] == "176.e5.v1"
+    assert pack["policy"]["chunk"] == "E5" and all(pack[s] == [] for s in er.SECTIONS)
     assert "other_project" not in _canonical(pack["diagnostics"])
 
 
@@ -529,7 +529,7 @@ def test_raw_repeat_compose_byte_identical_and_inputs_unchanged():
 
 
 def test_policy_reflects_chunk3_raw_budget():
-    assert er.BUDGETS["raw_evidence_refs"] == 5 and "not_implemented" not in er.POLICY and er.POLICY["chunk"] == "E"
+    assert er.BUDGETS["raw_evidence_refs"] == 5 and "not_implemented" not in er.POLICY and er.POLICY["chunk"] == "E5"
     assert er.normalize_request({"project_id": 1, "query": "x"})["raw_fallback"] is True
 
 
@@ -934,6 +934,22 @@ def _proc_row(key="P-1"):
     return {"procedure_key": key, "project_id": 1, "approved": False, "status": "active", "preferred_version": 1,
             "version_status": "preferred", "name": "Deploy", "description": "Run the deploy checklist",
             "task_family": "engineering", "updated_at": NOW, "input_contract": {"premises": {"platform": "windows"}}, "rank": 0.3}
+
+
+def test_e5_procedure_structural_capability_evidence_changes_relevance_not_authority():
+    req = _req(capability_keys=["cap.cache"])
+    row = _proc_row()
+    row["capability_keys"] = ["cap.cache"]
+    row["experience_evidence"] = ["episode:EXP-CAP", "capability:cap.cache"]
+    item = er.procedure_item(row, req, NOW)[0]
+    assert item["authority_class"] == "accepted_procedure"
+    assert item["role"] == "instruction"
+    assert item["signals"]["authority_tier"] == er._TIER_PROCEDURE
+    assert item["signals"]["capability_match"] is True
+    assert item["applicability"]["capability_keys"] == ["cap.cache"]
+    assert {"procedure:P-1@v1", "episode:EXP-CAP", "capability:cap.cache"} <= set(item["evidence"])
+    for forbidden in ("expert_score", "success_rate", "quality_score", "proven_count", "model", "provider"):
+        assert forbidden not in item
 
 
 def _scenarios():
