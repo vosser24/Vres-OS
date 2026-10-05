@@ -525,16 +525,51 @@ def knowledge_item(row: dict[str, Any], req: dict[str, Any], now: datetime) -> t
     ), None
 
 
+def _bounded_feedback_entry(value: Any) -> dict[str, str] | None:
+    """Sanitize one evidence-only procedure feedback item into the closed E5 public shape."""
+    if not isinstance(value, dict):
+        return None
+    feedback_type = value.get("feedback_type")
+    statement = value.get("statement")
+    episode_key = value.get("episode_key")
+    if not all(isinstance(v, str) and v.strip() for v in (feedback_type, statement, episode_key)):
+        return None
+    disposition = sanitize_extracted_text(statement)
+    if disposition.status is None:
+        text = disposition.text
+    elif disposition.status == SENSITIVE_SANITIZED:
+        text = disposition.text
+    else:
+        return None
+    text = _clean(text, 300)
+    if not text or _INSTRUCTION_SHAPED.search(text):
+        return None
+    return {
+        "feedback_type": _clean(feedback_type, 80),
+        "statement": text,
+        "episode_key": _clean(episode_key, 120),
+    }
+
+
 def _bounded_experience_history(value: Any) -> dict[str, Any] | None:
     """Closed E5 procedure-history shape. Counts/scores/model identity are deliberately not accepted."""
     if not isinstance(value, dict):
         return None
+    feedback: list[dict[str, str]] = []
+    raw_feedback = value.get("feedback")
+    if isinstance(raw_feedback, list):
+        for raw in raw_feedback:
+            entry = _bounded_feedback_entry(raw)
+            if entry is None:
+                continue
+            feedback.append(entry)
+            if len(feedback) >= 3:
+                break
     history = {
         "validated_success_episode_keys": _strs(value.get("validated_success_episode_keys"), 3),
         "validated_failure_episode_keys": _strs(value.get("validated_failure_episode_keys"), 3),
         "failure_episode_keys": _strs(value.get("failure_episode_keys"), 3),
-        # Task-backed feedback is added in the next bounded E5 chunk; keep the frozen public slot empty for now.
-        "feedback": [],
+        "feedback": feedback,
         "latest_validated_at": (
             _clean(value["latest_validated_at"], 80)
             if isinstance(value.get("latest_validated_at"), str)
@@ -542,7 +577,7 @@ def _bounded_experience_history(value: Any) -> dict[str, Any] | None:
         ),
     }
     if not any(history[name] for name in (
-        "validated_success_episode_keys", "validated_failure_episode_keys", "failure_episode_keys"
+        "validated_success_episode_keys", "validated_failure_episode_keys", "failure_episode_keys", "feedback"
     )) and history["latest_validated_at"] is None:
         return None
     return history
