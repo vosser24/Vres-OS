@@ -22,6 +22,10 @@ def _key(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:12]}"
 
 
+def _query_token() -> str:
+    return "qz" + uuid.uuid4().hex[:16]
+
+
 def _capability(project_id: int, key: str) -> None:
     with connect() as conn, conn.transaction():
         conn.execute(
@@ -171,7 +175,7 @@ def test_explicit_capability_sources_directly_linked_episode_without_lexical_mat
     pack = ExperienceRetrievalService().retrieve(
         {
             "project_id": pg_project,
-            "query": _key("NO-LEXICAL-MATCH"),
+            "query": _query_token(),
             "capability_keys": [capability_key],
             "raw_fallback": False,
         }
@@ -197,7 +201,7 @@ def test_explicit_capability_sources_accepted_procedure_through_current_episode_
     pack = ExperienceRetrievalService().retrieve(
         {
             "project_id": pg_project,
-            "query": _key("NO-PROCEDURE-LEXICAL-MATCH"),
+            "query": _query_token(),
             "capability_keys": [capability_key],
             "raw_fallback": False,
         }
