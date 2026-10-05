@@ -16,6 +16,7 @@ from vres_os.db import connect
 from vres_os.repository import Repository
 
 MIGRATION = "039_experience_lifecycle_ledger.sql"
+M041 = "041_experience_retrieval_observability.sql"  # separate E6 migration, excluded from the 040 addendum step
 M040 = "040_context_refresh_attestation.sql"  # the approved 2026-10-02 addendum migration (protected attestations)
 TABLE = "experience_lifecycle_events"
 LEGACY_STATUSES = ["proposed", "observed", "validated", "canonical", "challenged", "superseded", "rejected"]
@@ -373,6 +374,12 @@ def test_upgrade_from_038_to_039_preserves_rows_and_adds_only_the_ledger(monkeyp
         if p.name.endswith(".sql") and p.name <= MIGRATION:
             (staged039 / p.name).write_bytes(p.read_bytes())
     assert len(list(staged.iterdir())) == 38 and len(list(staged039.iterdir())) == 39
+    staged040 = tmp_path / "pkg040" / "migrations"  # the package up to and including 040: 041 (E6) is excluded
+    staged040.mkdir(parents=True)
+    for p in sorted(src.iterdir()):
+        if p.name.endswith(".sql") and p.name < M041:
+            (staged040 / p.name).write_bytes(p.read_bytes())
+    assert len(list(staged040.iterdir())) == 40
     with psycopg.connect(_dsn_for("postgres"), autocommit=True) as admin:
         assert admin.execute("SELECT 1 FROM pg_database WHERE datname=%s", (name,)).fetchone() is None, \
             f"{name} must not pre-exist"
@@ -424,8 +431,8 @@ def test_upgrade_from_038_to_039_preserves_rows_and_adds_only_the_ledger(monkeyp
             assert conn.execute(
                 "SELECT conname FROM pg_constraint WHERE conrelid='vres.sources'::regclass AND contype='c' "
                 "AND pg_get_constraintdef(oid) ILIKE '%status%'").fetchall() == []
-        # then 039 -> 040 with the real package: only the protected attestation table is added; rows are unchanged
-        monkeypatch.setattr(db, "resources", real_resources)
+        # then 039 -> 040 with the package filtered to exclude 041: only the protected attestation table is added
+        monkeypatch.setattr(db, "resources", _Root(tmp_path / "pkg040"))
         assert db.migrate() == [M040]
         assert db.migrate() == []
         with connect() as conn:

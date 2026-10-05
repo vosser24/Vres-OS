@@ -421,16 +421,22 @@ def test_e3f_29_no_observation_or_task_event_row_created(pg_project):
                          for t in ("task_events", "experience_transitions", "experience_episodes", "task_decisions",
                                    "user_input_observations"))
 
-    def observation_tables():
-        with connect() as conn:
-            return [r["table_name"] for r in conn.execute(
-                "SELECT table_name FROM information_schema.tables WHERE table_schema='vres' AND "
-                "(table_name ILIKE '%retriev%' OR table_name ILIKE '%usage%' OR table_name ILIKE '%experience_obs%')")]
+    e6_tables = ("experience_retrieval_observations", "experience_retrieval_items")
 
-    before = counts()
+    def observation_state():
+        with connect() as conn:
+            present = {r["table_name"] for r in conn.execute(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema='vres' AND table_name = ANY(%s)",
+                (list(e6_tables),))}
+            rows = tuple(conn.execute(f"SELECT count(*) AS n FROM vres.{t}").fetchone()["n"] for t in e6_tables)
+        return present, rows
+
+    present, _ = observation_state()
+    assert present == set(e6_tables)  # migration 041 created the E6 storage ...
+    before, obs_before = counts(), observation_state()
     _call({"query": mk, "task_key": task})
     assert counts() == before
-    assert observation_tables() == []  # E6 owns retrieval observations; none exist, so none can be written
+    assert observation_state() == obs_before  # ... but direct experience_retrieve writes no observation/item row
 
 
 def test_e3f_30_no_chairman_injection_single_registered_tool_governed_wording():

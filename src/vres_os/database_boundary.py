@@ -358,6 +358,7 @@ def activate_boundary(conn, cfg: VresConfig) -> None:
         )
     conn.execute(sql.SQL("GRANT USAGE ON SCHEMA vres TO {}").format(sql.Identifier(writer)))
     _activate_context_refresh_attestations(conn, runtime, writer)
+    _activate_experience_observability(conn, runtime, writer)
 
 
 def _activate_context_refresh_attestations(conn, runtime: str, writer: str) -> None:
@@ -379,3 +380,25 @@ def _activate_context_refresh_attestations(conn, runtime: str, writer: str) -> N
             conn.execute(sql.SQL("REVOKE ALL ON {} FROM {}").format(obj, role))
     conn.execute(sql.SQL("GRANT EXECUTE ON {} TO {}").format(issue, sql.Identifier(writer)))
     conn.execute(sql.SQL("GRANT EXECUTE ON {} TO {}").format(consume, sql.Identifier(runtime)))
+
+
+def _activate_experience_observability(conn, runtime: str, writer: str) -> None:
+    """Migration 041: the runtime may read the append-only ledger; only the writer may record through the function."""
+    from psycopg import sql
+
+    row = conn.execute("SELECT to_regclass('vres.experience_retrieval_observations') IS NOT NULL AS present").fetchone()
+    present = row["present"] if isinstance(row, dict) else row[0]
+    if not present:
+        return  # a package/database before migration 041
+    roles = [sql.SQL("PUBLIC"), sql.Identifier(runtime), sql.Identifier(writer)]
+    tables = [sql.SQL("TABLE vres.experience_retrieval_observations"), sql.SQL("TABLE vres.experience_retrieval_items")]
+    others = [sql.SQL("SEQUENCE vres.experience_retrieval_observations_id_seq"),
+              sql.SQL("SEQUENCE vres.experience_retrieval_items_id_seq"),
+              sql.SQL("FUNCTION vres.protect_experience_retrieval_immutability()")]
+    record = sql.SQL("FUNCTION vres.record_experience_retrieval_observation(bigint,text,text,text,text,jsonb,jsonb)")
+    for obj in [*tables, *others, record]:
+        for role in roles:
+            conn.execute(sql.SQL("REVOKE ALL ON {} FROM {}").format(obj, role))
+    for obj in tables:
+        conn.execute(sql.SQL("GRANT SELECT ON {} TO {}").format(obj, sql.Identifier(runtime)))
+    conn.execute(sql.SQL("GRANT EXECUTE ON {} TO {}").format(record, sql.Identifier(writer)))

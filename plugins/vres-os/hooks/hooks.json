@@ -108,6 +108,23 @@
         ]
       },
       {
+        "matcher": "^mcp__plugin_vres-os_vres__experience_retrieve$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe",
+            "args": [
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              "${CLAUDE_PLUGIN_ROOT}/bin/vres-experience-observe.ps1"
+            ],
+            "timeout": 10
+          }
+        ]
+      },
+      {
         "matcher": "^AskUserQuestion$",
         "hooks": [
           {

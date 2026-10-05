@@ -275,13 +275,15 @@ def test_hook_safe_tools_never_consult_the_database(monkeypatch, capsys):
 
 # --- scope guards ----------------------------------------------------------------------------------------------------
 
-def test_latest_migration_is_040_and_no_sessions_column_or_e6_table():
+def test_e4_migrations_add_no_sessions_column_or_retrieval_observation_table():
+    # The current package ends at 041 (the separate E6 observability migration); E4 (039/040) must stay clean.
     names = sorted(p.name for p in MIGRATIONS.glob("*.sql"))
-    assert names[-1] == "040_context_refresh_attestation.sql" and not any(n.startswith("041") for n in names)
+    assert names[-1] == "041_experience_retrieval_observability.sql"
     for path in [*MIGRATIONS.glob("039_*.sql"), *MIGRATIONS.glob("040_*.sql")]:  # E4 migrations add no sessions column
         assert not re.search(r"ALTER\s+TABLE\s+(IF\s+EXISTS\s+)?vres\.sessions", path.read_text(encoding="utf-8"),
                              re.I), path.name
-    for path in MIGRATIONS.glob("*.sql"):
+    # E4 owned no retrieval-observation storage: only migrations before 041 are held to the table-name ban.
+    for path in (p for p in MIGRATIONS.glob("*.sql") if p.name < "041"):
         sql = path.read_text(encoding="utf-8")
         tables = re.findall(r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?vres\.(\w+)", sql, re.I)
         for table in tables:

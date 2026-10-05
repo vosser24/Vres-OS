@@ -301,3 +301,21 @@ def test_context_refresh_attestation_migration_is_additive_protected_and_hash_on
     assert "protect_experience_lifecycle_immutability" not in code
     assert "UPDATE vres.experience_lifecycle_events" not in code and "DELETE FROM" not in code
     assert "UPDATE vres.sessions" not in code and "INSERT INTO vres.sessions" not in code
+
+
+def test_experience_retrieval_observability_migration_041_contract():
+    sql = _migration("041_experience_retrieval_observability.sql")
+    code = "\n".join(line for line in sql.splitlines() if not line.lstrip().startswith("--"))
+    assert "176.e6.v1" in sql and "d61f60d31182085748bb613ef3c160274f1a1a5a2384854f36e52b4cdfecc5e5" in sql
+    assert "7572cafc632d4f56571adbe5f59baceedf15c56a07d5a3ca35e4b05448a982e9" in sql
+    for table in ("experience_retrieval_observations", "experience_retrieval_items"):
+        assert f"CREATE TABLE IF NOT EXISTS vres.{table}" in code
+    for event in ("UPDATE", "DELETE", "TRUNCATE"):
+        assert f"BEFORE {event}" in code
+    assert "CREATE OR REPLACE FUNCTION vres.record_experience_retrieval_observation(" in code
+    assert "SECURITY DEFINER" in code and "SET search_path = pg_catalog, vres" in code
+    assert "authority_key = 'user_event_writer'" in code and "session_user" in code
+    assert "GRANT " not in code  # grants belong to database_boundary.activate_boundary
+    for forbidden in ("query_text text", "memory_text text", "raw_query", "tool_response jsonb", "premises jsonb", "text_body"):
+        assert forbidden not in code
+    assert "ALTER TABLE" not in code and "UPDATE vres.sessions" not in code and "DELETE FROM" not in code
