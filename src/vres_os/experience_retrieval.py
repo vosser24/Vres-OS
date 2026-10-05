@@ -1241,7 +1241,7 @@ class ExperienceRetrievalService:
         if not requested:
             return {}
         eligible: dict[str, dict[str, Any]] = {}
-        disallowed_flags = {"historical", "not_current", "revoked", "retired", "expired"}
+        disallowed_flags = {"historical", "not_current", REVOKED_STATUS, "retired", "expired"}
         for item, _reason in episodes:
             if (
                 item is None
