@@ -644,3 +644,67 @@ Execution requirements:
 9. do not begin E6 before E5 is fully accepted and closed.
 
 **#165 and later program items remain blocked until #176 E5–E8 are complete and E9 physical criteria are carried into #169.**
+
+
+---
+
+### 14. 2026-10-05 #176 E5 contract freeze / implementation start boundary
+Status: **E5 CONTRACT FROZEN — IMPLEMENTATION NOT YET STARTED**
+
+This section supersedes older E5-next prose for the exact implementation start boundary.
+
+Authoritative main:
+`a0a2769b99f4893733568194c0aa68e78e73aeab`
+
+E5 branch:
+`issue-176-e5-capability-procedure-experience`
+
+Frozen E5 contract commit:
+`a06d32801a22a9c17439a0e03c081dae57ba2367`
+
+Frozen E5 contract tree:
+`5cd55b7f4cd6bf9885187af5f179db18018f29c8`
+
+Contract:
+`docs/architecture/EXPERIENCE-INTELLIGENCE-E5-CONTRACT-2026-10-05.md`
+
+Retrieval schema target:
+`176.e5.v1`
+
+Architecture decision:
+- **NO migration**;
+- reuse `capabilities/capability_proofs`;
+- reuse `procedures/procedure_versions/procedure_runs/procedure_feedback`;
+- reuse immutable E1 episodes;
+- reuse E1 `episode uses capability/procedure` relations;
+- preserve E4 lifecycle/revocation gates.
+
+Bounded E5 implementation:
+- make explicit `capability_keys` a structured candidate-source signal, not only a ranking-after-retrieval signal;
+- surface bounded procedure experience history derived from existing immutable/validated evidence;
+- link task-backed feedback to the same-task eligible episode/procedure evidence path;
+- preserve validated success/failure distinction;
+- no expert score;
+- no model-specific learning;
+- no prompt rewriting;
+- no procedure/lifecycle automatic mutation;
+- no E6 retrieval-observation writes.
+
+Before code:
+1. create a fresh E5 Vres task from a correctly rooted E5 worktree;
+2. checkpoint the frozen contract/base/branch identity;
+3. do not alter the frozen contract;
+4. then implement in bounded chunks with targeted red tests first.
+
+Final E5 acceptance requires:
+- targeted/unit/PostgreSQL/security/regression evidence;
+- one coherent full suite;
+- installed-runtime smoke because the pack schema changes;
+- release gate;
+- exact-head CI;
+- current-turn freeze checkpoint;
+- protected `vres-os:validator` Fable/high;
+- guarded merge;
+- post-main CI.
+
+Do not begin E6 until E5 is fully accepted and closed.
