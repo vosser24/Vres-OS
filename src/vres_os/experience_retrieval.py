@@ -1400,10 +1400,18 @@ class ExperienceRetrievalService:
 
             state = gathered.setdefault(
                 procedure_key,
-                {"success": [], "validated_failure": [], "failure": [], "validated_times": []},
+                {
+                    "success": [],
+                    "validated_failure": [],
+                    "failure": [],
+                    "validated_times": [],
+                    "feedback_tasks": {},
+                    "feedback": [],
+                },
             )
             observed_epoch = _epoch(row.get("observed_at"))
             episode_key = str(row["episode_key"])
+            state["feedback_tasks"][int(row["task_id"])] = episode_key
             validation = payload.get("validation") if isinstance(payload, dict) else None
             validated = (
                 row.get("trust_class") == "validated_runtime"
@@ -1423,6 +1431,42 @@ class ExperienceRetrievalService:
             elif row.get("outcome_status") in _FAILED:
                 state["failure"].append((observed_epoch, episode_key))
 
+        feedback_task_ids = sorted({
+            task_id
+            for state in gathered.values()
+            for task_id in state["feedback_tasks"]
+        })
+        if feedback_task_ids:
+            feedback_rows = conn.execute(
+                """
+                SELECT p.procedure_key,f.task_id,f.feedback_type,f.statement,f.created_at,f.id
+                  FROM vres.procedure_feedback f
+                  JOIN vres.procedures p ON p.id=f.procedure_id
+                 WHERE p.procedure_key=ANY(%s)
+                   AND f.task_id=ANY(%s)
+                 ORDER BY p.procedure_key,f.created_at DESC,f.id
+                """,
+                (sorted(gathered), feedback_task_ids),
+            ).fetchall()
+            for feedback_row in feedback_rows:
+                procedure_key = str(feedback_row["procedure_key"])
+                state = gathered.get(procedure_key)
+                if state is None:
+                    continue
+                episode_key = state["feedback_tasks"].get(int(feedback_row["task_id"]))
+                if episode_key is None:
+                    continue
+                entry = _bounded_feedback_entry({
+                    "feedback_type": feedback_row["feedback_type"],
+                    "statement": feedback_row["statement"],
+                    "episode_key": episode_key,
+                })
+                if entry is None:
+                    continue
+                created_at = feedback_row.get("created_at")
+                created_epoch = _epoch(created_at)
+                state["feedback"].append((created_epoch, int(feedback_row["id"]), entry))
+
         result: dict[str, dict[str, Any]] = {}
         for procedure_key, state in sorted(gathered.items()):
             def newest(values):
@@ -1430,11 +1474,17 @@ class ExperienceRetrievalService:
 
             times = [pair for pair in state["validated_times"] if pair[1]]
             latest = max(times, key=lambda pair: (pair[0], pair[1]))[1] if times else None
+            feedback = [
+                entry
+                for _epoch_value, _stable_id, entry in sorted(
+                    state["feedback"], key=lambda value: (-value[0], value[1])
+                )[:3]
+            ]
             result[procedure_key] = {
                 "validated_success_episode_keys": newest(state["success"]),
                 "validated_failure_episode_keys": newest(state["validated_failure"]),
                 "failure_episode_keys": newest(state["failure"]),
-                "feedback": [],
+                "feedback": feedback,
                 "latest_validated_at": latest,
             }
         return result
