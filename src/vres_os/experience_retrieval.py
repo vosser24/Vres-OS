@@ -1261,6 +1261,150 @@ class ExperienceRetrievalService:
         }
 
     @staticmethod
+    def _procedure_experience_history(
+        conn,
+        procedure_keys: list[str],
+        req: dict[str, Any],
+        now: datetime,
+    ) -> dict[str, dict[str, Any]]:
+        """Bounded evidence-only history from current-eligible task episodes.
+
+        Procedure-run counts/quality/model fields are intentionally not read. Direct episode->procedure provenance
+        and immutable episode payload evidence must agree before an episode can classify the procedure.
+        """
+        if not procedure_keys:
+            return {}
+        revoked = f"(lc.id IS NOT NULL AND {is_revoked_sql('lc.new_state')})"
+        dead = "(sup.support_total>0 AND sup.support_active=0)"
+        rows = conn.execute(
+            f"""
+            WITH ranked AS (
+                SELECT pr.target_key AS history_procedure_key,
+                       e.episode_key,e.project_id,e.task_id,e.work_unit_key,e.task_family,e.policy_version,
+                       p.policy_digest,e.participation_class,e.trust_class,e.outcome_status,e.payload,
+                       e.source_digest,e.payload_digest,e.security_disposition,e.observed_at,
+                       CASE WHEN lc.id IS NULL THEN 'grounded' ELSE lc.new_state END AS lifecycle_state,
+                       lc.created_at AS lifecycle_at,lc.cause_kind AS lifecycle_cause,
+                       sup.support_total,sup.support_active,FALSE AS lex,0::double precision AS rank,
+                       row_number() OVER (
+                           PARTITION BY pr.target_key
+                           ORDER BY e.observed_at DESC,e.episode_key
+                       ) AS history_rank
+                  FROM vres.relations pr
+                  JOIN vres.experience_episodes e
+                    ON pr.source_kind='episode' AND pr.source_key=e.episode_key
+                   AND pr.relation_type='uses' AND pr.target_kind='procedure'
+                  JOIN vres.experience_policy_versions p ON p.policy_version=e.policy_version
+                  LEFT JOIN vres.experience_lifecycle_events lc ON lc.id=(
+                            SELECT max(x.id) FROM vres.experience_lifecycle_events x
+                             WHERE x.project_id=e.project_id
+                               AND x.target_kind='episode' AND x.target_key=e.episode_key
+                               AND x.action IN ('invalidate_derived','restore_derived'))
+                  LEFT JOIN LATERAL (
+                    SELECT count(*) AS support_total,
+                           count(*) FILTER (WHERE s.status='active') AS support_active
+                      FROM vres.sources s
+                     WHERE s.source_key IN (
+                           SELECT sr.target_key FROM vres.relations sr
+                            WHERE sr.source_kind='episode' AND sr.source_key=e.episode_key
+                              AND sr.relation_type='derived_from' AND sr.target_kind='source')
+                  ) sup ON true
+                 WHERE pr.target_key=ANY(%s)
+                   AND e.project_id=%s
+                   AND e.work_unit_key IS NULL
+                   AND NOT {revoked}
+                   AND NOT {dead}
+            )
+            SELECT *
+              FROM ranked
+             WHERE history_rank<=20
+             ORDER BY history_procedure_key,observed_at DESC,episode_key
+            """,
+            (sorted(set(procedure_keys)), req["project_id"]),
+        ).fetchall()
+
+        history_req = {**req, "temporal_intent": "current", "as_of": None}
+        gathered: dict[str, dict[str, Any]] = {}
+
+        def validation_time(row: dict[str, Any]) -> tuple[float, str]:
+            validation = row["payload"].get("validation") if isinstance(row.get("payload"), dict) else None
+            raw = validation.get("completed_at") if isinstance(validation, dict) else None
+            if isinstance(raw, str):
+                try:
+                    parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                    if parsed.tzinfo is None:
+                        parsed = parsed.replace(tzinfo=timezone.utc)
+                    parsed = parsed.astimezone(timezone.utc)
+                    return parsed.timestamp(), parsed.isoformat()
+                except ValueError:
+                    pass
+            observed = row.get("observed_at")
+            if isinstance(observed, datetime):
+                observed = observed.astimezone(timezone.utc)
+                return observed.timestamp(), observed.isoformat()
+            return 0.0, ""
+
+        for raw_row in rows:
+            row = dict(raw_row)
+            procedure_key = str(row["history_procedure_key"])
+            item, _reason = episode_item(row, history_req, now)
+            if item is None:
+                continue
+
+            payload = row.get("payload")
+            procedures = payload.get("procedures") if isinstance(payload, dict) else None
+            accepted_values = {
+                entry.get("accepted")
+                for entry in procedures or []
+                if isinstance(entry, dict)
+                and entry.get("procedure_key") == procedure_key
+                and type(entry.get("accepted")) is bool
+            }
+            if not accepted_values:
+                continue  # relation alone cannot classify a procedure; immutable payload must agree.
+
+            state = gathered.setdefault(
+                procedure_key,
+                {"success": [], "validated_failure": [], "failure": [], "validated_times": []},
+            )
+            observed_epoch = _epoch(row.get("observed_at"))
+            episode_key = str(row["episode_key"])
+            validation = payload.get("validation") if isinstance(payload, dict) else None
+            validated = (
+                row.get("trust_class") == "validated_runtime"
+                and isinstance(validation, dict)
+                and validation.get("status") == "passed"
+            )
+            classified_validated = False
+            if validated and accepted_values == {True}:
+                state["success"].append((observed_epoch, episode_key))
+                classified_validated = True
+            elif validated and accepted_values == {False}:
+                state["validated_failure"].append((observed_epoch, episode_key))
+                classified_validated = True
+
+            if classified_validated:
+                state["validated_times"].append(validation_time(row))
+            elif row.get("outcome_status") in _FAILED:
+                state["failure"].append((observed_epoch, episode_key))
+
+        result: dict[str, dict[str, Any]] = {}
+        for procedure_key, state in sorted(gathered.items()):
+            def newest(values):
+                return [key for _epoch_value, key in sorted(values, key=lambda pair: (-pair[0], pair[1]))[:3]]
+
+            times = [pair for pair in state["validated_times"] if pair[1]]
+            latest = max(times, key=lambda pair: (pair[0], pair[1]))[1] if times else None
+            result[procedure_key] = {
+                "validated_success_episode_keys": newest(state["success"]),
+                "validated_failure_episode_keys": newest(state["validated_failure"]),
+                "failure_episode_keys": newest(state["failure"]),
+                "feedback": [],
+                "latest_validated_at": latest,
+            }
+        return result
+
+    @staticmethod
     def _edges(conn, refs: list[str]) -> list[dict[str, Any]]:
         """Direct relations whose BOTH endpoints are already-gated surviving items (no traversal, no leak)."""
         if len(refs) < 2:
