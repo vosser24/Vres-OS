@@ -128,6 +128,7 @@ EXPERIENCE_HISTORY_KEYS = frozenset({
     "validated_success_episode_keys", "validated_failure_episode_keys", "failure_episode_keys",
     "feedback", "latest_validated_at",
 })
+FEEDBACK_KEYS = frozenset({"feedback_type", "statement", "episode_key"})
 FLAGS = frozenset({"stale", "conflict", "challenged", "historical", "premise_mismatch", "premise_unverified",
                    "retired", "revoked", "expired", "not_current", "cross_scope_unresolved"})  # E4 Chunk E
 ROLES = frozenset({"instruction", "candidate", "warning_example", "low_trust_observation", "conflict",
@@ -160,6 +161,8 @@ def assert_pack_schema(pack):
                 assert len(history["validated_failure_episode_keys"]) <= 3
                 assert len(history["failure_episode_keys"]) <= 3
                 assert len(history["feedback"]) <= 3
+                assert all(set(entry) == FEEDBACK_KEYS for entry in history["feedback"])
+                assert all(len(entry["statement"]) <= 300 for entry in history["feedback"])
                 assert history["latest_validated_at"] is None or isinstance(history["latest_validated_at"], str)
             if "provenance" in item:  # E4: or a revoked tombstone carrying metadata only
                 assert item["role"] == "low_trust_observation" or (
