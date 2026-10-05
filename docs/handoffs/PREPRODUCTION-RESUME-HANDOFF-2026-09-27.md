@@ -2743,3 +2743,362 @@ Methodology:
 - single writer per branch
 - no duplicate expensive full-suite/release-gate/protected-validation evidence without changed bytes or a concrete gap
 ```
+
+---
+
+# 32. 2026-10-05 #176 E5 one-line canonical-status fix / reacceptance seal
+
+This is the newest authoritative handoff boundary. It supersedes section 31 for current E5 execution state.
+
+## A. Exact repository boundary
+
+Repository:
+`vosser24/Vres-OS`
+
+Authoritative main:
+`a0a2769b99f4893733568194c0aa68e78e73aeab`
+
+E5 branch:
+`issue-176-e5-capability-procedure-experience`
+
+E5 task:
+`TASK-20261005-dc0e7a9e38`
+
+Frozen E5 contract:
+`a06d32801a22a9c17439a0e03c081dae57ba2367`
+
+Superseded coherent candidate:
+`d39fabb22484a664e863c1603e2054d1ef0723c4`
+
+Superseded tree:
+`fd00975275a1f8cc697bd4c570f994812e49f3b9`
+
+Current corrected candidate:
+**`230c4fdb5a7674fe13518796be68a77848ff0561`**
+
+Current corrected tree:
+**`97f98e2ad666df014bbc22270cc677aacd65a21f`**
+
+PR:
+**none yet**
+
+E5 remains 40 migrations through:
+`040_context_refresh_attestation.sql`
+
+## B. Why d39fabb is superseded
+
+The first full PostgreSQL acceptance cycle was finally allowed to run after the inspection-only hold was explicitly replaced and the frozen-contract Markdown hard-break waiver was issued.
+
+Waiver checks:
+- `git diff --check a06d328... HEAD`: PASS;
+- baseline→candidate excluding the frozen E5 contract: PASS.
+
+Fresh acceptance database:
+`vres_e5_final_62085d1c361f_test`
+
+Environment:
+- `ISOLATED_VRES_CONFIG=PASS`;
+- same acceptance DB migration count: **40**;
+- same acceptance DB highest migration: `040_context_refresh_attestation.sql`;
+- database dropped after the run;
+- original drifted database behind `pg_issue163_test_dsn` untouched.
+
+Full suite result on `d39fabb...`:
+- **2205 passed**;
+- **4 skipped**;
+- **1 failed**;
+- exit code 1;
+- approximately 21m32s.
+
+Because the full suite failed:
+- release gate was NOT run;
+- no final-local-acceptance checkpoint was created;
+- no PR was created;
+- no protected validation request was created.
+
+## C. Exact failure
+
+Failing test:
+`tests/test_source_revocation_unit.py::test_only_source_revocation_writes_the_revoked_status`
+
+Assertion expected the only non-session code-level revoked literal reader to be:
+`knowledge_status.py`
+
+Actual static readers additionally contained:
+`experience_retrieval.py`
+
+The test is a repository governance guard, not a runtime behavior test. It scans Python string constants for the exact word `revoked` to enforce status-literal ownership.
+
+## D. Root cause
+
+E4 main already imported and used the canonical:
+`REVOKED_STATUS`
+
+E5 Chunk 1 introduced one new hardcoded read-side literal in the structural-capability helper:
+
+```python
+disallowed_flags = {"historical", "not_current", "revoked", "retired", "expired"}
+```
+
+This violated the existing canonical-status-owner rule even though runtime semantics were equivalent.
+
+The static governance test correctly detected it.
+
+Classification:
+- **real E5 code defect**;
+- bounded;
+- read-side canonical-constant violation only;
+- not an environment problem;
+- not a stale test;
+- not a test-harness defect.
+
+Do NOT relax the test allow-list.
+
+## E. Bounded fix
+
+ChatGPT changed exactly one line:
+
+from:
+```python
+{"historical", "not_current", "revoked", "retired", "expired"}
+```
+
+to:
+```python
+{"historical", "not_current", REVOKED_STATUS, "retired", "expired"}
+```
+
+Commit:
+**`230c4fdb5a7674fe13518796be68a77848ff0561`**
+
+Tree:
+**`97f98e2ad666df014bbc22270cc677aacd65a21f`**
+
+Diff from `d39fabb...`:
+- one file;
+- one insertion;
+- one deletion;
+- file: `src/vres_os/experience_retrieval.py`.
+
+Unchanged:
+- all tests;
+- frozen E5 contract;
+- migration set;
+- MCP surfaces;
+- capability/procedure write authority;
+- routing/model policy;
+- prompts;
+- E6 surfaces.
+
+Durable issue #176 fix classification comment:
+`5997730568`
+
+## F. Frozen-contract whitespace waiver remains in force
+
+The E5 contract's intentional Markdown hard line breaks remain unchanged.
+
+Waived baseline diff-check lines:
+- 3–7;
+- 39;
+- 52–54.
+
+All were already present at frozen contract commit `a06d328...`.
+
+Do not edit them.
+
+For the corrected candidate require:
+1. `git diff --check a06d328... HEAD` = clean;
+2. baseline→candidate excluding the frozen contract = clean.
+
+No other whitespace warning is waived.
+
+## G. Targeted E5 development evidence remains useful but exact candidate identity changed
+
+Chunks 1–3 targeted evidence remains architectural/regression support, but exact acceptance must be rerun because source bytes changed by one line.
+
+Do NOT rerun every historical Chunk 1/2/3 ladder.
+
+Required bounded correction proof:
+- exact failing governance test;
+- focused E5 retrieval integration affected by the one-line set membership change;
+- critical Ruff;
+- bounded diff checks.
+
+If bounded correction proof passes, rerun one complete final acceptance cycle on the corrected candidate.
+
+## H. Required bounded correction proof
+
+From a clean local E5 worktree fast-forwarded to exact:
+`230c4fdb5a7674fe13518796be68a77848ff0561`
+
+require:
+- tree `97f98e2ad666df014bbc22270cc677aacd65a21f`;
+- origin branch same exact SHA;
+- origin/main still `a0a2769...`;
+- worktree clean.
+
+Run:
+1. `tests/test_source_revocation_unit.py::test_only_source_revocation_writes_the_revoked_status`;
+2. `tests/test_experience_retrieval.py`;
+3. `tests/integration/test_e5_capability_retrieval.py`;
+4. `tests/integration/test_e5_procedure_history.py`;
+5. critical Ruff on `experience_retrieval.py` plus these tests;
+6. post-freeze diff-check;
+7. baseline→head excluding frozen contract diff-check.
+
+Use a fresh isolated disposable PostgreSQL DB for the integration tests and the established empty `VRES_DATA_DIR` methodology.
+
+No checkpoint is needed merely for the bounded correction if the final full acceptance follows immediately.
+
+## I. Corrected-candidate final acceptance
+
+If the bounded correction proof is green, run exactly one coherent final acceptance cycle:
+
+### Fresh full PostgreSQL suite
+- new unique `_test` DB;
+- use `pg_issue163_test_dsn` only as admin/server credential source;
+- never run against or repair its drifted DB;
+- empty isolated `VRES_DATA_DIR`;
+- verify empty provenance writer / migration user;
+- same acceptance DB migration count = 40;
+- same acceptance DB highest migration = 040;
+- run complete `pytest -q -ra`;
+- zero failures/errors required;
+- record every skip and reason;
+- drop DB after evidence capture.
+
+### Release gate
+Only after full suite passes:
+- one fresh outside-checkout evidence directory;
+- isolated `VRES_DATA_DIR`;
+- no DB vars;
+- require `PASSED_WITH_EXPLICIT_LIVE_GATES`;
+- exact git commit/tree/dirty evidence;
+- wheel build;
+- exact Python/SQL byte comparison;
+- temporary wheel installation;
+- wheel-import-smoke PASS;
+- capture wheel filename/SHA256/bytes/source-files-compared.
+
+### Final local checkpoint
+Only after full suite + release gate + final Git identity are green:
+- create exactly one intentional final-local-acceptance Chairman checkpoint;
+- this is NOT the protected-validation freeze;
+- next action must hand control to ChatGPT for PR creation/exact-head CI;
+- do not call `validation_prepare`.
+
+## J. PR / CI / protected-validation sequence after local acceptance
+
+If exact corrected candidate is locally green:
+
+1. ChatGPT verifies remote branch exact head: `230c4fdb5a7674fe13518796be68a77848ff0561`;
+2. verify main unchanged: `a0a2769b99f4893733568194c0aa68e78e73aeab`;
+3. create E5 PR;
+4. require exact-head pull_request CI on `230c4fdb...`;
+5. inspect jobs/steps/full PG suite/installed-runtime/release-gate artifact + digest;
+6. only then return to local E5 session for ONE current-turn freeze checkpoint;
+7. recompute complete E5 artifact scope;
+8. `validation_prepare` exactly once;
+9. delegate exactly `vres-os:validator`;
+10. no model override; host Fable/high;
+11. no validator background/nested workers;
+12. first terminal stop must contain complete canonical JSON;
+13. PASS requires every check status `passed`;
+14. while pending, no material mutation and require `validation_in_flight` for any interim reply;
+15. trust host/Vres evidence first.
+
+No automatic retry on a failed protected request.
+
+## K. Merge / closure after protected PASS
+
+On host-recorded protected PASS:
+- guarded expected-head merge by ChatGPT;
+- require post-merge `push` CI on exact new main SHA;
+- verify full suite/release gate/artifact;
+- durably close E5 in issue/checklist/handoff;
+- complete E5 Vres task exactly once after current protected PASS and post-main closure;
+- only then begin E6.
+
+## L. Current E5 task state
+
+Task:
+`TASK-20261005-dc0e7a9e38`
+
+Latest intentional targeted-development checkpoint:
+`CP-20261005-8fe3a4f070`
+
+Host compaction checkpoint:
+`CP-20261005-bb0d29c4e5` with reason `pre_compact`
+
+No final-local-acceptance checkpoint was created after the failed `d39fabb...` full suite.
+
+No protected validation request exists for E5.
+
+The task remains unfinished.
+
+## M. Fresh-chat resume prompt
+
+```text
+Resume the Vres-OS preproduction program from the newest canonical durable handoff.
+
+Repository:
+vosser24/Vres-OS
+
+Canonical documentation branch:
+docs-execution-checklist-20260927
+
+Read first:
+docs/PREPRODUCTION-EXECUTION-CHECKLIST-2026-09-27.md
+docs/handoffs/PREPRODUCTION-RESUME-HANDOFF-2026-09-27.md
+
+Newest authoritative boundary:
+# 32. 2026-10-05 #176 E5 one-line canonical-status fix / reacceptance seal
+
+Do not resume from section #31 or the superseded d39fabb candidate.
+
+AUTHORITATIVE MAIN:
+a0a2769b99f4893733568194c0aa68e78e73aeab
+
+E5 BRANCH:
+issue-176-e5-capability-procedure-experience
+
+E5 TASK:
+TASK-20261005-dc0e7a9e38
+
+FROZEN CONTRACT:
+a06d32801a22a9c17439a0e03c081dae57ba2367
+
+SUPERSEDED CANDIDATE:
+d39fabb22484a664e863c1603e2054d1ef0723c4
+
+CURRENT CORRECTED CANDIDATE:
+230c4fdb5a7674fe13518796be68a77848ff0561
+
+CURRENT TREE:
+97f98e2ad666df014bbc22270cc677aacd65a21f
+
+The first full suite on d39fabb produced 2205 passed / 4 skipped / 1 failed.
+The failure was test_source_revocation_unit.py::test_only_source_revocation_writes_the_revoked_status.
+
+Root cause:
+E5 hardcoded one read-side "revoked" literal in experience_retrieval.py.
+This violated the canonical status-literal owner rule.
+The bounded fix replaces only that literal with imported REVOKED_STATUS.
+The governance test remains unchanged.
+
+Next:
+1. fast-forward local E5 worktree to exact 230c4fdb...
+2. run bounded correction proof: failing governance test + focused E5 retrieval + Ruff + bounded diff checks
+3. if green, rerun one full fresh PostgreSQL suite on the corrected exact candidate
+4. if full suite green, run release gate once and capture wheel smoke evidence
+5. create one final-local-acceptance checkpoint
+6. return evidence to ChatGPT
+7. only then create PR / exact-head CI
+8. only after exact-head CI green perform one current-turn protected Fable/high validation
+9. guarded merge + post-main CI + E5 task completion
+10. only then E6
+
+Do not rerun all historical Chunk 1–3 ladders.
+Do not edit the frozen contract.
+Preserve the frozen-contract Markdown hard-break waiver exactly as section #32 describes.
+```
