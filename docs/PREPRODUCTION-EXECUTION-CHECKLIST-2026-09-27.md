@@ -1,6 +1,6 @@
 # Vres Preproduction Execution Checklist
 
-Date: 2026-10-02  
+Date: 2026-10-05  
 Repository: `vosser24/Vres-OS`  
 Authoritative main after #176 E4: `a0a2769b99f4893733568194c0aa68e78e73aeab`
 
@@ -708,3 +708,181 @@ Final E5 acceptance requires:
 - post-main CI.
 
 Do not begin E6 until E5 is fully accepted and closed.
+
+
+---
+
+### 15. 2026-10-05 #176 E5 coherent final candidate / acceptance-in-progress boundary
+Status: **E5 CHUNKS 1–3 IMPLEMENTED + TARGETED GREEN — FINAL LOCAL FULL-SUITE / RELEASE-GATE ACCEPTANCE IN PROGRESS; PR NOT OPEN**
+
+This section supersedes section 14 for current E5 execution state. Section 14 remains the historical contract-freeze boundary.
+
+#### Exact repository boundary
+
+- authoritative main/base: `a0a2769b99f4893733568194c0aa68e78e73aeab`;
+- E5 branch: `issue-176-e5-capability-procedure-experience`;
+- E5 Vres task: `TASK-20261005-dc0e7a9e38`;
+- frozen E5 contract commit: `a06d32801a22a9c17439a0e03c081dae57ba2367`;
+- frozen E5 contract tree: `5cd55b7f4cd6bf9885187af5f179db18018f29c8`;
+- coherent final E5 candidate HEAD: **`d39fabb22484a664e863c1603e2054d1ef0723c4`**;
+- coherent final E5 candidate tree: **`fd00975275a1f8cc697bd4c570f994812e49f3b9`**;
+- branch is 28 commits ahead of the E4-complete main;
+- PR: **none yet**;
+- schema remains **40 migrations**, latest `040_context_refresh_attestation.sql`; E5 adds no migration.
+
+Base-to-candidate file delta is exactly eight files:
+- `docs/architecture/EXPERIENCE-INTELLIGENCE-E5-CONTRACT-2026-10-05.md` — new frozen contract;
+- `src/vres_os/experience_retrieval.py`;
+- `tests/integration/test_e5_capability_retrieval.py` — new;
+- `tests/integration/test_e5_procedure_history.py` — new;
+- `tests/integration/test_experience_retrieval_journey.py`;
+- `tests/integration/test_experience_retrieve_surface.py`;
+- `tests/test_experience_retrieval.py`;
+- `tests/test_experience_retrieval_e4.py`.
+
+#### E5 delivered scope
+
+E5 remains read-only integration over existing truth owners. It adds no new authority store.
+
+Implemented:
+- retrieval schema `176.e5.v1`;
+- explicit `capability_keys` validated against active project-visible capabilities;
+- direct `episode -> uses -> capability` structured candidate sourcing;
+- accepted `capability_proofs` may source the proof task's eligible episode only when the immutable episode payload itself already names that capability;
+- accepted procedures may be structurally sourced only through an already E1-integrity/E4-lifecycle-gated episode that directly uses the procedure and structurally matches the requested capability;
+- bounded procedure `experience_history` containing validated success episode keys, validated failure episode keys, other failure episode keys, task-backed feedback, and latest validated evidence time;
+- validated success/failure derives from immutable task-level `validated_runtime` episode evidence, never raw run counts or quality scores;
+- task-backed feedback joins only through a current-eligible same-task episode that directly used the same procedure;
+- feedback is #164-sanitized, bounded, and instruction-shaped feedback is omitted;
+- real E4 source revocation removes affected current procedure history/feedback;
+- repeated E5 retrieval is deterministic and mechanically proven read-only across E5-relevant truth owners.
+
+Explicitly not implemented:
+- no expert/success/confidence score;
+- no authority from `proven_count`, run count, quality score, feedback count or model/provider identity;
+- no model-specific personal memory;
+- no prompt/routing/model-policy rewrite;
+- no automatic procedure promotion/rewrite/demotion;
+- no automatic lifecycle mutation;
+- no E6 retrieval-observation writes;
+- no MCP registration or write-authority expansion.
+
+#### Targeted evidence — Chunk 1
+
+Candidate:
+- HEAD `a0b15d53ec96b1fd196dbb7778c3c42a853a45af`;
+- tree `9772552df25f67bf9746c2b004f9d7aaa97d1f56`;
+- checkpoint `CP-20261005-60dd993356`.
+
+Evidence:
+- unit/static: **165 passed**;
+- focused E5 PostgreSQL: **3 passed**;
+- E3/E4 retrieval regression: **122 passed**;
+- E1 linkage regression: **19 passed**;
+- critical Ruff: PASS;
+- diff-check: PASS;
+- fresh disposable PostgreSQL, migrations 001–040, isolated `VRES_DATA_DIR`, DB dropped;
+- no local repository mutation.
+
+#### Targeted evidence — Chunk 2
+
+Candidate:
+- HEAD `747997c2dd40ddf551a9bf17726ea573ef805258`;
+- tree `187dea9addde9f97f53908148e59309a85a4e3ea`;
+- explicit Chairman checkpoint `CP-20261005-8e70bf99ac`.
+
+Evidence:
+- unit/static: **166 passed**;
+- focused E5 capability/procedure-history: **5 passed**;
+- E3/E4 retrieval regression: **122 passed**;
+- D set in originally requested mixed file ordering: **24 passed + 1 setup error** because `pg_project` was not discovered for an integration test;
+- same D logical set with integration files collected first: **25 passed / 0 failed**;
+- Ruff: PASS;
+- diff-check: PASS;
+- no skips/warnings.
+
+Chunk-2 collection caveat is retained, not erased: the affected test lives under `tests/integration`, its `pg_project` fixture exists only in `tests/integration/conftest.py`, and the same test passed in the C set and the reordered D set. No E5 behavior assertion failed.
+
+Automatic checkpoint `CP-20261005-bb0d29c4e5` has reason `pre_compact` and the same material Chunk-2 state. Treat it as host compaction bookkeeping, not an intentional second Chairman material checkpoint.
+
+#### Targeted evidence — Chunk 3 / development closure
+
+Final coherent candidate:
+- HEAD `d39fabb22484a664e863c1603e2054d1ef0723c4`;
+- tree `fd00975275a1f8cc697bd4c570f994812e49f3b9`;
+- explicit Chairman checkpoint `CP-20261005-8fe3a4f070`.
+
+Evidence:
+- unit/static A: **235 passed**;
+- critical Ruff: PASS;
+- Chunk-3 diff-check: PASS;
+- focused E5 B: **8 passed**;
+- E3/E4 retrieval C: **122 passed**;
+- D1 integration authority/linkage: **6 passed**;
+- D2 unit/procedure/capability authority: **19 passed**;
+- E4 revocation/retrieval E: **39 passed**;
+- skips/warnings: **0**;
+- worktree remained clean; local Claude made no repository mutation.
+
+Fresh acceptance DB for the Chunk-3 targeted ladder was `vres_e5_c3_3635d6ac64bf_test`; it was dropped afterward. Separate disposable checks proved **40 migrations / latest 040** and `ISOLATED_VRES_CONFIG=PASS` with empty provenance-writer/migration-user configuration.
+
+#### Local PostgreSQL methodology / machine-specific guards
+
+- the database behind `pg_issue163_test_dsn` has historical migration drift and must NEVER be used as E5 acceptance evidence;
+- that handle may be used only as an administrative/server connection to create/drop a brand-new disposable `_test` database;
+- every PostgreSQL acceptance child must use an empty isolated `VRES_DATA_DIR` because this machine's real Vres config names a production provenance-writer role that conflicts with a single-role disposable DB;
+- verify `provenance_writer_user` and `migration_user` are empty before the acceptance suite;
+- never rewrite a migration ledger/digest to make a stale test DB usable.
+
+#### Frozen-contract diff-check waiver
+
+The frozen E5 contract intentionally contains Markdown hard line breaks (exactly two trailing spaces) at lines 3–7, 39 and 52–54. Those bytes are already present in frozen contract commit `a06d328...`.
+
+Therefore:
+- **do not edit the frozen contract** merely to normalize those spaces;
+- baseline→candidate `git diff --check` is explicitly waived ONLY for those nine intentional frozen-contract lines;
+- `git diff --check a06d328... HEAD` must remain clean;
+- baseline→candidate excluding the frozen contract must remain clean;
+- no other diff-check warning is waived.
+
+Durable waiver evidence is recorded on issue #176, comment id `5994173149`.
+
+#### Final local acceptance — CURRENT PENDING BOUNDARY
+
+First final-acceptance attempt was blocked by an inspection-only hold before any shell/test/database work; nothing changed.
+
+A later real user instruction cleared/replaced the hold. On the subsequent attempt:
+- Stage 0 exact branch/HEAD/tree/origin-main/clean/contract/migration checks: PASS;
+- repository-wide critical Ruff: PASS;
+- baseline→candidate diff-check stopped only on the nine frozen-contract Markdown hard breaks;
+- frozen contract was confirmed unchanged since `a06d328...`;
+- post-freeze diff-check was reported clean;
+- full PostgreSQL suite, release gate, wheel smoke and final-local checkpoint were **not yet run in that stopped attempt**.
+
+ChatGPT then issued the explicit formatting waiver and instructed local Claude to continue from Stage 2 after first confirming:
+1. `git diff --check a06d328... HEAD` is clean;
+2. baseline→candidate excluding the frozen contract is clean.
+
+At this documentation seal, the reply from that resumed final-local-acceptance run is **still pending**. Do not assume PASS or FAIL until the user supplies the actual local output.
+
+#### Exact next action
+
+If the pending local final-acceptance output is green:
+1. verify exact candidate remains `d39fabb...` / tree `fd009752...` and clean;
+2. require full fresh PostgreSQL suite result, same-DB migration proof, isolated-config proof, DB-drop proof;
+3. require release gate `PASSED_WITH_EXPLICIT_LIVE_GATES` and candidate-wheel build/install/import-smoke evidence;
+4. require exactly one explicit final-local-acceptance Chairman checkpoint;
+5. ChatGPT creates the E5 PR from the unchanged exact head;
+6. require exact-head PR CI SUCCESS plus release-gate artifact/digest;
+7. only then create the one current-turn protected-validation freeze checkpoint and call `validation_prepare` once;
+8. protected validator must be exactly `vres-os:validator`, Fable/high, no background/nested workers, canonical JSON terminal report;
+9. on clean host-recorded protected PASS: guarded expected-head merge, exact post-main push CI, durable E5 closure, complete E5 Vres task;
+10. only after all of that may E6 begin.
+
+If the pending local output reports any full-suite/release-gate/package failure:
+- STOP;
+- do not create a PR;
+- do not prepare protected validation;
+- classify the exact defect and make only a bounded correction if it is real.
+
+**Do not rerun Chunks 1–3 targeted ladders unless candidate bytes change or a concrete evidence gap is identified.**
