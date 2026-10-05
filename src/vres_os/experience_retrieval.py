@@ -525,6 +525,29 @@ def knowledge_item(row: dict[str, Any], req: dict[str, Any], now: datetime) -> t
     ), None
 
 
+def _bounded_experience_history(value: Any) -> dict[str, Any] | None:
+    """Closed E5 procedure-history shape. Counts/scores/model identity are deliberately not accepted."""
+    if not isinstance(value, dict):
+        return None
+    history = {
+        "validated_success_episode_keys": _strs(value.get("validated_success_episode_keys"), 3),
+        "validated_failure_episode_keys": _strs(value.get("validated_failure_episode_keys"), 3),
+        "failure_episode_keys": _strs(value.get("failure_episode_keys"), 3),
+        # Task-backed feedback is added in the next bounded E5 chunk; keep the frozen public slot empty for now.
+        "feedback": [],
+        "latest_validated_at": (
+            _clean(value["latest_validated_at"], 80)
+            if isinstance(value.get("latest_validated_at"), str)
+            else None
+        ),
+    }
+    if not any(history[name] for name in (
+        "validated_success_episode_keys", "validated_failure_episode_keys", "failure_episode_keys"
+    )) and history["latest_validated_at"] is None:
+        return None
+    return history
+
+
 def procedure_item(row: dict[str, Any], req: dict[str, Any], now: datetime) -> tuple[dict | None, str | None]:
     scope = _scope(row["project_id"], bool(row.get("approved")), req["project_id"])
     if scope is None:
@@ -535,7 +558,7 @@ def procedure_item(row: dict[str, Any], req: dict[str, Any], now: datetime) -> t
         return None, None
     structural_caps = _strs(row.get("capability_keys"))
     structural_evidence = _strs(row.get("experience_evidence"), 10, 160)
-    return _item(
+    item = _item(
         section="accepted_procedures", kind="procedure", memory_key=row["procedure_key"], memory_class="procedural",
         scope=scope, project_id=row["project_id"], authority_class="accepted_procedure", status="active",
         trust_class="unspecified", role="instruction", tier=_TIER_PROCEDURE,
@@ -545,7 +568,11 @@ def procedure_item(row: dict[str, Any], req: dict[str, Any], now: datetime) -> t
         recency=row.get("updated_at"), authoritative=True, ref=f"procedure:{row['procedure_key']}",
         premises=_bounded_premises(row.get("input_contract")),
         cmp_premises=_comparable_premises(row.get("input_contract")),
-    ), None
+    )
+    history = _bounded_experience_history(row.get("experience_history"))
+    if history is not None:
+        item["experience_history"] = history
+    return item, None
 
 
 def decision_item(row: dict[str, Any], req: dict[str, Any], now: datetime) -> tuple[dict | None, str | None]:
