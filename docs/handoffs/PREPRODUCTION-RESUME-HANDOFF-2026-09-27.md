@@ -3665,3 +3665,288 @@ First perform read-only discovery, create/bind the E6 Vres task, draft and freez
 Do not reopen E5 unless accepted bytes change or a concrete regression/evidence gap exists.
 ```
 
+---
+
+# 35. 2026-10-05 #176 E6 contract freeze / Chunk 1 start gate
+
+This is the newest authoritative handoff boundary. It supersedes section #34 for current execution state.
+
+## A. Exact repository boundary
+
+Repository:
+`vosser24/Vres-OS`
+
+Authoritative product main:
+`6af7bddf246e0f628c3e52add9528742e85189ca`
+
+E6 branch:
+`issue-176-e6-observability-utility`
+
+E6 task:
+`TASK-20261005-abb88a1f0e`
+
+Local E6 worktree:
+`C:\Projects\Vres-Issue-176-E6-20261005`
+
+At task creation:
+- branch tracked `origin/issue-176-e6-observability-utility`;
+- HEAD/base was exact accepted main;
+- tree was `97f98e2ad666df014bbc22270cc677aacd65a21f`;
+- worktree was clean;
+- no E6 implementation had started.
+
+## B. Frozen E6 contract
+
+Frozen contract commit:
+**`fe6cfcfe0d87cd6920303242a1d647975aa3bf22`**
+
+Frozen contract tree:
+**`49b017914948eb76fc27c9cbdd550f1d80c12009`**
+
+Parent/base:
+`6af7bddf246e0f628c3e52add9528742e85189ca`
+
+Contract:
+`docs/architecture/EXPERIENCE-INTELLIGENCE-E6-CONTRACT-2026-10-05.md`
+
+Base→freeze delta:
+- one commit;
+- one new contract file;
+- 913 additions;
+- zero deletions;
+- no migration/source/test/hook implementation bytes.
+
+E6 policy:
+`176.e6.v1`
+
+Policy digest:
+`d61f60d31182085748bb613ef3c160274f1a1a5a2384854f36e52b4cdfecc5e5`
+
+Existing E5 retrieval policy digest frozen as baseline:
+`7572cafc632d4f56571adbe5f59baceedf15c56a07d5a3ca35e4b05448a982e9`
+
+Migration target:
+`041_experience_retrieval_observability.sql`
+
+## C. E6 contract decisions
+
+E6 adds retrieval observability and utility evidence without changing E1–E5 memory authority.
+
+New ownership:
+- host-observed successful retrieval event;
+- exact returned memory identity/order;
+- explicit later exact-key reference evidence;
+- immutable paired retrieval-policy replay evidence.
+
+Existing truth owners remain authoritative for:
+- retrieval semantics;
+- task outcome;
+- validation;
+- terminal episodes;
+- procedures;
+- capability proofs;
+- lifecycle/revocation;
+- user authority.
+
+Normal `experience_retrieve` remains:
+- PostgreSQL READ ONLY;
+- public schema `176.e5.v1`;
+- byte-equivalent on unchanged state;
+- free of E6 observation identifiers.
+
+Host observation is post-retrieval only:
+`PostToolUse -> provenance writer -> E6 ledger`.
+
+No raw query, premise value, memory text, transcript, assistant/tool text, prompt, hidden reasoning, path/URI, secret/token, vector or payload may persist in the E6 observability ledger.
+
+Explicit references:
+- assistant public text;
+- assistant tool input;
+- SubagentHandback;
+- exact returned memory key only;
+- no raw inspected text persisted;
+- no reference means `not_observed`, not `unused`.
+
+Utility:
+- dynamic/read-only joins to task, validation and terminal episode evidence;
+- strict time ordering;
+- every public result states `causal_credit='not_established'`;
+- no utility/expertise/success probability score.
+
+Replay:
+- same REPEATABLE READ / READ ONLY snapshot;
+- same hard-gated candidate universe;
+- baseline exact E5 policy;
+- candidate can change only bounded post-gate budgets/max-items/max-bytes/RRF-k;
+- no new ranking signal in v1;
+- no security/authority/lifecycle gate changes;
+- no winner;
+- no activation/promotion.
+
+## D. Host-hook discovery evidence
+
+Current Claude Code hook behavior was checked against the official hook reference before freeze.
+
+Successful `PostToolUse` supplies:
+- `tool_input`;
+- `tool_response`;
+- `tool_use_id`;
+- optional `duration_ms`.
+
+Configured plugin hooks also run inside subagents and receive:
+- `agent_id`;
+- `agent_type`.
+
+This makes post-retrieval host observation possible without adding a retrieval-time write.
+
+## E. Implementation chunks
+
+### Chunk 1 — migration + host retrieval observation
+
+Deliver:
+- migration 041;
+- immutable observation + item ledgers;
+- exact E6 policy row/digest;
+- protected writer function(s);
+- runtime/PUBLIC forgery denial;
+- database-boundary activation;
+- local PostToolUse observer;
+- session/task/agent/work-unit attribution;
+- duration_ms evidence;
+- pack/request/item digests;
+- normal E5 retrieval byte-equivalence.
+
+### Chunk 2 — explicit reference + utility evidence
+
+Deliver:
+- immutable references;
+- exact-key assistant/tool/handback observation;
+- no raw inspected text persistence;
+- latest-eligible-observation attribution;
+- read-only downstream task/validation/episode utility evidence;
+- `not_observed` semantics;
+- no causal overclaim.
+
+### Chunk 3 — paired policy replay
+
+Deliver:
+- same-snapshot candidate universe;
+- bounded candidate policy;
+- immutable replay evidence;
+- deterministic add/remove/reorder/context deltas;
+- no winner/activation/promotion;
+- exact normal-retrieval regression proof.
+
+## F. Exact current gate
+
+Implementation is NOT yet authorized in the local worktree until the local E6 task checkpoints the frozen remote contract.
+
+Next local action:
+
+1. fetch remote E6 branch;
+2. fast-forward only to exact:
+   `fe6cfcfe0d87cd6920303242a1d647975aa3bf22`;
+3. verify tree:
+   `49b017914948eb76fc27c9cbdd550f1d80c12009`;
+4. verify origin branch same;
+5. verify worktree clean;
+6. read the frozen contract;
+7. create exactly one intentional Chairman contract-freeze checkpoint;
+8. checkpoint next action = begin E6 Chunk 1 with targeted red tests first;
+9. return checkpoint/identity to ChatGPT.
+
+Do not:
+- edit the frozen contract;
+- create migration 041 before that checkpoint;
+- start implementation agents before that checkpoint;
+- prepare protected validation now;
+- rerun E5 acceptance;
+- start E7/E8.
+
+## G. Testing methodology
+
+Preserve the successful E5 discipline:
+
+- Python 3.12 on Windows;
+- fresh unique disposable PostgreSQL DB ending exactly `_test`;
+- handle `pg_issue163_test_dsn` only as admin/server connection material;
+- never use or repair the historical drifted DB itself;
+- empty isolated `VRES_DATA_DIR`;
+- `VRES_ALLOW_TEST_DB=1`;
+- prove empty provenance/migration user settings for single-role test DB;
+- migrate exact candidate checkout;
+- capture actual counts, not historical expectations;
+- drop disposable DB after evidence;
+- targeted red -> implementation -> targeted green;
+- no automatic retry after real failures;
+- no duplicate full suite/release gate/protected review without changed bytes or concrete evidence gap.
+
+Because E6 adds hook/runtime packaging, installed-runtime and hook smoke are mandatory at final local acceptance.
+
+## H. Final protected gate
+
+No contract-only protected validation is required before implementation; this matches the established E5 contract-freeze cadence.
+
+Final E6 protected review is mandatory because E6 changes:
+- host-observed provenance writes;
+- database privilege surfaces;
+- telemetry/privacy boundaries;
+- replay evidence.
+
+At final acceptance:
+- current-turn Chairman freeze checkpoint;
+- `validation_prepare` exactly once for complete E6 scope;
+- exact `vres-os:validator`;
+- no model override;
+- host Fable/high;
+- complete canonical JSON;
+- every required check passed;
+- zero `not_run`;
+- no merge before PASS.
+
+## I. Fresh-chat resume prompt
+
+```text
+Resume Vres-OS #176 E6 from the newest canonical handoff.
+
+Repository:
+vosser24/Vres-OS
+
+Authoritative product main:
+6af7bddf246e0f628c3e52add9528742e85189ca
+
+E6 branch:
+issue-176-e6-observability-utility
+
+E6 task:
+TASK-20261005-abb88a1f0e
+
+Frozen E6 contract commit:
+fe6cfcfe0d87cd6920303242a1d647975aa3bf22
+
+Frozen E6 contract tree:
+49b017914948eb76fc27c9cbdd550f1d80c12009
+
+Contract:
+docs/architecture/EXPERIENCE-INTELLIGENCE-E6-CONTRACT-2026-10-05.md
+
+E6 policy:
+176.e6.v1
+
+Migration target:
+041_experience_retrieval_observability.sql
+
+No implementation has started.
+
+Next:
+fast-forward the local E6 worktree to exact frozen contract commit,
+verify exact branch/head/tree/origin/clean state,
+read the contract,
+create one Chairman contract-freeze checkpoint,
+then return evidence to ChatGPT.
+
+Do not edit the frozen contract.
+Do not start migration/tests/code before that checkpoint.
+Do not prepare protected validation yet.
+```
+
