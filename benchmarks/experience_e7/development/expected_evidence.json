@@ -1,0 +1,466 @@
+{
+  "cases": {
+    "dev_abstain_warranty": {
+      "irrelevant": [
+        "dev_a",
+        "dev_b"
+      ],
+      "must_abstain": true
+    },
+    "dev_asof_threshold": {
+      "conflict_pair": [
+        [
+          "dev_a",
+          "dev_b"
+        ]
+      ],
+      "irrelevant": [
+        "dev_b",
+        "dev_pad"
+      ],
+      "relevant": [
+        "dev_a"
+      ]
+    },
+    "dev_capability_precedent": {
+      "irrelevant": [
+        "dev_o"
+      ],
+      "relevant": [
+        "dev_e"
+      ]
+    },
+    "dev_challenged_rule": {
+      "acceptable": [
+        "dev_c"
+      ],
+      "conflict_pair": [
+        [
+          "dev_a",
+          "dev_b"
+        ]
+      ],
+      "relevant": [
+        "dev_b"
+      ],
+      "stale": [
+        "dev_a"
+      ]
+    },
+    "dev_conflict_records": {
+      "conflict_pair": [
+        [
+          "dev_a",
+          "dev_b"
+        ]
+      ],
+      "relevant": [
+        "dev_a",
+        "dev_b"
+      ]
+    },
+    "dev_current_threshold": {
+      "conflict_pair": [
+        [
+          "dev_a",
+          "dev_b"
+        ]
+      ],
+      "relevant": [
+        "dev_b"
+      ],
+      "stale": [
+        "dev_a"
+      ]
+    },
+    "dev_dynamic_export": {
+      "conflict_pair": [
+        [
+          "dev_a",
+          "dev_b"
+        ]
+      ],
+      "faithfulness": {
+        "checks": [
+          "temporal_update",
+          "conflict_recognition",
+          "prior_memory_intact"
+        ],
+        "claims": [
+          {
+            "alias": "dev_b",
+            "sources": [
+              "dev_src"
+            ],
+            "support": "supported",
+            "text": "The nightly stock export starts at 04:30 UTC."
+          }
+        ],
+        "protected": [
+          "dev_d"
+        ],
+        "source_facts": [
+          {
+            "alias": "dev_src",
+            "text": "The nightly stock export starts at 04:30 UTC."
+          }
+        ],
+        "temporal_updates": [
+          {
+            "new": "dev_b",
+            "old": "dev_a"
+          }
+        ]
+      },
+      "irrelevant": [
+        "dev_d"
+      ],
+      "relevant": [
+        "dev_b"
+      ],
+      "stale": [
+        "dev_a"
+      ]
+    },
+    "dev_false_premise_feed": {
+      "conflict_pair": [
+        [
+          "dev_a",
+          "dev_p"
+        ]
+      ],
+      "irrelevant": [
+        "dev_n"
+      ],
+      "premise": [
+        "dev_p"
+      ],
+      "relevant": [
+        "dev_a"
+      ]
+    },
+    "dev_gotcha_delimiter": {
+      "acceptable": [
+        "dev_e1",
+        "dev_e2"
+      ],
+      "irrelevant": [
+        "dev_n"
+      ],
+      "relevant": [
+        "dev_x"
+      ]
+    },
+    "dev_memory_not_needed": {
+      "irrelevant": [
+        "dev_a"
+      ],
+      "memory_not_needed": true
+    },
+    "dev_near_duplicate": {
+      "acceptable": [
+        "dev_b"
+      ],
+      "faithfulness": {
+        "checks": [
+          "dedup"
+        ],
+        "dedup": {
+          "distinct": [
+            [
+              "dev_a",
+              "dev_c"
+            ]
+          ],
+          "merge": [
+            [
+              "dev_a",
+              "dev_b"
+            ]
+          ]
+        }
+      },
+      "irrelevant": [
+        "dev_c"
+      ],
+      "near_duplicate_of": {
+        "dev_b": "dev_a"
+      },
+      "relevant": [
+        "dev_a"
+      ]
+    },
+    "dev_noisy_history": {
+      "irrelevant": [
+        "dev_d1",
+        "dev_d2",
+        "dev_d3",
+        "dev_d4",
+        "dev_d5"
+      ],
+      "relevant": [
+        "dev_a"
+      ]
+    },
+    "dev_participation": {
+      "irrelevant": [
+        "dev_seen"
+      ],
+      "relevant": [
+        "dev_own"
+      ]
+    },
+    "dev_procedure_reuse": {
+      "irrelevant": [
+        "dev_n"
+      ],
+      "outcome": {
+        "criteria": [
+          {
+            "action": "activate_after_approval",
+            "id": "approval_first",
+            "kind": "step_action_equals",
+            "step": "activation"
+          },
+          {
+            "aliases": [
+              "dev_p"
+            ],
+            "id": "uses_procedure",
+            "kind": "required_fact_use"
+          }
+        ]
+      },
+      "relevant": [
+        "dev_p"
+      ]
+    },
+    "dev_recurring_priceexport": {
+      "acceptable": [
+        "dev_e1",
+        "dev_e2"
+      ],
+      "faithfulness": {
+        "checks": [
+          "dedup",
+          "prior_memory_intact"
+        ],
+        "claims": [
+          {
+            "alias": "dev_x",
+            "sources": [
+              "dev_e1",
+              "dev_e2"
+            ],
+            "support": "supported",
+            "text": "Freeze the promo calendar, validate the template, then upload the batch."
+          }
+        ],
+        "dedup": {
+          "distinct": [
+            [
+              "dev_x",
+              "dev_n"
+            ]
+          ],
+          "merge": [
+            [
+              "dev_e1",
+              "dev_e2"
+            ]
+          ]
+        },
+        "protected": [
+          "dev_e1",
+          "dev_e2"
+        ]
+      },
+      "irrelevant": [
+        "dev_n"
+      ],
+      "near_duplicate_of": {
+        "dev_e2": "dev_e1"
+      },
+      "relevant": [
+        "dev_x"
+      ]
+    },
+    "dev_recurring_recount": {
+      "acceptable": [
+        "dev_e1",
+        "dev_e2"
+      ],
+      "irrelevant": [
+        "dev_e3"
+      ],
+      "relevant": [
+        "dev_x"
+      ]
+    },
+    "dev_scope_trap": {
+      "irrelevant": [
+        "dev_b"
+      ],
+      "relevant": [
+        "dev_a"
+      ]
+    },
+    "dev_source_revoked": {
+      "conflict_pair": [
+        [
+          "dev_k",
+          "dev_alt"
+        ]
+      ],
+      "relevant": [
+        "dev_alt"
+      ],
+      "stale": [
+        "dev_s",
+        "dev_k"
+      ]
+    },
+    "dev_static_owner": {
+      "acceptable": [
+        "dev_b"
+      ],
+      "irrelevant": [
+        "dev_c"
+      ],
+      "relevant": [
+        "dev_a"
+      ]
+    },
+    "dev_static_port": {
+      "irrelevant": [
+        "dev_b",
+        "dev_c"
+      ],
+      "relevant": [
+        "dev_a"
+      ]
+    },
+    "dev_temporal_refresh": {
+      "acceptable": [
+        "dev_src"
+      ],
+      "conflict_pair": [
+        [
+          "dev_a",
+          "dev_b"
+        ]
+      ],
+      "faithfulness": {
+        "checks": [
+          "temporal_update",
+          "conflict_recognition"
+        ],
+        "claims": [
+          {
+            "alias": "dev_b",
+            "sources": [
+              "dev_src"
+            ],
+            "support": "supported",
+            "text": "Oversize parcels stay with the pallet carrier under the renewed contract."
+          }
+        ],
+        "source_facts": [
+          {
+            "alias": "dev_src",
+            "text": "The renewed contract keeps oversize parcels with the pallet carrier."
+          }
+        ],
+        "temporal_updates": [
+          {
+            "new": "dev_b",
+            "old": "dev_a"
+          }
+        ]
+      },
+      "relevant": [
+        "dev_b"
+      ],
+      "stale": [
+        "dev_a"
+      ]
+    },
+    "dev_trajectory_failure": {
+      "acceptable": [
+        "dev_e"
+      ],
+      "irrelevant": [
+        "dev_n"
+      ],
+      "outcome": {
+        "criteria": [
+          {
+            "action": "email_copy",
+            "id": "avoid_email",
+            "kind": "forbidden_action",
+            "step": "choose_channel"
+          },
+          {
+            "aliases": [
+              "dev_x"
+            ],
+            "id": "uses_precedent",
+            "kind": "required_fact_use"
+          }
+        ]
+      },
+      "relevant": [
+        "dev_x"
+      ]
+    },
+    "dev_trajectory_success": {
+      "acceptable": [
+        "dev_e"
+      ],
+      "irrelevant": [
+        "dev_n"
+      ],
+      "outcome": {
+        "criteria": [
+          {
+            "action": "upload_batch",
+            "id": "route",
+            "kind": "step_action_equals",
+            "step": "choose_route"
+          },
+          {
+            "action": "skip_checks",
+            "id": "no_skip",
+            "kind": "forbidden_action",
+            "step": "review"
+          },
+          {
+            "aliases": [
+              "dev_x"
+            ],
+            "id": "uses_precedent",
+            "kind": "required_fact_use"
+          }
+        ]
+      },
+      "relevant": [
+        "dev_x"
+      ]
+    },
+    "dev_user_correction": {
+      "conflict_pair": [
+        [
+          "dev_a",
+          "dev_b"
+        ]
+      ],
+      "relevant": [
+        "dev_b"
+      ],
+      "stale": [
+        "dev_a"
+      ]
+    }
+  },
+  "schema_version": 1
+}

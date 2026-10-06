@@ -37,6 +37,7 @@ SCHEMA_VERSIONS = {
     "evidence_pack": 1,
 }
 SPLITS = ("development", "heldout", "adversarial")
+HELDOUT_STATUSES = ("not_authored", "sealed")
 DEVELOPMENT_SPLITS = ("development", "adversarial")
 ALIAS_PREFIX = {"development": "dev_", "heldout": "held_", "adversarial": "adv_"}
 BUNDLE_FILES = ("corpus.jsonl", "expected_evidence.json")
@@ -64,6 +65,15 @@ _SCORING_KEYS = {
     "labels",
     "threshold",
     "thresholds",
+    "outcome",
+    "faithfulness",
+    "security",
+    "claims",
+    "source_facts",
+    "criteria",
+    "assertions",
+    "forbidden_actions",
+    "success_criteria",
 }
 _PROHIBITED_PACK_KEYS = {
     "id",
@@ -178,6 +188,18 @@ def loads_strict(text: str) -> Any:
         raise BenchmarkError(f"malformed JSON: {exc}") from exc
 
 
+def render_json(value: Any) -> bytes:
+    """Canonical authored form of a JSON asset: sorted keys, 2-space indent, LF, final newline."""
+    _check_identity_value(value)
+    text = json.dumps(value, sort_keys=True, indent=2, ensure_ascii=False, allow_nan=False)
+    return (text + "\n").encode("utf-8")
+
+
+def render_jsonl(cases: list[dict]) -> bytes:
+    """Canonical authored corpus: one canonical-JSON case per line, LF, final newline."""
+    return b"".join(canonical_bytes(c) + b"\n" for c in cases)
+
+
 def corpus_digest(cases: list[dict]) -> str:
     return sha256_hex(b"".join(canonical_bytes(c) + b"\n" for c in cases))
 
@@ -248,17 +270,97 @@ def _alias_list(value: Any, declared: set[str], what: str) -> list[str]:
 # ---- scoring configuration (shape only; no metric semantics, no thresholds) ---
 
 
+MODES = ("memory_disabled", "raw_refind", "current_vres", "candidate_hybrid")
+_ESTIMATOR_ID = "utf8_bytes_ceil_div"
+_ROTATION = "cyclic_latin_square"
+_EQUIVALENCE = "nfc_collapse_whitespace_exact"
+_SCORING_SECTIONS = {
+    "schema_version",
+    "retrieval",
+    "evidence",
+    "latency",
+    "time",
+    "proxy_worker",
+    "display",
+    "aggregation",
+    "current_vres",
+    "faithfulness",
+}
+
+
+def _exact(value: Any, expected: Any, field: str) -> None:
+    if value != expected or type(value) is not type(expected):
+        raise BenchmarkError(f"{field} must be exactly {expected!r}")
+
+
 def validate_scoring_config(cfg: Any) -> dict:
-    _closed(cfg, {"schema_version", "latency", "evidence", "time"}, set(), "scoring config")
+    """Closed scoring.json v1: configuration parameters only. No thresholds, no metric values."""
+    _closed(cfg, _SCORING_SECTIONS, set(), "scoring config")
     _schema_version(cfg, "scoring")
-    latency = _closed(cfg["latency"], {"repeats"}, set(), "scoring latency")
+    retrieval = _closed(cfg["retrieval"], {"k_values"}, set(), "scoring retrieval")
+    ks = retrieval["k_values"]
+    if (
+        not isinstance(ks, list)
+        or not ks
+        or any(not _is_pos_int(k) for k in ks)
+        or any(a >= b for a, b in zip(ks, ks[1:], strict=False))
+    ):
+        raise BenchmarkError("retrieval.k_values must be a non-empty strictly increasing list")
+    evidence = _closed(
+        cfg["evidence"],
+        {"content_max_code_points", "pack_budget_tokens", "token_estimator"},
+        set(),
+        "scoring evidence",
+    )
+    if not _is_pos_int(evidence["content_max_code_points"]):
+        raise BenchmarkError("evidence.content_max_code_points must be a positive integer")
+    if not _is_pos_int(evidence["pack_budget_tokens"]):
+        raise BenchmarkError("evidence.pack_budget_tokens must be a positive integer")
+    est = _closed(
+        evidence["token_estimator"],
+        {"id", "version", "bytes_per_token"},
+        set(),
+        "scoring token_estimator",
+    )
+    if est["id"] != _ESTIMATOR_ID or not _is_pos_int(est["version"]):
+        raise BenchmarkError(f"evidence.token_estimator must be id {_ESTIMATOR_ID!r}, version > 0")
+    if not _is_pos_int(est["bytes_per_token"]):
+        raise BenchmarkError("evidence.token_estimator.bytes_per_token must be a positive integer")
+    latency = _closed(
+        cfg["latency"], {"repeats", "mode_order", "rotation"}, set(), "scoring latency"
+    )
     repeats = latency["repeats"]
     if type(repeats) is not int or repeats <= 0 or repeats % 4:
         raise BenchmarkError("latency.repeats must be a positive integer divisible by 4")
-    evidence = _closed(cfg["evidence"], {"content_max_code_points"}, set(), "scoring evidence")
-    if not _is_pos_int(evidence["content_max_code_points"]):
-        raise BenchmarkError("evidence.content_max_code_points must be a positive integer")
+    order = latency["mode_order"]
+    if not isinstance(order, list) or sorted(order, key=str) != sorted(MODES):
+        raise BenchmarkError(f"latency.mode_order must be a permutation of {list(MODES)}")
+    _exact(latency["rotation"], _ROTATION, "latency.rotation")
     _validate_time_config(cfg["time"])
+    worker = _closed(cfg["proxy_worker"], {"version", "max_trace_steps"}, set(), "proxy_worker")
+    if not _is_pos_int(worker["version"]):
+        raise BenchmarkError("proxy_worker.version must be a positive integer")
+    if not _is_pos_int(worker["max_trace_steps"]):
+        raise BenchmarkError("proxy_worker.max_trace_steps must be a positive integer")
+    display = _closed(cfg["display"], {"decimal_scale"}, set(), "scoring display")
+    scale = display["decimal_scale"]
+    if type(scale) is not int or not 0 <= scale <= 12:
+        raise BenchmarkError("display.decimal_scale must be an integer 0..12")
+    agg = _closed(cfg["aggregation"], {"reported", "per_split"}, set(), "scoring aggregation")
+    _exact(agg["reported"], ["micro", "macro"], "aggregation.reported")
+    _exact(agg["per_split"], True, "aggregation.per_split")
+    cur = _closed(
+        cfg["current_vres"],
+        {"merge_order", "interleave", "tie_break", "collapse_duplicates"},
+        set(),
+        "scoring current_vres",
+    )
+    _exact(cur["merge_order"], ["knowledge", "procedure"], "current_vres.merge_order")
+    _exact(cur["interleave"], "one_for_one", "current_vres.interleave")
+    _exact(cur["tie_break"], "alias_ascending", "current_vres.tie_break")
+    _exact(cur["collapse_duplicates"], True, "current_vres.collapse_duplicates")
+    faith = _closed(cfg["faithfulness"], {"equivalence"}, set(), "scoring faithfulness")
+    _exact(faith["equivalence"], _EQUIVALENCE, "faithfulness.equivalence")
     _check_identity_value(cfg)
     return cfg
 
@@ -307,10 +409,191 @@ def _scan_scoring_keys(value: Any) -> None:
             _scan_scoring_keys(inner)
 
 
+def _text(value: Any, field: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise BenchmarkError(f"{field} must be non-empty text")
+    return value
+
+
+def _id_arg(value: Any, field: str) -> str:
+    if not isinstance(value, str) or not _ID.fullmatch(value) or value.startswith("unmapped"):
+        raise BenchmarkError(f"{field} must be a lowercase identifier")
+    return value
+
+
+def _enum(values: tuple[str, ...]):
+    def check(value: Any, field: str) -> str:
+        if not isinstance(value, str) or value not in values:
+            raise BenchmarkError(f"{field} must be one of {list(values)}")
+        return value
+
+    return check
+
+
+def _nonneg(value: Any, field: str) -> int:
+    if not _is_nonneg_int(value):
+        raise BenchmarkError(f"{field} must be a non-negative integer")
+    return value
+
+
+# Closed timeline vocabulary: only class (a) and (b) operations (Chunk 0 findings, 0H). Class (c)
+# time values (updated_at, last_verified_at, valid_from, created_at) and runtime keys cannot be
+# expressed. `alias` is the case-local identity the step creates or acts on.
+_AUTHORITY = _enum(("trusted", "untrusted"))
+_PARTICIPATION = _enum(("participated", "observed"))
+_RESULT = _enum(("success", "failure"))
+_POLARITY = _enum(("positive", "negative"))
+_OPERATIONS: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {
+    "source_add": (
+        {"text": _text},
+        {"title": _text, "project": _id_arg, "lineage": _id_arg, "authority": _AUTHORITY},
+    ),
+    "knowledge_propose": (
+        {"statement": _text},
+        {
+            "title": _text,
+            "project": _id_arg,
+            "lineage": _id_arg,
+            "authority": _AUTHORITY,
+            "capability": _id_arg,
+        },
+    ),
+    "episode_capture": (
+        {"summary": _text, "result": _RESULT},
+        {
+            "project": _id_arg,
+            "lineage": _id_arg,
+            "participation": _PARTICIPATION,
+            "capability": _id_arg,
+        },
+    ),
+    "experience_consolidate": (
+        {
+            "polarity": _POLARITY,
+            "trigger": _text,
+            "subject": _text,
+            "episodes": "aliases",
+            "quote": _text,
+        },
+        {},
+    ),
+    "procedure_accept": (
+        {"name": _text, "method": _text},
+        {
+            "description": _text,
+            "invariants": "texts",
+            "project": _id_arg,
+            "lineage": _id_arg,
+            "capability": _id_arg,
+        },
+    ),
+    "knowledge_supersede": ({"supersedes": "alias"}, {}),
+    "lifecycle_retire": ({}, {"reason": _text}),
+    "lifecycle_reinstate": ({}, {"reason": _text}),
+    "lifecycle_challenge": ({}, {"reason": _text}),
+    "lifecycle_supersede": ({"supersedes": "alias"}, {"reason": _text}),
+    "lifecycle_refresh": ({"review_after_t": _nonneg}, {}),
+    "source_revoke": ({}, {"reason": _text}),
+}
+
+
+def _validate_step_args(step: dict, declared: set[str]) -> None:
+    op = step["op"]
+    required, optional = _OPERATIONS[op]
+    args = step.get("args", {})
+    if not isinstance(args, dict):
+        raise BenchmarkError("timeline args must be an object")
+    _closed(args, set(required), set(optional), f"{op} args")
+    for name, value in args.items():
+        check = required.get(name, optional.get(name))
+        field = f"{op} arg {name!r}"
+        if check == "alias":
+            if not isinstance(value, str) or value not in declared:
+                raise BenchmarkError(f"{field} references unknown alias {value!r}")
+            if value == step["alias"]:
+                raise BenchmarkError(f"{field} cannot reference itself")
+        elif check == "aliases":
+            if not isinstance(value, list) or not value:
+                raise BenchmarkError(f"{field} must be a non-empty alias list")
+            _alias_list(value, declared, field)
+        elif check == "texts":
+            if not isinstance(value, list) or any(
+                not isinstance(v, str) or not v.strip() for v in value
+            ):
+                raise BenchmarkError(f"{field} must be a list of non-empty text")
+        else:
+            check(value, field)
+
+
+def _validate_request(req: Any) -> None:
+    _closed(
+        req,
+        set(),
+        {
+            "project",
+            "temporal_intent",
+            "as_of_t",
+            "declared_premises",
+            "capability_keys",
+            "task_family",
+        },
+        "request",
+    )
+    for name in ("project", "task_family"):
+        if name in req:
+            _id_arg(req[name], f"request.{name}")
+    if "temporal_intent" in req:
+        _enum(("current", "historical"))(req["temporal_intent"], "request.temporal_intent")
+    if "as_of_t" in req:
+        _nonneg(req["as_of_t"], "request.as_of_t")
+    for name, check in (("declared_premises", _text), ("capability_keys", _id_arg)):
+        if name in req:
+            if not isinstance(req[name], list):
+                raise BenchmarkError(f"request.{name} must be a list")
+            for item in req[name]:
+                check(item, f"request.{name} item")
+
+
+def _validate_task(task: Any) -> dict[str, set[str]]:
+    """Public task template for the proxy worker. Returns {step: actions} for cross-checks."""
+    _closed(task, {"template", "inputs", "steps"}, set(), "task")
+    _id_arg(task["template"], "task.template")
+    inputs = task["inputs"]
+    if not isinstance(inputs, dict) or any(
+        not isinstance(v, (str, int, bool)) for v in inputs.values()
+    ):
+        raise BenchmarkError("task.inputs must be a flat object of text, integer or boolean values")
+    for key in inputs:
+        _id_arg(key, "task.inputs key")
+    steps = task["steps"]
+    if not isinstance(steps, list) or not steps:
+        raise BenchmarkError("task.steps must be a non-empty list")
+    out: dict[str, set[str]] = {}
+    for entry in steps:
+        _closed(entry, {"step", "actions", "retry_limit", "may_abstain"}, set(), "task step")
+        name = _id_arg(entry["step"], "task step name")
+        if name in out:
+            raise BenchmarkError(f"task has duplicate step {name!r}")
+        actions = entry["actions"]
+        if not isinstance(actions, list) or len(actions) < 2 or len(set(actions)) != len(actions):
+            raise BenchmarkError(f"task step {name} actions must be 2+ distinct identifiers")
+        for action in actions:
+            _id_arg(action, f"task step {name} action")
+        if not _is_nonneg_int(entry["retry_limit"]):
+            raise BenchmarkError(f"task step {name} retry_limit must be a non-negative integer")
+        if type(entry["may_abstain"]) is not bool:
+            raise BenchmarkError(f"task step {name} may_abstain must be a boolean")
+        out[name] = set(actions)
+    return out
+
+
 def _validate_case(case: Any, split: str) -> dict:
     _scan_scoring_keys(case)
     _closed(
-        case, {"schema_version", "case_id", "category", "query", "aliases"}, {"timeline"}, "case"
+        case,
+        {"schema_version", "case_id", "category", "query", "aliases"},
+        {"timeline", "request", "task"},
+        "case",
     )
     _schema_version(case, "corpus")
     if not isinstance(case["case_id"], str) or not _ID.fullmatch(case["case_id"]):
@@ -339,12 +622,17 @@ def _validate_case(case: Any, split: str) -> dict:
         if step["t"] <= last_t:
             raise BenchmarkError("timeline t must be strictly increasing within a case")
         last_t = step["t"]
-        if not isinstance(step["op"], str) or not step["op"]:
-            raise BenchmarkError("timeline op must be non-empty text")
-        if "alias" in step and step["alias"] not in seen:
+        if step["op"] not in _OPERATIONS:
+            raise BenchmarkError(f"unknown timeline op {step['op']!r}")
+        if "alias" not in step:
+            raise BenchmarkError(f"timeline op {step['op']} requires an alias")
+        if step["alias"] not in seen:
             raise BenchmarkError(f"timeline references unknown alias {step['alias']!r}")
-        if "args" in step and not isinstance(step["args"], dict):
-            raise BenchmarkError("timeline args must be an object")
+        _validate_step_args(step, seen)
+    if "request" in case:
+        _validate_request(case["request"])
+    if "task" in case:
+        _validate_task(case["task"])
     return case
 
 
@@ -394,6 +682,184 @@ def _validate_near_duplicates(mapping: Any, declared: set[str]) -> None:
             )
 
 
+_CRITERION_KINDS = {
+    "step_action_equals": {"step", "action"},
+    "forbidden_action": {"step", "action"},
+    "required_fact_use": {"aliases"},
+}
+
+
+def _validate_outcome(outcome: Any, case: dict, aliases: set[str]) -> None:
+    """Private outcome criteria, scored after the proxy worker ran on public input only."""
+    case_id = case["case_id"]
+    if "task" not in case:
+        raise BenchmarkError(f"{case_id} has outcome criteria but the case has no task")
+    steps = _validate_task(case["task"])
+    _closed(outcome, {"criteria"}, set(), f"{case_id}.outcome")
+    criteria = outcome["criteria"]
+    if not isinstance(criteria, list) or not criteria:
+        raise BenchmarkError(f"{case_id}.outcome criteria must be a non-empty list")
+    seen: set[str] = set()
+    for crit in criteria:
+        if not isinstance(crit, dict) or crit.get("kind") not in _CRITERION_KINDS:
+            raise BenchmarkError(f"{case_id}.outcome criterion has an unknown kind")
+        _closed(crit, {"id", "kind", *_CRITERION_KINDS[crit["kind"]]}, set(), "outcome criterion")
+        _id_arg(crit["id"], "outcome criterion id")
+        if crit["id"] in seen:
+            raise BenchmarkError(f"{case_id}.outcome has duplicate criterion id {crit['id']!r}")
+        seen.add(crit["id"])
+        if crit["kind"] == "required_fact_use":
+            if not isinstance(crit["aliases"], list) or not crit["aliases"]:
+                raise BenchmarkError(f"{case_id}.outcome required_fact_use aliases required")
+            _alias_list(crit["aliases"], aliases, f"{case_id}.outcome aliases")
+            continue
+        if crit["step"] not in steps:
+            raise BenchmarkError(f"{case_id}.outcome criterion has unknown step {crit['step']!r}")
+        if crit["action"] not in steps[crit["step"]]:
+            raise BenchmarkError(
+                f"{case_id}.outcome criterion has unknown action {crit['action']!r}"
+            )
+
+
+_FAITHFULNESS_CHECKS = ("dedup", "temporal_update", "prior_memory_intact", "conflict_recognition")
+_CHECK_PAYLOAD = {
+    "dedup": "dedup",
+    "temporal_update": "temporal_updates",
+    "prior_memory_intact": "protected",
+}
+_SUPPORT = ("supported", "unsupported")
+
+
+def _unique_text_alias_rows(rows: Any, aliases: set[str], what: str, extra: set[str]) -> list:
+    if not isinstance(rows, list):
+        raise BenchmarkError(f"{what} must be a list")
+    seen: set[str] = set()
+    for row in rows:
+        _closed(row, {"alias", "text", *extra}, set(), what)
+        if not isinstance(row["alias"], str) or row["alias"] not in aliases:
+            raise BenchmarkError(f"{what} references unknown alias {row['alias']!r}")
+        if row["alias"] in seen:
+            raise BenchmarkError(f"{what} has duplicate alias {row['alias']!r}")
+        seen.add(row["alias"])
+        _text(row["text"], f"{what} text")
+    return rows
+
+
+def _validate_faithfulness(faith: Any, entry: dict, aliases: set[str], case_id: str) -> None:
+    """Operation-level faithfulness expectations; equivalence is named in scoring.json."""
+    what = f"{case_id}.faithfulness"
+    _closed(
+        faith,
+        set(),
+        {"claims", "source_facts", "checks", "dedup", "temporal_updates", "protected"},
+        what,
+    )
+    if not faith:
+        raise BenchmarkError(f"{what} must not be empty")
+    for row in _unique_text_alias_rows(
+        faith.get("claims", []), aliases, f"{what}.claims", {"support", "sources"}
+    ):
+        if row["support"] not in _SUPPORT:
+            raise BenchmarkError(f"{what}.claims support must be one of {list(_SUPPORT)}")
+        _alias_list(row["sources"], aliases, f"{what}.claims sources")
+        if (row["support"] == "supported") != bool(row["sources"]):
+            raise BenchmarkError(f"{what}.claims sources must be non-empty iff supported")
+    _unique_text_alias_rows(faith.get("source_facts", []), aliases, f"{what}.source_facts", set())
+    checks = faith.get("checks", [])
+    if not isinstance(checks, list):
+        raise BenchmarkError(f"{what}.checks must be a list")
+    for check in checks:
+        if check not in _FAITHFULNESS_CHECKS:
+            raise BenchmarkError(f"{what} has unknown check {check!r}")
+    if len(set(checks)) != len(checks):
+        raise BenchmarkError(f"{what}.checks has duplicate check")
+    for check, key in _CHECK_PAYLOAD.items():
+        if check in checks and key not in faith:
+            raise BenchmarkError(f"{what} check {check!r} requires {key}")
+        if key in faith and check not in checks:
+            raise BenchmarkError(f"{what} has {key} without check {check!r}")
+    if "conflict_recognition" in checks and not entry.get("conflict_pair"):
+        raise BenchmarkError(f"{what} check conflict_recognition requires conflict_pair")
+    if "dedup" in faith:
+        dedup = _closed(faith["dedup"], {"merge", "distinct"}, set(), f"{what}.dedup")
+        if not dedup["merge"] and not dedup["distinct"]:
+            raise BenchmarkError(f"{what}.dedup needs at least one merge or distinct group")
+        for group in (*dedup["merge"], *dedup["distinct"]):
+            if not isinstance(group, list) or len(group) < 2:
+                raise BenchmarkError(f"{what}.dedup groups need at least two aliases")
+            _alias_list(group, aliases, f"{what}.dedup")
+    if "temporal_updates" in faith:
+        updates = faith["temporal_updates"]
+        if not isinstance(updates, list) or not updates:
+            raise BenchmarkError(f"{what}.temporal_updates must be a non-empty list")
+        for upd in updates:
+            _closed(upd, {"new", "old"}, set(), f"{what}.temporal_updates")
+            _alias_list(
+                [upd["new"], upd["old"]] if upd["new"] != upd["old"] else [upd["new"]],
+                aliases,
+                f"{what}.temporal_updates",
+            )
+            if upd["new"] == upd["old"]:
+                raise BenchmarkError(f"{what}.temporal_updates entry updates itself")
+    if "protected" in faith:
+        protected = faith["protected"]
+        if not isinstance(protected, list) or not protected:
+            raise BenchmarkError(f"{what}.protected must be a non-empty alias list")
+        _alias_list(protected, aliases, f"{what}.protected")
+
+
+SECURITY_ASSERTIONS = (
+    "no_durable_instruction_from_untrusted_doc",
+    "no_poisoned_trajectory_promotion",
+    "no_injection_after_context_reset",
+    "no_cross_project_retrieval",
+    "no_authority_from_external_claim",
+    "no_poisoned_procedure_accept",
+    "no_secret_persistence",
+    "revoked_source_not_retrieved",
+    "no_lexical_or_embedding_poison_rank",
+    "trusted_outranks_untrusted_conflict",
+    "second_user_isolation",
+    "burst_fails_closed",
+    "varied_poison_single_lineage",
+    "diversity_is_lineage",
+    "recurrence_cannot_raise_authority",
+    "frequency_is_not_trust",
+    "participation_distinct_from_observation",
+    "challenge_flags_without_mutation",
+    "retrieval_no_silent_rewrite",
+)
+_SECURITY_LISTS = ("must_not_persist", "must_not_retrieve", "must_not_promote")
+
+
+def _validate_security(sec: Any, aliases: set[str], case_id: str) -> None:
+    what = f"{case_id}.security"
+    _closed(
+        sec, {"assertions"}, {*_SECURITY_LISTS, "lineage_groups", "not_applicable_reason"}, what
+    )
+    assertions = sec["assertions"]
+    if not isinstance(assertions, list) or not assertions:
+        raise BenchmarkError(f"{what}.assertions must be a non-empty list")
+    for assertion in assertions:
+        if assertion not in SECURITY_ASSERTIONS:
+            raise BenchmarkError(f"{what} has unknown assertion {assertion!r}")
+    if len(set(assertions)) != len(assertions):
+        raise BenchmarkError(f"{what}.assertions has duplicate assertion")
+    for key in _SECURITY_LISTS:
+        if key in sec:
+            _alias_list(sec[key], aliases, f"{what}.{key}")
+    if "lineage_groups" in sec:
+        groups = sec["lineage_groups"]
+        if not isinstance(groups, list) or any(not isinstance(g, list) or not g for g in groups):
+            raise BenchmarkError(f"{what}.lineage_groups must be non-empty alias groups")
+        flat = [alias for group in groups for alias in group]
+        if len(set(flat)) != len(flat):
+            raise BenchmarkError(f"{what}.lineage_groups groups must be disjoint")
+        _alias_list(flat, aliases, f"{what}.lineage_groups")
+    if "not_applicable_reason" in sec:
+        _text(sec["not_applicable_reason"], f"{what}.not_applicable_reason")
+
+
 def parse_expected(normalized: bytes, cases: list[dict]) -> dict[str, dict]:
     parsed = loads_strict(normalized.decode("utf-8"))
     _closed(parsed, {"schema_version", "cases"}, set(), "expected evidence")
@@ -401,15 +867,16 @@ def parse_expected(normalized: bytes, cases: list[dict]) -> dict[str, dict]:
     entries = parsed["cases"]
     if not isinstance(entries, dict):
         raise BenchmarkError("expected evidence cases must be an object")
-    declared = {c["case_id"]: set(c["aliases"]) for c in cases}
-    unknown = set(entries) - set(declared)
+    by_id = {c["case_id"]: c for c in cases}
+    unknown = set(entries) - set(by_id)
     if unknown:
         raise BenchmarkError(f"expected evidence references unknown case(s) {sorted(unknown)}")
-    absent = set(declared) - set(entries)
+    absent = set(by_id) - set(entries)
     if absent:
         raise BenchmarkError(f"expected evidence missing case(s) {sorted(absent)}")
     for case_id, entry in entries.items():
-        aliases = declared[case_id]
+        case = by_id[case_id]
+        aliases = set(case["aliases"])
         _closed(
             entry,
             set(),
@@ -419,6 +886,9 @@ def parse_expected(normalized: bytes, cases: list[dict]) -> dict[str, dict]:
                 "must_abstain",
                 "near_duplicate_of",
                 "memory_not_needed",
+                "outcome",
+                "faithfulness",
+                "security",
             },
             f"expected evidence for {case_id}",
         )
@@ -435,6 +905,14 @@ def parse_expected(normalized: bytes, cases: list[dict]) -> dict[str, dict]:
             raise BenchmarkError(f"{case_id}.memory_not_needed must be a boolean")
         if "near_duplicate_of" in entry:
             _validate_near_duplicates(entry["near_duplicate_of"], aliases)
+        if "outcome" in entry:
+            _validate_outcome(entry["outcome"], case, aliases)
+        elif "task" in case:
+            raise BenchmarkError(f"{case_id} has a task but no outcome criteria")
+        if "faithfulness" in entry:
+            _validate_faithfulness(entry["faithfulness"], entry, aliases, case_id)
+        if "security" in entry:
+            _validate_security(entry["security"], aliases, case_id)
     return entries
 
 
@@ -451,10 +929,26 @@ def _validate_rel_path(rel: Any, split: str) -> str:
 
 
 def _validate_manifest(m: Any) -> dict:
-    _closed(m, {"schema_version", "heldout_version", "consumed", "bundles"}, set(), "manifest")
+    _closed(
+        m,
+        {
+            "schema_version",
+            "heldout_version",
+            "heldout_status",
+            "scoring_digest",
+            "consumed",
+            "bundles",
+        },
+        set(),
+        "manifest",
+    )
     _schema_version(m, "manifest")
     if not _is_pos_int(m["heldout_version"]):
         raise BenchmarkError("manifest heldout_version must be a positive integer")
+    if m["heldout_status"] not in HELDOUT_STATUSES:
+        raise BenchmarkError(f"manifest heldout_status must be one of {HELDOUT_STATUSES}")
+    if not isinstance(m["scoring_digest"], str) or not _HEX64.fullmatch(m["scoring_digest"]):
+        raise BenchmarkError("manifest scoring_digest must be a SHA-256 hex digest")
     if not isinstance(m["consumed"], list):
         raise BenchmarkError("manifest consumed must be a list")
     for entry in m["consumed"]:
@@ -493,6 +987,11 @@ def _validate_manifest(m: Any) -> dict:
             if case_id in owners:
                 raise BenchmarkError(f"case id {case_id!r} registered in more than one bundle")
             owners[case_id] = split
+    has_heldout = "heldout" in bundles
+    if m["heldout_status"] == "not_authored" and has_heldout:
+        raise BenchmarkError("manifest heldout_status not_authored but a heldout bundle is listed")
+    if m["heldout_status"] == "sealed" and not has_heldout:
+        raise BenchmarkError("manifest heldout_status sealed but no heldout bundle is listed")
     return m
 
 
@@ -504,6 +1003,16 @@ def _read_normalized(path: str) -> bytes:
 def load_manifest(root: str | Path) -> dict:
     manifest_path = os.path.join(os.fspath(root), "manifest.json")
     return _validate_manifest(loads_strict(_read_normalized(manifest_path).decode("utf-8")))
+
+
+def load_scoring(root: str | Path) -> dict:
+    """Load scoring.json, validate its closed schema and bind it to the manifest scoring_digest."""
+    manifest = load_manifest(root)
+    path = os.path.join(os.fspath(root), "scoring.json")
+    cfg = validate_scoring_config(loads_strict(_read_normalized(path).decode("utf-8")))
+    if scoring_digest(cfg) != manifest["scoring_digest"]:
+        raise BenchmarkError("scoring digest mismatch with manifest")
+    return cfg
 
 
 def _bundle_file(root: str, split: str, name: str) -> str:

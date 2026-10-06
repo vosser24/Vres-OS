@@ -78,7 +78,14 @@ def write_bundle(root, split, cases, expected=None, corpus_text=None, expected_t
 
 
 def write_manifest(root, bundles, **over):
-    m = {"schema_version": 1, "heldout_version": 1, "consumed": [], "bundles": bundles}
+    m = {
+        "schema_version": 1,
+        "heldout_version": 1,
+        "heldout_status": "sealed" if "heldout" in bundles else "not_authored",
+        "scoring_digest": "0" * 64,
+        "consumed": [],
+        "bundles": bundles,
+    }
     m.update(over)
     (root / "manifest.json").write_text(
         json.dumps(m, sort_keys=True), encoding="utf-8", newline="\n"
@@ -440,9 +447,28 @@ def test_near_duplicate_invalid_rejected(root, mapping, why):
 def _scoring(repeats):
     return {
         "schema_version": 1,
-        "latency": {"repeats": repeats},
-        "evidence": {"content_max_code_points": 400},
+        "retrieval": {"k_values": [1, 3, 5]},
+        "evidence": {
+            "content_max_code_points": 400,
+            "pack_budget_tokens": 2000,
+            "token_estimator": {"id": "utf8_bytes_ceil_div", "version": 1, "bytes_per_token": 4},
+        },
+        "latency": {
+            "repeats": repeats,
+            "mode_order": ["memory_disabled", "raw_refind", "current_vres", "candidate_hybrid"],
+            "rotation": "cyclic_latin_square",
+        },
         "time": {"epoch_anchor": "2026-01-01T00:00:00Z", "step_seconds": 3600},
+        "proxy_worker": {"version": 1, "max_trace_steps": 16},
+        "display": {"decimal_scale": 4},
+        "aggregation": {"reported": ["micro", "macro"], "per_split": True},
+        "current_vres": {
+            "merge_order": ["knowledge", "procedure"],
+            "interleave": "one_for_one",
+            "tie_break": "alias_ascending",
+            "collapse_duplicates": True,
+        },
+        "faithfulness": {"equivalence": "nfc_collapse_whitespace_exact"},
     }
 
 
@@ -889,7 +915,7 @@ def test_benchmark_module_has_no_cli_or_mcp_surface_and_no_sql():
 
 
 def _tl(*ts, **extra):
-    return [{"t": t, "op": "capture", **extra} for t in ts]
+    return [{"t": t, "op": "lifecycle_retire", "alias": "dev_a", **extra} for t in ts]
 
 
 def test_timeline_step_missing_t_rejected(root):

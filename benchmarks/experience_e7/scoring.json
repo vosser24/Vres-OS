@@ -1,0 +1,59 @@
+{
+  "aggregation": {
+    "per_split": true,
+    "reported": [
+      "micro",
+      "macro"
+    ]
+  },
+  "current_vres": {
+    "collapse_duplicates": true,
+    "interleave": "one_for_one",
+    "merge_order": [
+      "knowledge",
+      "procedure"
+    ],
+    "tie_break": "alias_ascending"
+  },
+  "display": {
+    "decimal_scale": 4
+  },
+  "evidence": {
+    "content_max_code_points": 600,
+    "pack_budget_tokens": 2000,
+    "token_estimator": {
+      "bytes_per_token": 4,
+      "id": "utf8_bytes_ceil_div",
+      "version": 1
+    }
+  },
+  "faithfulness": {
+    "equivalence": "nfc_collapse_whitespace_exact"
+  },
+  "latency": {
+    "mode_order": [
+      "memory_disabled",
+      "raw_refind",
+      "current_vres",
+      "candidate_hybrid"
+    ],
+    "repeats": 20,
+    "rotation": "cyclic_latin_square"
+  },
+  "proxy_worker": {
+    "max_trace_steps": 16,
+    "version": 1
+  },
+  "retrieval": {
+    "k_values": [
+      1,
+      3,
+      5
+    ]
+  },
+  "schema_version": 1,
+  "time": {
+    "epoch_anchor": "2026-01-01T00:00:00Z",
+    "step_seconds": 3600
+  }
+}
