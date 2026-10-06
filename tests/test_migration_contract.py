@@ -362,3 +362,23 @@ def test_migration_041_reference_ledger_and_writer_contract():
                    "REVOKE ALL ON FUNCTION vres.record_experience_retrieval_references(bigint,text,text,text,text,text,text,text[]) FROM PUBLIC"):
         assert refuse in flat
     assert "GRANT " not in code and "UPDATE vres.experience_retrieval" not in code
+
+
+def test_migration_041_reference_writer_orders_by_observed_at_and_locks_before_resolving_conflicts():
+    sql = _migration("041_experience_retrieval_observability.sql")
+    code = "\n".join(line for line in sql.splitlines() if not line.lstrip().startswith("--"))
+    flat = " ".join(code.split())
+    fn = flat.split("CREATE OR REPLACE FUNCTION vres.record_experience_retrieval_references(", 1)[1].split("$vres_e6$;", 1)[0]
+    # the bounded candidate set keeps observed_at so the final selection can order by it (never by id alone)
+    assert "SELECT o.id, o.observed_at FROM vres.experience_retrieval_observations o" in fn
+    assert "ORDER BY c.observed_at DESC, c.id DESC LIMIT 1" in fn and "ORDER BY c.id DESC" not in fn
+    # one stable per-reference lock identity (independent of the selected observation), taken before any duplicate check
+    lock = fn.index("pg_advisory_xact_lock")
+    assert lock < fn.index("FROM vres.experience_retrieval_references r")
+    assert lock < fn.index("conflicting duplicate experience retrieval reference")
+    identity = fn[:lock].rsplit("idem := ", 1)[1]
+    for part in ("p_project_id", "sess.id", "p_agent_id", "p_source_kind", "p_host_event_digest", "'176.e6.v1'"):
+        assert part in identity
+    assert "obs_id" not in identity
+    # no race-sensitive ON CONFLICT that could turn a conflicting digest into an ordinary duplicate
+    assert "ON CONFLICT" not in fn

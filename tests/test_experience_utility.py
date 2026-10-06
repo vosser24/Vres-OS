@@ -199,3 +199,33 @@ def test_mcp_surface_is_one_read_only_tool_without_project_id(monkeypatch):
     doc = (mcp_server.experience_utility_evidence.__doc__ or "").lower() if hasattr(
         mcp_server.experience_utility_evidence, "__doc__") else ""
     assert "descriptive" in doc and "not_established" in doc and "promotion" in doc
+
+
+def _decision_owner_script(task_rows, knowledge_rows):
+    return _script(**{"FROM vres.task_decisions": task_rows, "FROM vres.knowledge_items": knowledge_rows})
+
+
+def _dec_state(out):
+    return {i["memory_key"]: i["current_state"] for i in out["items"]}["DEC-1"]
+
+
+def test_decision_key_resolves_from_the_knowledge_decision_or_rule_owner_when_only_it_exists():
+    out, conn = _run(_decision_owner_script([], [{"memory_key": "DEC-1", "current_status": "validated", "current_usable": True}]))
+    assert _dec_state(out) == {"current_status": "validated", "current_usable": True}
+    assert any("knowledge_type IN ('decision','rule')" in s for s in conn.log)
+    out, _ = _run(_decision_owner_script([], [{"memory_key": "DEC-1", "current_status": "rejected", "current_usable": False}]))
+    assert _dec_state(out) == {"current_status": "rejected", "current_usable": False}
+
+
+def test_decision_key_in_both_owner_families_is_ambiguous_and_unusable_by_default():
+    out, _ = _run(_decision_owner_script(
+        [{"memory_key": "DEC-1", "current_status": "active", "current_usable": True}],
+        [{"memory_key": "DEC-1", "current_status": "validated", "current_usable": True}]))
+    assert _dec_state(out) == {"current_status": "ambiguous_owner", "current_usable": None}
+
+
+def test_decision_key_with_one_task_decision_owner_is_unchanged_and_no_owner_is_not_found():
+    out, _ = _run(_decision_owner_script([{"memory_key": "DEC-1", "current_status": "active", "current_usable": True}], []))
+    assert _dec_state(out) == {"current_status": "active", "current_usable": True}
+    out, _ = _run(_decision_owner_script([], []))
+    assert _dec_state(out) == {"current_status": "not_found", "current_usable": None}

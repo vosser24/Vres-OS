@@ -18,6 +18,7 @@ from vres_os.experience_consolidation import episode_payload_digest  # noqa: E40
 from vres_os.experience_utility import ExperienceUtilityEvidenceService  # noqa: E402
 
 from test_e6_retrieval_observation import _open_session, _payload, _rows, _seed, e6  # noqa: E402,F401
+from test_experience_retrieval_journey import _knowledge  # noqa: E402
 
 FORBIDDEN_WORDS = ("unused", "ignored", "harmful", "ineffective", "not_helpful", "score")
 PRIVATE_KEYS = {"query", "premises", "objective", "statement", "report", "payload", "text", "title", "rationale"}
@@ -166,3 +167,34 @@ def test_evidence_is_read_only_and_cannot_write(e6):
         with connect() as conn, conn.transaction():
             conn.execute("SET TRANSACTION READ ONLY")
             conn.execute("UPDATE vres.tasks SET completed_at=now() WHERE task_key=%s", (task,))
+
+
+def test_knowledge_decision_and_rule_owners_resolve_from_knowledge_items_and_stay_historical(e6):
+    mk, task = _seed(e6)
+    _knowledge(f"KD-{mk}", e6, mk, ktype="decision")
+    _knowledge(f"KR-{mk}", e6, mk, ktype="rule")
+    host = f"h-{uuid.uuid4().hex[:8]}"
+    _open_session(e6, host, task)
+    payload, _ = _payload(e6, {"query": f"{mk} staged rollout", "task_key": task}, host)
+    key = eo.observe_retrieval(payload, e6)["observation_key"]
+    live = _by_key(_evidence(e6, key))
+    for owner in (f"KD-{mk}", f"KR-{mk}"):
+        assert live[owner]["memory_class"] == "decision", live[owner]
+        assert live[owner]["current_state"] == {"current_status": "validated", "current_usable": True}
+    with connect() as conn, conn.transaction():
+        conn.execute("UPDATE vres.knowledge_items SET status='rejected' WHERE knowledge_key IN (%s,%s)",
+                     (f"KD-{mk}", f"KR-{mk}"))
+    after = _by_key(_evidence(e6, key))  # historical observation evidence stays; only current usability changes
+    for owner in (f"KD-{mk}", f"KR-{mk}"):
+        assert after[owner]["memory_class"] == "decision" and after[owner]["reference_status"] == "not_observed"
+        assert after[owner]["current_state"] == {"current_status": "rejected", "current_usable": False}
+
+
+def test_a_decision_key_present_in_both_owner_families_is_ambiguous_and_never_picked(e6):
+    mk, task, host, key = _setup(e6)
+    assert _by_key(_evidence(e6, key))[f"D-{mk}"]["current_state"] == {"current_status": "active", "current_usable": True}
+    _knowledge(f"D-{mk}", e6, mk, ktype="decision")  # the same key now also names an eligible knowledge decision
+    item = _by_key(_evidence(e6, key))[f"D-{mk}"]
+    assert item["current_state"] == {"current_status": "ambiguous_owner", "current_usable": None}
+    assert item["reference_status"] == "not_observed" and set(item) == {
+        "memory_key", "memory_class", "ordinal", "section", "reference_status", "references", "current_state"}

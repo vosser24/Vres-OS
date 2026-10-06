@@ -36,20 +36,24 @@ def _not_found() -> dict[str, Any]:
     return {"current_status": "not_found", "current_usable": None}
 
 
+# Knowledge rows resolve identically for `semantic` items and for the knowledge-owned `decision` items.
+_KNOWLEDGE_SQL = (
+    "SELECT k.knowledge_key AS memory_key, k.status AS current_status, "
+    f"(k.status IN ({_LIVE}) AND (k.valid_from IS NULL OR k.valid_from <= now()) "
+    "AND (k.valid_to IS NULL OR k.valid_to > now()) "
+    "AND (k.project_id IS NOT NULL OR k.scope_approval_event_id IS NOT NULL) "
+    f"AND {company_support_usable_sql('k')}) AS current_usable "
+    "FROM vres.knowledge_items k "
+    "WHERE (k.project_id = %s OR k.project_id IS NULL) AND k.knowledge_key = ANY(%s)")
+_KNOWLEDGE_DECISION_SQL = _KNOWLEDGE_SQL + " AND k.knowledge_type IN ('decision','rule')"
+
 # Per memory class: the live owner row. Each query is project-bound and returns (memory_key, current_status, current_usable).
 _CURRENT_SQL = {
     "decision": (
         "SELECT d.decision_key AS memory_key, d.status AS current_status, (d.status = 'active') AS current_usable "
         "FROM vres.task_decisions d JOIN vres.tasks dt ON dt.id = d.task_id "
         "WHERE dt.project_id = %s AND d.decision_key = ANY(%s)"),
-    "semantic": (
-        "SELECT k.knowledge_key AS memory_key, k.status AS current_status, "
-        f"(k.status IN ({_LIVE}) AND (k.valid_from IS NULL OR k.valid_from <= now()) "
-        "AND (k.valid_to IS NULL OR k.valid_to > now()) "
-        "AND (k.project_id IS NOT NULL OR k.scope_approval_event_id IS NOT NULL) "
-        f"AND {company_support_usable_sql('k')}) AS current_usable "
-        "FROM vres.knowledge_items k "
-        "WHERE (k.project_id = %s OR k.project_id IS NULL) AND k.knowledge_key = ANY(%s)"),
+    "semantic": _KNOWLEDGE_SQL,
     "procedural": (
         "SELECT p.procedure_key AS memory_key, p.status AS current_status, "
         "(p.status = 'active' AND (p.project_id IS NOT NULL OR p.scope_approval_event_id IS NOT NULL) "
@@ -143,10 +147,20 @@ class ExperienceUtilityEvidenceService:
             sql = _CURRENT_SQL.get(memory_class)
             if sql is None:
                 continue
-            for row in conn.execute(sql, (project_id, keys)).fetchall():
-                usable = row["current_usable"]
-                state[row["memory_key"]] = {"current_status": row["current_status"],
-                                            "current_usable": None if usable is None else bool(usable)}
+            # `decision` has two truth owners (task decisions and decision/rule knowledge): every owner row counts.
+            sqls = [sql, _KNOWLEDGE_DECISION_SQL] if memory_class == "decision" else [sql]
+            owners: dict[str, list[dict[str, Any]]] = {}
+            for owner_sql in sqls:
+                for row in conn.execute(owner_sql, (project_id, keys)).fetchall():
+                    if row["memory_key"] in keys:
+                        owners.setdefault(row["memory_key"], []).append(row)
+            for key, rows in owners.items():
+                if len(rows) > 1:  # never pick an owner by priority
+                    state[key] = {"current_status": "ambiguous_owner", "current_usable": None}
+                    continue
+                usable = rows[0]["current_usable"]
+                state[key] = {"current_status": rows[0]["current_status"],
+                              "current_usable": None if usable is None else bool(usable)}
         return state
 
     @staticmethod

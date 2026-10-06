@@ -5,6 +5,8 @@ Like the Chunk 1 module this owns its fixture, never deletes (the ledgers are ap
 disposable ``*_test`` database being dropped.
 """
 import json
+import threading
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -190,3 +192,83 @@ def test_the_sql_writer_rejects_malformed_arguments_itself(e6):
             with eo.db.connect(purpose="writer") as conn, conn.transaction():
                 conn.execute("SELECT * FROM vres.record_experience_retrieval_references(%s,%s,%s,%s,%s,%s,%s,%s)", args)
     assert _refs(host) == []
+
+
+def _clone_observation(observation_key, k, observed_at, tool_use_id):
+    """Insert a second eligible observation (same session/agent, returning key ``k``) with a chosen observed_at."""
+    with connect() as conn, conn.transaction():
+        row = conn.execute("SELECT * FROM vres.experience_retrieval_observations WHERE observation_key=%s",
+                           (observation_key,)).fetchone()
+        item = conn.execute("SELECT * FROM vres.experience_retrieval_items WHERE observation_id=%s AND memory_key=%s",
+                            (row["id"], k)).fetchone()
+        new = {c: v for c, v in row.items() if c != "id"}
+        new.update(observation_key=f"ERO-{uuid.uuid4().hex}", idempotency_key=uuid.uuid4().hex * 2,
+                   tool_use_id=tool_use_id, observed_at=observed_at, item_count=1, abstained=False, reason=None)
+        nid = conn.execute(
+            f"INSERT INTO vres.experience_retrieval_observations({','.join(new)}) VALUES ({','.join(['%s'] * len(new))}) "
+            "RETURNING id", _adapt(new.values())).fetchone()["id"]
+        cols = {c: v for c, v in item.items() if c != "id"}
+        cols.update(observation_id=nid, ordinal=1, section_ordinal=1)
+        conn.execute(f"INSERT INTO vres.experience_retrieval_items({','.join(cols)}) VALUES ({','.join(['%s'] * len(cols))})",
+                     _adapt(cols.values()))
+        return new["observation_key"], nid
+
+
+def test_latest_prior_observation_is_chosen_by_observed_at_not_by_id(e6):
+    mk, task, host = _setup(e6)
+    later, _ = _observe(e6, mk, task, host)  # lower id, later observed_at
+    k = _keys_of(later["observation_key"])[0]
+    earlier_key, earlier_id = _clone_observation(  # higher id, EARLIER observed_at
+        later["observation_key"], k, datetime.now(timezone.utc) - timedelta(hours=1), "toolu_earlier")
+    ids = {r["observation_key"]: r["id"] for r in _rows(
+        "SELECT observation_key, id, observed_at FROM vres.experience_retrieval_observations WHERE observation_key IN (%s,%s)",
+        (later["observation_key"], earlier_key))}
+    assert ids[later["observation_key"]] < ids[earlier_key]
+    obs_at = {r["observation_key"]: r["observed_at"] for r in _rows(
+        "SELECT observation_key, observed_at FROM vres.experience_retrieval_observations WHERE observation_key IN (%s,%s)",
+        (later["observation_key"], earlier_key))}
+    assert obs_at[later["observation_key"]] > obs_at[earlier_key]
+    assert _record(e6, host, [k])["recorded"] == 1
+    assert [r["observation_key"] for r in _refs(host)] == [later["observation_key"]]
+
+
+def test_concurrent_conflicting_delivery_of_one_host_event_fails_closed_for_the_loser(e6):
+    mk, task, host = _setup(e6)
+    obs, _ = _observe(e6, mk, task, host)
+    k = _keys_of(obs["observation_key"])[0]
+    holder: dict = {}
+    args = lambda evidence: (e6, host, None, "assistant_public_text", _sha256("turn-race"), _sha256(evidence), None, [k])
+    sql = "SELECT * FROM vres.record_experience_retrieval_references(%s,%s,%s,%s,%s,%s,%s,%s)"
+
+    def loser():
+        try:
+            with eo.db.connect(purpose="writer") as conn, conn.transaction():
+                holder["pid"] = conn.execute("SELECT pg_backend_pid() AS p").fetchone()["p"]
+                holder["result"] = conn.execute(sql, args("answer B")).fetchone()
+        except psycopg.Error as exc:
+            holder["error"] = exc
+
+    thread = None
+    try:
+        with eo.db.connect(purpose="writer") as a, a.transaction():
+            first = a.execute(sql, args("answer A")).fetchone()  # uncommitted: holds whatever lock the writer takes
+            assert first["outcome"] == "recorded"
+            thread = threading.Thread(target=loser)
+            thread.start()
+            deadline = time.monotonic() + 30
+            blocked = False
+            while time.monotonic() < deadline and not blocked:
+                if "pid" in holder:
+                    blocked = bool(_rows(
+                        "SELECT 1 FROM pg_locks WHERE pid=%s AND locktype='advisory' AND NOT granted",
+                        (holder["pid"],)))
+                if not blocked:
+                    time.sleep(0.05)
+            assert blocked, "the second delivery never waited on the advisory lock held by the first"
+    finally:
+        if thread is not None:
+            thread.join(60)
+    assert not thread.is_alive()
+    assert "error" in holder and "result" not in holder, holder.get("result")
+    rows = _refs(host)
+    assert len(rows) == 1 and rows[0]["evidence_digest"] == _sha256("answer A")

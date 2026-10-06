@@ -318,7 +318,8 @@ $vres_e6$;
 -- project, the exact open session and the same agent context (NULL means main thread), be strictly earlier than this
 -- reference, and not be produced by the same tool use. Among the 100 most recent such observations the LATEST one that
 -- returned the key is chosen. A key with no such observation writes nothing. Re-delivery of the same host event is a
--- duplicate; the same identity with different evidence fails closed.
+-- duplicate; the same identity with different evidence fails closed, also under concurrent delivery (the per-reference
+-- lock is taken before the duplicate check).
 CREATE OR REPLACE FUNCTION vres.record_experience_retrieval_references(
     p_project_id bigint, p_provider_session_id text, p_agent_id text, p_source_kind text, p_host_event_digest text,
     p_evidence_digest text, p_tool_use_id text, p_memory_keys text[])
@@ -380,13 +381,16 @@ BEGIN
 
     now_ts := clock_timestamp();
     FOR k IN SELECT DISTINCT x FROM unnest(p_memory_keys) AS x ORDER BY x LOOP
+        -- Stable per-reference identity (independent of which prior observation is chosen). Taking its lock BEFORE any
+        -- duplicate/conflict decision serialises concurrent deliveries of the same host event and key, so the later one
+        -- always sees the earlier one's committed row and cannot be mistaken for an ordinary duplicate.
+        idem := encode(sha256(convert_to(
+            jsonb_build_array(p_project_id, sess.id, coalesce(p_agent_id, ''), p_source_kind, k, p_host_event_digest,
+                              '176.e6.v1')::text, 'UTF8')), 'hex');
+        PERFORM pg_advisory_xact_lock(hashtextextended(idem, 0));
+
         SELECT r.evidence_digest INTO prior
-          FROM vres.experience_retrieval_references r
-          JOIN vres.experience_retrieval_observations o ON o.id = r.observation_id
-         WHERE o.project_id = p_project_id AND o.session_id = sess.id
-           AND o.host_agent_id IS NOT DISTINCT FROM p_agent_id
-           AND r.memory_key = k AND r.source_kind = p_source_kind AND r.host_event_digest = p_host_event_digest
-         LIMIT 1;
+          FROM vres.experience_retrieval_references r WHERE r.idempotency_key = idem;
         IF FOUND THEN
             IF prior.evidence_digest <> p_evidence_digest THEN
                 RAISE EXCEPTION 'conflicting duplicate experience retrieval reference' USING ERRCODE = 'P0001';
@@ -397,32 +401,24 @@ BEGIN
 
         obs_id := NULL;
         SELECT c.id INTO obs_id FROM (
-            SELECT o.id FROM vres.experience_retrieval_observations o
+            SELECT o.id, o.observed_at FROM vres.experience_retrieval_observations o
              WHERE o.project_id = p_project_id AND o.session_id = sess.id
                AND o.host_agent_id IS NOT DISTINCT FROM p_agent_id
                AND o.observed_at < now_ts AND o.tool_use_id IS DISTINCT FROM p_tool_use_id
              ORDER BY o.observed_at DESC, o.id DESC LIMIT 100) c
          WHERE EXISTS (SELECT 1 FROM vres.experience_retrieval_items i WHERE i.observation_id = c.id AND i.memory_key = k)
-         ORDER BY c.id DESC LIMIT 1;
+         ORDER BY c.observed_at DESC, c.id DESC LIMIT 1;
         IF obs_id IS NULL THEN
             n_skipped := n_skipped + 1;
             CONTINUE;
         END IF;
 
-        idem := encode(sha256(convert_to(
-            jsonb_build_array(obs_id, k, p_source_kind, p_host_event_digest, '176.e6.v1')::text, 'UTF8')), 'hex');
-        PERFORM pg_advisory_xact_lock(hashtextextended(idem, 0));
         INSERT INTO vres.experience_retrieval_references(
             reference_key, idempotency_key, observation_id, memory_key, source_kind, host_event_digest, evidence_digest,
             tool_use_id, agent_id, observed_at)
         VALUES ('ERR-' || replace(gen_random_uuid()::text, '-', ''), idem, obs_id, k, p_source_kind,
-                p_host_event_digest, p_evidence_digest, p_tool_use_id, p_agent_id, now_ts)
-        ON CONFLICT DO NOTHING;
-        IF FOUND THEN
-            n_recorded := n_recorded + 1;
-        ELSE
-            n_duplicates := n_duplicates + 1;
-        END IF;
+                p_host_event_digest, p_evidence_digest, p_tool_use_id, p_agent_id, now_ts);
+        n_recorded := n_recorded + 1;
     END LOOP;
 
     RETURN QUERY SELECT CASE WHEN n_recorded > 0 THEN 'recorded'
