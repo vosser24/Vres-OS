@@ -41,7 +41,8 @@ def surface(monkeypatch, tmp_path):
 
 
 def test_mcp_registration_has_full_contract_and_no_pass_setter(surface):
-    assert len(surface.mcp.registered) == 51
+    assert len(surface.mcp.registered) == 52
+    assert 'experience_utility_evidence' in surface.mcp.registered  # E6: the one added non-mutating tool
     assert 'procedure_get' in surface.mcp.registered
     assert 'experience_retrieve' in surface.mcp.registered
     for name in ('source_revoke', 'knowledge_lifecycle', 'context_refresh_ack'):
