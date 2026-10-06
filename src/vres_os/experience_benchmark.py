@@ -22,6 +22,7 @@ import json
 import os
 import re
 import unicodedata
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
@@ -56,6 +57,7 @@ _SCORING_KEYS = {
     "scoring",
     "near_duplicate_of",
     "must_abstain",
+    "memory_not_needed",
     "premise",
     "conflict_pair",
     "label",
@@ -180,8 +182,10 @@ def corpus_digest(cases: list[dict]) -> str:
     return sha256_hex(b"".join(canonical_bytes(c) + b"\n" for c in cases))
 
 
-def expected_digest(expected: dict) -> str:
-    return sha256_hex(canonical_bytes(expected))
+def expected_digest(cases: dict) -> str:
+    """Logical identity of the complete versioned expected-evidence object."""
+    versioned = {"schema_version": SCHEMA_VERSIONS["expected_evidence"], "cases": cases}
+    return sha256_hex(canonical_bytes(versioned))
 
 
 def scoring_digest(config: dict) -> str:
@@ -216,6 +220,10 @@ def _is_pos_int(value: Any) -> bool:
     return type(value) is int and value > 0
 
 
+def _is_nonneg_int(value: Any) -> bool:
+    return type(value) is int and value >= 0
+
+
 def _check_alias_syntax(alias: Any) -> str:
     if not isinstance(alias, str) or not _ID.fullmatch(alias):
         raise BenchmarkError(f"invalid alias {alias!r}")
@@ -241,7 +249,7 @@ def _alias_list(value: Any, declared: set[str], what: str) -> list[str]:
 
 
 def validate_scoring_config(cfg: Any) -> dict:
-    _closed(cfg, {"schema_version", "latency", "evidence"}, set(), "scoring config")
+    _closed(cfg, {"schema_version", "latency", "evidence", "time"}, set(), "scoring config")
     _schema_version(cfg, "scoring")
     latency = _closed(cfg["latency"], {"repeats"}, set(), "scoring latency")
     repeats = latency["repeats"]
@@ -250,8 +258,39 @@ def validate_scoring_config(cfg: Any) -> dict:
     evidence = _closed(cfg["evidence"], {"content_max_code_points"}, set(), "scoring evidence")
     if not _is_pos_int(evidence["content_max_code_points"]):
         raise BenchmarkError("evidence.content_max_code_points must be a positive integer")
+    _validate_time_config(cfg["time"])
     _check_identity_value(cfg)
     return cfg
+
+
+_ANCHOR = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
+
+
+def _parse_anchor(anchor: Any) -> datetime:
+    if not isinstance(anchor, str) or not _ANCHOR.fullmatch(anchor):
+        raise BenchmarkError("time.epoch_anchor must be a UTC timestamp YYYY-MM-DDTHH:MM:SSZ")
+    try:
+        return datetime.strptime(anchor, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    except ValueError as exc:
+        raise BenchmarkError(f"time.epoch_anchor is not a real UTC instant: {exc}") from exc
+
+
+def _validate_time_config(time_cfg: Any) -> None:
+    _closed(time_cfg, {"epoch_anchor", "step_seconds"}, set(), "scoring time")
+    _parse_anchor(time_cfg["epoch_anchor"])
+    if not _is_pos_int(time_cfg["step_seconds"]):
+        raise BenchmarkError("time.step_seconds must be a positive integer")
+
+
+def benchmark_instant(time_cfg: dict, t: int) -> str:
+    """Deterministic benchmark instant: epoch_anchor + t * step_seconds, as UTC `...Z` text."""
+    _validate_time_config(time_cfg)
+    if not _is_nonneg_int(t):
+        raise BenchmarkError("timeline ordinal must be a non-negative integer")
+    moment = _parse_anchor(time_cfg["epoch_anchor"]) + timedelta(
+        seconds=t * time_cfg["step_seconds"]
+    )
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 # ---- corpus / expected-evidence schemas ---
@@ -292,8 +331,14 @@ def _validate_case(case: Any, split: str) -> dict:
             raise BenchmarkError(
                 f"alias prefix mismatch: {alias!r} in {split} requires {ALIAS_PREFIX[split]!r}"
             )
+    last_t = -1
     for step in case.get("timeline", []):
-        _closed(step, {"op"}, {"alias", "args"}, "timeline step")
+        _closed(step, {"t", "op"}, {"alias", "args"}, "timeline step")
+        if not _is_nonneg_int(step["t"]):
+            raise BenchmarkError("timeline t must be a non-negative integer")
+        if step["t"] <= last_t:
+            raise BenchmarkError("timeline t must be strictly increasing within a case")
+        last_t = step["t"]
         if not isinstance(step["op"], str) or not step["op"]:
             raise BenchmarkError("timeline op must be non-empty text")
         if "alias" in step and step["alias"] not in seen:
@@ -368,7 +413,13 @@ def parse_expected(normalized: bytes, cases: list[dict]) -> dict[str, dict]:
         _closed(
             entry,
             set(),
-            {*_LABEL_LISTS, "conflict_pair", "must_abstain", "near_duplicate_of"},
+            {
+                *_LABEL_LISTS,
+                "conflict_pair",
+                "must_abstain",
+                "near_duplicate_of",
+                "memory_not_needed",
+            },
             f"expected evidence for {case_id}",
         )
         for label in _LABEL_LISTS:
@@ -380,6 +431,8 @@ def parse_expected(normalized: bytes, cases: list[dict]) -> dict[str, dict]:
             _alias_list(group, aliases, f"{case_id}.conflict_pair")
         if "must_abstain" in entry and not isinstance(entry["must_abstain"], bool):
             raise BenchmarkError(f"{case_id}.must_abstain must be a boolean")
+        if "memory_not_needed" in entry and not isinstance(entry["memory_not_needed"], bool):
+            raise BenchmarkError(f"{case_id}.memory_not_needed must be a boolean")
         if "near_duplicate_of" in entry:
             _validate_near_duplicates(entry["near_duplicate_of"], aliases)
     return entries

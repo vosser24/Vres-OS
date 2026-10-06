@@ -6,7 +6,7 @@ Scope: owner discovery (0A), placement (0B), temporal admissibility (0H). Read-o
 
 | Surface | Signature | Public fields usable as B2 `content` | Excluded (non-public / non-semantic) |
 |---|---|---|---|
-| E3/E5 retrieval | `ExperienceRetrievalService.retrieve(request: dict \| RetrievalRequest) -> dict`; `RetrievalRequest(project_id, query, task_key, task_family, capability_keys, temporal_intent="current", as_of, premises, include_candidates=True, raw_fallback=True)` | item text (already sanitized, re-redacted, <=300 chars, instruction-shaped text quarantined) | DB ids, paths, URIs |
+| E3/E5 retrieval | `ExperienceRetrievalService.retrieve(request: dict \| RetrievalRequest) -> dict`; `RetrievalRequest(project_id, query, task_key, task_family, capability_keys, temporal_intent="current", as_of, premises, include_candidates=True, raw_fallback=True)` | item `text` (see the retrieval limits note below) | DB ids, paths, URIs |
 | Knowledge | `KnowledgeService.search(query, limit=8, project_id=None)` | `title`, `statement` | `rank`, `confidence`, timestamps, scope |
 | Chunks | `KnowledgeService.chunk_search(query, limit=8, project_id=None)` | `section`, `content` | `source_id`, `knowledge_id`, `path_or_uri`, `rank` |
 | Procedures | `ProcedureService.find_matches(query, task_family=None, limit=5, project_id=None)` | `name`, `description`, `method`, `invariants` | `updated_at`, `score`, `accepted_*` |
@@ -16,7 +16,7 @@ Scope: owner discovery (0A), placement (0B), temporal admissibility (0H). Read-o
 | E4 | `SourceRevocationService(clock=None).revoke_source(source_key, *, project_id, approval_key, reason, task_key=None)` | n/a | |
 
 Sanitizer findings:
-- Retrieval: sanitization guaranteed by the owner (`sanitize_extracted_text`, review-required text excluded, 300-char cap).
+- Retrieval: general item text is built with `_clean(..., MAX_TEXT)` where `MAX_TEXT = 600` (`redact_text` + whitespace collapse + cut). Narrower 300-character limits apply only to specific surfaces: raw-chunk snippets (`RAW_SNIPPET = 300`, which also pass `sanitize_extracted_text`, review-required text excluded, instruction-shaped text quarantined), procedure feedback text and the precedent objective. The owner's bound is therefore not uniform. The benchmark's own B2 `content_max_code_points` is the common normalization bound; this note does not change the architecture and no E1-E6 owner is modified.
 - `knowledge.propose` and `sources` redact on **write** (`redact_text`), but `knowledge.search` / `chunk_search` do not re-sanitize on **read**. **Finding:** the benchmark must not trust these surfaces' read output as sanitized. `build_evidence_item` therefore applies the sanitizer itself and fails closed on secret-shaped text before truncation. No runtime change is needed for bounded content, because the 300-char cap and truncation are applied by the benchmark.
 - Chunk and knowledge results carry DB ids/paths; only the fields in the table may enter a pack. Case-local aliases replace all runtime keys.
 
@@ -50,3 +50,7 @@ Owner/API gaps (recorded, not fixed; no owner change in Chunk 0):
 3. `knowledge.search` / `chunk_search` have no read-side sanitizer guarantee.
 
 Consequence for the corpus: timeline steps may only use class (a) and (b) operations; assertions must not depend on class (c) values.
+
+## Repair note: line endings
+
+CRLF-to-LF normalization in the loader is checkout/transport normalization (Windows `autocrlf`) only. It is not permission for authored benchmark assets to use arbitrary line endings: benchmark writers always emit canonical LF, digests are over LF content, and a lone CR is rejected.

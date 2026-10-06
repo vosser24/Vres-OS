@@ -222,14 +222,19 @@ def test_scoring_material_in_corpus_rejected(root, key):
 
 def test_scoring_material_nested_in_timeline_rejected(root):
     rewrite_dev(
-        root, [_case("c1", timeline=[{"op": "capture", "args": {"expected_evidence": ["dev_a"]}}])]
+        root,
+        [
+            _case(
+                "c1", timeline=[{"t": 0, "op": "capture", "args": {"expected_evidence": ["dev_a"]}}]
+            )
+        ],
     )
     with pytest.raises(eb.BenchmarkError, match="scoring"):
         eb.load_development_bundle(root, "development")
 
 
 def test_float_in_corpus_rejected(root):
-    rewrite_dev(root, [_case("c1", timeline=[{"op": "capture", "args": {"n": 1.5}}])])
+    rewrite_dev(root, [_case("c1", timeline=[{"t": 0, "op": "capture", "args": {"n": 1.5}}])])
     with pytest.raises(eb.BenchmarkError, match="float"):
         eb.load_development_bundle(root, "development")
 
@@ -437,6 +442,7 @@ def _scoring(repeats):
         "schema_version": 1,
         "latency": {"repeats": repeats},
         "evidence": {"content_max_code_points": 400},
+        "time": {"epoch_anchor": "2026-01-01T00:00:00Z", "step_seconds": 3600},
     }
 
 
@@ -877,3 +883,152 @@ def test_benchmark_module_has_no_cli_or_mcp_surface_and_no_sql():
         r"^\s*(?:from|import)\s+(?:typer|click|argparse|mcp|psycopg|\.db|\.repository)", text, re.M
     )
     assert "@app.command" not in text and "SELECT " not in text and "INSERT " not in text
+
+
+# ---- Chunk 0 repair R1: timeline ordinal `t` and deterministic time config ---
+
+
+def _tl(*ts, **extra):
+    return [{"t": t, "op": "capture", **extra} for t in ts]
+
+
+def test_timeline_step_missing_t_rejected(root):
+    rewrite_dev(root, [_case("c1", timeline=[{"op": "capture"}])])
+    with pytest.raises(eb.BenchmarkError, match="missing"):
+        eb.load_development_bundle(root, "development")
+
+
+@pytest.mark.parametrize("bad", [True, False, -1, 1.5, "1", None])
+def test_timeline_t_wrong_type_or_negative_rejected(root, bad):
+    case = _case("c1", timeline=[{"t": bad, "op": "capture"}])
+    rewrite_dev(root, [case], corpus_text=json.dumps(case, sort_keys=True) + "\n")
+    with pytest.raises(
+        eb.BenchmarkError, match="timeline t|float"
+    ):  # a float t dies at the no-float parse rule
+        eb.load_development_bundle(root, "development")
+
+
+@pytest.mark.parametrize("ts", [(0, 0), (2, 1), (0, 2, 1)])
+def test_timeline_t_not_strictly_increasing_rejected(root, ts):
+    rewrite_dev(root, [_case("c1", timeline=_tl(*ts))])
+    with pytest.raises(eb.BenchmarkError, match="strictly increasing"):
+        eb.load_development_bundle(root, "development")
+
+
+def test_timeline_strictly_increasing_t_accepted(root):
+    rewrite_dev(root, [_case("c1", timeline=_tl(0, 1, 5))])
+    loaded = eb.load_development_bundle(root, "development")
+    assert [s["t"] for s in loaded["cases"][0]["timeline"]] == [0, 1, 5]
+
+
+@pytest.mark.parametrize("drop", ["epoch_anchor", "step_seconds"])
+def test_time_config_missing_field_rejected(drop):
+    cfg = _scoring(4)
+    del cfg["time"][drop]
+    with pytest.raises(eb.BenchmarkError, match=drop):
+        eb.validate_scoring_config(cfg)
+
+
+def test_time_config_missing_block_rejected():
+    cfg = _scoring(4)
+    del cfg["time"]
+    with pytest.raises(eb.BenchmarkError, match="time"):
+        eb.validate_scoring_config(cfg)
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "2026-01-01",
+        "2026-01-01T00:00:00",
+        "2026-01-01T00:00:00+02:00",
+        "2026-01-01T00:00:00.5Z",
+        "2026-13-01T00:00:00Z",
+        "2026-01-01 00:00:00Z",
+        20260101,
+        None,
+    ],
+)
+def test_time_config_bad_anchor_rejected(bad):
+    cfg = _scoring(4)
+    cfg["time"]["epoch_anchor"] = bad
+    with pytest.raises(eb.BenchmarkError, match="epoch_anchor"):
+        eb.validate_scoring_config(cfg)
+
+
+@pytest.mark.parametrize("bad", [0, -1, True, "60", 1.5, None])
+def test_time_config_bad_step_rejected(bad):
+    cfg = _scoring(4)
+    cfg["time"]["step_seconds"] = bad
+    with pytest.raises(eb.BenchmarkError, match="step_seconds"):
+        eb.validate_scoring_config(cfg)
+
+
+def test_time_config_unknown_field_rejected():
+    cfg = _scoring(4)
+    cfg["time"]["jitter"] = 1
+    with pytest.raises(eb.BenchmarkError, match="unknown"):
+        eb.validate_scoring_config(cfg)
+
+
+def test_time_config_valid_accepted_and_instant_deterministic():
+    cfg = eb.validate_scoring_config(_scoring(4))
+    t = cfg["time"]
+    assert eb.benchmark_instant(t, 0) == "2026-01-01T00:00:00Z"
+    assert eb.benchmark_instant(t, 3) == "2026-01-01T03:00:00Z"
+    assert eb.benchmark_instant(t, 3) == eb.benchmark_instant(dict(t), 3)
+    assert eb.benchmark_instant(
+        {"epoch_anchor": "2026-01-01T00:00:00Z", "step_seconds": 1}, 90
+    ) == ("2026-01-01T00:01:30Z")
+
+
+@pytest.mark.parametrize("bad", [-1, True, 1.5, "1", None])
+def test_benchmark_instant_rejects_bad_ordinal(bad):
+    with pytest.raises(eb.BenchmarkError, match="ordinal"):
+        eb.benchmark_instant(_scoring(4)["time"], bad)
+
+
+# ---- Chunk 0 repair R2: memory_not_needed ---
+
+
+@pytest.mark.parametrize("flag", [True, False])
+def test_memory_not_needed_boolean_accepted(root, flag):
+    rewrite_dev(root, expected=_expected({"c1": {"memory_not_needed": flag}, "c2": {}}))
+    loaded = eb.load_development_bundle(root, "development")
+    assert loaded["expected"]["c1"]["memory_not_needed"] is flag
+
+
+@pytest.mark.parametrize("bad", [1, 0, "true", None, [], {}])
+def test_memory_not_needed_non_boolean_rejected(root, bad):
+    rewrite_dev(root, expected=_expected({"c1": {"memory_not_needed": bad}, "c2": {}}))
+    with pytest.raises(eb.BenchmarkError, match="memory_not_needed must be a boolean"):
+        eb.load_development_bundle(root, "development")
+
+
+def test_memory_not_needed_not_allowed_in_corpus(root):
+    rewrite_dev(root, [_case("c1", memory_not_needed=True)])
+    with pytest.raises(eb.BenchmarkError, match="scoring"):
+        eb.load_development_bundle(root, "development")
+
+
+# ---- Chunk 0 repair R3: expected digest binds schema version ---
+
+
+def test_expected_digest_is_over_versioned_object(root):
+    loaded = eb.load_development_bundle(root, "development")
+    versioned = {"schema_version": 1, "cases": loaded["expected"]}
+    assert loaded["digests"]["expected_evidence"] == eb.sha256_hex(eb.canonical_bytes(versioned))
+    assert eb.expected_digest(loaded["expected"]) == loaded["digests"]["expected_evidence"]
+
+
+def test_expected_digest_differs_under_different_schema_identity(monkeypatch):
+    cases = {"c1": {"relevant": ["dev_a"]}}
+    before = eb.expected_digest(cases)
+    monkeypatch.setitem(eb.SCHEMA_VERSIONS, "expected_evidence", 2)
+    assert eb.expected_digest(cases) != before
+
+
+def test_expected_digest_key_order_independent():
+    a = {"c1": {"relevant": ["dev_a"], "stale": ["dev_b"]}, "c2": {}}
+    b = {"c2": {}, "c1": {"stale": ["dev_b"], "relevant": ["dev_a"]}}
+    assert eb.expected_digest(a) == eb.expected_digest(b)
