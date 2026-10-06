@@ -391,14 +391,18 @@ def _activate_experience_observability(conn, runtime: str, writer: str) -> None:
     if not present:
         return  # a package/database before migration 041
     roles = [sql.SQL("PUBLIC"), sql.Identifier(runtime), sql.Identifier(writer)]
-    tables = [sql.SQL("TABLE vres.experience_retrieval_observations"), sql.SQL("TABLE vres.experience_retrieval_items")]
+    tables = [sql.SQL("TABLE vres.experience_retrieval_observations"), sql.SQL("TABLE vres.experience_retrieval_items"),
+              sql.SQL("TABLE vres.experience_retrieval_references")]
     others = [sql.SQL("SEQUENCE vres.experience_retrieval_observations_id_seq"),
               sql.SQL("SEQUENCE vres.experience_retrieval_items_id_seq"),
+              sql.SQL("SEQUENCE vres.experience_retrieval_references_id_seq"),
               sql.SQL("FUNCTION vres.protect_experience_retrieval_immutability()")]
     record = sql.SQL("FUNCTION vres.record_experience_retrieval_observation(bigint,text,text,text,text,jsonb,jsonb)")
-    for obj in [*tables, *others, record]:
+    references = sql.SQL("FUNCTION vres.record_experience_retrieval_references(bigint,text,text,text,text,text,text,text[])")
+    for obj in [*tables, *others, record, references]:
         for role in roles:
             conn.execute(sql.SQL("REVOKE ALL ON {} FROM {}").format(obj, role))
     for obj in tables:
         conn.execute(sql.SQL("GRANT SELECT ON {} TO {}").format(obj, sql.Identifier(runtime)))
     conn.execute(sql.SQL("GRANT EXECUTE ON {} TO {}").format(record, sql.Identifier(writer)))
+    conn.execute(sql.SQL("GRANT EXECUTE ON {} TO {}").format(references, sql.Identifier(writer)))

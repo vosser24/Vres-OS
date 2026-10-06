@@ -3,10 +3,13 @@ from __future__ import annotations
 import json
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from . import experience_references
 from .orchestration import OrchestrationService
+from .paths import logs_dir
 from .project import discover_project
 from .redaction import redact_text
 from .repository import Repository
@@ -39,12 +42,17 @@ def _assistant_handback_messages(value: Any) -> list[str]:
     Tool results and non-assistant records are deliberately never treated as routing
     authority.
     """
+    return [message for _, message in _assistant_handback_blocks(value)]
+
+
+def _assistant_handback_blocks(value: Any) -> list[tuple[str | None, str]]:
+    """(host tool_use id or None, message) for each assistant-authored SubagentHandback call, in order."""
     if not isinstance(value, dict):
         return []
     content = value.get("content")
     if not isinstance(content, list):
         return []
-    result: list[str] = []
+    result: list[tuple[str | None, str]] = []
     for block in content[:100]:
         if not isinstance(block, dict) or block.get("type") != "tool_use":
             continue
@@ -55,8 +63,44 @@ def _assistant_handback_messages(value: Any) -> list[str]:
             continue
         message = tool_input.get("message")
         if isinstance(message, str) and message.strip():
-            result.append(message)
+            block_id = block.get("id")
+            result.append((block_id if isinstance(block_id, str) and block_id else None, message))
     return result
+
+
+def _capture_handback_reference(payload: dict[str, Any], project_id: int) -> None:
+    """Best effort, after the primary evidence was accepted: exact-key references in the final handback.
+
+    Never raises and never changes the hook outcome. Logs only a fixed bounded code, never message text.
+    """
+    try:
+        transcript = payload.get("agent_transcript_path")
+        if not transcript:
+            return
+        for obj in reversed(transcript_tail(Path(str(transcript)).expanduser())):
+            if not isinstance(obj, dict):
+                continue
+            message = obj.get("message")
+            role = message.get("role") if isinstance(message, dict) else obj.get("role")
+            if obj.get("type") != "assistant" and role != "assistant":
+                continue
+            blocks = _assistant_handback_blocks(message if isinstance(message, dict) else obj)
+            if not blocks:
+                continue
+            tool_use_id, text = blocks[-1]
+            record_uuid = obj.get("uuid")
+            experience_references.capture_handback(
+                text, tool_use_id=tool_use_id, record_uuid=record_uuid if isinstance(record_uuid, str) else None,
+                provider_session_id=payload.get("session_id"), agent_id=payload.get("agent_id"),
+                project_id=project_id)
+            return
+    except Exception as exc:
+        try:
+            with (logs_dir() / "hook-errors.log").open("a", encoding="utf-8") as handle:
+                handle.write(f"{datetime.now(timezone.utc).isoformat()} event=ExperienceReference "
+                             f"code={type(exc).__name__}\n")
+        except OSError:
+            pass
 
 
 def _routing_payload_with_handback(payload: dict[str, Any]) -> dict[str, Any]:
@@ -139,8 +183,11 @@ def main() -> None:
                 if str(exc) != "Task changed during routing; fresh Fable route required":
                     raise
                 record_stale_routing_rejection(observed_payload, pid)
+            else:
+                _capture_handback_reference(payload, pid)
         elif mode == "worker-stop":
             service.record_worker_from_hook(payload, pid)
+            _capture_handback_reference(payload, pid)
         elif mode == "work-unit-started":
             tool_input = payload.get("tool_input")
             if not isinstance(tool_input, dict):

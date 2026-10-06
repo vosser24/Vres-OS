@@ -24,6 +24,8 @@ from test_experience_lifecycle_schema import _dsn_for, _Root, _seed_episode, _ta
 
 HEX = "a" * 64
 RECORD_ARGS = "(bigint,text,text,text,text,jsonb,jsonb)"
+REF_ARGS = "(bigint,text,text,text,text,text,text,text[])"
+REF_FN = "vres.record_experience_retrieval_references" + REF_ARGS
 
 
 @pytest.fixture
@@ -113,7 +115,7 @@ def test_append_only_for_update_delete_truncate_even_for_owner(db_ready, pid):
         with pytest.raises(psycopg.Error):
             with connect() as conn, conn.transaction():
                 conn.execute(stmt, (key,))
-    for table in ("experience_retrieval_observations", "experience_retrieval_items"):
+    for table in ("experience_retrieval_observations", "experience_retrieval_items", "experience_retrieval_references"):
         with pytest.raises(psycopg.Error):
             with connect() as conn, conn.transaction():
                 conn.execute(f"TRUNCATE vres.{table}")
@@ -150,7 +152,15 @@ def test_boundary_runtime_reads_but_cannot_write_or_record(db_ready):
         with psycopg.connect(ro_dsn, autocommit=True, row_factory=dict_row) as ro:
             ro.execute("SELECT count(*) FROM vres.experience_retrieval_observations").fetchone()
             ro.execute("SELECT count(*) FROM vres.experience_retrieval_items").fetchone()
+            ro.execute("SELECT count(*) FROM vres.experience_retrieval_references").fetchone()
             for stmt in (
+                "INSERT INTO vres.experience_retrieval_references(reference_key) VALUES ('x')",
+                "UPDATE vres.experience_retrieval_references SET agent_id='x'",
+                "DELETE FROM vres.experience_retrieval_references",
+                "TRUNCATE vres.experience_retrieval_references",
+                "SELECT * FROM vres.record_experience_retrieval_references(1,'s',NULL,'assistant_public_text',"
+                "repeat('a',64),repeat('b',64),NULL,ARRAY['K'])",
+                "SELECT nextval('vres.experience_retrieval_references_id_seq')",
                 "INSERT INTO vres.experience_retrieval_observations(observation_key) VALUES ('x')",
                 "UPDATE vres.experience_retrieval_observations SET pack_bytes=1",
                 "DELETE FROM vres.experience_retrieval_items",
@@ -183,12 +193,15 @@ _ACL_SQL = """
 SELECT format('%%s|%%s|%%s', c.oid::regclass, pg_get_userbyid(a.grantee), a.privilege_type) AS acl
   FROM pg_class c, aclexplode(c.relacl) a
  WHERE c.oid IN ('vres.experience_retrieval_observations'::regclass, 'vres.experience_retrieval_items'::regclass,
-                 'vres.experience_retrieval_observations_id_seq'::regclass, 'vres.experience_retrieval_items_id_seq'::regclass)
+                 'vres.experience_retrieval_references'::regclass,
+                 'vres.experience_retrieval_observations_id_seq'::regclass, 'vres.experience_retrieval_items_id_seq'::regclass,
+                 'vres.experience_retrieval_references_id_seq'::regclass)
    AND a.grantee <> c.relowner
 UNION ALL
 SELECT format('%%s|%%s|%%s', p.oid::regprocedure, pg_get_userbyid(a.grantee), a.privilege_type)
   FROM pg_proc p, aclexplode(p.proacl) a
  WHERE p.oid IN ('vres.record_experience_retrieval_observation(bigint,text,text,text,text,jsonb,jsonb)'::regprocedure,
+                 'vres.record_experience_retrieval_references(bigint,text,text,text,text,text,text,text[])'::regprocedure,
                  'vres.protect_experience_retrieval_immutability()'::regprocedure)
    AND a.grantee <> p.proowner
 """
@@ -211,6 +224,8 @@ def test_n_boundary_activation_is_repeatable_without_broadening_grants(db_ready)
             assert mine == sorted([
                 f"vres.experience_retrieval_observations|{runtime}|SELECT",
                 f"vres.experience_retrieval_items|{runtime}|SELECT",
+                f"vres.experience_retrieval_references|{runtime}|SELECT",
+                f"vres.record_experience_retrieval_references(bigint,text,text,text,text,text,text,text[])|{writer}|EXECUTE",
                 f"vres.record_experience_retrieval_observation(bigint,text,text,text,text,jsonb,jsonb)|{writer}|EXECUTE",
             ])
             assert all(a.split("|")[1] in (runtime, writer) for a in snapshots[0])  # nothing for PUBLIC or anyone else
@@ -290,7 +305,8 @@ def test_k_real_040_to_041_upgrade_preserves_seeded_state(disposable_040):
             "041_experience_retrieval_observability.sql"
         tables_after = {r["table_name"] for r in conn.execute(
             "SELECT table_name FROM information_schema.tables WHERE table_schema='vres'")}
-        assert tables_after - tables_before == {"experience_retrieval_observations", "experience_retrieval_items"}
+        assert tables_after - tables_before == {"experience_retrieval_observations", "experience_retrieval_items",
+                                                    "experience_retrieval_references"}
         assert tables_before - tables_after == set()
         state_after = {t: conn.execute(q).fetchall() for t, q in _SEED_SELECT.items()}
         policies_after = state_after.pop("experience_policy_versions")
@@ -314,3 +330,117 @@ def test_m_same_version_policy_row_with_wrong_json_fails_the_migration(disposabl
     with connect() as conn:
         assert conn.execute("SELECT count(*) AS n FROM vres.schema_migrations").fetchone()["n"] == 40
         assert conn.execute("SELECT to_regclass('vres.experience_retrieval_observations') IS NULL AS absent").fetchone()["absent"]
+
+
+# ---- Chunk 2: immutable explicit-reference ledger ---------------------------------------------------------------------
+
+def _insert_item(conn, obs_key, memory_key="K-1"):
+    oid = conn.execute("SELECT id FROM vres.experience_retrieval_observations WHERE observation_key=%s",
+                       (obs_key,)).fetchone()["id"]
+    conn.execute(
+        "INSERT INTO vres.experience_retrieval_items(observation_id,ordinal,section,section_ordinal,memory_key,memory_class,"
+        "authority_class,scope,status,trust_class,role,applicability_digest,signals,item_digest) VALUES "
+        "(%s,1,'validated_lessons',1,%s,'semantic','validated_lesson','project','validated','x','instruction',%s,'{}'::jsonb,%s)",
+        (oid, memory_key, HEX, HEX))
+    return oid
+
+
+def _reference(oid, **over):
+    row = {"reference_key": f"ERR-{uuid.uuid4().hex}", "idempotency_key": uuid.uuid4().hex * 2, "observation_id": oid,
+           "memory_key": "K-1", "source_kind": "assistant_public_text", "host_event_digest": HEX,
+           "evidence_digest": HEX, "tool_use_id": None, "agent_id": None, "observed_at": datetime.now(timezone.utc)}
+    row.update(over)
+    return row
+
+
+def _insert_ref(conn, oid, **over):
+    row = _reference(oid, **over)
+    conn.execute(f"INSERT INTO vres.experience_retrieval_references({','.join(row)}) VALUES ({','.join(['%s'] * len(row))})",
+                 tuple(row.values()))
+    return row["reference_key"]
+
+
+def test_reference_table_has_no_raw_text_columns_and_a_closed_shape(db_ready):
+    with connect() as conn:
+        cols = {r["column_name"]: r["data_type"] for r in conn.execute(
+            "SELECT column_name,data_type FROM information_schema.columns "
+            "WHERE table_schema='vres' AND table_name='experience_retrieval_references'")}
+    assert set(cols) == {"id", "reference_key", "idempotency_key", "observation_id", "memory_key", "source_kind",
+                         "host_event_digest", "evidence_digest", "tool_use_id", "agent_id", "observed_at", "created_at"}
+
+
+def test_reference_checks_uniqueness_and_item_integrity(db_ready, pid):
+    with connect() as conn, conn.transaction():
+        key = _insert_obs(conn, pid, item_count=1, abstained=False, reason=None)
+        oid = _insert_item(conn, key)
+        _insert_ref(conn, oid)
+        _insert_ref(conn, oid, source_kind="assistant_tool_input", tool_use_id="toolu_1", host_event_digest="b" * 64)
+        _insert_ref(conn, oid, source_kind="subagent_handback", host_event_digest="c" * 64)
+    bad = [{"source_kind": "tool_response"}, {"host_event_digest": "A" * 64}, {"evidence_digest": "short"},
+           {"idempotency_key": "short"}, {"reference_key": "bad"}, {"memory_key": ""},
+           {"source_kind": "assistant_tool_input", "tool_use_id": None, "host_event_digest": "d" * 64}]
+    for over in bad:
+        with pytest.raises(psycopg.errors.CheckViolation):
+            with connect() as conn, conn.transaction():
+                _insert_ref(conn, oid, **{"host_event_digest": "e" * 64, **over})
+    with pytest.raises(psycopg.errors.UniqueViolation):  # same observation/key/source/event identity
+        with connect() as conn, conn.transaction():
+            _insert_ref(conn, oid)
+    with pytest.raises(psycopg.errors.ForeignKeyViolation):  # a reference must name an item of that observation
+        with connect() as conn, conn.transaction():
+            _insert_ref(conn, oid, memory_key="K-NOT-RETRIEVED", host_event_digest="f" * 64)
+
+
+def test_reference_ledger_is_append_only_and_restricts_cascades(db_ready, pid):
+    with connect() as conn, conn.transaction():
+        key = _insert_obs(conn, pid, item_count=1, abstained=False, reason=None)
+        oid = _insert_item(conn, key)
+        ref = _insert_ref(conn, oid)
+    for stmt in ("UPDATE vres.experience_retrieval_references SET agent_id='x' WHERE reference_key=%s",
+                 "DELETE FROM vres.experience_retrieval_references WHERE reference_key=%s"):
+        with pytest.raises(psycopg.Error):
+            with connect() as conn, conn.transaction():
+                conn.execute(stmt, (ref,))
+    with pytest.raises(psycopg.Error):
+        with connect() as conn, conn.transaction():
+            conn.execute("TRUNCATE vres.experience_retrieval_references")
+    with pytest.raises(psycopg.Error):  # immutability trigger (and the RESTRICT foreign key behind it) refuse the delete
+        with connect() as conn, conn.transaction():
+            conn.execute("DELETE FROM vres.experience_retrieval_observations WHERE id=%s", (oid,))
+    assert _scalar("SELECT count(*) FROM vres.experience_retrieval_references WHERE reference_key=%s", (ref,)) == 1
+
+
+def test_writer_role_may_execute_the_reference_recorder_only(db_ready):
+    """A real login role granted by activation: EXECUTE on the reference function, no table access of any kind."""
+    base = os.environ["VRES_TEST_DATABASE_URL"]
+    runtime, writer, secret = f"vres_e6_rt_{uuid.uuid4().hex[:8]}", f"vres_e6_wr_{uuid.uuid4().hex[:8]}", uuid.uuid4().hex
+    with psycopg.connect(base, autocommit=True, row_factory=dict_row) as admin:
+        admin.execute(sql.SQL("CREATE ROLE {} NOLOGIN").format(sql.Identifier(runtime)))
+        admin.execute(sql.SQL("CREATE ROLE {} LOGIN NOSUPERUSER PASSWORD {}").format(sql.Identifier(writer), sql.Literal(secret)))
+        for role in (runtime, writer):
+            admin.execute(sql.SQL("GRANT USAGE ON SCHEMA vres TO {}").format(sql.Identifier(role)))
+        _activate_experience_observability(admin, runtime, writer)
+    wr_dsn = make_conninfo(**{**conninfo_to_dict(base), "user": writer, "password": secret})
+    try:
+        with psycopg.connect(wr_dsn, autocommit=True, row_factory=dict_row) as w:
+            for stmt in ("SELECT count(*) FROM vres.experience_retrieval_references",
+                         "INSERT INTO vres.experience_retrieval_references(reference_key) VALUES ('x')",
+                         "UPDATE vres.experience_retrieval_references SET agent_id='x'",
+                         "DELETE FROM vres.experience_retrieval_references",
+                         "SELECT count(*) FROM vres.experience_retrieval_observations",
+                         "SELECT nextval('vres.experience_retrieval_references_id_seq')"):
+                with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                    w.execute(stmt)
+            # EXECUTE is granted; the body then refuses because this role is not the configured provenance writer
+            with pytest.raises(psycopg.errors.RaiseException):
+                w.execute("SELECT * FROM vres.record_experience_retrieval_references(1,'s',NULL,'assistant_public_text',"
+                          "repeat('a',64),repeat('b',64),NULL,ARRAY['K'])")
+        with psycopg.connect(base, autocommit=True, row_factory=dict_row) as admin:
+            assert admin.execute("SELECT has_function_privilege('public', %s, 'EXECUTE') AS p", (REF_FN,)).fetchone()["p"] is False
+            assert admin.execute("SELECT has_function_privilege(%s, %s, 'EXECUTE') AS p", (runtime, REF_FN)).fetchone()["p"] is False
+            assert admin.execute("SELECT has_function_privilege(%s, %s, 'EXECUTE') AS p", (writer, REF_FN)).fetchone()["p"] is True
+    finally:
+        with psycopg.connect(base, autocommit=True) as admin:
+            for role in (runtime, writer):
+                admin.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role)))
+                admin.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(role)))

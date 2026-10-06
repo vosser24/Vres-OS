@@ -108,7 +108,7 @@
         ]
       },
       {
-        "matcher": "^mcp__plugin_vres-os_vres__experience_retrieve$",
+        "matcher": "^(?!SubagentHandback$).+",
         "hooks": [
           {
             "type": "command",

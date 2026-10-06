@@ -2,6 +2,7 @@
 from vres_os import database_boundary as boundary
 
 RECORD = "vres.record_experience_retrieval_observation(bigint,text,text,text,text,jsonb,jsonb)"
+REFS = "vres.record_experience_retrieval_references(bigint,text,text,text,text,text,text,text[])"
 
 
 class _Conn:
@@ -31,6 +32,14 @@ def test_runtime_reads_writer_records_nobody_else():
     assert 'GRANT SELECT ON TABLE vres.experience_retrieval_observations TO "vres_runtime"' in text
     assert 'GRANT SELECT ON TABLE vres.experience_retrieval_items TO "vres_runtime"' in text
     assert f'GRANT EXECUTE ON FUNCTION {RECORD} TO "vres_writer"' in text
-    assert text.count("GRANT ") == 3
+    assert 'GRANT SELECT ON TABLE vres.experience_retrieval_references TO "vres_runtime"' in text
+    assert f'GRANT EXECUTE ON FUNCTION {REFS} TO "vres_writer"' in text
+    assert text.count("GRANT ") == 5
+    for role in ("PUBLIC", '"vres_runtime"', '"vres_writer"'):
+        assert f"REVOKE ALL ON TABLE vres.experience_retrieval_references FROM {role}" in text
+        assert f"REVOKE ALL ON SEQUENCE vres.experience_retrieval_references_id_seq FROM {role}" in text
+        assert f"REVOKE ALL ON FUNCTION {REFS} FROM {role}" in text
+    assert 'GRANT SELECT ON TABLE vres.experience_retrieval_references TO "vres_writer"' not in text
+    assert 'GRANT EXECUTE ON FUNCTION ' + REFS + ' TO "vres_runtime"' not in text
     assert 'REVOKE ALL ON TABLE vres.experience_retrieval_observations FROM "vres_writer"' in text
     assert f"REVOKE ALL ON FUNCTION {RECORD} FROM PUBLIC" in text

@@ -12,7 +12,8 @@ from .db import DatabaseUnavailable, connect
 from .paths import logs_dir
 from .project import discover_project
 from .redaction import redact_text
-from .reply_guard import begin_reply_turn, inspect_stop_guard, mark_stop_guard_blocked
+from . import experience_references
+from .reply_guard import begin_reply_turn, current_reply_turn, inspect_stop_guard, mark_stop_guard_blocked
 from .repository import PendingValidationError, Repository
 from .session_contamination import contamination_notice, revoked_phrase
 from .session_lifecycle import (
@@ -442,6 +443,7 @@ def stop() -> None:
                     sid,
                 )
             repo.record_event(task.task_key, "MODEL_STOP", "vres-lifecycle", {}, sid)
+            _public_text_reference(payload, project_id, sid)
         if report:
             sys.stdout.write(json.dumps({"systemMessage": report}))
     except Exception as exc:
@@ -457,6 +459,21 @@ def stop() -> None:
                 }
             )
         )
+
+
+def _public_text_reference(payload: dict[str, Any], project_id: int, sid: str | None) -> None:
+    """Exact-key references in the allowed main-thread reply text. Independent of the guard; never raises."""
+    try:
+        turn = current_reply_turn(project_id, sid or "")
+        turn_id = turn.get("turn_id") if isinstance(turn, dict) else None
+        if not turn_id:
+            return
+        text = payload.get("last_assistant_message")
+        if not isinstance(text, str):
+            text = last_assistant_snapshot(payload, max_chars=experience_references.MAX_TEXT_CHARS)
+        experience_references.capture_public_text(text, turn_id, sid, project_id)
+    except Exception as exc:
+        _log_experience_event("ExperienceReference", type(exc).__name__)
 
 
 def validator_stop() -> None:
@@ -524,7 +541,7 @@ def experience_observe() -> None:
     Prints nothing, always returns normally and logs only a fixed bounded code (never payload, ids, query, memory text
     or exception bodies). Telemetry gaps are visible as codes; ``recorded`` and ``duplicate`` are not errors.
     """
-    from .experience_observability import ObservationRejected, observe_retrieval
+    from .experience_observability import TOOL_NAME, ObservationRejected, observe_retrieval
 
     try:
         payload = _input()
@@ -539,14 +556,36 @@ def experience_observe() -> None:
             if row is None:
                 raise ObservationRejected("project_not_found")
             project_id = row["id"] if isinstance(row, dict) else row[0]
-            outcome = observe_retrieval(payload, project_id).get("outcome")
-            if outcome in ("recorded", "duplicate"):
+            if payload.get("tool_name", TOOL_NAME) == TOOL_NAME:
+                outcome = observe_retrieval(payload, project_id).get("outcome")
+                if outcome in ("recorded", "duplicate"):
+                    return
+                code = (f"observation_{outcome}" if outcome in _OBSERVE_GAP_OUTCOMES
+                        else "observation_outcome_unexpected")
+            else:
+                _experience_reference(payload, project_id)
                 return
-            code = f"observation_{outcome}" if outcome in _OBSERVE_GAP_OUTCOMES else "observation_outcome_unexpected"
     except Exception as exc:  # telemetry must never break the host turn
         code = exc.code if isinstance(exc, ObservationRejected) else type(exc).__name__
+    _log_experience_event("ExperienceObserve", code)
+
+
+def _log_experience_event(event: str, code: str) -> None:
     try:
         with (logs_dir() / "hook-errors.log").open("a", encoding="utf-8") as handle:
-            handle.write(f"{datetime.now(timezone.utc).isoformat()} event=ExperienceObserve code={code}\n")
+            handle.write(f"{datetime.now(timezone.utc).isoformat()} event={event} code={code}\n")
     except OSError:
         pass
+
+
+def _experience_reference(payload: dict[str, Any], project_id: int) -> None:
+    """Exact-key references in a non-retrieval tool INPUT. Never raises; logs only a fixed bounded code."""
+    if payload.get("tool_name") == "SubagentHandback":
+        return  # recorded once from the SubagentStop transcript, never double counted
+    try:
+        outcome = experience_references.capture_tool_input(payload, project_id).get("outcome")
+    except Exception as exc:
+        _log_experience_event("ExperienceReference", type(exc).__name__)
+        return
+    if outcome in _OBSERVE_GAP_OUTCOMES:
+        _log_experience_event("ExperienceReference", f"reference_{outcome}")

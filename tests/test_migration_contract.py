@@ -308,10 +308,13 @@ def test_experience_retrieval_observability_migration_041_contract():
     code = "\n".join(line for line in sql.splitlines() if not line.lstrip().startswith("--"))
     assert "176.e6.v1" in sql and "d61f60d31182085748bb613ef3c160274f1a1a5a2384854f36e52b4cdfecc5e5" in sql
     assert "7572cafc632d4f56571adbe5f59baceedf15c56a07d5a3ca35e4b05448a982e9" in sql
-    for table in ("experience_retrieval_observations", "experience_retrieval_items"):
+    for table in ("experience_retrieval_observations", "experience_retrieval_items", "experience_retrieval_references"):
         assert f"CREATE TABLE IF NOT EXISTS vres.{table}" in code
     for event in ("UPDATE", "DELETE", "TRUNCATE"):
         assert f"BEFORE {event}" in code
+    for trg in ("trg_protect_err_update", "trg_protect_err_delete", "trg_protect_err_truncate"):
+        assert f"CREATE TRIGGER {trg}" in code
+    assert code.count("EXECUTE FUNCTION vres.protect_experience_retrieval_immutability()") == 9
     assert "CREATE OR REPLACE FUNCTION vres.record_experience_retrieval_observation(" in code
     assert "SECURITY DEFINER" in code and "SET search_path = pg_catalog, vres" in code
     assert "authority_key = 'user_event_writer'" in code and "session_user" in code
@@ -331,3 +334,31 @@ def test_migration_041_work_unit_attribution_and_policy_row_are_strict():
     # the post-insert verification compares the exact frozen policy JSON, not just version/schema/digest
     verify = flat.split("DO $vres_e6$", 1)[1].split("END", 1)[0]
     assert "policy='{" in verify and '"policy_version":"176.e6.v1"' in verify
+
+
+def test_migration_041_reference_ledger_and_writer_contract():
+    sql = _migration("041_experience_retrieval_observability.sql")
+    code = "\n".join(line for line in sql.splitlines() if not line.lstrip().startswith("--"))
+    flat = " ".join(code.split())
+    table = flat.split("CREATE TABLE IF NOT EXISTS vres.experience_retrieval_references", 1)[1].split(");", 1)[0]
+    for column in ("reference_key", "idempotency_key", "observation_id", "memory_key", "source_kind", "host_event_digest",
+                   "evidence_digest", "tool_use_id", "agent_id", "observed_at", "created_at"):
+        assert column in table
+    assert "'assistant_public_text','assistant_tool_input','subagent_handback'" in table.replace(" ", "")
+    assert "REFERENCES vres.experience_retrieval_observations(id) ON DELETE RESTRICT" in table
+    assert "UNIQUE (observation_id, memory_key, source_kind, host_event_digest)" in table
+    for forbidden in (" text_body", "raw_text", "message text", "content text", "tool_input jsonb", "tool_response"):
+        assert forbidden not in table
+    fn = flat.split("CREATE OR REPLACE FUNCTION vres.record_experience_retrieval_references(", 1)[1]
+    assert "SECURITY DEFINER SET search_path = pg_catalog, vres" in fn
+    assert "authority_key = 'user_event_writer'" in fn and "session_user <> allowed::text" in fn
+    # per-key attribution: same project + exact session + same agent context (NULL means NULL), prior, not self, latest
+    assert "o.project_id = p_project_id AND o.session_id = sess.id" in fn
+    assert "o.host_agent_id IS NOT DISTINCT FROM p_agent_id" in fn
+    assert "o.observed_at < now_ts" in fn and "o.tool_use_id IS DISTINCT FROM p_tool_use_id" in fn
+    assert "ORDER BY o.observed_at DESC, o.id DESC LIMIT 100" in fn and "cardinality(p_memory_keys) > 500" in fn
+    for refuse in ("REVOKE ALL ON TABLE vres.experience_retrieval_references FROM PUBLIC",
+                   "REVOKE ALL ON SEQUENCE vres.experience_retrieval_references_id_seq FROM PUBLIC",
+                   "REVOKE ALL ON FUNCTION vres.record_experience_retrieval_references(bigint,text,text,text,text,text,text,text[]) FROM PUBLIC"):
+        assert refuse in flat
+    assert "GRANT " not in code and "UPDATE vres.experience_retrieval" not in code

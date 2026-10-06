@@ -14,11 +14,15 @@ LAUNCHER = ROOT / "plugins/vres-os/bin/vres-experience-observe.ps1"
 TOOL = "mcp__plugin_vres-os_vres__experience_retrieve"
 
 
-def test_hooks_json_registers_only_exact_successful_posttooluse():
+def test_hooks_json_registers_one_successful_posttooluse_observer():
     entries = [e for e in HOOKS["hooks"]["PostToolUse"] if "vres-experience-observe" in json.dumps(e)]
     assert len(entries) == 1
-    assert entries[0]["matcher"] == f"^{TOOL}$" and entries[0]["hooks"][0]["timeout"] == 10
+    import re  # Chunk 2 broadened the matcher to every tool except the SubagentHandback event; retrieve is still matched
+    assert re.search(entries[0]["matcher"], TOOL) and not re.search(entries[0]["matcher"], "SubagentHandback")
+    assert entries[0]["hooks"][0]["timeout"] == 10
     assert all("vres-experience-observe" not in json.dumps(v) for k, v in HOOKS["hooks"].items() if k != "PostToolUse")
+    assert "PostToolUseFailure" in HOOKS["hooks"]  # present, yet carries no reference/observation capture
+    assert "vres-experience-observe" not in json.dumps(HOOKS["hooks"]["PostToolUseFailure"])
 
 
 def test_launcher_is_bounded_utf8_nobom_and_fail_safe():

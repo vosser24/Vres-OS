@@ -142,6 +142,41 @@ DROP TRIGGER IF EXISTS trg_protect_eri_truncate ON vres.experience_retrieval_ite
 CREATE TRIGGER trg_protect_eri_truncate BEFORE TRUNCATE ON vres.experience_retrieval_items
 FOR EACH STATEMENT EXECUTE FUNCTION vres.protect_experience_retrieval_immutability();
 
+-- Explicit-reference evidence (Chunk 2). A row says only: in this session/agent context an assistant-authored artifact
+-- (public text, tool input or subagent handback) literally contained the exact memory key of an item returned by a
+-- PRIOR observation. It stores digests and identities, never the text, and it asserts nothing about usefulness.
+CREATE TABLE IF NOT EXISTS vres.experience_retrieval_references (
+    id bigserial PRIMARY KEY,
+    reference_key text NOT NULL UNIQUE CHECK (reference_key ~ '^ERR-[0-9a-f]{32}$'),
+    idempotency_key text NOT NULL UNIQUE CHECK (idempotency_key ~ '^[0-9a-f]{64}$'),
+    observation_id bigint NOT NULL REFERENCES vres.experience_retrieval_observations(id) ON DELETE RESTRICT,
+    memory_key text NOT NULL CHECK (char_length(memory_key) BETWEEN 1 AND 300),
+    source_kind text NOT NULL CHECK (source_kind IN ('assistant_public_text','assistant_tool_input','subagent_handback')),
+    host_event_digest text NOT NULL CHECK (host_event_digest ~ '^[0-9a-f]{64}$'),
+    evidence_digest text NOT NULL CHECK (evidence_digest ~ '^[0-9a-f]{64}$'),
+    tool_use_id text CHECK (tool_use_id IS NULL OR char_length(tool_use_id) BETWEEN 1 AND 300),
+    agent_id text CHECK (agent_id IS NULL OR char_length(agent_id) BETWEEN 1 AND 300),
+    observed_at timestamptz NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (observation_id, memory_key, source_kind, host_event_digest),
+    FOREIGN KEY (observation_id, memory_key)
+        REFERENCES vres.experience_retrieval_items(observation_id, memory_key) ON DELETE RESTRICT,
+    CHECK (source_kind <> 'assistant_tool_input' OR tool_use_id IS NOT NULL)
+);
+
+CREATE INDEX IF NOT EXISTS idx_err_observation ON vres.experience_retrieval_references(observation_id);
+CREATE INDEX IF NOT EXISTS idx_err_memory_key ON vres.experience_retrieval_references(memory_key);
+
+DROP TRIGGER IF EXISTS trg_protect_err_update ON vres.experience_retrieval_references;
+CREATE TRIGGER trg_protect_err_update BEFORE UPDATE ON vres.experience_retrieval_references
+FOR EACH ROW EXECUTE FUNCTION vres.protect_experience_retrieval_immutability();
+DROP TRIGGER IF EXISTS trg_protect_err_delete ON vres.experience_retrieval_references;
+CREATE TRIGGER trg_protect_err_delete BEFORE DELETE ON vres.experience_retrieval_references
+FOR EACH ROW EXECUTE FUNCTION vres.protect_experience_retrieval_immutability();
+DROP TRIGGER IF EXISTS trg_protect_err_truncate ON vres.experience_retrieval_references;
+CREATE TRIGGER trg_protect_err_truncate BEFORE TRUNCATE ON vres.experience_retrieval_references
+FOR EACH STATEMENT EXECUTE FUNCTION vres.protect_experience_retrieval_immutability();
+
 -- Writer-only recorder. The host hook passes structural digests only; the project is resolved by the hook from the host
 -- cwd and the open Claude session is matched EXACTLY by (project, provider, provider_session_id). The task comes only
 -- from sessions.task_id (NULL when unbound); a work unit is attributed only when exactly one RUNNING work unit of that task is
@@ -278,12 +313,134 @@ BEGIN
 END
 $vres_e6$;
 
+-- Writer-only explicit-reference recorder. The caller proposes exact memory keys it found in assistant-authored host
+-- evidence; this function independently re-derives the attribution per key: the observation must belong to the same
+-- project, the exact open session and the same agent context (NULL means main thread), be strictly earlier than this
+-- reference, and not be produced by the same tool use. Among the 100 most recent such observations the LATEST one that
+-- returned the key is chosen. A key with no such observation writes nothing. Re-delivery of the same host event is a
+-- duplicate; the same identity with different evidence fails closed.
+CREATE OR REPLACE FUNCTION vres.record_experience_retrieval_references(
+    p_project_id bigint, p_provider_session_id text, p_agent_id text, p_source_kind text, p_host_event_digest text,
+    p_evidence_digest text, p_tool_use_id text, p_memory_keys text[])
+RETURNS TABLE(outcome text, recorded integer, duplicates integer, skipped integer)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, vres
+AS $vres_e6$
+DECLARE
+    allowed name;
+    n integer;
+    sess record;
+    now_ts timestamptz;
+    k text;
+    obs_id bigint;
+    prior record;
+    idem text;
+    n_recorded integer := 0;
+    n_duplicates integer := 0;
+    n_skipped integer := 0;
+BEGIN
+    SELECT writer_role INTO allowed FROM vres.provenance_authority WHERE authority_key = 'user_event_writer';
+    IF allowed IS NULL OR session_user <> allowed::text THEN
+        RAISE EXCEPTION 'experience retrieval references may be recorded only by the trusted provenance writer role'
+            USING ERRCODE = 'P0001';
+    END IF;
+    IF p_project_id IS NULL OR p_provider_session_id IS NULL
+       OR char_length(p_provider_session_id) NOT BETWEEN 1 AND 300
+       OR p_source_kind IS NULL
+       OR p_source_kind NOT IN ('assistant_public_text','assistant_tool_input','subagent_handback')
+       OR p_host_event_digest IS NULL OR p_host_event_digest !~ '^[0-9a-f]{64}$'
+       OR p_evidence_digest IS NULL OR p_evidence_digest !~ '^[0-9a-f]{64}$'
+       OR (p_tool_use_id IS NOT NULL AND char_length(p_tool_use_id) NOT BETWEEN 1 AND 300)
+       OR (p_agent_id IS NOT NULL AND char_length(p_agent_id) NOT BETWEEN 1 AND 300)
+       OR (p_source_kind = 'assistant_tool_input' AND p_tool_use_id IS NULL)
+       OR (p_source_kind = 'assistant_public_text' AND p_tool_use_id IS NOT NULL)
+       OR p_memory_keys IS NULL OR cardinality(p_memory_keys) > 500
+       OR EXISTS (SELECT 1 FROM unnest(p_memory_keys) AS x WHERE x IS NULL OR char_length(x) NOT BETWEEN 1 AND 300) THEN
+        RAISE EXCEPTION 'invalid experience retrieval reference arguments' USING ERRCODE = 'P0001';
+    END IF;
+    IF cardinality(p_memory_keys) = 0 THEN
+        RETURN QUERY SELECT 'no_keys'::text, 0, 0, 0;
+        RETURN;
+    END IF;
+
+    SELECT count(*) INTO n FROM vres.sessions s
+     WHERE s.project_id = p_project_id AND s.provider = 'claude'
+       AND s.provider_session_id = p_provider_session_id AND s.ended_at IS NULL;
+    IF n = 0 THEN
+        RETURN QUERY SELECT 'session_not_found'::text, 0, 0, 0;
+        RETURN;
+    ELSIF n > 1 THEN
+        RETURN QUERY SELECT 'session_ambiguous'::text, 0, 0, 0;
+        RETURN;
+    END IF;
+    SELECT s.id INTO sess FROM vres.sessions s
+     WHERE s.project_id = p_project_id AND s.provider = 'claude'
+       AND s.provider_session_id = p_provider_session_id AND s.ended_at IS NULL;
+
+    now_ts := clock_timestamp();
+    FOR k IN SELECT DISTINCT x FROM unnest(p_memory_keys) AS x ORDER BY x LOOP
+        SELECT r.evidence_digest INTO prior
+          FROM vres.experience_retrieval_references r
+          JOIN vres.experience_retrieval_observations o ON o.id = r.observation_id
+         WHERE o.project_id = p_project_id AND o.session_id = sess.id
+           AND o.host_agent_id IS NOT DISTINCT FROM p_agent_id
+           AND r.memory_key = k AND r.source_kind = p_source_kind AND r.host_event_digest = p_host_event_digest
+         LIMIT 1;
+        IF FOUND THEN
+            IF prior.evidence_digest <> p_evidence_digest THEN
+                RAISE EXCEPTION 'conflicting duplicate experience retrieval reference' USING ERRCODE = 'P0001';
+            END IF;
+            n_duplicates := n_duplicates + 1;
+            CONTINUE;
+        END IF;
+
+        obs_id := NULL;
+        SELECT c.id INTO obs_id FROM (
+            SELECT o.id FROM vres.experience_retrieval_observations o
+             WHERE o.project_id = p_project_id AND o.session_id = sess.id
+               AND o.host_agent_id IS NOT DISTINCT FROM p_agent_id
+               AND o.observed_at < now_ts AND o.tool_use_id IS DISTINCT FROM p_tool_use_id
+             ORDER BY o.observed_at DESC, o.id DESC LIMIT 100) c
+         WHERE EXISTS (SELECT 1 FROM vres.experience_retrieval_items i WHERE i.observation_id = c.id AND i.memory_key = k)
+         ORDER BY c.id DESC LIMIT 1;
+        IF obs_id IS NULL THEN
+            n_skipped := n_skipped + 1;
+            CONTINUE;
+        END IF;
+
+        idem := encode(sha256(convert_to(
+            jsonb_build_array(obs_id, k, p_source_kind, p_host_event_digest, '176.e6.v1')::text, 'UTF8')), 'hex');
+        PERFORM pg_advisory_xact_lock(hashtextextended(idem, 0));
+        INSERT INTO vres.experience_retrieval_references(
+            reference_key, idempotency_key, observation_id, memory_key, source_kind, host_event_digest, evidence_digest,
+            tool_use_id, agent_id, observed_at)
+        VALUES ('ERR-' || replace(gen_random_uuid()::text, '-', ''), idem, obs_id, k, p_source_kind,
+                p_host_event_digest, p_evidence_digest, p_tool_use_id, p_agent_id, now_ts)
+        ON CONFLICT DO NOTHING;
+        IF FOUND THEN
+            n_recorded := n_recorded + 1;
+        ELSE
+            n_duplicates := n_duplicates + 1;
+        END IF;
+    END LOOP;
+
+    RETURN QUERY SELECT CASE WHEN n_recorded > 0 THEN 'recorded'
+                             WHEN n_duplicates > 0 THEN 'duplicate'
+                             ELSE 'no_prior_observation' END::text,
+                         n_recorded, n_duplicates, n_skipped;
+END
+$vres_e6$;
+
 -- Privileges: nobody but the owner by default (activate_boundary grants the writer EXECUTE and the runtime SELECT).
 REVOKE ALL ON TABLE vres.experience_retrieval_observations FROM PUBLIC;
 REVOKE ALL ON TABLE vres.experience_retrieval_items FROM PUBLIC;
+REVOKE ALL ON TABLE vres.experience_retrieval_references FROM PUBLIC;
 REVOKE ALL ON SEQUENCE vres.experience_retrieval_observations_id_seq FROM PUBLIC;
 REVOKE ALL ON SEQUENCE vres.experience_retrieval_items_id_seq FROM PUBLIC;
+REVOKE ALL ON SEQUENCE vres.experience_retrieval_references_id_seq FROM PUBLIC;
 REVOKE ALL ON FUNCTION vres.record_experience_retrieval_observation(bigint,text,text,text,text,jsonb,jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION vres.record_experience_retrieval_references(bigint,text,text,text,text,text,text,text[]) FROM PUBLIC;
 REVOKE ALL ON FUNCTION vres.protect_experience_retrieval_immutability() FROM PUBLIC;
 
 DO $vres_e6$
@@ -295,14 +452,17 @@ BEGIN
           FROM pg_class c, aclexplode(c.relacl) a
          WHERE c.oid IN ('vres.experience_retrieval_observations'::regclass,
                          'vres.experience_retrieval_items'::regclass,
+                         'vres.experience_retrieval_references'::regclass,
                          'vres.experience_retrieval_observations_id_seq'::regclass,
-                         'vres.experience_retrieval_items_id_seq'::regclass)
+                         'vres.experience_retrieval_items_id_seq'::regclass,
+                         'vres.experience_retrieval_references_id_seq'::regclass)
            AND a.grantee <> c.relowner AND a.grantee <> 0
         UNION
         SELECT DISTINCT format('FUNCTION %s', p.oid::regprocedure), a.grantee
           FROM pg_proc p, aclexplode(p.proacl) a
          WHERE p.oid IN (
                  'vres.record_experience_retrieval_observation(bigint,text,text,text,text,jsonb,jsonb)'::regprocedure,
+                 'vres.record_experience_retrieval_references(bigint,text,text,text,text,text,text,text[])'::regprocedure,
                  'vres.protect_experience_retrieval_immutability()'::regprocedure)
            AND a.grantee <> p.proowner AND a.grantee <> 0
     LOOP
