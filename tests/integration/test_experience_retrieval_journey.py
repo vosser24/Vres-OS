@@ -1420,3 +1420,23 @@ def test_c3s_5_historical_without_as_of_applies_the_same_effective_time_on_both_
     for q in query_variants(mr):
         rh, rc = _retrieve(pg_project, q, temporal_intent="historical"), _retrieve(pg_project, q)
         assert _raw_keys(rh) == _raw_keys(rc) and set(_raw_keys(rh)) <= {keys["ok"]}
+
+
+def test_e6c3_ordinary_retrieve_stays_read_only_and_matches_the_snapshot_composition(pg_project):
+    from vres_os.experience_retrieval import E5_PARAMS, normalize_request
+    mk = _mk()
+    task = _task(pg_project)
+    _decision(f"D-{mk}", task, f"{mk} decision")
+    _knowledge(f"K-{mk}", pg_project, mk)
+    _procedure(f"P-{mk}", pg_project, mk)
+    request = {"project_id": pg_project, "query": mk, "task_key": task}
+    service = ExperienceRetrievalService()
+    before = _snapshot()
+    ordinary = service.retrieve(request)
+    with service.snapshot() as conn:
+        universe = service.collect_universe(conn, normalize_request(request))
+        again = service.compose_universe(universe, E5_PARAMS)
+    assert _canonical(again) == _canonical(ordinary) and _snapshot() == before
+    with connect() as conn:
+        assert conn.execute("SELECT count(*) AS n FROM vres.experience_retrieval_replays "
+                            "WHERE project_id=%s", (pg_project,)).fetchone()["n"] == 0

@@ -153,7 +153,14 @@ def test_boundary_runtime_reads_but_cannot_write_or_record(db_ready):
             ro.execute("SELECT count(*) FROM vres.experience_retrieval_observations").fetchone()
             ro.execute("SELECT count(*) FROM vres.experience_retrieval_items").fetchone()
             ro.execute("SELECT count(*) FROM vres.experience_retrieval_references").fetchone()
+            ro.execute("SELECT count(*) FROM vres.experience_retrieval_replays").fetchone()
             for stmt in (
+                "INSERT INTO vres.experience_retrieval_replays(replay_key) VALUES ('x')",
+                "UPDATE vres.experience_retrieval_replays SET baseline_pack_bytes=1",
+                "DELETE FROM vres.experience_retrieval_replays",
+                "TRUNCATE vres.experience_retrieval_replays",
+                "SELECT * FROM vres.record_experience_retrieval_replay(1,NULL,'{}'::jsonb)",
+                "SELECT nextval('vres.experience_retrieval_replays_id_seq')",
                 "INSERT INTO vres.experience_retrieval_references(reference_key) VALUES ('x')",
                 "UPDATE vres.experience_retrieval_references SET agent_id='x'",
                 "DELETE FROM vres.experience_retrieval_references",
@@ -193,15 +200,17 @@ _ACL_SQL = """
 SELECT format('%%s|%%s|%%s', c.oid::regclass, pg_get_userbyid(a.grantee), a.privilege_type) AS acl
   FROM pg_class c, aclexplode(c.relacl) a
  WHERE c.oid IN ('vres.experience_retrieval_observations'::regclass, 'vres.experience_retrieval_items'::regclass,
-                 'vres.experience_retrieval_references'::regclass,
+                 'vres.experience_retrieval_references'::regclass, 'vres.experience_retrieval_replays'::regclass,
                  'vres.experience_retrieval_observations_id_seq'::regclass, 'vres.experience_retrieval_items_id_seq'::regclass,
-                 'vres.experience_retrieval_references_id_seq'::regclass)
+                 'vres.experience_retrieval_references_id_seq'::regclass,
+                 'vres.experience_retrieval_replays_id_seq'::regclass)
    AND a.grantee <> c.relowner
 UNION ALL
 SELECT format('%%s|%%s|%%s', p.oid::regprocedure, pg_get_userbyid(a.grantee), a.privilege_type)
   FROM pg_proc p, aclexplode(p.proacl) a
  WHERE p.oid IN ('vres.record_experience_retrieval_observation(bigint,text,text,text,text,jsonb,jsonb)'::regprocedure,
                  'vres.record_experience_retrieval_references(bigint,text,text,text,text,text,text,text[])'::regprocedure,
+                 'vres.record_experience_retrieval_replay(bigint,bigint,jsonb)'::regprocedure,
                  'vres.protect_experience_retrieval_immutability()'::regprocedure)
    AND a.grantee <> p.proowner
 """
@@ -225,6 +234,8 @@ def test_n_boundary_activation_is_repeatable_without_broadening_grants(db_ready)
                 f"vres.experience_retrieval_observations|{runtime}|SELECT",
                 f"vres.experience_retrieval_items|{runtime}|SELECT",
                 f"vres.experience_retrieval_references|{runtime}|SELECT",
+                f"vres.experience_retrieval_replays|{runtime}|SELECT",
+                f"vres.record_experience_retrieval_replay(bigint,bigint,jsonb)|{writer}|EXECUTE",
                 f"vres.record_experience_retrieval_references(bigint,text,text,text,text,text,text,text[])|{writer}|EXECUTE",
                 f"vres.record_experience_retrieval_observation(bigint,text,text,text,text,jsonb,jsonb)|{writer}|EXECUTE",
             ])
@@ -306,7 +317,7 @@ def test_k_real_040_to_041_upgrade_preserves_seeded_state(disposable_040):
         tables_after = {r["table_name"] for r in conn.execute(
             "SELECT table_name FROM information_schema.tables WHERE table_schema='vres'")}
         assert tables_after - tables_before == {"experience_retrieval_observations", "experience_retrieval_items",
-                                                    "experience_retrieval_references"}
+                                                    "experience_retrieval_references", "experience_retrieval_replays"}
         assert tables_before - tables_after == set()
         state_after = {t: conn.execute(q).fetchall() for t, q in _SEED_SELECT.items()}
         policies_after = state_after.pop("experience_policy_versions")
@@ -444,3 +455,39 @@ def test_writer_role_may_execute_the_reference_recorder_only(db_ready):
             for role in (runtime, writer):
                 admin.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role)))
                 admin.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(role)))
+
+
+REPLAY_FN = "vres.record_experience_retrieval_replay(bigint,bigint,jsonb)"
+
+
+def test_replay_table_is_closed_content_free_and_writer_function_is_not_public(db_ready):
+    with connect() as conn:
+        cols = {r["column_name"] for r in conn.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_schema='vres' "
+            "AND table_name='experience_retrieval_replays'")}
+        assert {"replay_key", "idempotency_key", "candidate_policy", "baseline_pack_digest", "candidate_pack_digest",
+                "added_keys", "removed_keys", "reordered_keys", "diagnostics_delta", "causal_credit"} <= cols
+        for banned in ("query", "premises", "pack_body", "transcript", "reasoning", "credential", "vector", "winner", "text"):
+            assert not [c for c in cols if banned in c and not c.endswith("_digest")], banned
+        assert conn.execute("SELECT has_function_privilege('public', %s, 'EXECUTE') AS p", (REPLAY_FN,)).fetchone()["p"] is False
+        assert conn.execute("SELECT prosecdef AS d FROM pg_proc WHERE oid=%s::regprocedure", (REPLAY_FN,)).fetchone()["d"]
+
+
+def test_replay_writer_refuses_non_writer_unknown_keys_and_bad_shapes(db_ready, pid):
+    from psycopg.types.json import Jsonb
+    good = {"request_digest": HEX, "snapshot_at": "2026-10-06T00:00:00+00:00", "baseline_retrieval_policy_digest": HEX,
+            "candidate_policy": {"rrf_k": 15}, "candidate_policy_digest": HEX, "baseline_pack_digest": HEX,
+            "candidate_pack_digest": "b" * 64, "baseline_item_keys": ["K-1"], "candidate_item_keys": ["K-1"],
+            "added_keys": [], "removed_keys": [], "reordered_keys": [], "baseline_pack_bytes": 100,
+            "candidate_pack_bytes": 90, "baseline_estimated_tokens": 10, "candidate_estimated_tokens": 9,
+            "baseline_abstained": False, "candidate_abstained": False, "diagnostics_delta": {}}
+    call = "SELECT outcome, replay_key FROM vres.record_experience_retrieval_replay(%s,NULL,%s)"
+    with connect(purpose="writer") as conn, conn.transaction():
+        first = conn.execute(call, (pid, Jsonb(good))).fetchone()
+        again = conn.execute(call, (pid, Jsonb(good))).fetchone()
+    assert first["outcome"] == "recorded" and again["outcome"] == "duplicate" and again["replay_key"] == first["replay_key"]
+    for bad in ({**good, "winner": True}, {**good, "baseline_pack_bytes": 0}, {**good, "baseline_pack_bytes": 99999},
+                {**good, "added_keys": ["K"] * 33}, {k: v for k, v in good.items() if k != "candidate_pack_digest"}):
+        with pytest.raises(psycopg.Error):
+            with connect(purpose="writer") as conn, conn.transaction():
+                conn.execute(call, (pid, Jsonb(bad)))

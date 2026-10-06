@@ -466,3 +466,13 @@ def test_e3f_30_no_chairman_injection_single_registered_tool_governed_wording():
         assert forbidden not in joined, forbidden
     assert [n for n in ast.walk(fn[TOOL]) if isinstance(n, (ast.Import, ast.ImportFrom))] == []
     assert inspect.getsource(mcp_server).count("ExperienceRetrievalService(") == 1  # only this tool builds it
+
+
+def test_e6c3_the_public_tool_neither_replays_nor_writes_the_replay_ledger(pg_project):
+    mk = _mk()
+    _seed_basic(pg_project, mk)
+    _surface(pg_project, mk)
+    with connect() as conn:
+        assert conn.execute("SELECT count(*) AS n FROM vres.experience_retrieval_replays "
+                            "WHERE project_id=%s", (pg_project,)).fetchone()["n"] == 0
+    assert "replay" not in inspect.getsource(mcp_server.experience_retrieve).lower()

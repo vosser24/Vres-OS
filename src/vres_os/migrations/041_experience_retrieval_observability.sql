@@ -428,15 +428,169 @@ BEGIN
 END
 $vres_e6$;
 
+-- Paired policy replay ledger (Chunk 3). One row records, for ONE request evaluated against ONE hard-gated candidate
+-- universe in ONE REPEATABLE READ snapshot, the exact E5 baseline and ONE bounded candidate composition policy:
+-- their pack digests, ordered item keys and deterministic deltas. It stores digests, memory keys and counts only, never
+-- request text, memory text or pack bodies, and it never establishes causal credit or selects a policy.
+CREATE TABLE IF NOT EXISTS vres.experience_retrieval_replays (
+    id bigserial PRIMARY KEY,
+    replay_key text NOT NULL UNIQUE CHECK (replay_key ~ '^ERP-[0-9a-f]{32}$'),
+    idempotency_key text NOT NULL UNIQUE CHECK (idempotency_key ~ '^[0-9a-f]{64}$'),
+    project_id bigint NOT NULL REFERENCES vres.projects(id) ON DELETE RESTRICT,
+    task_id bigint REFERENCES vres.tasks(id) ON DELETE RESTRICT,
+    policy_version text NOT NULL DEFAULT '176.e6.v1' CHECK (policy_version = '176.e6.v1'),
+    request_digest text NOT NULL CHECK (request_digest ~ '^[0-9a-f]{64}$'),
+    snapshot_at timestamptz NOT NULL,
+    baseline_retrieval_policy_digest text NOT NULL CHECK (baseline_retrieval_policy_digest ~ '^[0-9a-f]{64}$'),
+    candidate_policy jsonb NOT NULL CHECK (jsonb_typeof(candidate_policy) = 'object' AND char_length(candidate_policy::text) <= 2048),
+    candidate_policy_digest text NOT NULL CHECK (candidate_policy_digest ~ '^[0-9a-f]{64}$'),
+    baseline_pack_digest text NOT NULL CHECK (baseline_pack_digest ~ '^[0-9a-f]{64}$'),
+    candidate_pack_digest text NOT NULL CHECK (candidate_pack_digest ~ '^[0-9a-f]{64}$'),
+    baseline_item_keys jsonb NOT NULL CHECK (jsonb_typeof(baseline_item_keys) = 'array' AND jsonb_array_length(baseline_item_keys) <= 32),
+    candidate_item_keys jsonb NOT NULL CHECK (jsonb_typeof(candidate_item_keys) = 'array' AND jsonb_array_length(candidate_item_keys) <= 32),
+    added_keys jsonb NOT NULL CHECK (jsonb_typeof(added_keys) = 'array' AND jsonb_array_length(added_keys) <= 32),
+    removed_keys jsonb NOT NULL CHECK (jsonb_typeof(removed_keys) = 'array' AND jsonb_array_length(removed_keys) <= 32),
+    reordered_keys jsonb NOT NULL CHECK (jsonb_typeof(reordered_keys) = 'array' AND jsonb_array_length(reordered_keys) <= 32),
+    baseline_pack_bytes integer NOT NULL CHECK (baseline_pack_bytes BETWEEN 1 AND 32768),
+    candidate_pack_bytes integer NOT NULL CHECK (candidate_pack_bytes BETWEEN 1 AND 32768),
+    baseline_estimated_tokens integer NOT NULL CHECK (baseline_estimated_tokens BETWEEN 0 AND 32768),
+    candidate_estimated_tokens integer NOT NULL CHECK (candidate_estimated_tokens BETWEEN 0 AND 32768),
+    baseline_abstained boolean NOT NULL,
+    candidate_abstained boolean NOT NULL,
+    diagnostics_delta jsonb NOT NULL CHECK (jsonb_typeof(diagnostics_delta) = 'object' AND char_length(diagnostics_delta::text) <= 4096),
+    causal_credit text NOT NULL DEFAULT 'not_established' CHECK (causal_credit = 'not_established'),
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_erp_project_snapshot ON vres.experience_retrieval_replays(project_id, snapshot_at);
+
+DROP TRIGGER IF EXISTS trg_protect_erp_update ON vres.experience_retrieval_replays;
+CREATE TRIGGER trg_protect_erp_update BEFORE UPDATE ON vres.experience_retrieval_replays
+FOR EACH ROW EXECUTE FUNCTION vres.protect_experience_retrieval_immutability();
+DROP TRIGGER IF EXISTS trg_protect_erp_delete ON vres.experience_retrieval_replays;
+CREATE TRIGGER trg_protect_erp_delete BEFORE DELETE ON vres.experience_retrieval_replays
+FOR EACH ROW EXECUTE FUNCTION vres.protect_experience_retrieval_immutability();
+DROP TRIGGER IF EXISTS trg_protect_erp_truncate ON vres.experience_retrieval_replays;
+CREATE TRIGGER trg_protect_erp_truncate BEFORE TRUNCATE ON vres.experience_retrieval_replays
+FOR EACH STATEMENT EXECUTE FUNCTION vres.protect_experience_retrieval_immutability();
+
+-- Writer-only recorder. The replay is computed by the service in a read-only snapshot; this function persists it in a
+-- separate writer transaction. The idempotency identity is derived here from digests only, its advisory lock is taken
+-- BEFORE the lookup, an unchanged repeat returns the existing row, and an existing row is never overwritten.
+CREATE OR REPLACE FUNCTION vres.record_experience_retrieval_replay(
+    p_project_id bigint, p_task_id bigint, p_replay jsonb)
+RETURNS TABLE(outcome text, replay_key text)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, vres
+AS $vres_e6$
+DECLARE
+    allowed name;
+    k text;
+    idem text;
+    existing text;
+    new_key text;
+BEGIN
+    SELECT writer_role INTO allowed FROM vres.provenance_authority WHERE authority_key = 'user_event_writer';
+    IF allowed IS NULL OR session_user <> allowed::text THEN
+        RAISE EXCEPTION 'experience retrieval replays may be recorded only by the trusted provenance writer role'
+            USING ERRCODE = 'P0001';
+    END IF;
+    IF p_project_id IS NULL OR p_replay IS NULL OR jsonb_typeof(p_replay) <> 'object' THEN
+        RAISE EXCEPTION 'invalid experience retrieval replay arguments' USING ERRCODE = 'P0001';
+    END IF;
+    FOR k IN SELECT jsonb_object_keys(p_replay) LOOP
+        IF k <> ALL (ARRAY['request_digest','snapshot_at','baseline_retrieval_policy_digest','candidate_policy',
+                           'candidate_policy_digest','baseline_pack_digest','candidate_pack_digest','baseline_item_keys',
+                           'candidate_item_keys','added_keys','removed_keys','reordered_keys','baseline_pack_bytes',
+                           'candidate_pack_bytes','baseline_estimated_tokens','candidate_estimated_tokens',
+                           'baseline_abstained','candidate_abstained','diagnostics_delta']) THEN
+            RAISE EXCEPTION 'unknown experience retrieval replay field' USING ERRCODE = 'P0001';
+        END IF;
+    END LOOP;
+    IF (SELECT count(*) FROM jsonb_object_keys(p_replay)) <> 19 THEN
+        RAISE EXCEPTION 'incomplete experience retrieval replay' USING ERRCODE = 'P0001';
+    END IF;
+    FOREACH k IN ARRAY ARRAY['request_digest','baseline_retrieval_policy_digest','candidate_policy_digest',
+                             'baseline_pack_digest','candidate_pack_digest'] LOOP
+        IF jsonb_typeof(p_replay -> k) IS DISTINCT FROM 'string' OR (p_replay ->> k) !~ '^[0-9a-f]{64}$' THEN
+            RAISE EXCEPTION 'invalid experience retrieval replay digest' USING ERRCODE = 'P0001';
+        END IF;
+    END LOOP;
+    FOREACH k IN ARRAY ARRAY['baseline_item_keys','candidate_item_keys','added_keys','removed_keys','reordered_keys'] LOOP
+        IF jsonb_typeof(p_replay -> k) IS DISTINCT FROM 'array' OR jsonb_array_length(p_replay -> k) > 32
+           OR EXISTS (SELECT 1 FROM jsonb_array_elements(p_replay -> k) e
+                       WHERE jsonb_typeof(e) <> 'string' OR char_length(e #>> '{}') NOT BETWEEN 1 AND 300) THEN
+            RAISE EXCEPTION 'invalid experience retrieval replay key list' USING ERRCODE = 'P0001';
+        END IF;
+    END LOOP;
+    FOREACH k IN ARRAY ARRAY['baseline_pack_bytes','candidate_pack_bytes','baseline_estimated_tokens',
+                             'candidate_estimated_tokens'] LOOP
+        IF jsonb_typeof(p_replay -> k) IS DISTINCT FROM 'number' THEN
+            RAISE EXCEPTION 'invalid experience retrieval replay count' USING ERRCODE = 'P0001';
+        END IF;
+        -- Range-check BEFORE the idempotency lookup so an out-of-range repeat is rejected, never reported as a duplicate.
+        IF (p_replay ->> k)::numeric <> trunc((p_replay ->> k)::numeric)
+           OR (p_replay ->> k)::numeric < (CASE WHEN right(k, 10) = 'pack_bytes' THEN 1 ELSE 0 END)
+           OR (p_replay ->> k)::numeric > 32768 THEN
+            RAISE EXCEPTION 'invalid experience retrieval replay count' USING ERRCODE = 'P0001';
+        END IF;
+    END LOOP;
+    IF jsonb_typeof(p_replay -> 'baseline_abstained') IS DISTINCT FROM 'boolean'
+       OR jsonb_typeof(p_replay -> 'candidate_abstained') IS DISTINCT FROM 'boolean'
+       OR jsonb_typeof(p_replay -> 'candidate_policy') IS DISTINCT FROM 'object'
+       OR jsonb_typeof(p_replay -> 'diagnostics_delta') IS DISTINCT FROM 'object'
+       OR jsonb_typeof(p_replay -> 'snapshot_at') IS DISTINCT FROM 'string' THEN
+        RAISE EXCEPTION 'invalid experience retrieval replay shape' USING ERRCODE = 'P0001';
+    END IF;
+    IF p_task_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM vres.tasks t WHERE t.id = p_task_id AND t.project_id = p_project_id) THEN
+        RAISE EXCEPTION 'replay task does not belong to the project' USING ERRCODE = 'P0001';
+    END IF;
+
+    idem := encode(sha256(convert_to(
+        jsonb_build_array(p_project_id, coalesce(p_task_id::text, ''), p_replay ->> 'request_digest',
+                          p_replay ->> 'candidate_policy_digest', p_replay ->> 'baseline_pack_digest',
+                          p_replay ->> 'candidate_pack_digest', '176.e6.v1')::text, 'UTF8')), 'hex');
+    PERFORM pg_advisory_xact_lock(hashtextextended(idem, 0));
+
+    SELECT r.replay_key INTO existing FROM vres.experience_retrieval_replays r WHERE r.idempotency_key = idem;
+    IF FOUND THEN
+        RETURN QUERY SELECT 'duplicate'::text, existing;
+        RETURN;
+    END IF;
+
+    new_key := 'ERP-' || replace(gen_random_uuid()::text, '-', '');
+    INSERT INTO vres.experience_retrieval_replays(
+        replay_key, idempotency_key, project_id, task_id, request_digest, snapshot_at,
+        baseline_retrieval_policy_digest, candidate_policy, candidate_policy_digest, baseline_pack_digest,
+        candidate_pack_digest, baseline_item_keys, candidate_item_keys, added_keys, removed_keys, reordered_keys,
+        baseline_pack_bytes, candidate_pack_bytes, baseline_estimated_tokens, candidate_estimated_tokens,
+        baseline_abstained, candidate_abstained, diagnostics_delta)
+    VALUES (new_key, idem, p_project_id, p_task_id, p_replay ->> 'request_digest', (p_replay ->> 'snapshot_at')::timestamptz,
+            p_replay ->> 'baseline_retrieval_policy_digest', p_replay -> 'candidate_policy',
+            p_replay ->> 'candidate_policy_digest', p_replay ->> 'baseline_pack_digest',
+            p_replay ->> 'candidate_pack_digest', p_replay -> 'baseline_item_keys', p_replay -> 'candidate_item_keys',
+            p_replay -> 'added_keys', p_replay -> 'removed_keys', p_replay -> 'reordered_keys',
+            (p_replay ->> 'baseline_pack_bytes')::integer, (p_replay ->> 'candidate_pack_bytes')::integer,
+            (p_replay ->> 'baseline_estimated_tokens')::integer, (p_replay ->> 'candidate_estimated_tokens')::integer,
+            (p_replay ->> 'baseline_abstained')::boolean, (p_replay ->> 'candidate_abstained')::boolean,
+            p_replay -> 'diagnostics_delta');
+    RETURN QUERY SELECT 'recorded'::text, new_key;
+END
+$vres_e6$;
+
 -- Privileges: nobody but the owner by default (activate_boundary grants the writer EXECUTE and the runtime SELECT).
 REVOKE ALL ON TABLE vres.experience_retrieval_observations FROM PUBLIC;
 REVOKE ALL ON TABLE vres.experience_retrieval_items FROM PUBLIC;
 REVOKE ALL ON TABLE vres.experience_retrieval_references FROM PUBLIC;
+REVOKE ALL ON TABLE vres.experience_retrieval_replays FROM PUBLIC;
 REVOKE ALL ON SEQUENCE vres.experience_retrieval_observations_id_seq FROM PUBLIC;
 REVOKE ALL ON SEQUENCE vres.experience_retrieval_items_id_seq FROM PUBLIC;
 REVOKE ALL ON SEQUENCE vres.experience_retrieval_references_id_seq FROM PUBLIC;
+REVOKE ALL ON SEQUENCE vres.experience_retrieval_replays_id_seq FROM PUBLIC;
 REVOKE ALL ON FUNCTION vres.record_experience_retrieval_observation(bigint,text,text,text,text,jsonb,jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION vres.record_experience_retrieval_references(bigint,text,text,text,text,text,text,text[]) FROM PUBLIC;
+REVOKE ALL ON FUNCTION vres.record_experience_retrieval_replay(bigint,bigint,jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION vres.protect_experience_retrieval_immutability() FROM PUBLIC;
 
 DO $vres_e6$
@@ -449,9 +603,11 @@ BEGIN
          WHERE c.oid IN ('vres.experience_retrieval_observations'::regclass,
                          'vres.experience_retrieval_items'::regclass,
                          'vres.experience_retrieval_references'::regclass,
+                         'vres.experience_retrieval_replays'::regclass,
                          'vres.experience_retrieval_observations_id_seq'::regclass,
                          'vres.experience_retrieval_items_id_seq'::regclass,
-                         'vres.experience_retrieval_references_id_seq'::regclass)
+                         'vres.experience_retrieval_references_id_seq'::regclass,
+                         'vres.experience_retrieval_replays_id_seq'::regclass)
            AND a.grantee <> c.relowner AND a.grantee <> 0
         UNION
         SELECT DISTINCT format('FUNCTION %s', p.oid::regprocedure), a.grantee
@@ -459,6 +615,7 @@ BEGIN
          WHERE p.oid IN (
                  'vres.record_experience_retrieval_observation(bigint,text,text,text,text,jsonb,jsonb)'::regprocedure,
                  'vres.record_experience_retrieval_references(bigint,text,text,text,text,text,text,text[])'::regprocedure,
+                 'vres.record_experience_retrieval_replay(bigint,bigint,jsonb)'::regprocedure,
                  'vres.protect_experience_retrieval_immutability()'::regprocedure)
            AND a.grantee <> p.proowner AND a.grantee <> 0
     LOOP

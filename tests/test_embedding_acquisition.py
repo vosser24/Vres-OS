@@ -99,3 +99,51 @@ def test_onboard_folder_does_not_launch_worker_when_disabled(monkeypatch):
     monkeypatch.setattr(mcp_server, "ConfigStore", lambda: SimpleNamespace(load=lambda: VresConfig(embeddings_enabled=False)))
     monkeypatch.setattr(workers, "launch_embedding_worker", lambda: pytest.fail("worker launched while disabled"))
     assert "embedding_worker" not in mcp_server.onboard_folder(".")
+
+
+# ---- #176 E6 Chunk 3: semantic search on a caller-supplied connection (replay snapshot)
+
+class _SqlConn:
+    def __init__(self):
+        self.sql = []
+
+    def execute(self, query, params=None):
+        self.sql.append(" ".join(query.split()))
+        return SimpleNamespace(fetchall=lambda: [])
+
+
+def _semantic_env(monkeypatch, enabled=True):
+    cfg = SimpleNamespace(embeddings_enabled=enabled, embedding_model="m")
+    monkeypatch.setattr(embeddings, "ConfigStore", lambda: SimpleNamespace(load=lambda: cfg))
+    monkeypatch.setattr(embeddings, "_load_model",
+                        lambda name: SimpleNamespace(encode=lambda *a, **k: [[1.0, 0.0]]))
+    monkeypatch.setattr(embeddings, "_vector_enabled", lambda conn: True)
+
+
+def test_e6c3_semantic_search_in_conn_uses_the_supplied_connection_and_never_opens_its_own(monkeypatch):
+    _semantic_env(monkeypatch)
+    monkeypatch.setattr(embeddings, "_connect", lambda: pytest.fail("must not open a second connection"))
+    conn = _SqlConn()
+    assert embeddings.EmbeddingService().semantic_search_in_conn("cache", 8, 1, conn) == []
+    assert len(conn.sql) == 1 and conn.sql[0].lstrip().upper().startswith("SELECT")
+
+
+def test_e6c3_semantic_search_runs_the_identical_sql_through_its_own_connection(monkeypatch):
+    from contextlib import contextmanager
+    _semantic_env(monkeypatch)
+    own, supplied = _SqlConn(), _SqlConn()
+
+    @contextmanager
+    def connect():
+        yield own
+
+    monkeypatch.setattr(embeddings, "_connect", connect)
+    embeddings.EmbeddingService().semantic_search("cache", 8, 1)
+    embeddings.EmbeddingService().semantic_search_in_conn("cache", 8, 1, supplied)
+    assert own.sql == supplied.sql and len(own.sql) == 1
+
+
+def test_e6c3_semantic_search_in_conn_is_disabled_without_touching_the_connection(monkeypatch):
+    _semantic_env(monkeypatch, enabled=False)
+    monkeypatch.setattr(embeddings, "_load_model", lambda *a: pytest.fail("model loaded while disabled"))
+    assert embeddings.EmbeddingService().semantic_search_in_conn("cache", 8, 1, object()) == []

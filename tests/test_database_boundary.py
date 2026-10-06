@@ -5,6 +5,9 @@ RECORD = "vres.record_experience_retrieval_observation(bigint,text,text,text,tex
 REFS = "vres.record_experience_retrieval_references(bigint,text,text,text,text,text,text,text[])"
 
 
+REPLAY = "vres.record_experience_retrieval_replay(bigint,bigint,jsonb)"
+
+
 class _Conn:
     def __init__(self, present=True):
         self.present, self.statements = present, []
@@ -34,7 +37,16 @@ def test_runtime_reads_writer_records_nobody_else():
     assert f'GRANT EXECUTE ON FUNCTION {RECORD} TO "vres_writer"' in text
     assert 'GRANT SELECT ON TABLE vres.experience_retrieval_references TO "vres_runtime"' in text
     assert f'GRANT EXECUTE ON FUNCTION {REFS} TO "vres_writer"' in text
-    assert text.count("GRANT ") == 5
+    assert 'GRANT SELECT ON TABLE vres.experience_retrieval_replays TO "vres_runtime"' in text
+    assert f'GRANT EXECUTE ON FUNCTION {REPLAY} TO "vres_writer"' in text
+    assert text.count("GRANT ") == 7
+    for role in ("PUBLIC", '"vres_runtime"', '"vres_writer"'):
+        assert f"REVOKE ALL ON TABLE vres.experience_retrieval_replays FROM {role}" in text
+        assert f"REVOKE ALL ON SEQUENCE vres.experience_retrieval_replays_id_seq FROM {role}" in text
+        assert f"REVOKE ALL ON FUNCTION {REPLAY} FROM {role}" in text
+    assert 'GRANT SELECT ON TABLE vres.experience_retrieval_replays TO "vres_writer"' not in text
+    assert f'GRANT EXECUTE ON FUNCTION {REPLAY} TO "vres_runtime"' not in text
+    assert "GRANT INSERT" not in text and "GRANT ALL" not in text and "TO PUBLIC" not in text
     for role in ("PUBLIC", '"vres_runtime"', '"vres_writer"'):
         assert f"REVOKE ALL ON TABLE vres.experience_retrieval_references FROM {role}" in text
         assert f"REVOKE ALL ON SEQUENCE vres.experience_retrieval_references_id_seq FROM {role}" in text
