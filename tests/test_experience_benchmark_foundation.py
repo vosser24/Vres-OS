@@ -924,7 +924,14 @@ def _tl(*ts, **extra):
         "args": {"knowledge_type": "fact", "statement": "A fact."},
     }
     return [create] + [
-        {"t": t, "op": "lifecycle_challenge", "alias": "dev_a", **extra} for t in ts[1:]
+        {
+            "t": t,
+            "op": "lifecycle_challenge",
+            "alias": "dev_a",
+            "args": {"approval_fixture": True},
+            **extra,
+        }
+        for t in ts[1:]
     ]
 
 

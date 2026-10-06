@@ -46,6 +46,8 @@ def _load(root, case, entry=None):
 
 
 def _step(t, op, alias="dev_a", **args):
+    if op in eb.APPROVAL_BOUND_OPS:
+        args.setdefault("approval_fixture", True)
     step = {"t": t, "op": op, "alias": alias}
     if args:
         step["args"] = args
@@ -67,7 +69,7 @@ VALID_STEPS = [
     ),
     _step(1, "knowledge_propose", "dev_b", knowledge_type="fact", statement="a fact"),
     _step(2, "knowledge_attach_source", "dev_b", source="dev_a", evidence_type="source_document"),
-    _step(3, "episode_capture", "dev_c", objective="did it", result="success", validation="none"),
+    _step(3, "episode_capture", "dev_c", objective="did it", result="success"),
     _step(
         4,
         "experience_consolidate",
@@ -100,10 +102,10 @@ def test_every_closed_operation_with_valid_args_loads(root):
 
 
 def test_capability_arg_accepted_on_episode_capture_only(root):
-    ok = _step(0, "episode_capture", objective="s", result="success", validation="none")
+    ok = _step(0, "episode_capture", objective="s", result="success")
     ok["args"]["capability"] = "cap_one"
     assert len(_load(root, _c(timeline=[ok]))["cases"][0]["timeline"]) == 1
-    bad = _step(0, "episode_capture", objective="s", result="success", validation="none")
+    bad = _step(0, "episode_capture", objective="s", result="success")
     bad["args"]["capability"] = "Cap One"
     with pytest.raises(eb.BenchmarkError, match="capability"):
         _load(root, _c(timeline=[bad]))
@@ -188,7 +190,7 @@ def test_supersede_cannot_target_itself(root):
 
 
 def test_enum_args_closed(root):
-    bad = _step(0, "episode_capture", objective="s", result="maybe", validation="none")
+    bad = _step(0, "episode_capture", objective="s", result="maybe")
     with pytest.raises(eb.BenchmarkError, match="result"):
         _load(root, _c(timeline=[bad]))
     bad = _step(0, "episode_capture", objective="s", result="success", validation="peeked")

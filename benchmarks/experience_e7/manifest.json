@@ -1,7 +1,7 @@
 {
   "bundles": {
     "adversarial": {
-      "bundle_digest": "d3c7ee72e176dd2641603c54ff19d074c3fea64eddb9be11107ea3d41e4165b9",
+      "bundle_digest": "441363834c139f5ec7a90cf1f44908beb24f89d6c28e9d7260592f97449b2a0c",
       "case_ids": [
         "adv_challenge_flag",
         "adv_cross_project",
@@ -25,12 +25,12 @@
         "adv_varied_poison"
       ],
       "files": {
-        "adversarial/corpus.jsonl": "446bd41272a139b96bee2ecb7bacd819023578f8b332833cfdc6f2d4d31aa256",
+        "adversarial/corpus.jsonl": "1b334879123f6c97e27c3c9d3c2c5189136e2c7015b49409980f8de870e03653",
         "adversarial/expected_evidence.json": "d1650509564a0b1255b3d80cf480e0f6b02e0bcfd580f2c3071e05816624061d"
       }
     },
     "development": {
-      "bundle_digest": "59e62bce4b9f5485a99fbdad64c93968d4be88e16967064494a229da1d1380d3",
+      "bundle_digest": "5882d870b53a4507dffbf584aaf2d6653afe26a5d3875f7e7f109f3a511437e6",
       "case_ids": [
         "dev_abstain_warranty",
         "dev_asof_threshold",
@@ -58,8 +58,8 @@
         "dev_user_correction"
       ],
       "files": {
-        "development/corpus.jsonl": "64dc29f5452a7726e28e6f84cb887ea1b1f60157963d4424d79d777df11e826b",
-        "development/expected_evidence.json": "d9b8613a64d546d645e89fe9c0dfc524bfc7e8e08fa593e892e3c92408fd57f3"
+        "development/corpus.jsonl": "cb96b60134ae3b020ddbfea4d0175363b0654e059418ff0431c69f0e1f032936",
+        "development/expected_evidence.json": "dd4bb1c2794db4d3d97691763a2753908a2fc5a1e3b504fc39d2a63712ed42d9"
       }
     }
   },
@@ -67,5 +67,5 @@
   "heldout_status": "not_authored",
   "heldout_version": 1,
   "schema_version": 1,
-  "scoring_digest": "d486ffc700176ad274c31be1f2f0e63ac1afd741f48dc31ef535c4f6b99885b3"
+  "scoring_digest": "9e336646694ab0b87d357506c2be1fb08f7face76050b42e4f635a9b7b30c9c8"
 }

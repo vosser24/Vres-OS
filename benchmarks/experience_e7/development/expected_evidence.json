@@ -236,30 +236,15 @@
       ]
     },
     "dev_recurring_priceexport": {
-      "acceptable": [
-        "dev_e1",
-        "dev_e2"
-      ],
       "faithfulness": {
         "checks": [
           "dedup",
           "prior_memory_intact"
         ],
-        "claims": [
-          {
-            "alias": "dev_x",
-            "sources": [
-              "dev_e1",
-              "dev_e2"
-            ],
-            "support": "supported",
-            "text": "Freeze the promo calendar, validate the template, then upload the batch."
-          }
-        ],
         "dedup": {
           "distinct": [
             [
-              "dev_x",
+              "dev_e1",
               "dev_n"
             ]
           ],
@@ -282,19 +267,17 @@
         "dev_e2": "dev_e1"
       },
       "relevant": [
-        "dev_x"
+        "dev_e1",
+        "dev_e2"
       ]
     },
     "dev_recurring_recount": {
-      "acceptable": [
-        "dev_e1",
-        "dev_e2"
-      ],
       "irrelevant": [
         "dev_e3"
       ],
       "relevant": [
-        "dev_x"
+        "dev_e1",
+        "dev_e2"
       ]
     },
     "dev_scope_trap": {
@@ -417,9 +400,6 @@
       ]
     },
     "dev_trajectory_success": {
-      "acceptable": [
-        "dev_e"
-      ],
       "irrelevant": [
         "dev_n"
       ],
@@ -439,7 +419,7 @@
           },
           {
             "aliases": [
-              "dev_x"
+              "dev_e"
             ],
             "id": "uses_precedent",
             "kind": "required_fact_use"
@@ -447,7 +427,7 @@
         ]
       },
       "relevant": [
-        "dev_x"
+        "dev_e"
       ]
     },
     "dev_user_correction": {

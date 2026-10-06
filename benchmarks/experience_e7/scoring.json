@@ -55,7 +55,7 @@
       },
       "alias_repeat": "count_once_at_first_position",
       "per_case_result": "numerator_denominator_pair_or_not_applicable",
-      "rank_order": "native_order_never_re_sorted",
+      "rank_order": "native_owner_rank_then_alias_tiebreak_never_re_sorted",
       "representation": {
         "computed": "exact_rational",
         "digested": "exact_rational",
@@ -98,7 +98,7 @@
         "family": "retrieval",
         "kind": "rate",
         "na_rule": "zero_denominator",
-        "numerator": "abstained_where_expected",
+        "numerator": "pack_empty_or_only_acceptable_where_must_abstain",
         "per_case": "pair",
         "scope": "per_case"
       },
@@ -137,7 +137,7 @@
         "family": "retrieval",
         "kind": "rate",
         "na_rule": "zero_denominator",
-        "numerator": "abstained_where_not_expected",
+        "numerator": "pack_empty_where_must_not_abstain",
         "per_case": "pair",
         "scope": "per_case"
       },
@@ -190,7 +190,7 @@
         "aggregation": "mean_of_booleans",
         "family": "retrieval",
         "kind": "boolean",
-        "per_case": "premise_surfaced_matches_expected",
+        "per_case": "owner_surfaces_declared_mismatch_and_no_premise_item_used_as_support",
         "scope": "per_case"
       },
       "prior_memory_invariant": {
@@ -239,9 +239,9 @@
         "family": "retrieval",
         "kind": "rate",
         "na_rule": "zero_denominator_or_historical_intent",
-        "numerator": "stale_aliases_not_in_top_k",
+        "numerator": "stale_aliases_not_returned_in_budgeted_pack",
         "per_case": "pair",
-        "scope": "top_k"
+        "scope": "whole_pack"
       },
       "success": {
         "aggregation": "mean_of_booleans",

@@ -327,7 +327,7 @@ _HOLDS = "must_hold_every_operation"
 METRIC_SEMANTICS_V1: dict[str, Any] = {
     "version": 1,
     "common": {
-        "rank_order": "native_order_never_re_sorted",
+        "rank_order": "native_owner_rank_then_alias_tiebreak_never_re_sorted",
         "alias_repeat": "count_once_at_first_position",
         "top_k": "first_min_k_and_pack_size_after_duplicate_collapse",
         "zero_denominator": {"result": "not_applicable", "excluded_reason": "zero_denominator"},
@@ -367,8 +367,8 @@ METRIC_SEMANTICS_V1: dict[str, Any] = {
         ),
         "stale_memory_suppression": _rate(
             _RET,
-            "top_k",
-            "stale_aliases_not_in_top_k",
+            "whole_pack",
+            "stale_aliases_not_returned_in_budgeted_pack",
             "stale_aliases",
             "pair",
             "zero_denominator_or_historical_intent",
@@ -381,15 +381,23 @@ METRIC_SEMANTICS_V1: dict[str, Any] = {
             "pair",
         ),
         "premise_awareness_accuracy": _flag(
-            _RET, "boolean", "per_case", "premise_surfaced_matches_expected", _BOOL_MEAN
+            _RET,
+            "boolean",
+            "per_case",
+            "owner_surfaces_declared_mismatch_and_no_premise_item_used_as_support",
+            _BOOL_MEAN,
         ),
         "correct_abstention": _rate(
-            _RET, "per_case", "abstained_where_expected", "cases_expecting_abstention", "pair"
+            _RET,
+            "per_case",
+            "pack_empty_or_only_acceptable_where_must_abstain",
+            "cases_expecting_abstention",
+            "pair",
         ),
         "false_abstention": _rate(
             _RET,
             "per_case",
-            "abstained_where_not_expected",
+            "pack_empty_where_must_not_abstain",
             "cases_not_expecting_abstention",
             "pair",
         ),
@@ -654,7 +662,14 @@ def _nonneg(value: Any, field: str) -> int:
 # Closed timeline vocabulary: only class (a) and (b) operations (Chunk 0 findings, 0H). Class (c)
 # time values (updated_at, last_verified_at, valid_from, created_at) and runtime keys cannot be
 # expressed. `alias` is the case-local identity the step creates or acts on.
-ALIAS_KINDS = ("source", "knowledge", "episode", "procedure", "procedure_candidate")
+ALIAS_KINDS = (
+    "source",
+    "knowledge",
+    "episode",
+    "procedure",
+    "procedure_candidate",
+    "transition",
+)
 # Trust vocabulary the corpus may state; stored by the owner as metadata.trust_class (E3 reads it).
 TRUST_CLASSES = ("trusted_project_source", "external_untrusted_observation")
 # Mirrors KnowledgeService; a DB-free test compares both tuples with knowledge.py.
@@ -706,7 +721,14 @@ def _evidence(value: Any, field: str) -> list:
 _TRUST = _enum(TRUST_CLASSES)
 _RESULT = _enum(("success", "failure"))
 _POLARITY = _enum(("positive", "negative"))
-_VALIDATION = _enum(("none", "passed"))
+
+
+def _fixture(value: Any, field: str) -> bool:
+    if value is not True:
+        raise BenchmarkError(f"{field} must be exactly true (explicit synthetic approval fixture)")
+    return True
+
+
 _KNOWLEDGE_TYPE = _enum(KNOWLEDGE_TYPES)
 _EVIDENCE_TYPE = _enum(EVIDENCE_TYPES)
 _TRIGGER = _enum(CONSOLIDATION_TRIGGERS)
@@ -726,7 +748,7 @@ _OPERATIONS: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {
     ),
     "knowledge_attach_source": ({"source": "alias", "evidence_type": _EVIDENCE_TYPE}, {}),
     "episode_capture": (
-        {"objective": _text, "result": _RESULT, "validation": _VALIDATION},
+        {"objective": _text, "result": _RESULT},
         {"project": _id_arg, "lineage": _id_arg, "capability": _id_arg},
     ),
     "episode_observe": (
@@ -745,7 +767,7 @@ _OPERATIONS: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {
         {},
     ),
     "procedure_accept": (
-        {"name": _text, "method": _text},
+        {"name": _text, "method": _text, "approval_fixture": _fixture},
         {"description": _text, "invariants": "texts", "project": _id_arg, "lineage": _id_arg},
     ),
     "procedure_candidate": (
@@ -753,13 +775,27 @@ _OPERATIONS: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {
         {"description": _text, "invariants": "texts"},
     ),
     "knowledge_supersede": ({"supersedes": "alias"}, {}),
-    "lifecycle_retire": ({}, {"reason": _text}),
-    "lifecycle_reinstate": ({}, {"reason": _text}),
-    "lifecycle_challenge": ({}, {"reason": _text}),
-    "lifecycle_supersede": ({"supersedes": "alias"}, {"reason": _text}),
-    "lifecycle_refresh": ({"review_after_t": _nonneg}, {}),
-    "source_revoke": ({}, {"reason": _text}),
+    "lifecycle_retire": ({"approval_fixture": _fixture}, {"reason": _text}),
+    "lifecycle_reinstate": ({"approval_fixture": _fixture}, {"reason": _text}),
+    "lifecycle_challenge": ({"approval_fixture": _fixture}, {"reason": _text}),
+    "lifecycle_supersede": (
+        {"supersedes": "alias", "approval_fixture": _fixture},
+        {"reason": _text},
+    ),
+    "lifecycle_refresh": ({"review_after_t": _nonneg, "approval_fixture": _fixture}, {}),
+    "source_revoke": ({"approval_fixture": _fixture}, {"reason": _text}),
 }
+
+# Approval-bound operations need the explicit synthetic benchmark approval fixture (F2).
+APPROVAL_BOUND_OPS = (
+    "procedure_accept",
+    "lifecycle_retire",
+    "lifecycle_reinstate",
+    "lifecycle_challenge",
+    "lifecycle_supersede",
+    "lifecycle_refresh",
+    "source_revoke",
+)
 
 _GAP = (
     "OWNER GAP - NO PUBLIC OBSERVED-EPISODE WRITER CURRENTLY EXISTS: the E1 table supports "
@@ -768,18 +804,54 @@ _GAP = (
     "execution of this operation stays fail-closed until a governed owner change; direct SQL is "
     "forbidden."
 )
-_APPROVAL = (
-    "approval_key: supplied by an isolated-runtime approval fixture; the harness never "
-    "fabricates user approval (open contract ambiguity carried to Chunk 2)"
+APPROVAL_FIXTURE_CHAIN = (
+    "scenario owns a synthetic case task",
+    "Repository.record_event(USER_INSTRUCTION, synthetic benchmark acceptance text)",
+    "ApprovalService.record_latest_user_approval(task_key, approval_type, statement, subject_key)",
+    "owner operation receives the returned approval_key",
+)
+APPROVAL_FIXTURE_NOTE = (
+    "SYNTHETIC BENCHMARK APPROVAL FIXTURE, never a user approval: allowed only in a fresh "
+    "disposable database whose name ends exactly '_test' with VRES_ALLOW_TEST_DB=1, never the "
+    "canonical database, enabled only by the explicit case field approval_fixture=true, and "
+    "excluded from measured memory/outcome evidence. No direct approval_events SQL."
+)
+_APPROVAL = "approval_key: " + APPROVAL_FIXTURE_NOTE
+OWNER_GAP_REASONS = MappingProxyType(
+    {
+        "episode_observe": "observed_episode_writer_missing",
+        "episode_capture_success_with_capability": "work_unit_passed_host_hook_only",
+    }
+)
+# F9: fixed deterministic integer-safe comparable metrics (no floats in digested input).
+BASELINE_INITIAL_METRICS = MappingProxyType(
+    {
+        "quality_score": 1,
+        "runtime_ms": 1000,
+        "input_tokens": 120,
+        "output_tokens": 60,
+        "model_calls": 2,
+    }
+)
+COMPARABLE_METRIC_FIELDS = ("quality_score", "runtime_ms", "input_tokens", "output_tokens")
+CANDIDATE_METRICS = MappingProxyType(
+    {
+        "quality_score": 1,
+        "runtime_ms": 900,
+        "input_tokens": 100,
+        "output_tokens": 50,
+        "model_calls": 2,
+    }
 )
 _T = "created_at / review_after: benchmark_instant(scoring.time, step t)"
 
 
-def _row(owner, method, creates, acts_on, refs, translation, harness, gap=None):
+def _row(owner, method, creates, acts_on, refs, translation, harness, gap=None, chain=None):
     return MappingProxyType(
         {
             "owner": owner,
             "method": method,
+            "methods": tuple(chain) if chain else ((method,) if method else ()),
             "creates": creates,
             "acts_on": acts_on,
             "refs": MappingProxyType(dict(refs)),
@@ -795,6 +867,8 @@ def _row(owner, method, creates, acts_on, refs, translation, harness, gap=None):
 _LIFECYCLE_COMMON = {
     "project_id": "isolated-runtime project map, never a corpus value",
     "approval_key": _APPROVAL,
+    "approval_type": "e4_lifecycle",
+    "approval_subject": "experience_lifecycle.approval_subject(action, target[, successor])",
     "reason": "step reason; when omitted the harness passes the operation name",
 }
 _LIFECYCLE_TRANSLATION = {"alias": "knowledge_key of the acted-on knowledge alias"}
@@ -808,7 +882,7 @@ OPERATION_OWNERS = MappingProxyType(
             None,
             {},
             {
-                "text": "add_chunks text (one source body)",
+                "text": "SourceService.add_chunks text (one source body; the raw-refind surface)",
                 "title": "register title",
                 "project": "register project_id via the isolated-runtime project map",
                 "trust_class": "register authority_level, the semantic class verbatim",
@@ -819,8 +893,10 @@ OPERATION_OWNERS = MappingProxyType(
                 "content_hash": "sha256 of text",
                 "title": "alias when omitted",
                 "created_at": _T,
-                "approval_key": "only if the owner demands scope approval; " + _APPROVAL,
+                "approval_key": "none: a project-local source needs no approval",
+                "alias": "source_key returned by register; no direct chunk INSERT",
             },
+            chain=("register", "add_chunks"),
         ),
         "knowledge_propose": _row(
             "KnowledgeService",
@@ -863,17 +939,38 @@ OPERATION_OWNERS = MappingProxyType(
             None,
             {},
             {
-                "objective": "task objective of the real task the harness binds",
-                "result": "success -> completed task, failure -> failed task",
-                "validation": "passed -> task-level validation passed; none -> not validated",
+                "objective": "task objective of the synthetic scenario task the harness binds",
+                "result": (
+                    "success without capability -> synthetic task completed through "
+                    "Repository.complete_task, task-level capture(task_key); failure -> "
+                    "governed work unit failed through OrchestrationService.fail_work_unit, "
+                    "capture(task_key, work_unit_key=<runtime work unit>)"
+                ),
                 "project": "task project via the isolated-runtime project map",
                 "lineage": "case-local grouping label only; never passed to an owner",
-                "capability": "work-unit capability key registered through the capability path",
+                "capability": (
+                    "capability key placed on the governed work unit through a real project "
+                    "capability path so E1 derives it; never written into the episode row; "
+                    "success with a capability is OWNER_GAP:work_unit_passed_host_hook_only"
+                ),
             },
             {
-                "task_key": "isolated-runtime task created for the alias",
-                "participation_class": "always participated (owner-fixed; not selectable)",
+                "task_key": "isolated-runtime synthetic scenario task created for the alias",
+                "participation_class": "participated, trust trusted_project_source (owner-fixed)",
+                "validation": (
+                    "always none: validated_runtime_fixture = unavailable_by_design; the "
+                    "benchmark never forges protected-validator provenance"
+                ),
+                "work_unit_chain": (
+                    "OrchestrationService.discover, RoutingService deterministic route, "
+                    "record_plan, record_work_graph, start_work_unit, fail_work_unit"
+                ),
             },
+            chain=(
+                "Repository.begin_task",
+                "Repository.complete_task | OrchestrationService.fail_work_unit",
+                "capture",
+            ),
         ),
         "episode_observe": _row(
             None,
@@ -888,7 +985,7 @@ OPERATION_OWNERS = MappingProxyType(
         "experience_consolidate": _row(
             "ExperienceConsolidationService",
             "consolidate",
-            "knowledge",
+            "transition",
             None,
             {"evidence": "episode"},
             {
@@ -898,8 +995,16 @@ OPERATION_OWNERS = MappingProxyType(
                 "title": "candidate title",
                 "statement": "candidate statement",
                 "evidence": "candidate evidence; episode alias -> episode_key of that episode",
+                "alias": (
+                    "transition identity (transition_key, verdict, optional knowledge_key); "
+                    "bound to a runtime key only when the owner returns a fresh knowledge_key; "
+                    "a quarantined or deduplicated transition never appears as retrieved memory"
+                ),
             },
-            {"project_id": "isolated-runtime project map of the cited episodes"},
+            {
+                "project_id": "isolated-runtime project map of the cited episodes",
+                "recurrence": "uncalibrated: always quarantined, never promoted (not calibrated)",
+            },
         ),
         "procedure_accept": _row(
             "ProcedureService",
@@ -921,6 +1026,9 @@ OPERATION_OWNERS = MappingProxyType(
                     "fixed benchmark constants"
                 ),
                 "approval_key": _APPROVAL,
+                "approval_type": "procedure_accept",
+                "approval_subject": "runtime procedure_key",
+                "initial_metrics": "BASELINE_INITIAL_METRICS (fixed deterministic integers)",
             },
         ),
         "procedure_candidate": _row(
@@ -936,7 +1044,7 @@ OPERATION_OWNERS = MappingProxyType(
                 "invariants": "candidate delta invariants",
             },
             {
-                "metrics": "{} (valid per validate_metrics): no approval is fabricated",
+                "metrics": "CANDIDATE_METRICS (fixed deterministic integers, comparable)",
                 "protected_regression/business_behavior_change": "False",
             },
         ),
@@ -1001,7 +1109,7 @@ OPERATION_OWNERS = MappingProxyType(
             "source",
             {},
             {"alias": "source_key", "reason": "reason"},
-            _LIFECYCLE_COMMON,
+            {**_LIFECYCLE_COMMON, "approval_subject": "revoke_source:<runtime source key>"},
         ),
     }
 )
@@ -1030,8 +1138,6 @@ def _validate_step_args(step: dict, declared: set[str]) -> None:
                 raise BenchmarkError(f"{field} must be a list of non-empty text")
         else:
             check(value, field)
-    if op == "episode_capture" and args["validation"] == "passed" and args["result"] != "success":
-        raise BenchmarkError("episode_capture validation 'passed' requires result 'success'")
 
 
 def _need_alias(state: dict, op: str, alias: str, kind: str, role: str) -> dict:
@@ -1075,13 +1181,11 @@ def _check_consolidation(step: dict, state: dict) -> None:
         raise BenchmarkError(
             "experience_consolidate: a positive lesson cannot cite a failed episode"
         )
-    if trigger == "validated_novel" and not all(
-        e["participated"] and e["validation"] == "passed" and e["result"] == "success"
-        for e in episodes
-    ):
+    if trigger == "validated_novel":
         raise BenchmarkError(
-            "experience_consolidate: validated_novel requires participated, validated, "
-            "successful episodes only"
+            "experience_consolidate: validated_novel needs validated_runtime episodes, which "
+            "are unavailable_by_design for the benchmark (protected-validator provenance is "
+            "never forged)"
         )
 
 
@@ -1107,14 +1211,17 @@ def _check_timeline_step(step: dict, state: dict) -> None:
     elif op == "knowledge_propose":
         created[alias] = {"kind": "knowledge", "type": args["knowledge_type"]}
     elif op == "experience_consolidate":
-        created[alias] = {"kind": "knowledge", "type": "lesson"}
+        if args["trigger"] == "recurrence":  # uncalibrated: always quarantined, no knowledge key
+            created[alias] = {"kind": "transition"}
+        else:
+            created[alias] = {"kind": "knowledge", "type": "lesson"}
     elif op in ("episode_capture", "episode_observe"):
         created[alias] = {
             "kind": "episode",
             "objective": args["objective"],
             "result": args["result"],
             "participated": op == "episode_capture",
-            "validation": args.get("validation", "none"),
+            "capability": args.get("capability"),
         }
     elif op == "procedure_accept":
         created[alias] = {"kind": "procedure"}
@@ -1142,6 +1249,77 @@ def _check_timeline_step(step: dict, state: dict) -> None:
         old = created[args["supersedes"]]
         if old["type"] != created[alias]["type"]:
             raise BenchmarkError(f"{op}: replacement must have the same knowledge type")
+
+
+# ---- execution-preflight helpers (pure; no runtime, no SQL) ---
+
+
+def validate_owner_sequence(op: str, methods: list[str], *, raw_refindable: bool = True) -> None:
+    """A plan must call the full public owner sequence recorded in OPERATION_OWNERS."""
+    row = OPERATION_OWNERS.get(op)
+    if row is None:
+        raise BenchmarkError(f"unknown operation {op!r}")
+    if row["owner_gap"]:
+        raise BenchmarkError(f"{op} has no public owner: {OWNER_GAP_REASONS[op]}")
+    if tuple(methods) == row["methods"]:
+        return
+    if op == "source_add" and not raw_refindable and tuple(methods) == ("register",):
+        return
+    raise BenchmarkError(
+        f"{op}: plan {list(methods)} must call the full owner sequence {list(row['methods'])}"
+        + (
+            " (source text must be raw-refindable: add_chunks is required)"
+            if op == "source_add"
+            else ""
+        )
+    )
+
+
+def approval_plan(op: str, target_key: str, successor_key: str | None = None) -> dict[str, str]:
+    """Real approval type and exact subject of an approval-bound op (public owner formulas)."""
+    if op not in APPROVAL_BOUND_OPS:
+        raise BenchmarkError(f"{op} is not approval-bound")
+    if not isinstance(target_key, str) or not target_key:
+        raise BenchmarkError("approval target key must be non-empty text")
+    if op == "procedure_accept":
+        return {"approval_type": "procedure_accept", "subject_key": target_key}
+    if op == "source_revoke":
+        return {"approval_type": "e4_lifecycle", "subject_key": f"revoke_source:{target_key}"}
+    from .experience_lifecycle import approval_subject
+
+    action = op.removeprefix("lifecycle_")
+    return {
+        "approval_type": "e4_lifecycle",
+        "subject_key": approval_subject(
+            action, target_key, successor_key if action == "supersede" else None
+        ),
+    }
+
+
+def check_approval_fixture_gate(database_name: Any, environ: Any) -> None:
+    """The synthetic approval fixture runs only in a fresh disposable `_test` database."""
+    if not isinstance(database_name, str) or not database_name.endswith("_test"):
+        raise BenchmarkError("approval fixture refused: database name must end with '_test'")
+    if len(database_name) <= len("_test"):
+        raise BenchmarkError("approval fixture refused: database name must be more than '_test'")
+    if environ.get("VRES_ALLOW_TEST_DB") != "1":
+        raise BenchmarkError("approval fixture refused: VRES_ALLOW_TEST_DB=1 is required")
+
+
+def classify_case(case: dict) -> str:
+    """Closed admission rule: EXECUTABLE or OWNER_GAP:<stable reason>; nothing else."""
+    reasons = set()
+    for step in case.get("timeline", []):
+        op, args = step["op"], step.get("args", {})
+        if op not in OPERATION_OWNERS:
+            raise BenchmarkError(f"unknown operation {op!r}")
+        if OPERATION_OWNERS[op]["owner_gap"]:
+            reasons.add(OWNER_GAP_REASONS[op])
+        if op in APPROVAL_BOUND_OPS and args.get("approval_fixture") is not True:
+            raise BenchmarkError(f"{op} requires the explicit approval_fixture=true field")
+        if op == "episode_capture" and args["result"] == "success" and args.get("capability"):
+            reasons.add(OWNER_GAP_REASONS["episode_capture_success_with_capability"])
+    return "OWNER_GAP:" + sorted(reasons)[0] if reasons else "EXECUTABLE"
 
 
 def _validate_request(req: Any) -> None:
@@ -1538,6 +1716,25 @@ def parse_expected(normalized: bytes, cases: list[dict]) -> dict[str, dict]:
             if not isinstance(group, list) or len(group) < 2:
                 raise BenchmarkError(f"{case_id}.conflict_pair groups need at least two aliases")
             _alias_list(group, aliases, f"{case_id}.conflict_pair")
+        transitions = {
+            step["alias"]
+            for step in case.get("timeline", [])
+            if step["op"] == "experience_consolidate" and step["args"]["trigger"] == "recurrence"
+        }
+        retrievable = [
+            *(
+                a
+                for label in ("relevant", "acceptable", "stale", "premise")
+                for a in entry.get(label, [])
+            ),
+            *(a for group in entry.get("conflict_pair", []) for a in group),
+        ]
+        bad = sorted(transitions.intersection(retrievable))
+        if bad:
+            raise BenchmarkError(
+                f"{case_id}: quarantined recurrence transition(s) {bad} are not retrievable "
+                "memory and cannot be labelled relevant/acceptable/stale/premise/conflict"
+            )
         if "must_abstain" in entry and not isinstance(entry["must_abstain"], bool):
             raise BenchmarkError(f"{case_id}.must_abstain must be a boolean")
         if "memory_not_needed" in entry and not isinstance(entry["memory_not_needed"], bool):
@@ -1741,6 +1938,7 @@ class AliasMap:
         self._by_alias: dict[str, str] = {}
         self._by_key: dict[str, str] = {}
         self._unmapped: dict[str, int] = {}
+        self._transitions: dict[str, str] = {}
 
     def __repr__(self) -> str:
         return f"AliasMap(<{len(self._declared)} aliases>)"
@@ -1756,6 +1954,23 @@ class AliasMap:
             raise BenchmarkError("runtime key already bound to an alias")
         self._by_alias[alias] = runtime_key
         self._by_key[runtime_key] = alias
+
+    def bind_transition(self, alias: str, result: Any) -> bool:
+        """Bind a consolidation alias only to a fresh knowledge_key; never invent one."""
+        if not isinstance(result, dict) or not result.get("transition_key"):
+            raise BenchmarkError("transition result needs a transition_key")
+        if alias not in self._declared:
+            raise BenchmarkError(f"undeclared alias {alias!r}")
+        key = result.get("knowledge_key")
+        if not key or key in self._by_key:  # quarantined/deduplicated: transition identity only
+            self._transitions[alias] = result["transition_key"]
+            return False
+        self.bind(alias, key)
+        self._transitions[alias] = result["transition_key"]
+        return True
+
+    def transition_for(self, alias: str) -> str | None:
+        return self._transitions.get(alias)
 
     def alias_for(self, runtime_key: str) -> str | None:
         return self._by_key.get(runtime_key)

@@ -290,6 +290,27 @@ def audit(root: Path) -> dict:
         for a in e.get("security", {}).get("must_flag_challenged", [])
     ]
     check("challenge_cases_have_lifecycle_challenge", bool(flagged), flagged)
+    matrix: dict[str, dict] = {}
+    classify_errors: list[str] = []
+    for split, bundle in bundles.items():
+        rows = {"executable": [], "owner_gap": {}}
+        for c in bundle["cases"]:
+            try:
+                label = eb.classify_case(c)
+            except eb.BenchmarkError as exc:
+                classify_errors.append(f"{c['case_id']}: {exc}")
+                continue
+            if label == "EXECUTABLE":
+                rows["executable"].append(c["case_id"])
+            elif label.startswith("OWNER_GAP:") and label[len("OWNER_GAP:") :]:
+                rows["owner_gap"][c["case_id"]] = label[len("OWNER_GAP:") :]
+            else:
+                classify_errors.append(f"{c['case_id']}: ambiguous state {label!r}")
+        rows["executable_count"] = len(rows["executable"])
+        rows["owner_gap_count"] = len(rows["owner_gap"])
+        matrix[split] = rows
+    check("every_case_executable_or_owner_gap", not classify_errors, classify_errors)
+    report["execution_matrix"] = matrix
     try:
         eb.validate_metric_semantics(scoring["metric_semantics"])
         semantics_ok = True
@@ -323,6 +344,12 @@ def main(argv: list[str] | None = None) -> int:
             print(("PASS " if result["ok"] else "FAIL ") + name)
         for split, info in report["bundles"].items():
             print(split, info["case_count"], info["digests"])
+        for split, rows in report["execution_matrix"].items():
+            print(
+                split, "executable", rows["executable_count"], "owner_gap", rows["owner_gap_count"]
+            )
+            for cid, reason in rows["owner_gap"].items():
+                print("  OWNER_GAP", cid, reason)
         print("manifest", report["manifest_digest"], "ok" if report["ok"] else report["problems"])
     return 0 if report["ok"] else 1
 

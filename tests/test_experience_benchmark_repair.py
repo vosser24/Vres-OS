@@ -29,6 +29,8 @@ def _audit_module():
 
 
 def S(t, op, alias, **args):
+    if op in eb.APPROVAL_BOUND_OPS:
+        args.setdefault("approval_fixture", True)
     step = {"t": t, "op": op, "alias": alias}
     if args:
         step["args"] = args
@@ -67,7 +69,6 @@ def episode(t=0, alias="dev_e1", **over):
     args = {
         "objective": "Import failed on semicolon delimiters and prices landed in one column.",
         "result": "failure",
-        "validation": "none",
         "project": "proj_alpha",
     }
     args.update(over)
@@ -489,10 +490,9 @@ def test_consolidation_evidence_must_be_an_earlier_episode():
 
 
 def test_positive_lesson_cannot_cite_a_failed_episode():
-    ok = episode(0, result="success", validation="passed")
     entry = {"episode": "dev_e1", "pointer": "/objective", "quote": "semicolon delimiters"}
-    good = consolidate(polarity="positive", trigger="validated_novel", evidence=[entry])
-    assert parse(ok, good)
+    good = consolidate(polarity="positive", trigger="recurrence", evidence=[entry])
+    assert parse(episode(0, result="success"), good)
     with pytest.raises(eb.BenchmarkError, match="failed"):
         parse(episode(0), good)
 
@@ -502,21 +502,20 @@ def test_failure_gotcha_requires_negative_polarity_and_a_failed_episode():
     with pytest.raises(eb.BenchmarkError, match="failure_gotcha"):
         parse(episode(), consolidate(polarity="positive"))
     with pytest.raises(eb.BenchmarkError, match="failure_gotcha"):
-        parse(episode(result="success", validation="none"), consolidate())
+        parse(episode(result="success"), consolidate())
 
 
-def test_validated_novel_needs_validated_runtime_evidence_declared_in_setup():
+def test_validated_novel_is_unavailable_by_design():
     entry = {"episode": "dev_e1", "pointer": "/objective", "quote": "semicolon delimiters"}
     good = consolidate(polarity="positive", trigger="validated_novel", evidence=[entry])
-    assert parse(episode(result="success", validation="passed"), good)
-    with pytest.raises(eb.BenchmarkError, match="validated_novel"):
-        parse(episode(result="success", validation="none"), good)
+    with pytest.raises(eb.BenchmarkError, match="unavailable_by_design"):
+        parse(episode(result="success"), good)
 
 
 def test_recurrence_trigger_is_representable_and_uncalibrated_not_inferred():
     entry = {"episode": "dev_e1", "pointer": "/objective", "quote": "semicolon delimiters"}
     step = consolidate(polarity="positive", trigger="recurrence", evidence=[entry])
-    assert parse(episode(result="success", validation="none"), step)
+    assert parse(episode(result="success"), step)
 
 
 # ---- R4 participated capture vs observed ----------------
@@ -533,20 +532,10 @@ def test_episode_capture_cannot_select_participation():
         parse(step)
 
 
-def test_episode_capture_requires_explicit_validation_field():
-    step = episode()
-    del step["args"]["validation"]
-    with pytest.raises(eb.BenchmarkError, match="validation"):
-        parse(step)
-    bad = episode(validation="maybe")
-    with pytest.raises(eb.BenchmarkError, match="validation"):
-        parse(bad)
-
-
-def test_validation_passed_requires_a_successful_result():
-    assert parse(episode(result="success", validation="passed"))
-    with pytest.raises(eb.BenchmarkError, match="validation"):
-        parse(episode(result="failure", validation="passed"))
+def test_episode_capture_rejects_any_validation_argument():
+    for value in ("none", "passed"):
+        with pytest.raises(eb.BenchmarkError, match="validation"):
+            parse(episode(validation=value))
 
 
 def test_episode_observe_is_a_separate_owner_gap_operation():
