@@ -131,7 +131,9 @@ def test_restrict_foreign_keys_protect_the_ledger_from_cascades(db_ready, pid):
         key = _insert_obs(conn, pid)
         session_id = conn.execute("SELECT session_id FROM vres.experience_retrieval_observations WHERE observation_key=%s",
                                   (key,)).fetchone()["session_id"]
-    with pytest.raises(psycopg.errors.RestrictViolation, match="experience_retrieval_observations"):
+    # PostgreSQL versions surface the protected FK deletion as either class.
+    with pytest.raises((psycopg.errors.RestrictViolation, psycopg.errors.ForeignKeyViolation),
+                       match="experience_retrieval_observations"):
         with connect() as conn, conn.transaction():
             conn.execute("DELETE FROM vres.sessions WHERE id=%s", (session_id,))
 
