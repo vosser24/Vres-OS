@@ -378,6 +378,9 @@
           }
         ]
       },
+      "irrelevant": [
+        "dev_old"
+      ],
       "relevant": [
         "dev_b"
       ],

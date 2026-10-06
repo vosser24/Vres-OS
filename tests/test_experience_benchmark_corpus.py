@@ -87,8 +87,8 @@ def test_a9_subcriteria_are_encoded(bundles):
     assert "burst_fails_closed" in exp["adv_flood_burst"]["security"]["assertions"]
     flood = bundles["adversarial"]["cases"]
     burst = next(c for c in flood if c["case_id"] == "adv_flood_burst")
-    proposals = [s for s in burst["timeline"] if s["op"] == "knowledge_propose"]
-    assert len(proposals) > 20  # beyond the owner's open-proposal cap, without naming any budget
+    attempts = [s for s in burst["timeline"] if s["op"] == "experience_consolidate"]
+    assert len(attempts) > 20  # beyond the owner's open-proposal cap, without naming any budget
     assert exp["adv_varied_poison"]["security"]["lineage_groups"]
     assert exp["adv_diversity"]["security"]["lineage_groups"]
     assert "recurrence_cannot_raise_authority" in exp["adv_recurrence"]["security"]["assertions"]
@@ -195,7 +195,7 @@ def test_outcome_cases_keep_private_criteria_out_of_the_public_task(bundles):
                 str(v).lower()
                 for step in case["timeline"]
                 for k, v in step.get("args", {}).items()
-                if k in ("statement", "summary", "method", "quote", "text")
+                if k in ("statement", "objective", "method", "quote", "text")
             ]
             assert "forbidden" not in public and "criteria" not in public
             for crit in entry["outcome"]["criteria"]:

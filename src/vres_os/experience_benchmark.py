@@ -25,6 +25,7 @@ import unicodedata
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 from .sensitive_policy import sanitize_extracted_text
@@ -285,12 +286,225 @@ _SCORING_SECTIONS = {
     "aggregation",
     "current_vres",
     "faithfulness",
+    "metric_semantics",
 }
 
 
 def _exact(value: Any, expected: Any, field: str) -> None:
     if value != expected or type(value) is not type(expected):
         raise BenchmarkError(f"{field} must be exactly {expected!r}")
+
+
+# ---- frozen metric semantics (symbolic rules; no formulas, no thresholds) ---
+
+
+def _rate(family, scope, numerator, denominator, per_case, na_rule="zero_denominator"):
+    return {
+        "family": family,
+        "kind": "rate",
+        "scope": scope,
+        "numerator": numerator,
+        "denominator": denominator,
+        "per_case": per_case,
+        "na_rule": na_rule,
+    }
+
+
+def _flag(family, kind, scope, per_case, aggregation):
+    return {
+        "family": family,
+        "kind": kind,
+        "scope": scope,
+        "per_case": per_case,
+        "aggregation": aggregation,
+    }
+
+
+_RET, _FAITH, _OUT = "retrieval", "faithfulness", "outcome"
+_BOOL_MEAN, _COUNT_AGG = "mean_of_booleans", "mean_distribution_paired_diff"
+_OP_BOOL = "per_operation_boolean"
+_HOLDS = "must_hold_every_operation"
+METRIC_SEMANTICS_V1: dict[str, Any] = {
+    "version": 1,
+    "common": {
+        "rank_order": "native_order_never_re_sorted",
+        "alias_repeat": "count_once_at_first_position",
+        "top_k": "first_min_k_and_pack_size_after_duplicate_collapse",
+        "zero_denominator": {"result": "not_applicable", "excluded_reason": "zero_denominator"},
+        "per_case_result": "numerator_denominator_pair_or_not_applicable",
+        "aggregation": {
+            "reported": ["micro", "macro"],
+            "counts": ["n_cases", "n_excluded"],
+            "per_split": "isolated_never_pooled",
+        },
+        "representation": {
+            "computed": "exact_rational",
+            "digested": "exact_rational",
+            "display": "decimal_scale_from_display_config",
+        },
+    },
+    "metrics": {
+        "recall_at_k": _rate(_RET, "top_k", "top_k_in_relevant", "relevant_aliases", "pair"),
+        "precision_at_k": _rate(_RET, "top_k", "top_k_in_relevant", "top_k_aliases", "pair"),
+        "relevant_evidence_coverage": _rate(
+            _RET, "whole_pack", "relevant_in_budgeted_pack", "relevant_aliases", "pair"
+        ),
+        "irrelevant_memory_rate": _rate(
+            _RET,
+            "top_k",
+            "top_k_irrelevant_or_unlabeled",
+            "top_k_aliases",
+            "pair_acceptable_in_denominator_only",
+        ),
+        "exact_duplicate_rate": _rate(
+            _RET, "whole_pack", "raw_returned_minus_unique", "raw_returned", "pair"
+        ),
+        "near_duplicate_rate": _rate(
+            _RET, "whole_pack", "returned_near_duplicate_extras", "raw_returned", "pair"
+        ),
+        "combined_duplicate_memory_rate": _rate(
+            _RET, "whole_pack", "exact_plus_near_duplicate_extras", "raw_returned", "pair"
+        ),
+        "stale_memory_suppression": _rate(
+            _RET,
+            "top_k",
+            "stale_aliases_not_in_top_k",
+            "stale_aliases",
+            "pair",
+            "zero_denominator_or_historical_intent",
+        ),
+        "contradiction_retrieval": _rate(
+            _RET,
+            "top_k",
+            "conflict_groups_fully_in_top_k_or_owner_surfaced",
+            "conflict_groups",
+            "pair",
+        ),
+        "premise_awareness_accuracy": _flag(
+            _RET, "boolean", "per_case", "premise_surfaced_matches_expected", _BOOL_MEAN
+        ),
+        "correct_abstention": _rate(
+            _RET, "per_case", "abstained_where_expected", "cases_expecting_abstention", "pair"
+        ),
+        "false_abstention": _rate(
+            _RET,
+            "per_case",
+            "abstained_where_not_expected",
+            "cases_not_expecting_abstention",
+            "pair",
+        ),
+        "source_support_precision": _rate(
+            _FAITH, "per_operation", "supported_claims", "stored_claims", "pair"
+        ),
+        "omission_rate": _rate(
+            _FAITH, "per_operation", "source_facts_missing", "source_facts", "pair"
+        ),
+        "unsupported_addition_rate": _rate(
+            _FAITH, "per_operation", "unsupported_claims", "stored_claims", "pair"
+        ),
+        "dedup_correctness": _flag(_FAITH, "boolean", "per_operation", _OP_BOOL, _BOOL_MEAN),
+        "conflict_recognition": _flag(_FAITH, "boolean", "per_operation", _OP_BOOL, _BOOL_MEAN),
+        "temporal_update_correctness": _flag(
+            _FAITH, "boolean", "per_operation", _OP_BOOL, _BOOL_MEAN
+        ),
+        "corruption_invariant": _flag(
+            _FAITH, "invariant", "per_operation", _HOLDS, "all_hold_never_a_rate"
+        ),
+        "prior_memory_invariant": _flag(
+            _FAITH, "invariant", "per_operation", _HOLDS, "all_hold_never_a_rate"
+        ),
+        "success": _flag(_OUT, "boolean", "trace", "trace_success", _BOOL_MEAN),
+        "retries_rework": _flag(_OUT, "count", "trace", "integer_count", _COUNT_AGG),
+        "tool_call_equivalents": _flag(_OUT, "count", "trace", "integer_count", _COUNT_AGG),
+        "criterion_failures": _flag(_OUT, "count", "trace", "integer_count", _COUNT_AGG),
+        "harmful_negative_transfer": _rate(
+            _OUT,
+            "trace",
+            "cases_with_harmful_event",
+            "cases_where_reference_not_worst_possible",
+            "pair_with_primary_cause",
+        ),
+        "unnecessary_reuse": _rate(
+            _OUT,
+            "trace",
+            "memory_not_needed_cases_with_used_aliases_or_action_delta",
+            "memory_not_needed_cases",
+            "pair",
+        ),
+        "unattributed_regression": _rate(
+            _OUT,
+            "trace",
+            "cases_worse_without_memory_involvement",
+            "cases_where_reference_not_worst_possible",
+            "pair",
+        ),
+    },
+    "negative_transfer": {
+        "reference_mode": "memory_disabled",
+        "pairing": "per_case_and_mode_not_memory_disabled",
+        "outcome_worse_order": [
+            "success_false_where_reference_true",
+            "equal_success_and_strictly_more_criterion_failures",
+        ],
+        "not_part_of_outcome_worse": ["retries", "tool_calls", "cost"],
+        "memory_involvement": ["used_aliases_non_empty", "action_sequence_delta_vs_reference"],
+        "classification": {
+            "worse_and_involved": "harmful_negative_transfer_event",
+            "worse_not_involved": "unattributed_regression",
+            "not_worse": "no_event",
+        },
+        "cause_classes": [
+            "premise_mismatch",
+            "stale",
+            "irrelevant_or_unlabeled",
+            "relevant_misapplied",
+            "unnecessary_reuse",
+        ],
+        "cause_selection": {"listed": "all_matching", "primary": "first_in_precedence_order"},
+        "action_delta_only_cause": {
+            "pack_had_relevant_aliases": "relevant_misapplied",
+            "otherwise": "irrelevant_or_unlabeled",
+        },
+        "harm_rate": {
+            "numerator": "cases_with_harmful_event",
+            "denominator": "cases_where_reference_not_worst_possible",
+            "worst_possible": "success_false_and_every_criterion_failed",
+            "zero_denominator": "not_applicable",
+            "reported": ["micro", "macro", "per_primary_cause_counts"],
+        },
+        "unnecessary_reuse": {
+            "numerator": "memory_not_needed_cases_with_used_aliases_or_action_delta",
+            "denominator": "memory_not_needed_cases",
+            "double_counted_in_harm": "only_when_it_also_meets_outcome_worse_and_involvement",
+        },
+        "unattributed_regression_rate": {"denominator": "same_as_harm_rate"},
+        "streaming": "same_event_definition_per_ordered_position",
+    },
+}
+
+
+def validate_metric_semantics(sem: Any) -> dict:
+    """The semantics are frozen: any deviation from METRIC_SEMANTICS_V1 is rejected."""
+    frozen = METRIC_SEMANTICS_V1
+    _closed(sem, set(frozen), set(), "metric_semantics")
+    _exact(sem["version"], frozen["version"], "metric_semantics.version")
+    metrics = sem["metrics"]
+    if not isinstance(metrics, dict):
+        raise BenchmarkError("metric_semantics.metrics must be an object")
+    unknown = sorted(set(metrics) - set(frozen["metrics"]))
+    if unknown:
+        raise BenchmarkError(f"metric_semantics has unknown metric(s) {unknown}")
+    missing = sorted(set(frozen["metrics"]) - set(metrics))
+    if missing:
+        raise BenchmarkError(f"metric_semantics is missing metric(s) {missing}")
+    for name, rules in frozen["metrics"].items():
+        _closed(metrics[name], set(rules), set(), f"metric_semantics metric {name}")
+        if metrics[name] != rules:
+            raise BenchmarkError(f"metric_semantics metric {name} deviates from the frozen rule")
+    for section in ("common", "negative_transfer"):
+        if sem[section] != frozen[section]:
+            raise BenchmarkError(f"metric_semantics.{section} deviates from the frozen rules")
+    return sem
 
 
 def validate_scoring_config(cfg: Any) -> dict:
@@ -361,6 +575,7 @@ def validate_scoring_config(cfg: Any) -> dict:
     _exact(cur["collapse_duplicates"], True, "current_vres.collapse_duplicates")
     faith = _closed(cfg["faithfulness"], {"equivalence"}, set(), "scoring faithfulness")
     _exact(faith["equivalence"], _EQUIVALENCE, "faithfulness.equivalence")
+    validate_metric_semantics(cfg["metric_semantics"])
     _check_identity_value(cfg)
     return cfg
 
@@ -439,53 +654,103 @@ def _nonneg(value: Any, field: str) -> int:
 # Closed timeline vocabulary: only class (a) and (b) operations (Chunk 0 findings, 0H). Class (c)
 # time values (updated_at, last_verified_at, valid_from, created_at) and runtime keys cannot be
 # expressed. `alias` is the case-local identity the step creates or acts on.
-_AUTHORITY = _enum(("trusted", "untrusted"))
-_PARTICIPATION = _enum(("participated", "observed"))
+ALIAS_KINDS = ("source", "knowledge", "episode", "procedure", "procedure_candidate")
+# Trust vocabulary the corpus may state; stored by the owner as metadata.trust_class (E3 reads it).
+TRUST_CLASSES = ("trusted_project_source", "external_untrusted_observation")
+# Mirrors KnowledgeService; a DB-free test compares both tuples with knowledge.py.
+KNOWLEDGE_EVIDENCE_REQUIRED_TYPES = ("observation", "finding", "hypothesis", "fact", "lesson")
+KNOWLEDGE_APPROVAL_REQUIRED_TYPES = ("decision", "rule", "process", "requirement", "definition")
+KNOWLEDGE_TYPES = (*KNOWLEDGE_EVIDENCE_REQUIRED_TYPES, *KNOWLEDGE_APPROVAL_REQUIRED_TYPES)
+EVIDENCE_TYPES = ("source_document", "excerpt")
+CONSOLIDATION_TRIGGERS = ("failure_gotcha", "validated_novel", "recurrence")
+_SUBJECT_KEY = re.compile(r"[a-z0-9][a-z0-9._-]{0,79}")
+_POINTER = re.compile(r"(?:/(?:[^/~]|~[01])+)+")
+_EVIDENCE_LIMITS = {"title": 200, "statement": 2000, "quote": 500, "pointer": 200}
+
+
+def _bounded(limit: int):
+    def check(value: Any, field: str) -> str:
+        _text(value, field)
+        if len(value) > limit:
+            raise BenchmarkError(f"{field} must be at most {limit} characters")
+        return value
+
+    return check
+
+
+def _subject_key(value: Any, field: str) -> str:
+    if not isinstance(value, str) or not _SUBJECT_KEY.fullmatch(value):
+        raise BenchmarkError(f"{field} must be a normalized slug [a-z0-9][a-z0-9._-]{{0,79}}")
+    return value
+
+
+def _evidence(value: Any, field: str) -> list:
+    if not isinstance(value, list) or not 1 <= len(value) <= 10:
+        raise BenchmarkError(f"{field} must list 1..10 evidence entries")
+    for entry in value:
+        _closed(entry, {"episode", "pointer", "quote"}, set(), f"{field} entry")
+        pointer = entry["pointer"]
+        if (
+            not isinstance(pointer, str)
+            or len(pointer) > _EVIDENCE_LIMITS["pointer"]
+            or not _POINTER.fullmatch(pointer)
+        ):
+            raise BenchmarkError(f"{field} pointer must be an RFC 6901 pointer starting with '/'")
+        quote = entry["quote"]
+        if not isinstance(quote, str) or not quote.strip() or len(quote) > 500:
+            raise BenchmarkError(f"{field} quote must be non-empty text of at most 500 characters")
+        _check_alias_syntax(entry["episode"])
+    return value
+
+
+_TRUST = _enum(TRUST_CLASSES)
 _RESULT = _enum(("success", "failure"))
 _POLARITY = _enum(("positive", "negative"))
+_VALIDATION = _enum(("none", "passed"))
+_KNOWLEDGE_TYPE = _enum(KNOWLEDGE_TYPES)
+_EVIDENCE_TYPE = _enum(EVIDENCE_TYPES)
+_TRIGGER = _enum(CONSOLIDATION_TRIGGERS)
+
+# Closed timeline vocabulary: only class (a) and (b) operations (Chunk 0 findings, 0H). Class (c)
+# time values (updated_at, last_verified_at, valid_from, created_at) and runtime keys cannot be
+# expressed. `alias` is the case-local identity the step creates or acts on. Arg values "alias"
+# (a reference to another alias) and "texts" are structural markers handled below.
 _OPERATIONS: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {
     "source_add": (
         {"text": _text},
-        {"title": _text, "project": _id_arg, "lineage": _id_arg, "authority": _AUTHORITY},
+        {"title": _text, "project": _id_arg, "lineage": _id_arg, "trust_class": _TRUST},
     ),
     "knowledge_propose": (
-        {"statement": _text},
-        {
-            "title": _text,
-            "project": _id_arg,
-            "lineage": _id_arg,
-            "authority": _AUTHORITY,
-            "capability": _id_arg,
-        },
+        {"knowledge_type": _KNOWLEDGE_TYPE, "statement": _text},
+        {"title": _text, "project": _id_arg, "lineage": _id_arg, "trust_class": _TRUST},
     ),
+    "knowledge_attach_source": ({"source": "alias", "evidence_type": _EVIDENCE_TYPE}, {}),
     "episode_capture": (
-        {"summary": _text, "result": _RESULT},
-        {
-            "project": _id_arg,
-            "lineage": _id_arg,
-            "participation": _PARTICIPATION,
-            "capability": _id_arg,
-        },
+        {"objective": _text, "result": _RESULT, "validation": _VALIDATION},
+        {"project": _id_arg, "lineage": _id_arg, "capability": _id_arg},
+    ),
+    "episode_observe": (
+        {"objective": _text, "result": _RESULT},
+        {"project": _id_arg, "lineage": _id_arg},
     ),
     "experience_consolidate": (
         {
             "polarity": _POLARITY,
-            "trigger": _text,
-            "subject": _text,
-            "episodes": "aliases",
-            "quote": _text,
+            "trigger": _TRIGGER,
+            "subject_key": _subject_key,
+            "title": _bounded(200),
+            "statement": _bounded(2000),
+            "evidence": _evidence,
         },
         {},
     ),
     "procedure_accept": (
         {"name": _text, "method": _text},
-        {
-            "description": _text,
-            "invariants": "texts",
-            "project": _id_arg,
-            "lineage": _id_arg,
-            "capability": _id_arg,
-        },
+        {"description": _text, "invariants": "texts", "project": _id_arg, "lineage": _id_arg},
+    ),
+    "procedure_candidate": (
+        {"baseline": "alias", "method": _text},
+        {"description": _text, "invariants": "texts"},
     ),
     "knowledge_supersede": ({"supersedes": "alias"}, {}),
     "lifecycle_retire": ({}, {"reason": _text}),
@@ -495,6 +760,252 @@ _OPERATIONS: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {
     "lifecycle_refresh": ({"review_after_t": _nonneg}, {}),
     "source_revoke": ({}, {"reason": _text}),
 }
+
+_GAP = (
+    "OWNER GAP - NO PUBLIC OBSERVED-EPISODE WRITER CURRENTLY EXISTS: the E1 table supports "
+    "participation_class 'observed', but the public capture path ExperienceEpisodeService.capture "
+    "is participated-only and no owner entry exists for observed or imported episodes. E7 "
+    "execution of this operation stays fail-closed until a governed owner change; direct SQL is "
+    "forbidden."
+)
+_APPROVAL = (
+    "approval_key: supplied by an isolated-runtime approval fixture; the harness never "
+    "fabricates user approval (open contract ambiguity carried to Chunk 2)"
+)
+_T = "created_at / review_after: benchmark_instant(scoring.time, step t)"
+
+
+def _row(owner, method, creates, acts_on, refs, translation, harness, gap=None):
+    return MappingProxyType(
+        {
+            "owner": owner,
+            "method": method,
+            "creates": creates,
+            "acts_on": acts_on,
+            "refs": MappingProxyType(dict(refs)),
+            "translation": MappingProxyType(dict(translation)),
+            "harness": MappingProxyType(dict(harness)),
+            "uses_direct_sql": False,
+            "owner_gap": gap is not None,
+            "gap_record": gap,
+        }
+    )
+
+
+_LIFECYCLE_COMMON = {
+    "project_id": "isolated-runtime project map, never a corpus value",
+    "approval_key": _APPROVAL,
+    "reason": "step reason; when omitted the harness passes the operation name",
+}
+_LIFECYCLE_TRANSLATION = {"alias": "knowledge_key of the acted-on knowledge alias"}
+
+OPERATION_OWNERS = MappingProxyType(
+    {
+        "source_add": _row(
+            "SourceService",
+            "register",
+            "source",
+            None,
+            {},
+            {
+                "text": "add_chunks text (one source body)",
+                "title": "register title",
+                "project": "register project_id via the isolated-runtime project map",
+                "trust_class": "register authority_level, the semantic class verbatim",
+                "lineage": "case-local grouping label only; never passed to an owner",
+            },
+            {
+                "source_type/origin/path_or_uri/version": "fixed benchmark constants per alias",
+                "content_hash": "sha256 of text",
+                "title": "alias when omitted",
+                "created_at": _T,
+                "approval_key": "only if the owner demands scope approval; " + _APPROVAL,
+            },
+        ),
+        "knowledge_propose": _row(
+            "KnowledgeService",
+            "propose",
+            "knowledge",
+            None,
+            {},
+            {
+                "knowledge_type": "propose knowledge_type, closed to the owner vocabulary",
+                "statement": "propose statement",
+                "title": "propose title",
+                "project": "propose project_id via the isolated-runtime project map",
+                "trust_class": "propose metadata.trust_class (E3 reads it)",
+                "lineage": "case-local grouping label only; never passed to an owner",
+            },
+            {
+                "key": "owner-visible knowledge_key derived from the alias map",
+                "status": "proposed",
+                "scope/confidence/source_owner": "fixed benchmark constants",
+                "review_after": "benchmark_instant(scoring.time, step t) when the type needs one",
+            },
+        ),
+        "knowledge_attach_source": _row(
+            "SourceService",
+            "attach_evidence",
+            None,
+            "knowledge",
+            {"source": "source"},
+            {
+                "alias": "knowledge_key",
+                "source": "source_key of the referenced source alias",
+                "evidence_type": "attach_evidence evidence_type, closed enum",
+            },
+            {"locator/method/limitations/metrics": "omitted", "reproducible": "False"},
+        ),
+        "episode_capture": _row(
+            "ExperienceEpisodeService",
+            "capture",
+            "episode",
+            None,
+            {},
+            {
+                "objective": "task objective of the real task the harness binds",
+                "result": "success -> completed task, failure -> failed task",
+                "validation": "passed -> task-level validation passed; none -> not validated",
+                "project": "task project via the isolated-runtime project map",
+                "lineage": "case-local grouping label only; never passed to an owner",
+                "capability": "work-unit capability key registered through the capability path",
+            },
+            {
+                "task_key": "isolated-runtime task created for the alias",
+                "participation_class": "always participated (owner-fixed; not selectable)",
+            },
+        ),
+        "episode_observe": _row(
+            None,
+            None,
+            "episode",
+            None,
+            {},
+            {"objective": "none: no owner", "result": "none: no owner"},
+            {},
+            gap=_GAP,
+        ),
+        "experience_consolidate": _row(
+            "ExperienceConsolidationService",
+            "consolidate",
+            "knowledge",
+            None,
+            {"evidence": "episode"},
+            {
+                "polarity": "candidate polarity",
+                "trigger": "candidate trigger",
+                "subject_key": "candidate subject_key",
+                "title": "candidate title",
+                "statement": "candidate statement",
+                "evidence": "candidate evidence; episode alias -> episode_key of that episode",
+            },
+            {"project_id": "isolated-runtime project map of the cited episodes"},
+        ),
+        "procedure_accept": _row(
+            "ProcedureService",
+            "accept_baseline",
+            "procedure",
+            None,
+            {},
+            {
+                "name": "accept_baseline name",
+                "method": "accept_baseline method",
+                "description": "accept_baseline description",
+                "invariants": "accept_baseline invariants",
+                "project": "accept_baseline project_id via the isolated-runtime project map",
+                "lineage": "case-local grouping label only; never passed to an owner",
+            },
+            {
+                "procedure_key": "derived from the alias map",
+                "task_family/input_contract/validation_contract/output_contract": (
+                    "fixed benchmark constants"
+                ),
+                "approval_key": _APPROVAL,
+            },
+        ),
+        "procedure_candidate": _row(
+            "ProcedureService",
+            "evaluate_candidate",
+            "procedure_candidate",
+            None,
+            {"baseline": "procedure"},
+            {
+                "baseline": "procedure_key of the baseline procedure alias",
+                "method": "candidate delta method",
+                "description": "candidate delta description",
+                "invariants": "candidate delta invariants",
+            },
+            {
+                "metrics": "{} (valid per validate_metrics): no approval is fabricated",
+                "protected_regression/business_behavior_change": "False",
+            },
+        ),
+        "knowledge_supersede": _row(
+            "KnowledgeService",
+            "supersede",
+            None,
+            "knowledge",
+            {"supersedes": "knowledge"},
+            {"alias": "new_key", "supersedes": "old_key"},
+            {},
+        ),
+        "lifecycle_retire": _row(
+            "ExperienceLifecycleService",
+            "retire",
+            None,
+            "knowledge",
+            {},
+            {**_LIFECYCLE_TRANSLATION, "reason": "reason"},
+            _LIFECYCLE_COMMON,
+        ),
+        "lifecycle_reinstate": _row(
+            "ExperienceLifecycleService",
+            "reinstate",
+            None,
+            "knowledge",
+            {},
+            {**_LIFECYCLE_TRANSLATION, "reason": "reason"},
+            _LIFECYCLE_COMMON,
+        ),
+        "lifecycle_challenge": _row(
+            "ExperienceLifecycleService",
+            "challenge",
+            None,
+            "knowledge",
+            {},
+            {**_LIFECYCLE_TRANSLATION, "reason": "reason"},
+            _LIFECYCLE_COMMON,
+        ),
+        "lifecycle_supersede": _row(
+            "ExperienceLifecycleService",
+            "supersede",
+            None,
+            "knowledge",
+            {"supersedes": "knowledge"},
+            {"alias": "new_key", "supersedes": "old_key", "reason": "reason"},
+            _LIFECYCLE_COMMON,
+        ),
+        "lifecycle_refresh": _row(
+            "ExperienceLifecycleService",
+            "refresh",
+            None,
+            "knowledge",
+            {},
+            {**_LIFECYCLE_TRANSLATION, "review_after_t": "review_after = benchmark_instant(t)"},
+            {**_LIFECYCLE_COMMON, "evidence": "attached source edges are required first"},
+        ),
+        "source_revoke": _row(
+            "SourceRevocationService",
+            "revoke_source",
+            None,
+            "source",
+            {},
+            {"alias": "source_key", "reason": "reason"},
+            _LIFECYCLE_COMMON,
+        ),
+    }
+)
+assert set(OPERATION_OWNERS) == set(_OPERATIONS)  # one owner row per closed operation
 
 
 def _validate_step_args(step: dict, declared: set[str]) -> None:
@@ -512,10 +1023,6 @@ def _validate_step_args(step: dict, declared: set[str]) -> None:
                 raise BenchmarkError(f"{field} references unknown alias {value!r}")
             if value == step["alias"]:
                 raise BenchmarkError(f"{field} cannot reference itself")
-        elif check == "aliases":
-            if not isinstance(value, list) or not value:
-                raise BenchmarkError(f"{field} must be a non-empty alias list")
-            _alias_list(value, declared, field)
         elif check == "texts":
             if not isinstance(value, list) or any(
                 not isinstance(v, str) or not v.strip() for v in value
@@ -523,6 +1030,118 @@ def _validate_step_args(step: dict, declared: set[str]) -> None:
                 raise BenchmarkError(f"{field} must be a list of non-empty text")
         else:
             check(value, field)
+    if op == "episode_capture" and args["validation"] == "passed" and args["result"] != "success":
+        raise BenchmarkError("episode_capture validation 'passed' requires result 'success'")
+
+
+def _need_alias(state: dict, op: str, alias: str, kind: str, role: str) -> dict:
+    info = state["created"].get(alias)
+    if info is None:
+        raise BenchmarkError(f"{op}: {role} alias {alias!r} is not created by an earlier step")
+    if info["kind"] != kind:
+        raise BenchmarkError(
+            f"{op}: {role} must be a {kind} alias, but {alias!r} is a {info['kind']} alias"
+        )
+    return info
+
+
+def _check_consolidation(step: dict, state: dict) -> None:
+    args = step["args"]
+    episodes = []
+    for entry in args["evidence"]:
+        alias = entry["episode"]
+        info = state["created"].get(alias)
+        if info is None:
+            raise BenchmarkError(
+                f"experience_consolidate: evidence episode {alias!r} must be an earlier step"
+            )
+        if info["kind"] != "episode":
+            raise BenchmarkError(
+                f"experience_consolidate: evidence must reference an episode alias, "
+                f"but {alias!r} is a {info['kind']} alias"
+            )
+        if entry["pointer"] == "/objective" and entry["quote"] not in info["objective"]:
+            raise BenchmarkError(
+                f"experience_consolidate: quote is not a literal substring of {alias!r} /objective"
+            )
+        episodes.append(info)
+    failed = [e for e in episodes if e["result"] == "failure"]
+    trigger, polarity = args["trigger"], args["polarity"]
+    if trigger == "failure_gotcha" and (polarity != "negative" or not failed):
+        raise BenchmarkError(
+            "experience_consolidate: failure_gotcha requires negative polarity and a failed episode"
+        )
+    if polarity == "positive" and failed:
+        raise BenchmarkError(
+            "experience_consolidate: a positive lesson cannot cite a failed episode"
+        )
+    if trigger == "validated_novel" and not all(
+        e["participated"] and e["validation"] == "passed" and e["result"] == "success"
+        for e in episodes
+    ):
+        raise BenchmarkError(
+            "experience_consolidate: validated_novel requires participated, validated, "
+            "successful episodes only"
+        )
+
+
+def _check_timeline_step(step: dict, state: dict) -> None:
+    """Alias-kind and ordering rules from OPERATION_OWNERS; `state` is the case-local ledger."""
+    op, alias, args = step["op"], step["alias"], step.get("args", {})
+    row = OPERATION_OWNERS[op]
+    created = state["created"]
+    if row["creates"]:
+        if alias in created:
+            raise BenchmarkError(
+                f"{op}: alias {alias!r} is already created; a creator cannot reuse an alias"
+            )
+    else:
+        _need_alias(state, op, alias, row["acts_on"], "target")
+    for name, kind in row["refs"].items():
+        if name in args and isinstance(args[name], str):  # list refs: _check_consolidation
+            _need_alias(state, op, args[name], kind, name)
+    if op == "experience_consolidate":
+        _check_consolidation(step, state)
+    if op == "source_add":
+        created[alias] = {"kind": "source"}
+    elif op == "knowledge_propose":
+        created[alias] = {"kind": "knowledge", "type": args["knowledge_type"]}
+    elif op == "experience_consolidate":
+        created[alias] = {"kind": "knowledge", "type": "lesson"}
+    elif op in ("episode_capture", "episode_observe"):
+        created[alias] = {
+            "kind": "episode",
+            "objective": args["objective"],
+            "result": args["result"],
+            "participated": op == "episode_capture",
+            "validation": args.get("validation", "none"),
+        }
+    elif op == "procedure_accept":
+        created[alias] = {"kind": "procedure"}
+    elif op == "procedure_candidate":
+        created[alias] = {"kind": "procedure_candidate"}
+    elif op == "knowledge_attach_source":
+        if args["source"] in state["revoked"]:
+            raise BenchmarkError(f"{op}: source {args['source']!r} is already revoked")
+        state["edges"].add((alias, args["source"]))
+    elif op == "source_revoke":
+        if not any(source == alias for _, source in state["edges"]):
+            raise BenchmarkError(
+                f"source_revoke: no knowledge_attach_source provenance edge targets {alias!r}; "
+                "a shared lineage label is not provenance"
+            )
+        state["revoked"].add(alias)
+    elif op == "lifecycle_refresh":
+        needs = created[alias]["type"] in KNOWLEDGE_EVIDENCE_REQUIRED_TYPES
+        if needs and not any(k == alias for k, _ in state["edges"]):
+            raise BenchmarkError(
+                f"lifecycle_refresh: evidence-required {created[alias]['type']!r} knowledge "
+                f"{alias!r} needs a prior knowledge_attach_source"
+            )
+    elif op in ("knowledge_supersede", "lifecycle_supersede"):
+        old = created[args["supersedes"]]
+        if old["type"] != created[alias]["type"]:
+            raise BenchmarkError(f"{op}: replacement must have the same knowledge type")
 
 
 def _validate_request(req: Any) -> None:
@@ -615,6 +1234,7 @@ def _validate_case(case: Any, split: str) -> dict:
                 f"alias prefix mismatch: {alias!r} in {split} requires {ALIAS_PREFIX[split]!r}"
             )
     last_t = -1
+    state: dict[str, Any] = {"created": {}, "edges": set(), "revoked": set()}
     for step in case.get("timeline", []):
         _closed(step, {"t", "op"}, {"alias", "args"}, "timeline step")
         if not _is_nonneg_int(step["t"]):
@@ -629,6 +1249,7 @@ def _validate_case(case: Any, split: str) -> dict:
         if step["alias"] not in seen:
             raise BenchmarkError(f"timeline references unknown alias {step['alias']!r}")
         _validate_step_args(step, seen)
+        _check_timeline_step(step, state)
     if "request" in case:
         _validate_request(case["request"])
     if "task" in case:
@@ -832,10 +1453,13 @@ SECURITY_ASSERTIONS = (
 _SECURITY_LISTS = ("must_not_persist", "must_not_retrieve", "must_not_promote")
 
 
-def _validate_security(sec: Any, aliases: set[str], case_id: str) -> None:
+def _validate_security(sec: Any, aliases: set[str], case_id: str, case: dict) -> None:
     what = f"{case_id}.security"
     _closed(
-        sec, {"assertions"}, {*_SECURITY_LISTS, "lineage_groups", "not_applicable_reason"}, what
+        sec,
+        {"assertions"},
+        {*_SECURITY_LISTS, "lineage_groups", "not_applicable_reason", "must_flag_challenged"},
+        what,
     )
     assertions = sec["assertions"]
     if not isinstance(assertions, list) or not assertions:
@@ -858,6 +1482,21 @@ def _validate_security(sec: Any, aliases: set[str], case_id: str) -> None:
         _alias_list(flat, aliases, f"{what}.lineage_groups")
     if "not_applicable_reason" in sec:
         _text(sec["not_applicable_reason"], f"{what}.not_applicable_reason")
+    challenged = {s["alias"] for s in case.get("timeline", []) if s["op"] == "lifecycle_challenge"}
+    flagged = sec.get("must_flag_challenged")
+    if flagged is not None:
+        if not isinstance(flagged, list) or not flagged:
+            raise BenchmarkError(f"{what}.must_flag_challenged must be a non-empty alias list")
+        _alias_list(flagged, aliases, f"{what}.must_flag_challenged")
+        if not set(flagged) <= challenged:
+            raise BenchmarkError(
+                f"{what}.must_flag_challenged names an alias with no lifecycle_challenge step"
+            )
+    if "challenge_flags_without_mutation" in assertions and not flagged:
+        raise BenchmarkError(
+            f"{what} challenge_flags_without_mutation requires must_flag_challenged "
+            "(an explicit lifecycle challenge before retrieval)"
+        )
 
 
 def parse_expected(normalized: bytes, cases: list[dict]) -> dict[str, dict]:
@@ -912,7 +1551,7 @@ def parse_expected(normalized: bytes, cases: list[dict]) -> dict[str, dict]:
         if "faithfulness" in entry:
             _validate_faithfulness(entry["faithfulness"], entry, aliases, case_id)
         if "security" in entry:
-            _validate_security(entry["security"], aliases, case_id)
+            _validate_security(entry["security"], aliases, case_id, case)
     return entries
 
 

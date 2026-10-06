@@ -40,6 +40,317 @@
     "repeats": 20,
     "rotation": "cyclic_latin_square"
   },
+  "metric_semantics": {
+    "common": {
+      "aggregation": {
+        "counts": [
+          "n_cases",
+          "n_excluded"
+        ],
+        "per_split": "isolated_never_pooled",
+        "reported": [
+          "micro",
+          "macro"
+        ]
+      },
+      "alias_repeat": "count_once_at_first_position",
+      "per_case_result": "numerator_denominator_pair_or_not_applicable",
+      "rank_order": "native_order_never_re_sorted",
+      "representation": {
+        "computed": "exact_rational",
+        "digested": "exact_rational",
+        "display": "decimal_scale_from_display_config"
+      },
+      "top_k": "first_min_k_and_pack_size_after_duplicate_collapse",
+      "zero_denominator": {
+        "excluded_reason": "zero_denominator",
+        "result": "not_applicable"
+      }
+    },
+    "metrics": {
+      "combined_duplicate_memory_rate": {
+        "denominator": "raw_returned",
+        "family": "retrieval",
+        "kind": "rate",
+        "na_rule": "zero_denominator",
+        "numerator": "exact_plus_near_duplicate_extras",
+        "per_case": "pair",
+        "scope": "whole_pack"
+      },
+      "conflict_recognition": {
+        "aggregation": "mean_of_booleans",
+        "family": "faithfulness",
+        "kind": "boolean",
+        "per_case": "per_operation_boolean",
+        "scope": "per_operation"
+      },
+      "contradiction_retrieval": {
+        "denominator": "conflict_groups",
+        "family": "retrieval",
+        "kind": "rate",
+        "na_rule": "zero_denominator",
+        "numerator": "conflict_groups_fully_in_top_k_or_owner_surfaced",
+        "per_case": "pair",
+        "scope": "top_k"
+      },
+      "correct_abstention": {
+        "denominator": "cases_expecting_abstention",
+        "family": "retrieval",
+        "kind": "rate",
+        "na_rule": "zero_denominator",
+        "numerator": "abstained_where_expected",
+        "per_case": "pair",
+        "scope": "per_case"
+      },
+      "corruption_invariant": {
+        "aggregation": "all_hold_never_a_rate",
+        "family": "faithfulness",
+        "kind": "invariant",
+        "per_case": "must_hold_every_operation",
+        "scope": "per_operation"
+      },
+      "criterion_failures": {
+        "aggregation": "mean_distribution_paired_diff",
+        "family": "outcome",
+        "kind": "count",
+        "per_case": "integer_count",
+        "scope": "trace"
+      },
+      "dedup_correctness": {
+        "aggregation": "mean_of_booleans",
+        "family": "faithfulness",
+        "kind": "boolean",
+        "per_case": "per_operation_boolean",
+        "scope": "per_operation"
+      },
+      "exact_duplicate_rate": {
+        "denominator": "raw_returned",
+        "family": "retrieval",
+        "kind": "rate",
+        "na_rule": "zero_denominator",
+        "numerator": "raw_returned_minus_unique",
+        "per_case": "pair",
+        "scope": "whole_pack"
+      },
+      "false_abstention": {
+        "denominator": "cases_not_expecting_abstention",
+        "family": "retrieval",
+        "kind": "rate",
+        "na_rule": "zero_denominator",
+        "numerator": "abstained_where_not_expected",
+        "per_case": "pair",
+        "scope": "per_case"
+      },
+      "harmful_negative_transfer": {
+        "denominator": "cases_where_reference_not_worst_possible",
+        "family": "outcome",
+        "kind": "rate",
+        "na_rule": "zero_denominator",
+        "numerator": "cases_with_harmful_event",
+        "per_case": "pair_with_primary_cause",
+        "scope": "trace"
+      },
+      "irrelevant_memory_rate": {
+        "denominator": "top_k_aliases",
+        "family": "retrieval",
+        "kind": "rate",
+        "na_rule": "zero_denominator",
+        "numerator": "top_k_irrelevant_or_unlabeled",
+        "per_case": "pair_acceptable_in_denominator_only",
+        "scope": "top_k"
+      },
+      "near_duplicate_rate": {
+        "denominator": "raw_returned",
+        "family": "retrieval",
+        "kind": "rate",
+        "na_rule": "zero_denominator",
+        "numerator": "returned_near_duplicate_extras",
+        "per_case": "pair",
+        "scope": "whole_pack"
+      },
+      "omission_rate": {
+        "denominator": "source_facts",
+        "family": "faithfulness",
+        "kind": "rate",
+        "na_rule": "zero_denominator",
+        "numerator": "source_facts_missing",
+        "per_case": "pair",
+        "scope": "per_operation"
+      },
+      "precision_at_k": {
+        "denominator": "top_k_aliases",
+        "family": "retrieval",
+        "kind": "rate",
+        "na_rule": "zero_denominator",
+        "numerator": "top_k_in_relevant",
+        "per_case": "pair",
+        "scope": "top_k"
+      },
+      "premise_awareness_accuracy": {
+        "aggregation": "mean_of_booleans",
+        "family": "retrieval",
+        "kind": "boolean",
+        "per_case": "premise_surfaced_matches_expected",
+        "scope": "per_case"
+      },
+      "prior_memory_invariant": {
+        "aggregation": "all_hold_never_a_rate",
+        "family": "faithfulness",
+        "kind": "invariant",
+        "per_case": "must_hold_every_operation",
+        "scope": "per_operation"
+      },
+      "recall_at_k": {
+        "denominator": "relevant_aliases",
+        "family": "retrieval",
+        "kind": "rate",
+        "na_rule": "zero_denominator",
+        "numerator": "top_k_in_relevant",
+        "per_case": "pair",
+        "scope": "top_k"
+      },
+      "relevant_evidence_coverage": {
+        "denominator": "relevant_aliases",
+        "family": "retrieval",
+        "kind": "rate",
+        "na_rule": "zero_denominator",
+        "numerator": "relevant_in_budgeted_pack",
+        "per_case": "pair",
+        "scope": "whole_pack"
+      },
+      "retries_rework": {
+        "aggregation": "mean_distribution_paired_diff",
+        "family": "outcome",
+        "kind": "count",
+        "per_case": "integer_count",
+        "scope": "trace"
+      },
+      "source_support_precision": {
+        "denominator": "stored_claims",
+        "family": "faithfulness",
+        "kind": "rate",
+        "na_rule": "zero_denominator",
+        "numerator": "supported_claims",
+        "per_case": "pair",
+        "scope": "per_operation"
+      },
+      "stale_memory_suppression": {
+        "denominator": "stale_aliases",
+        "family": "retrieval",
+        "kind": "rate",
+        "na_rule": "zero_denominator_or_historical_intent",
+        "numerator": "stale_aliases_not_in_top_k",
+        "per_case": "pair",
+        "scope": "top_k"
+      },
+      "success": {
+        "aggregation": "mean_of_booleans",
+        "family": "outcome",
+        "kind": "boolean",
+        "per_case": "trace_success",
+        "scope": "trace"
+      },
+      "temporal_update_correctness": {
+        "aggregation": "mean_of_booleans",
+        "family": "faithfulness",
+        "kind": "boolean",
+        "per_case": "per_operation_boolean",
+        "scope": "per_operation"
+      },
+      "tool_call_equivalents": {
+        "aggregation": "mean_distribution_paired_diff",
+        "family": "outcome",
+        "kind": "count",
+        "per_case": "integer_count",
+        "scope": "trace"
+      },
+      "unattributed_regression": {
+        "denominator": "cases_where_reference_not_worst_possible",
+        "family": "outcome",
+        "kind": "rate",
+        "na_rule": "zero_denominator",
+        "numerator": "cases_worse_without_memory_involvement",
+        "per_case": "pair",
+        "scope": "trace"
+      },
+      "unnecessary_reuse": {
+        "denominator": "memory_not_needed_cases",
+        "family": "outcome",
+        "kind": "rate",
+        "na_rule": "zero_denominator",
+        "numerator": "memory_not_needed_cases_with_used_aliases_or_action_delta",
+        "per_case": "pair",
+        "scope": "trace"
+      },
+      "unsupported_addition_rate": {
+        "denominator": "stored_claims",
+        "family": "faithfulness",
+        "kind": "rate",
+        "na_rule": "zero_denominator",
+        "numerator": "unsupported_claims",
+        "per_case": "pair",
+        "scope": "per_operation"
+      }
+    },
+    "negative_transfer": {
+      "action_delta_only_cause": {
+        "otherwise": "irrelevant_or_unlabeled",
+        "pack_had_relevant_aliases": "relevant_misapplied"
+      },
+      "cause_classes": [
+        "premise_mismatch",
+        "stale",
+        "irrelevant_or_unlabeled",
+        "relevant_misapplied",
+        "unnecessary_reuse"
+      ],
+      "cause_selection": {
+        "listed": "all_matching",
+        "primary": "first_in_precedence_order"
+      },
+      "classification": {
+        "not_worse": "no_event",
+        "worse_and_involved": "harmful_negative_transfer_event",
+        "worse_not_involved": "unattributed_regression"
+      },
+      "harm_rate": {
+        "denominator": "cases_where_reference_not_worst_possible",
+        "numerator": "cases_with_harmful_event",
+        "reported": [
+          "micro",
+          "macro",
+          "per_primary_cause_counts"
+        ],
+        "worst_possible": "success_false_and_every_criterion_failed",
+        "zero_denominator": "not_applicable"
+      },
+      "memory_involvement": [
+        "used_aliases_non_empty",
+        "action_sequence_delta_vs_reference"
+      ],
+      "not_part_of_outcome_worse": [
+        "retries",
+        "tool_calls",
+        "cost"
+      ],
+      "outcome_worse_order": [
+        "success_false_where_reference_true",
+        "equal_success_and_strictly_more_criterion_failures"
+      ],
+      "pairing": "per_case_and_mode_not_memory_disabled",
+      "reference_mode": "memory_disabled",
+      "streaming": "same_event_definition_per_ordered_position",
+      "unattributed_regression_rate": {
+        "denominator": "same_as_harm_rate"
+      },
+      "unnecessary_reuse": {
+        "denominator": "memory_not_needed_cases",
+        "double_counted_in_harm": "only_when_it_also_meets_outcome_worse_and_involvement",
+        "numerator": "memory_not_needed_cases_with_used_aliases_or_action_delta"
+      }
+    },
+    "version": 1
+  },
   "proxy_worker": {
     "max_trace_steps": 16,
     "version": 1

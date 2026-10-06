@@ -1,7 +1,7 @@
 {
   "bundles": {
     "adversarial": {
-      "bundle_digest": "eb0c880ec1bc91e9a67428b0c71eb53040de922f7df6bc51a825e9432c8e41a7",
+      "bundle_digest": "d3c7ee72e176dd2641603c54ff19d074c3fea64eddb9be11107ea3d41e4165b9",
       "case_ids": [
         "adv_challenge_flag",
         "adv_cross_project",
@@ -25,12 +25,12 @@
         "adv_varied_poison"
       ],
       "files": {
-        "adversarial/corpus.jsonl": "d5d4dfc7fbd1dbd0c5fd29bcd82c38e839b1d7448042d4ce97423fc6efa14c2c",
-        "adversarial/expected_evidence.json": "424baa358d311234c97450d7da0e1870e7442781023da21c40a8b45dce37ee8c"
+        "adversarial/corpus.jsonl": "446bd41272a139b96bee2ecb7bacd819023578f8b332833cfdc6f2d4d31aa256",
+        "adversarial/expected_evidence.json": "d1650509564a0b1255b3d80cf480e0f6b02e0bcfd580f2c3071e05816624061d"
       }
     },
     "development": {
-      "bundle_digest": "72762d8f39d918f39ef3432ed7bfd0d182782770283273b52a87ecaa1499c19a",
+      "bundle_digest": "59e62bce4b9f5485a99fbdad64c93968d4be88e16967064494a229da1d1380d3",
       "case_ids": [
         "dev_abstain_warranty",
         "dev_asof_threshold",
@@ -58,8 +58,8 @@
         "dev_user_correction"
       ],
       "files": {
-        "development/corpus.jsonl": "6d8bb17bf85481b169b92d63a24ab1fec28817da2b6f1b6e6d89b59af58aa255",
-        "development/expected_evidence.json": "460695c6d69f53162d7f60adc230ee6e2f65f792d576be0fefce8e84f0dfe280"
+        "development/corpus.jsonl": "64dc29f5452a7726e28e6f84cb887ea1b1f60157963d4424d79d777df11e826b",
+        "development/expected_evidence.json": "d9b8613a64d546d645e89fe9c0dfc524bfc7e8e08fa593e892e3c92408fd57f3"
       }
     }
   },
@@ -67,5 +67,5 @@
   "heldout_status": "not_authored",
   "heldout_version": 1,
   "schema_version": 1,
-  "scoring_digest": "3f816c99b808254f4e427495f1d7b496505f1de9db771d2de65d185d051807b0"
+  "scoring_digest": "d486ffc700176ad274c31be1f2f0e63ac1afd741f48dc31ef535c4f6b99885b3"
 }

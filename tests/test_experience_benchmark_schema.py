@@ -33,7 +33,7 @@ def _root_fixture(tmp_path):
     return r
 
 
-ALIASES = ["dev_a", "dev_b", "dev_c", "dev_d", "dev_e"]
+ALIASES = [f"dev_{c}" for c in "abcdefghij"]
 
 
 def _c(case_id="c1", **over):
@@ -54,27 +54,43 @@ def _step(t, op, alias="dev_a", **args):
 
 # ---- 1B.1 timeline operation vocabulary is closed and carries per-op argument shapes ---
 
+_EV = [{"episode": "dev_c", "pointer": "/objective", "quote": "did it"}]
 VALID_STEPS = [
-    _step(0, "source_add", text="doc text", title="t", project="proj_one", lineage="lin_a"),
-    _step(1, "knowledge_propose", statement="a fact", project="proj_one", authority="trusted"),
-    _step(2, "episode_capture", summary="did it", result="success", participation="participated"),
     _step(
-        3,
-        "experience_consolidate",
-        polarity="positive",
-        trigger="when x",
-        subject="s",
-        episodes=["dev_c"],
-        quote="did it",
+        0,
+        "source_add",
+        text="doc text",
+        title="t",
+        project="proj_one",
+        lineage="lin_a",
+        trust_class="trusted_project_source",
     ),
-    _step(4, "procedure_accept", name="p", method="m", invariants=["i1"]),
-    _step(5, "knowledge_supersede", alias="dev_b", supersedes="dev_a"),
-    _step(6, "lifecycle_retire", reason="old"),
-    _step(7, "lifecycle_reinstate", reason="back"),
-    _step(8, "lifecycle_challenge", reason="doubt"),
-    _step(9, "lifecycle_supersede", alias="dev_b", supersedes="dev_a"),
-    _step(10, "lifecycle_refresh", review_after_t=40),
-    _step(11, "source_revoke", reason="bad source"),
+    _step(1, "knowledge_propose", "dev_b", knowledge_type="fact", statement="a fact"),
+    _step(2, "knowledge_attach_source", "dev_b", source="dev_a", evidence_type="source_document"),
+    _step(3, "episode_capture", "dev_c", objective="did it", result="success", validation="none"),
+    _step(
+        4,
+        "experience_consolidate",
+        "dev_d",
+        polarity="positive",
+        trigger="recurrence",
+        subject_key="did-it",
+        title="Did it",
+        statement="Do it again.",
+        evidence=_EV,
+    ),
+    _step(5, "procedure_accept", "dev_e", name="p", method="m", invariants=["i1"]),
+    _step(6, "procedure_candidate", "dev_f", baseline="dev_e", method="m2"),
+    _step(7, "knowledge_propose", "dev_g", knowledge_type="fact", statement="g"),
+    _step(8, "knowledge_supersede", "dev_g", supersedes="dev_b"),
+    _step(9, "lifecycle_retire", "dev_g", reason="old"),
+    _step(10, "lifecycle_reinstate", "dev_g", reason="back"),
+    _step(11, "lifecycle_challenge", "dev_g", reason="doubt"),
+    _step(12, "knowledge_propose", "dev_h", knowledge_type="fact", statement="h"),
+    _step(13, "lifecycle_supersede", "dev_h", supersedes="dev_g"),
+    _step(14, "lifecycle_refresh", "dev_b", review_after_t=40),
+    _step(15, "episode_observe", "dev_i", objective="saw it", result="success"),
+    _step(16, "source_revoke", "dev_a", reason="bad source"),
 ]
 
 
@@ -83,16 +99,17 @@ def test_every_closed_operation_with_valid_args_loads(root):
     assert [s["op"] for s in loaded["cases"][0]["timeline"]] == [s["op"] for s in VALID_STEPS]
 
 
-def test_capability_arg_accepted_on_episode_and_procedure(root):
-    steps = [
-        _step(0, "episode_capture", summary="s", result="success", capability="cap_one"),
-        _step(1, "procedure_accept", alias="dev_b", name="p", method="m", capability="cap_one"),
-        _step(2, "knowledge_propose", alias="dev_c", statement="x", capability="cap_one"),
-    ]
-    assert len(_load(root, _c(timeline=steps))["cases"][0]["timeline"]) == 3
-    bad = _step(0, "episode_capture", summary="s", result="success", capability="Cap One")
+def test_capability_arg_accepted_on_episode_capture_only(root):
+    ok = _step(0, "episode_capture", objective="s", result="success", validation="none")
+    ok["args"]["capability"] = "cap_one"
+    assert len(_load(root, _c(timeline=[ok]))["cases"][0]["timeline"]) == 1
+    bad = _step(0, "episode_capture", objective="s", result="success", validation="none")
+    bad["args"]["capability"] = "Cap One"
     with pytest.raises(eb.BenchmarkError, match="capability"):
         _load(root, _c(timeline=[bad]))
+    other = _step(0, "procedure_accept", name="p", method="m", capability="cap_one")
+    with pytest.raises(eb.BenchmarkError, match="capability"):
+        _load(root, _c(timeline=[other]))
 
 
 def test_unknown_operation_rejected(root):
@@ -112,7 +129,7 @@ def test_operation_requires_alias(root):
         ("source_add", {}, "text"),
         ("knowledge_propose", {}, "statement"),
         ("episode_capture", {"summary": "s"}, "result"),
-        ("experience_consolidate", {"polarity": "positive"}, "episodes"),
+        ("experience_consolidate", {"polarity": "positive"}, "evidence"),
         ("procedure_accept", {"name": "p"}, "method"),
         ("knowledge_supersede", {}, "supersedes"),
         ("lifecycle_supersede", {}, "supersedes"),
@@ -150,16 +167,18 @@ def test_alias_valued_args_must_reference_declared_aliases(root):
     bad = _step(0, "knowledge_supersede", alias="dev_b", supersedes="dev_zzz")
     with pytest.raises(eb.BenchmarkError, match="unknown alias"):
         _load(root, _c(timeline=[bad]))
+    ev = [{"episode": "dev_zzz", "pointer": "/objective", "quote": "q"}]
     bad = _step(
         0,
         "experience_consolidate",
         polarity="positive",
-        trigger="t",
-        subject="s",
-        episodes=["dev_zzz"],
-        quote="q",
+        trigger="recurrence",
+        subject_key="s",
+        title="t",
+        statement="s",
+        evidence=ev,
     )
-    with pytest.raises(eb.BenchmarkError, match="unknown alias"):
+    with pytest.raises(eb.BenchmarkError, match="earlier step"):
         _load(root, _c(timeline=[bad]))
 
 
@@ -169,14 +188,17 @@ def test_supersede_cannot_target_itself(root):
 
 
 def test_enum_args_closed(root):
-    bad = _step(0, "episode_capture", summary="s", result="maybe")
+    bad = _step(0, "episode_capture", objective="s", result="maybe", validation="none")
     with pytest.raises(eb.BenchmarkError, match="result"):
         _load(root, _c(timeline=[bad]))
-    bad = _step(0, "episode_capture", summary="s", result="success", participation="peeked")
-    with pytest.raises(eb.BenchmarkError, match="participation"):
+    bad = _step(0, "episode_capture", objective="s", result="success", validation="peeked")
+    with pytest.raises(eb.BenchmarkError, match="validation"):
         _load(root, _c(timeline=[bad]))
-    bad = _step(0, "source_add", text="x", authority="supreme")
-    with pytest.raises(eb.BenchmarkError, match="authority"):
+    bad = _step(0, "source_add", text="x", trust_class="supreme")
+    with pytest.raises(eb.BenchmarkError, match="trust_class"):
+        _load(root, _c(timeline=[bad]))
+    bad = _step(0, "knowledge_propose", knowledge_type="gossip", statement="x")
+    with pytest.raises(eb.BenchmarkError, match="knowledge_type"):
         _load(root, _c(timeline=[bad]))
 
 
@@ -512,6 +534,7 @@ def full_scoring():
             "collapse_duplicates": True,
         },
         "faithfulness": {"equivalence": "nfc_collapse_whitespace_exact"},
+        "metric_semantics": copy.deepcopy(eb.METRIC_SEMANTICS_V1),
     }
 
 
@@ -545,6 +568,7 @@ def test_scoring_digest_changes_with_any_parameter():
         "aggregation",
         "current_vres",
         "faithfulness",
+        "metric_semantics",
     ],
 )
 def test_scoring_missing_section_rejected(section):

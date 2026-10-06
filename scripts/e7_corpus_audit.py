@@ -246,6 +246,58 @@ def audit(root: Path) -> dict:
         if any("max_open" in s.lower() or "budget" in s.lower() for s in _walk_strings(c))
     ]
     check("no_invented_proposal_budget", not budget_hits, budget_hits)
+
+    all_cases = [c for b in bundles.values() for c in b["cases"]]
+    ops_used = {s["op"] for c in all_cases for s in c.get("timeline", [])}
+    check(
+        "owner_map_covers_operations",
+        ops_used <= set(eb.OPERATION_OWNERS)
+        and all(
+            row["owner_gap"] or (row["owner"] and row["method"] and not row["uses_direct_sql"])
+            for row in eb.OPERATION_OWNERS.values()
+        ),
+        sorted(ops_used - set(eb.OPERATION_OWNERS)),
+    )
+    gap_ops = sorted(op for op, row in eb.OPERATION_OWNERS.items() if row["owner_gap"])
+    check("owner_gap_ops_recorded", gap_ops == ["episode_observe"], gap_ops)
+    observed_wrong = [
+        c["case_id"]
+        for c in all_cases
+        for s in c.get("timeline", [])
+        if s["op"] == "episode_capture" and s.get("args", {}).get("participation") == "observed"
+    ]
+    check("observed_episodes_use_owner_gap_op", not observed_wrong, observed_wrong)
+    no_edge, bad_consolidation = [], []
+    for c in all_cases:
+        edges: set[tuple[str, str]] = set()
+        for s in c.get("timeline", []):
+            args = s.get("args", {})
+            if s["op"] == "knowledge_attach_source":
+                edges.add((s["alias"], args["source"]))
+            elif s["op"] == "source_revoke" and not any(src == s["alias"] for _, src in edges):
+                no_edge.append(c["case_id"])
+            elif s["op"] == "experience_consolidate" and not (
+                args["trigger"] in eb.CONSOLIDATION_TRIGGERS
+                and 1 <= len(args["evidence"]) <= 10
+                and all(e["pointer"].startswith("/") and e["quote"] for e in args["evidence"])
+            ):
+                bad_consolidation.append(c["case_id"])
+    check("revocation_has_provenance_edge", not no_edge, no_edge)
+    check("consolidations_e2_shaped", not bad_consolidation, bad_consolidation)
+    flagged = [
+        a
+        for e in bundles["adversarial"]["expected"].values()
+        for a in e.get("security", {}).get("must_flag_challenged", [])
+    ]
+    check("challenge_cases_have_lifecycle_challenge", bool(flagged), flagged)
+    try:
+        eb.validate_metric_semantics(scoring["metric_semantics"])
+        semantics_ok = True
+    except eb.BenchmarkError as exc:
+        semantics_ok = False
+        report["metric_semantics_error"] = str(exc)
+    check("metric_semantics_frozen", semantics_ok)
+    report["metric_semantics_digest"] = eb.sha256_hex(eb.render_json(scoring["metric_semantics"]))
     report["scoring"] = {"digest": eb.scoring_digest(scoring), "config": scoring}
     report["manifest_digest"] = hashlib.sha256((root / "manifest.json").read_bytes()).hexdigest()
     report["checks"] = checks

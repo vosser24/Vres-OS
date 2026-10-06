@@ -6,6 +6,7 @@ DB-free. Synthetic fixtures only; no real or held-out corpus content.
 from __future__ import annotations
 
 import builtins
+import copy
 import hashlib
 import io
 import json
@@ -469,6 +470,7 @@ def _scoring(repeats):
             "collapse_duplicates": True,
         },
         "faithfulness": {"equivalence": "nfc_collapse_whitespace_exact"},
+        "metric_semantics": copy.deepcopy(eb.METRIC_SEMANTICS_V1),
     }
 
 
@@ -915,7 +917,15 @@ def test_benchmark_module_has_no_cli_or_mcp_surface_and_no_sql():
 
 
 def _tl(*ts, **extra):
-    return [{"t": t, "op": "lifecycle_retire", "alias": "dev_a", **extra} for t in ts]
+    create = {
+        "t": ts[0],
+        "op": "knowledge_propose",
+        "alias": "dev_a",
+        "args": {"knowledge_type": "fact", "statement": "A fact."},
+    }
+    return [create] + [
+        {"t": t, "op": "lifecycle_challenge", "alias": "dev_a", **extra} for t in ts[1:]
+    ]
 
 
 def test_timeline_step_missing_t_rejected(root):
