@@ -256,9 +256,28 @@ class EmbeddingService:
         return leases, gates
 
     def semantic_search(self, query: str, limit: int = 8, project_id: int | None = None) -> list[dict[str, Any]]:
+        prepared = self._prepare_query(query, limit)
+        if prepared is None:
+            return []
+        cfg, q, limit = prepared
+        with _connect() as conn:
+            return self._search(conn, cfg, q, limit, project_id)
+
+    def semantic_search_in_conn(self, query: str, limit: int, project_id: int | None, conn: Any) -> list[dict[str, Any]]:
+        """Same read-only search on a caller-supplied connection (e.g. a REPEATABLE READ replay snapshot).
+
+        The model is loaded and the query embedded before any statement runs; nothing is written."""
+        prepared = self._prepare_query(query, limit)
+        if prepared is None:
+            return []
+        cfg, q, limit = prepared
+        return self._search(conn, cfg, q, limit, project_id)
+
+    @staticmethod
+    def _prepare_query(query: str, limit: int):
         cfg = ConfigStore().load()
         if not cfg.embeddings_enabled or not query.strip():
-            return []
+            return None
         limit = max(1, min(int(limit), 50))
         model = _load_model(cfg.embedding_model)
         try:
@@ -273,38 +292,21 @@ class EmbeddingService:
             q = _validate_vector(q)
         except Exception as exc:
             raise EmbeddingUnavailable(f"Query embedding failed: {redact_text(str(exc))}") from exc
-        with _connect() as conn:
-            vector_enabled = _vector_enabled(conn)
-            if vector_enabled:
-                literal = "[" + ",".join(f"{x:.9g}" for x in q) + "]"
-                rows = conn.execute(
-                    f"""
-                    SELECT c.chunk_key,c.source_id,c.knowledge_id,c.section,c.content,s.source_key,s.title AS source_title,
-                           1 - (c.embedding_vector <=> %s::vector) AS score
-                      FROM vres.knowledge_chunks c
-                      LEFT JOIN vres.sources s ON s.id=c.source_id
-                      LEFT JOIN vres.knowledge_items k ON k.id=c.knowledge_id
-                     WHERE c.embedding_vector IS NOT NULL AND c.embedding_model=%s AND c.embedding_dimensions=%s
-                       AND {_ELIGIBLE}
-                       AND (
-                         %s IS NULL
-                         OR (k.id IS NOT NULL AND (k.project_id=%s OR k.project_id IS NULL))
-                         OR (s.id IS NOT NULL AND (s.project_id=%s OR s.project_id IS NULL
-                              OR EXISTS(SELECT 1 FROM vres.source_locations sl WHERE sl.source_id=s.id AND sl.project_id=%s)))
-                       )
-                     ORDER BY c.embedding_vector <=> %s::vector LIMIT %s
-                    """,
-                    (literal, cfg.embedding_model, len(q), project_id, project_id, project_id, project_id, literal, limit),
-                ).fetchall()
-                return [dict(r) for r in rows]
+        return cfg, q, limit
+
+    @staticmethod
+    def _search(conn: Any, cfg: Any, q: list[float], limit: int, project_id: int | None) -> list[dict[str, Any]]:
+        vector_enabled = _vector_enabled(conn)
+        if vector_enabled:
+            literal = "[" + ",".join(f"{x:.9g}" for x in q) + "]"
             rows = conn.execute(
                 f"""
-                SELECT c.chunk_key,c.source_id,c.knowledge_id,c.section,c.content,c.embedding,c.embedding_dimensions,
-                       s.source_key,s.title AS source_title
+                SELECT c.chunk_key,c.source_id,c.knowledge_id,c.section,c.content,s.source_key,s.title AS source_title,
+                       1 - (c.embedding_vector <=> %s::vector) AS score
                   FROM vres.knowledge_chunks c
                   LEFT JOIN vres.sources s ON s.id=c.source_id
                   LEFT JOIN vres.knowledge_items k ON k.id=c.knowledge_id
-                 WHERE c.embedding IS NOT NULL AND c.embedding_model=%s AND c.embedding_dimensions=%s
+                 WHERE c.embedding_vector IS NOT NULL AND c.embedding_model=%s AND c.embedding_dimensions=%s
                    AND {_ELIGIBLE}
                    AND (
                      %s IS NULL
@@ -312,10 +314,30 @@ class EmbeddingService:
                      OR (s.id IS NOT NULL AND (s.project_id=%s OR s.project_id IS NULL
                           OR EXISTS(SELECT 1 FROM vres.source_locations sl WHERE sl.source_id=s.id AND sl.project_id=%s)))
                    )
-                 ORDER BY c.embedded_at DESC LIMIT 5000
+                 ORDER BY c.embedding_vector <=> %s::vector LIMIT %s
                 """,
-                (cfg.embedding_model, len(q), project_id, project_id, project_id, project_id),
+                (literal, cfg.embedding_model, len(q), project_id, project_id, project_id, project_id, literal, limit),
             ).fetchall()
+            return [dict(r) for r in rows]
+        rows = conn.execute(
+            f"""
+            SELECT c.chunk_key,c.source_id,c.knowledge_id,c.section,c.content,c.embedding,c.embedding_dimensions,
+                   s.source_key,s.title AS source_title
+              FROM vres.knowledge_chunks c
+              LEFT JOIN vres.sources s ON s.id=c.source_id
+              LEFT JOIN vres.knowledge_items k ON k.id=c.knowledge_id
+             WHERE c.embedding IS NOT NULL AND c.embedding_model=%s AND c.embedding_dimensions=%s
+               AND {_ELIGIBLE}
+               AND (
+                 %s IS NULL
+                 OR (k.id IS NOT NULL AND (k.project_id=%s OR k.project_id IS NULL))
+                 OR (s.id IS NOT NULL AND (s.project_id=%s OR s.project_id IS NULL
+                      OR EXISTS(SELECT 1 FROM vres.source_locations sl WHERE sl.source_id=s.id AND sl.project_id=%s)))
+               )
+             ORDER BY c.embedded_at DESC LIMIT 5000
+            """,
+            (cfg.embedding_model, len(q), project_id, project_id, project_id, project_id),
+        ).fetchall()
         scored: list[dict[str, Any]] = []
         for row in rows:
             vector = row["embedding"] if isinstance(row["embedding"], list) else json.loads(row["embedding"])

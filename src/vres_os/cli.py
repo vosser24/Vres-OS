@@ -15,7 +15,7 @@ from .bootstrap import interactive_setup, last_setup_result, prerequisite_status
 from .config import ConfigStore
 from .credential_broker import CredentialBindingError, CredentialBroker, CredentialBrokerError
 from .db import DatabaseUnavailable, migrate
-from .hooks import compact, post_compact, session_end, session_start, stop, user_prompt, validator_stop
+from .hooks import compact, experience_observe, post_compact, session_end, session_start, stop, user_prompt, validator_stop
 from .local_secrets import LocalSecretError, LocalSecretManager
 from .onboarding import OnboardingService
 from .project import discover_project
@@ -595,6 +595,11 @@ def hook_session_end() -> None:
 @hook_app.command("validator-stop")
 def hook_validator_stop() -> None:
     validator_stop()
+
+
+@hook_app.command("experience-observe")
+def hook_experience_observe() -> None:
+    experience_observe()
 
 
 if __name__ == "__main__":

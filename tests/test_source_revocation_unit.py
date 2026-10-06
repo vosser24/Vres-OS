@@ -248,4 +248,8 @@ def test_only_source_revocation_writes_the_revoked_status():
     assert offenders == []
     # The only other code-level use is the read-side exclusion tuple.
     # E4 Chunk G: session_contamination.py only words the revoked-identifier phrase shown to the user (no status write).
-    assert [r for r in readers if r[0] != "session_contamination.py"] == [("knowledge_status.py", ["revoked"])]
+    # E6: experience_utility.py is a read-side lifecycle projection (reader only; writers are already rejected above).
+    assert sorted(r[0] for r in readers) == [
+        "experience_utility.py", "knowledge_status.py", "session_contamination.py",
+    ]
+    assert [r for r in readers if r[0] == "knowledge_status.py"] == [("knowledge_status.py", ["revoked"])]

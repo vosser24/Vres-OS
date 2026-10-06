@@ -19,6 +19,7 @@ from .db import migrate
 from .embeddings import EmbeddingService
 from .experience_lifecycle import ExperienceLifecycleService
 from .experience_retrieval import ExperienceRetrievalService
+from .experience_utility import ExperienceUtilityEvidenceService
 from .knowledge import KnowledgeService
 from .model_policy import ModelPolicyService
 from .onboarding import OnboardingService
@@ -256,6 +257,18 @@ def experience_retrieve(request: dict[str, Any]) -> dict:
     if not isinstance(request, dict) or "project_id" in request:
         raise ValueError("experience_retrieve takes a request object without project_id")
     return ExperienceRetrievalService().retrieve({**request, "project_id": _trusted_project_id()})
+
+
+@mcp.tool()
+def experience_utility_evidence(request: dict[str, Any]) -> dict:
+    """Read-only, descriptive utility evidence for one recorded retrieval observation of the current session project:
+    the returned items, exact-key references observed later, current usability from the truth owners, and downstream
+    task/validation/terminal-episode facts with temporal flags. It never ranks or scores memories, never says a memory
+    was or was not useful, and causal_credit is always not_established. It grants no authority and is not a
+    promotion, policy-change or replay input by itself. Request: observation_key (required). project_id is not
+    accepted; unknown fields are rejected."""
+    r = _closed_request("experience_utility_evidence", request, {"observation_key"})
+    return ExperienceUtilityEvidenceService().evidence(_trusted_project_id(), r["observation_key"])
 
 
 def _closed_request(tool: str, request: Any, required: set[str], optional: set[str] = frozenset()) -> dict[str, Any]:

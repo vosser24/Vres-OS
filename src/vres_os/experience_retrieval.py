@@ -118,6 +118,36 @@ _TOKEN = re.compile(r"\w+", re.UNICODE)
 
 
 @dataclass(frozen=True)
+class CompositionParams:
+    """The ONLY knobs a replay candidate may vary: section budgets, item cap, pack byte cap and RRF k.
+
+    Authority tier, scope rank, eligibility and every gate are never parameters."""
+
+    section_budgets: dict[str, int]
+    max_items: int
+    max_pack_bytes: int
+    rrf_k: int
+
+
+E5_PARAMS = CompositionParams(dict(BUDGETS), MAX_ITEMS, MAX_PACK_BYTES, RRF_K)
+
+
+def _policy_for(params: CompositionParams) -> dict[str, Any]:
+    """The E5 POLICY object for E5 params; otherwise a truthful replay-only copy."""
+    if params == E5_PARAMS:
+        return POLICY
+    return {
+        **POLICY, "chunk": "E6_candidate", "fusion": f"reciprocal_rank_k{params.rrf_k}_lexical_semantic",
+        "budgets": dict(params.section_budgets), "max_items": params.max_items,
+        "max_pack_bytes": params.max_pack_bytes,
+    }
+
+
+def _fusion_at(item: dict[str, Any], k: int) -> float:
+    return round(sum(1.0 / (k + pos) for pos in (item.get("_lex_pos"), item.get("_sem_pos")) if pos), 6)
+
+
+@dataclass(frozen=True)
 class RetrievalRequest:
     project_id: int
     query: str
@@ -375,6 +405,8 @@ def _item(
             "recency_epoch": _epoch(recency),
         },
         "text": _clean(text),
+        "_lex_pos": row.get("lex_pos"),
+        "_sem_pos": row.get("sem_pos"),
         "_kind": kind,
         "_section": section,
         "_authoritative": authoritative,
@@ -770,7 +802,9 @@ def raw_chunk_item(row: dict[str, Any], req: dict[str, Any]) -> tuple[dict | Non
     ), None
 
 
-def select_raw(rows: list[dict[str, Any]], req: dict[str, Any], diag: dict[str, Any]) -> list[dict[str, Any]]:
+def select_raw(
+    rows: list[dict[str, Any]], req: dict[str, Any], diag: dict[str, Any], params: CompositionParams = E5_PARAMS,
+) -> list[dict[str, Any]]:
     """Deterministic (rank desc, chunk_key) selection: <=2 chunks per source/knowledge item, <=5 total."""
     per_group: dict[Any, int] = {}
     out: list[dict[str, Any]] = []
@@ -785,7 +819,7 @@ def select_raw(rows: list[dict[str, Any]], req: dict[str, Any], diag: dict[str, 
             continue
         per_group[group] = per_group.get(group, 0) + 1
         out.append(item)
-        if len(out) >= BUDGETS["raw_evidence_refs"]:
+        if len(out) >= params.section_budgets["raw_evidence_refs"]:
             break
     return out
 
@@ -942,7 +976,10 @@ def _settle(kept: list[dict[str, Any]], sets: dict[str, dict[str, Any]], diag: d
             break
 
 
-def compose(items: list[dict[str, Any]], req: dict[str, Any], diagnostics: dict[str, int], edges=(), raw_fn=None) -> dict[str, Any]:
+def compose(
+    items: list[dict[str, Any]], req: dict[str, Any], diagnostics: dict[str, int], edges=(), raw_fn=None,
+    params: CompositionParams = E5_PARAMS,
+) -> dict[str, Any]:
     """Evaluate, order, dedupe, budget and size-bound. Pure and deterministic given its inputs.
 
     Raw fallback trigger (structural, no threshold): raw_fallback is true AND the FINAL selected items (after
@@ -960,6 +997,9 @@ def compose(items: list[dict[str, Any]], req: dict[str, Any], diagnostics: dict[
         "truncated": {"section_budget": 0, "total_items": 0, "pack_bytes": 0, "conflict_sets": 0},
     }
     items, conflict_list = evaluate(copy.deepcopy(list(items)), req, list(edges))
+    if params.rrf_k != RRF_K:  # only the fusion score is recomputed; tier/scope/eligibility stay frozen
+        for item in items:
+            item["signals"]["fusion_rank_score"] = _fusion_at(item, params.rrf_k)
     sets = {c["conflict_key"]: c for c in conflict_list}
     in_conflict = {m["memory_key"] for c in conflict_list for m in c["members"]}
     cited: dict[str, set[str]] = {}
@@ -986,7 +1026,7 @@ def compose(items: list[dict[str, Any]], req: dict[str, Any], diagnostics: dict[
         min(by_key[m["memory_key"]]["signals"]["authority_tier"] for m in c["members"]), c["reason"], c["conflict_key"],
     )):
         members = [by_key[m["memory_key"]] for m in entry["members"] if m["memory_key"] not in keys]
-        if per_section["conflicts_and_stale"] + len(members) > BUDGETS["conflicts_and_stale"]:
+        if per_section["conflicts_and_stale"] + len(members) > params.section_budgets["conflicts_and_stale"]:
             del sets[entry["conflict_key"]]
             diag["truncated"]["conflict_sets"] += 1
             continue
@@ -1011,7 +1051,7 @@ def compose(items: list[dict[str, Any]], req: dict[str, Any], diagnostics: dict[
             continue
         digests[digest] = item
         keys.add(item["memory_key"])
-        if per_section[item["_section"]] >= BUDGETS[item["_section"]]:
+        if per_section[item["_section"]] >= params.section_budgets[item["_section"]]:
             diag["truncated"]["section_budget"] += 1
             continue
         per_section[item["_section"]] += 1
@@ -1020,9 +1060,9 @@ def compose(items: list[dict[str, Any]], req: dict[str, Any], diagnostics: dict[
         kept.append(item)
     def cap_total() -> None:
         kept.sort(key=_sort_key)
-        if len(kept) > MAX_ITEMS:
-            diag["truncated"]["total_items"] += len(kept) - MAX_ITEMS
-            del kept[MAX_ITEMS:]
+        if len(kept) > params.max_items:
+            diag["truncated"]["total_items"] += len(kept) - params.max_items
+            del kept[params.max_items:]
             _settle(kept, sets, diag)
 
     cap_total()
@@ -1036,7 +1076,7 @@ def compose(items: list[dict[str, Any]], req: dict[str, Any], diagnostics: dict[
             if extras.get("possibly_truncated"):
                 diag["raw_possibly_truncated"] = True
             used = 0
-            for item in select_raw(list(rows), req, diag):
+            for item in select_raw(list(rows), req, diag, params):
                 digest = statement_digest(item["text"])
                 if item["memory_key"] in keys or digest in digests:
                     diag["deduplicated"] += 1
@@ -1048,13 +1088,15 @@ def compose(items: list[dict[str, Any]], req: dict[str, Any], diagnostics: dict[
             diag["raw_fallback"] = "used" if used else "no_results"
             cap_total()
 
+    policy = _policy_for(params)
+
     def build(selected: list[dict[str, Any]], tokens: int) -> dict[str, Any]:
         # Frozen top-level keys only (contract "Experience pack"): conflict sets are carried by their member items.
         sections = {name: [_public(i) for i in selected if i["_section"] == name] for name in SECTIONS}
         empty = not selected
         return {
             "schema_version": SCHEMA_VERSION,
-            "policy": POLICY,
+            "policy": policy,
             **sections,
             "abstained": empty,
             "reason": "no_eligible_experience" if empty else None,
@@ -1063,7 +1105,7 @@ def compose(items: list[dict[str, Any]], req: dict[str, Any], diagnostics: dict[
             "estimated_tokens": tokens,
         }
 
-    while kept and len(_canonical(build(kept, 9999)).encode("utf-8")) > MAX_PACK_BYTES:
+    while kept and len(_canonical(build(kept, 9999)).encode("utf-8")) > params.max_pack_bytes:
         kept.pop()  # lowest priority item is last; never cut inside an item
         diag["truncated"]["pack_bytes"] += 1
         _settle(kept, sets, diag)
@@ -1081,21 +1123,24 @@ def _lexical(vec: str, text: str, tokens: list[str]) -> tuple[str, str]:
     )
 
 
-def _default_semantic(query: str, limit: int, project_id: int):
-    from .config import ConfigStore
-
-    if not ConfigStore().load().embeddings_enabled:
-        return None
-    from .embeddings import EmbeddingService
-
-    return EmbeddingService().semantic_search(query, limit=limit, project_id=project_id)
-
-
 def _positions(rows: list[dict[str, Any]], key: str) -> None:
     """Assign 1-based lexical positions (ts_rank desc, key asc) to rows that matched lexically."""
     hits = sorted((r for r in rows if _lexical_hit(r)), key=lambda r: (-_lex(r), r[key]))
     for pos, row in enumerate(hits, 1):
         row["lex_pos"] = pos
+
+
+@dataclass
+class RetrievalUniverse:
+    """The complete hard-gated candidate universe, collected once. Compositions work on copies of `items`."""
+
+    req: dict[str, Any]
+    items: list[dict[str, Any]]
+    counts: dict[str, Any]
+    edges: list[dict[str, Any]]
+    task_id: int | None
+    snapshot_at: Any
+    raw_fn: Any
 
 
 class ExperienceRetrievalService:
@@ -1104,8 +1149,8 @@ class ExperienceRetrievalService:
     def __init__(self, connect_fn=None, semantic_fn=None):
         self._connect_fn = connect_fn
         # semantic_fn(query, limit, project_id) -> list[chunk hit dicts with knowledge_id] | None (disabled).
-        # Default reuses the existing EmbeddingService (its own SELECT-only connection; no second embedding policy).
-        self._semantic_fn = semantic_fn or _default_semantic
+        # Default: EmbeddingService.semantic_search_in_conn on the retrieval connection (no second embedding policy).
+        self._semantic_fn = semantic_fn
 
     @contextmanager
     def _open(self):
@@ -1118,8 +1163,45 @@ class ExperienceRetrievalService:
                 raise RuntimeError("Experience retrieval requires a read-only transaction")
             yield conn
 
+    @contextmanager
+    def snapshot(self):
+        """One REPEATABLE READ + READ ONLY snapshot, mechanically verified before anything is read (replay only)."""
+        connect = self._connect_fn
+        if connect is None:
+            from .db import connect
+        with connect() as conn:
+            conn.isolation_level = psycopg.IsolationLevel.REPEATABLE_READ
+            conn.read_only = True
+            row = conn.execute(
+                "SELECT current_setting('transaction_isolation') AS transaction_isolation, "
+                "current_setting('transaction_read_only') AS transaction_read_only"
+            ).fetchone()
+            if (row["transaction_isolation"], row["transaction_read_only"]) != ("repeatable read", "on"):
+                raise RuntimeError("Replay requires a REPEATABLE READ, READ ONLY snapshot")
+            yield conn
+
     def retrieve(self, request: dict[str, Any] | RetrievalRequest) -> dict[str, Any]:
         req = normalize_request(request)
+        with self._open() as conn:
+            return self.compose_universe(self.collect_universe(conn, req))
+
+    def paired_compose(self, request: dict[str, Any] | RetrievalRequest, candidate: CompositionParams) -> dict[str, Any]:
+        """Baseline (exact E5) and candidate composed from copies of ONE universe inside ONE snapshot."""
+        req = normalize_request(request)
+        with self.snapshot() as conn:
+            universe = self.collect_universe(conn, req, eager_raw=True)
+            baseline = self.compose_universe(universe, E5_PARAMS)
+            cand = self.compose_universe(universe, candidate)
+            isolation = {"transaction_isolation": "repeatable read", "transaction_read_only": "on"}
+        return {"req": universe.req, "task_id": universe.task_id, "snapshot_at": universe.snapshot_at,
+                "baseline": baseline, "candidate": cand, "isolation": isolation}
+
+    def compose_universe(self, universe: RetrievalUniverse, params: CompositionParams = E5_PARAMS) -> dict[str, Any]:
+        return compose(universe.items, universe.req, dict(universe.counts), universe.edges,
+                       raw_fn=universe.raw_fn, params=params)
+
+    def collect_universe(self, conn, req: dict[str, Any], *, eager_raw: bool = False) -> RetrievalUniverse:
+        req = dict(req)
         tokens = list(dict.fromkeys(t.casefold() for t in _TOKEN.findall(req["query"])))[:8]
         params = {
             "pid": req["project_id"], "task_key": req["task_key"], "family": req["task_family"],
@@ -1127,73 +1209,87 @@ class ExperienceRetrievalService:
             "hist": req["temporal_intent"] == "historical", "sem_ids": [], "as_of": req["as_of"],
             "caps": req["capability_keys"],
         }
-        semantic, sem_diag = self._semantic(req)
-        with self._open() as conn:
-            if not conn.execute("SELECT 1 FROM vres.projects WHERE id=%(pid)s", params).fetchone():
-                raise ValueError("Retrieval project_id does not exist")
-            self._require_capabilities(conn, req["project_id"], req["capability_keys"])
-            if req["task_key"]:
-                task = conn.execute(
-                    "SELECT project_id,task_family FROM vres.tasks WHERE task_key=%(task_key)s", params
-                ).fetchone()
-                if not task or task["project_id"] != req["project_id"]:
-                    raise ValueError("Retrieval task_key does not belong to the project")
-                req["task_family"] = req["task_family"] or task["task_family"]
-                params["family"] = req["task_family"]
-            now = conn.execute("SELECT now() AS n").fetchone()["n"]
-            diag = {"excluded_unapproved_company": 0, **sem_diag}
-            params["sem_ids"] = sorted(semantic)
+        if not conn.execute("SELECT 1 FROM vres.projects WHERE id=%(pid)s", params).fetchone():
+            raise ValueError("Retrieval project_id does not exist")
+        self._require_capabilities(conn, req["project_id"], req["capability_keys"])
+        task_id = None
+        if req["task_key"]:
+            task = conn.execute(
+                "SELECT id,project_id,task_family FROM vres.tasks WHERE task_key=%(task_key)s", params
+            ).fetchone()
+            if not task or task["project_id"] != req["project_id"]:
+                raise ValueError("Retrieval task_key does not belong to the project")
+            task_id = task["id"]
+            req["task_family"] = req["task_family"] or task["task_family"]
+            params["family"] = req["task_family"]
+        now = conn.execute("SELECT now() AS n").fetchone()["n"]
+        semantic, sem_diag = self._semantic(req, conn)
+        diag = {"excluded_unapproved_company": 0, **sem_diag}
+        params["sem_ids"] = sorted(semantic)
 
-            # E5 resolves episodes first so already-gated, integrity-checked capability precedents can source
-            # accepted procedures structurally. This never changes either item's authority tier.
-            episode_rows = self._episodes(conn, params, diag)
-            _positions(episode_rows, "episode_key")
-            episode_built = [episode_item(row, req, now) for row in episode_rows]
-            procedure_links = self._procedure_capability_links(conn, episode_built, req)
-            procedure_rows = self._procedures(conn, params, diag, procedure_links)
-            procedure_history = self._procedure_experience_history(
-                conn,
-                [str(row["procedure_key"]) for row in procedure_rows],
-                req,
-                now,
-            )
-            for row in procedure_rows:
-                history = procedure_history.get(str(row["procedure_key"]))
-                if history is not None:
-                    row["experience_history"] = history
+        # E5 resolves episodes first so already-gated, integrity-checked capability precedents can source
+        # accepted procedures structurally. This never changes either item's authority tier.
+        episode_rows = self._episodes(conn, params, diag)
+        _positions(episode_rows, "episode_key")
+        episode_built = [episode_item(row, req, now) for row in episode_rows]
+        procedure_links = self._procedure_capability_links(conn, episode_built, req)
+        procedure_rows = self._procedures(conn, params, diag, procedure_links)
+        procedure_history = self._procedure_experience_history(
+            conn,
+            [str(row["procedure_key"]) for row in procedure_rows],
+            req,
+            now,
+        )
+        for row in procedure_rows:
+            history = procedure_history.get(str(row["procedure_key"]))
+            if history is not None:
+                row["experience_history"] = history
 
-            built: list[tuple[dict | None, str | None]] = []
-            for rows, builder, key in (
-                (self._decisions(conn, params), decision_item, "decision_key"),
-                (procedure_rows, procedure_item, "procedure_key"),
-                (self._knowledge(conn, params, tokens, diag), knowledge_item, "knowledge_key"),
-            ):
-                _positions(rows, key)
-                if builder is knowledge_item:
-                    for row in rows:
-                        row["sem_pos"] = semantic.get(row["id"])
-                built += [builder(row, req, now) for row in rows]
-            built += episode_built
+        built: list[tuple[dict | None, str | None]] = []
+        for rows, builder, key in (
+            (self._decisions(conn, params), decision_item, "decision_key"),
+            (procedure_rows, procedure_item, "procedure_key"),
+            (self._knowledge(conn, params, tokens, diag), knowledge_item, "knowledge_key"),
+        ):
+            _positions(rows, key)
+            if builder is knowledge_item:
+                for row in rows:
+                    row["sem_pos"] = semantic.get(row["id"])
+            built += [builder(row, req, now) for row in rows]
+        built += episode_built
 
-            refs = sorted({i["_ref"] for i, _ in built if i is not None and i.get("_ref")})
-            edges = self._edges(conn, refs)
-            counts = dict(diag)
-            # Raw-fallback time reference: the validated as_of for historical intent, else DB now(); never from query text.
-            raw_at = req["as_of"] if req["temporal_intent"] == "historical" else None
-            items = []
-            for item, reason in built:
-                if item is not None:
-                    items.append(item)
-                elif reason:
-                    counts[reason] = counts.get(reason, 0) + 1
-            # compose runs inside the same READ ONLY transaction so the (lazy, gated) raw fallback can read from it.
-            return compose(items, req, counts, edges, raw_fn=lambda: self._raw(conn, params, tokens, raw_at))
+        refs = sorted({i["_ref"] for i, _ in built if i is not None and i.get("_ref")})
+        edges = self._edges(conn, refs)
+        counts = dict(diag)
+        # Raw-fallback time reference: the validated as_of for historical intent, else DB now(); never from query text.
+        raw_at = req["as_of"] if req["temporal_intent"] == "historical" else None
+        items = []
+        for item, reason in built:
+            if item is not None:
+                items.append(item)
+            elif reason:
+                counts[reason] = counts.get(reason, 0) + 1
+        # The raw fallback stays lazy inside this READ ONLY transaction. For a replay it is collected ONCE up front
+        # (result or error memoised) so baseline and candidate each decide on their own whether to use the same rows.
+        raw_fn = lambda: self._raw(conn, params, tokens, raw_at)  # noqa: E731
+        if eager_raw and req["raw_fallback"]:
+            try:
+                outcome = (True, raw_fn())
+            except psycopg.Error as exc:
+                outcome = (False, exc)
 
-    def _semantic(self, req) -> tuple[dict[int, int], dict[str, Any]]:
+            def raw_fn():
+                if not outcome[0]:
+                    raise outcome[1]
+                return outcome[1]
+
+        return RetrievalUniverse(req, items, counts, edges, task_id, now, raw_fn)
+
+    def _semantic(self, req, conn=None) -> tuple[dict[int, int], dict[str, Any]]:
         """Optional semantic signal: {knowledge_id: 1-based position}. Never fails the retrieval, never trusted:
         every id is re-resolved through the E3 eligibility SQL/gate."""
         try:
-            hits = self._semantic_fn(req["query"], 50, req["project_id"])
+            hits = self._semantic_hits(req, conn)
         except (EmbeddingUnavailable, psycopg.Error) as exc:
             return {}, {"embedding": "unavailable", "embedding_error": type(exc).__name__}
         if hits is None:
@@ -1207,6 +1303,21 @@ class ExperienceRetrievalService:
         if any(isinstance(h, dict) and h.get("possibly_truncated") for h in hits):
             diag["embedding_truncated"] = True
         return positions, diag
+
+    def _semantic_hits(self, req, conn):
+        query, project_id = req["query"], req["project_id"]
+        if self._semantic_fn is not None:
+            return self._semantic_fn(query, 50, project_id)
+        from .config import ConfigStore
+
+        if not ConfigStore().load().embeddings_enabled:
+            return None
+        from .embeddings import EmbeddingService
+
+        if conn is None:
+            return EmbeddingService().semantic_search(query, limit=50, project_id=project_id)
+        with conn.transaction():  # savepoint: a failed semantic SELECT cannot poison the snapshot
+            return EmbeddingService().semantic_search_in_conn(query, 50, project_id, conn)
 
     @staticmethod
     def _require_capabilities(conn, project_id: int, capability_keys: list[str]) -> None:

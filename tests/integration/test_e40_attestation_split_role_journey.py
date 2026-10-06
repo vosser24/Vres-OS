@@ -28,6 +28,7 @@ from vres_os.config import VresConfig  # noqa: E402
 from vres_os.database_boundary import activate_boundary, default_boundary_roles, provision_boundary  # noqa: E402
 
 M040 = "040_context_refresh_attestation.sql"
+M041 = "041_experience_retrieval_observability.sql"  # the separate E6 migration, excluded from this 039 -> 040 journey
 ISSUE = "vres.issue_context_refresh_attestation(text,text,text,text)"
 CONSUME = "vres.consume_context_refresh_attestation(bigint,text,text,text)"
 TRIGGER_FN = "vres.require_attested_context_refresh()"
@@ -50,7 +51,7 @@ def _cleanup(admin_dsn, database, roles):
 
 
 class _Filtered:
-    """importlib.resources stand-in exposing only migrations whose name sorts before `upto` (the 039 package)."""
+    """importlib.resources stand-in exposing only migrations whose name sorts before `upto` (the 039 package, or the 040 package when `upto` is 041)."""
 
     def __init__(self, upto):
         self._root = resources.files("vres_os").joinpath("migrations")
@@ -146,7 +147,7 @@ def test_split_role_upgrade_039_to_040_privileges_and_end_to_end_ack(monkeypatch
             ev1 = _contaminate(runtime, pid, session_key)
 
         # --- upgrade 039 -> 040 ---------------------------------------------------------------------------------
-        monkeypatch.setattr(db, "resources", resources)
+        monkeypatch.setattr(db, "resources", _Filtered(M041))  # package up to and including 040, never 041
         assert db.migrate() == [M040]
         assert db.migrate() == []  # idempotent re-run (boundary activation re-applied)
 

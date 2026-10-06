@@ -1318,3 +1318,240 @@ def test_c3s_2_historical_without_as_of_is_accepted_and_as_of_rules_are_unchange
             er.normalize_request(bad)
     naive = er.normalize_request({"project_id": 1, "query": "q", "temporal_intent": "historical", "as_of": "2026-01-01T00:00:00"})
     assert naive["as_of"] == datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+
+# ======================================================================= #176 E6 Chunk 3: paired replay composition
+
+def _params(budgets=None, max_items=24, max_pack_bytes=16384, rrf_k=60):
+    return er.CompositionParams(section_budgets={**er.BUDGETS, **(budgets or {})}, max_items=max_items,
+                                max_pack_bytes=max_pack_bytes, rrf_k=rrf_k)
+
+
+def _lessons(n, **over):
+    return [_kitem(_k(f"K-{i:02d}", statement=f"lesson {i} unique words", **over)) for i in range(n)]
+
+
+def test_e6c3_e5_params_are_exactly_the_frozen_constants():
+    p = er.E5_PARAMS
+    assert dict(p.section_budgets) == er.BUDGETS and p.max_items == er.MAX_ITEMS == 24
+    assert p.max_pack_bytes == er.MAX_PACK_BYTES == 16384 and p.rrf_k == er.RRF_K == 60
+    assert set(p.__dataclass_fields__) == {"section_budgets", "max_items", "max_pack_bytes", "rrf_k"}
+
+
+def test_e6c3_default_compose_is_byte_identical_to_explicit_e5_params_and_policy_is_the_e5_object():
+    req = _req(task_key="T-1")
+    items = _lessons(4) + [er.decision_item(_decision("D-1"), req, NOW)[0]]
+    default = er.compose(items, req, {})
+    explicit = er.compose(items, req, {}, params=er.E5_PARAMS)
+    assert _canonical(default) == _canonical(explicit) and default["policy"] == er.POLICY
+    assert er.select_raw([_raw("C-1")], req, {}) == er.select_raw([_raw("C-1")], req, {}, params=er.E5_PARAMS)
+
+
+def test_e6c3_candidate_section_budget_is_deterministic_and_policy_is_truthful():
+    req = _req()
+    items = _lessons(5)
+    base = er.compose(items, req, {})
+    cand_a = er.compose(items, req, {}, params=_params({"validated_lessons": 2}))
+    cand_b = er.compose(items, req, {}, params=_params({"validated_lessons": 2}))
+    assert len(base["validated_lessons"]) == 5 and len(cand_a["validated_lessons"]) == 2
+    assert _canonical(cand_a) == _canonical(cand_b)
+    assert cand_a["policy"]["budgets"]["validated_lessons"] == 2 and cand_a["policy"] != er.POLICY
+    assert cand_a["policy"]["max_items"] == er.MAX_ITEMS
+    assert base["policy"] == er.POLICY and er.POLICY["budgets"]["validated_lessons"] == 6  # constants never mutated
+
+
+def test_e6c3_candidate_max_items_and_max_pack_bytes_bound_the_pack():
+    req = _req()
+    few = er.compose(_lessons(6), req, {}, params=_params({"validated_lessons": 16}, max_items=3))
+    assert len(few["validated_lessons"]) == 3 and few["policy"]["max_items"] == 3
+    fat = [_kitem(_k(f"K-{i:02d}", statement=f"fat {i} " + "w" * 560)) for i in range(6)]
+    tight = er.compose(fat, req, {}, params=_params(max_pack_bytes=4096))
+    assert len(_canonical(tight).encode()) <= 4096 and tight["policy"]["max_pack_bytes"] == 4096
+
+
+def test_e6c3_rrf_k_changes_only_same_authority_eligible_order():
+    req = _req()
+    a = _kitem(_k("K-A", statement="a words", rank=0.9, lex_pos=1), req)
+    b = _kitem(_k("K-B", statement="b words", rank=0.5, lex_pos=5, sem_pos=40), req)
+    default = er.compose([a, b], req, {})
+    assert _order(default) == ["K-B", "K-A"]  # k=60: semantic support lifts B
+    low = er.compose([a, b], req, {}, params=_params(rrf_k=10))
+    high = er.compose([a, b], req, {}, params=_params(rrf_k=120))
+    assert _order(low) == ["K-A", "K-B"] and _order(high) == ["K-B", "K-A"]
+    got = {i["memory_key"]: i for i in low["validated_lessons"]}
+    assert got["K-A"]["signals"]["fusion_rank_score"] == round(1 / 11, 6)
+    assert got["K-B"]["signals"]["fusion_rank_score"] == round(1 / 15 + 1 / 50, 6)
+    other = {i["memory_key"]: i["signals"] for i in default["validated_lessons"]}
+    for item in low["validated_lessons"]:
+        for name in ("authority_tier", "scope_rank", "task_family_match", "capability_match", "recency_epoch"):
+            assert item["signals"][name] == other[item["memory_key"]][name]  # only fusion_rank_score is recomputed
+
+
+def test_e6c3_lower_authority_never_crosses_higher_authority_at_any_rrf_k():
+    req = _req(task_key="T-1")
+    decision = er.decision_item(_decision("D-1"), req, NOW)[0]
+    project_weak = _kitem(_k("K-P", statement="p words", rank=0.0), req)
+    company_strong = _kitem(_k("K-C", project_id=None, approved=True, statement="c words", rank=0.9, lex_pos=1,
+                               sem_pos=1), req)
+    for k in (10, 60, 120):
+        pack = er.compose([company_strong, project_weak, decision], req, {}, params=_params(rrf_k=k))
+        assert _order(pack, "current_decisions") == ["D-1"]
+        assert _order(pack) == ["K-P", "K-C"]  # project scope outranks company regardless of fusion
+
+
+def test_e6c3_rank_positions_are_internal_only_and_never_public():
+    req = _req()
+    item = _kitem(_k("K-A", lex_pos=3, sem_pos=7), req)
+    assert item["_lex_pos"] == 3 and item["_sem_pos"] == 7
+    blob = _canonical(er.compose([item], req, {}, params=_params(rrf_k=25)))
+    assert "_lex_pos" not in blob and "_sem_pos" not in blob and "lex_pos" not in blob and "sem_pos" not in blob
+
+
+def test_e6c3_no_new_ranking_signal_is_accepted_by_the_params_surface():
+    with pytest.raises(TypeError):
+        er.CompositionParams(section_budgets=dict(er.BUDGETS), max_items=24, max_pack_bytes=16384, rrf_k=60,
+                             recency_weight=2)
+    pack = er.compose(_lessons(2), _req(), {}, params=_params(rrf_k=15))
+    for item in pack["validated_lessons"]:
+        assert set(item["signals"]) == SIGNAL_KEYS
+
+
+def test_e6c3_select_raw_honours_the_candidate_raw_budget_only():
+    rows = [_raw(f"C-{n}", source=f"S-{n}", content=f"cache text {n}", rank=1.0 - n / 100) for n in range(6)]
+    two = er.select_raw(rows, _req(), {}, params=_params({"raw_evidence_refs": 2}))
+    assert len(two) == 2 and len(er.select_raw(rows, _req(), {})) <= er.BUDGETS["raw_evidence_refs"]
+    pack = er.compose([], _req(), {}, raw_fn=_fn(rows), params=_params({"raw_evidence_refs": 2}))
+    assert len(pack["raw_evidence_refs"]) == 2 and pack["policy"]["budgets"]["raw_evidence_refs"] == 2
+
+
+class _Snap:
+    """Fake connection: applies the isolation/read-only the service sets, unless told to ignore it."""
+
+    def __init__(self, honor=True):
+        self.honor, self.isolation_level, self.read_only, self.sql = honor, None, None, []
+
+    def execute(self, query, params=None):
+        self.sql.append(" ".join(query.split()))
+        repeatable = self.isolation_level == psycopg.IsolationLevel.REPEATABLE_READ
+        row = {"transaction_isolation": "repeatable read" if repeatable and self.honor else "read committed",
+               "transaction_read_only": "on" if self.read_only and self.honor else "off"}
+        return type("C", (), {"fetchone": lambda s: row})()
+
+
+def _connect_with(conn):
+    from contextlib import contextmanager
+
+    @contextmanager
+    def connect():
+        yield conn
+    return connect
+
+
+def test_e6c3_snapshot_is_repeatable_read_and_read_only_and_mechanically_verified():
+    conn = _Snap()
+    with er.ExperienceRetrievalService(connect_fn=_connect_with(conn)).snapshot() as got:
+        assert got is conn
+    assert conn.isolation_level == psycopg.IsolationLevel.REPEATABLE_READ and conn.read_only is True
+    assert any("transaction_isolation" in s and "transaction_read_only" in s for s in conn.sql)
+    with pytest.raises(RuntimeError):
+        with er.ExperienceRetrievalService(connect_fn=_connect_with(_Snap(honor=False))).snapshot():
+            raise AssertionError("must not yield an unverified snapshot")
+
+
+def test_e6c3_ordinary_retrieve_open_stays_read_only_without_repeatable_read():
+    import inspect
+    source = inspect.getsource(er.ExperienceRetrievalService._open)
+    assert "REPEATABLE" not in source.upper() and "read_only = True" in source
+
+
+def _universe(items=(), raw_rows=()):
+    calls = []
+
+    def raw_fn():
+        calls.append(1)
+        return list(raw_rows), {}
+
+    uni = er.RetrievalUniverse(req=_req(), items=list(items), counts={"excluded_unapproved_company": 0}, edges=[],
+                               task_id=None, snapshot_at=NOW, raw_fn=raw_fn)
+    uni.raw_calls = calls
+    return uni
+
+
+def test_e6c3_paired_compose_collects_once_and_both_compositions_get_the_same_universe():
+    seen = {"collect": [], "compose": []}
+    items = _lessons(4)
+
+    class Spy(er.ExperienceRetrievalService):
+        def collect_universe(self, conn, req, *, eager_raw=False):
+            seen["collect"].append((conn, eager_raw))
+            seen["uni"] = _universe(items)
+            return seen["uni"]
+
+        def compose_universe(self, universe, params=er.E5_PARAMS):
+            seen["compose"].append((universe, params))
+            return super().compose_universe(universe, params)
+
+    conn = _Snap()
+    out = Spy(connect_fn=_connect_with(conn)).paired_compose({"project_id": 1, "query": "cache"},
+                                                             _params({"validated_lessons": 2}))
+    assert len(seen["collect"]) == 1 and seen["collect"][0] == (conn, True)
+    assert [c[0] is seen["uni"] for c in seen["compose"]] == [True, True]
+    assert seen["compose"][0][1] == er.E5_PARAMS and seen["compose"][1][1].section_budgets["validated_lessons"] == 2
+    assert len(out["baseline"]["validated_lessons"]) == 4 and len(out["candidate"]["validated_lessons"]) == 2
+    assert [i["memory_key"] for i in seen["uni"].items] == [i["memory_key"] for i in items]  # universe not consumed
+    assert out["isolation"] == {"transaction_isolation": "repeatable read", "transaction_read_only": "on"}
+
+
+def test_e6c3_baseline_composition_equals_ordinary_compose_of_the_same_universe():
+    items = _lessons(3)
+    uni = _universe(items)
+    got = er.ExperienceRetrievalService().compose_universe(uni)
+    assert _canonical(got) == _canonical(er.compose(items, uni.req, dict(uni.counts), [], raw_fn=uni.raw_fn))
+
+
+def test_e6c3_each_composition_decides_on_its_own_to_use_the_one_collected_raw_set():
+    rows = [_raw(f"C-{n}", source=f"S-{n}", content=f"cache text {n}", rank=1.0 - n / 100) for n in range(4)]
+    uni = _universe([], rows)
+    svc = er.ExperienceRetrievalService()
+    base, cand = svc.compose_universe(uni), svc.compose_universe(uni, _params({"raw_evidence_refs": 2}))
+    assert len(base["raw_evidence_refs"]) == 4 and len(cand["raw_evidence_refs"]) == 2
+    with_primary = _universe(_lessons(1), rows)
+    svc.compose_universe(with_primary)
+    assert with_primary.raw_calls == []
+
+
+def test_e6c3_default_semantic_runs_on_the_supplied_connection_inside_a_savepoint(monkeypatch):
+    import types
+    from contextlib import contextmanager
+    seen = {}
+
+    class FakeSearch:
+        def semantic_search_in_conn(self, query, limit, project_id, conn):
+            seen["args"] = (query, limit, project_id, conn)
+            return [{"knowledge_id": 4}, {"knowledge_id": 9}]
+
+        def semantic_search(self, *a, **k):
+            raise AssertionError("the replay path must not open its own connection")
+
+    events = []
+
+    class Conn:
+        @contextmanager
+        def transaction(self):
+            events.append("savepoint")
+            yield
+
+    monkeypatch.setattr("vres_os.embeddings.EmbeddingService", FakeSearch)
+    monkeypatch.setattr("vres_os.config.ConfigStore", lambda: types.SimpleNamespace(
+        load=lambda: types.SimpleNamespace(embeddings_enabled=True)))
+    conn = Conn()
+    positions, diag = er.ExperienceRetrievalService()._semantic(_req(), conn)
+    assert seen["args"] == ("cache invalidation", 50, 1, conn) and events == ["savepoint"]
+    assert positions == {4: 1, 9: 2} and diag == {"embedding": "used"}
+
+
+def test_e6c3_default_semantic_is_disabled_without_touching_the_connection(monkeypatch):
+    import types
+    monkeypatch.setattr("vres_os.config.ConfigStore", lambda: types.SimpleNamespace(
+        load=lambda: types.SimpleNamespace(embeddings_enabled=False)))
+    assert er.ExperienceRetrievalService()._semantic(_req(), object()) == ({}, {"embedding": "disabled"})
