@@ -135,7 +135,9 @@ def test_password_policy_key_fails_closed_as_documented_false_positive():
 
 def test_separatorless_credential_phrase_is_redacted():
     """#176 E7 C5: 'database password <value>' has no ':'/'=' but is still a stated credential."""
-    out = sanitize_text("Backup runbook: connect with the database password <<CANARY_1>> and run the dump.")
+    out = sanitize_text(
+        "Backup runbook: connect with the database password <<CANARY_1>> and run the dump."
+    )
     assert "CANARY_1" not in out.text
     assert out.rule_counts == {"phrase_credential": 1}
     assert "and run the dump." in out.text
