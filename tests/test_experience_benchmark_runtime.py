@@ -246,3 +246,166 @@ def test_tie_order_never_reorders_items_that_differ_on_a_ranking_signal():
         "dev_src",
         "dev_a",
     ]
+
+
+# ---- #176 E7 Chunk 2 repair: R1 status, R3 owner-max limits, R4 native tie order, R5 ----
+
+
+def test_initial_status_is_the_frozen_proposed_and_supersession_rank_allows_it():
+    from vres_os.knowledge import _RANK  # owner supersession rule
+
+    frozen = eb.OPERATION_OWNERS["knowledge_propose"]
+    assert "proposed" in json.dumps(dict(frozen), default=str)
+    assert rt.INITIAL_STATUS == "proposed"
+    assert _RANK[rt.INITIAL_STATUS] <= _RANK[rt.INITIAL_STATUS]  # proposed -> proposed allowed
+
+
+def test_native_limits_are_owner_maxima_and_no_artificial_cap_remains():
+    assert (
+        rt.RAW_REFIND_NATIVE_LIMIT,
+        rt.CURRENT_KNOWLEDGE_NATIVE_LIMIT,
+        rt.CURRENT_PROCEDURE_NATIVE_LIMIT,
+    ) == (50, 50, 20)
+    assert not hasattr(rt, "NATIVE_LIMIT")
+
+
+class _Stub:
+    def __init__(self, rows):
+        self.rows, self.limits = rows, []
+
+    def chunk_search(self, query, limit, project_id):
+        self.limits.append(limit)
+        return self.rows
+
+    def search(self, query, limit, project_id):
+        self.limits.append(limit)
+        return self.rows
+
+    def find_matches(self, query, task_family=None, limit=5, project_id=None):
+        self.limits.append(limit)
+        return self.rows
+
+
+def _owners(**kw):
+    return rt.Owners(**{k: kw.get(k) for k in rt.Owners.__dataclass_fields__})
+
+
+class _ProjectMap(eb.AliasMap):
+    project_id = 7
+
+
+def _many_amap(n):
+    names = [f"dev_{i:02d}" for i in range(n)]
+    m = _ProjectMap(names)
+    for i, name in enumerate(names):
+        m.bind(name, f"SRC-{i}")
+    return m, names
+
+
+def test_raw_refind_is_not_cut_at_ten_when_entries_fit_the_budget():
+    m, names = _many_amap(15)
+    rows = [
+        {"source_key": f"SRC-{i}", "content": "x", "rank": 1.0 - i / 100, "section": None}
+        for i in range(15)
+    ]
+    stub = _Stub(rows)
+    out = rt.RawRefind(_owners(knowledge=stub)).retrieve({"query": "q", "request": {}}, m, SCORING)
+    assert stub.limits == [50]
+    assert [i["alias"] for i in out["pack"]] == names  # 15 > 10, cut only by the token budget
+
+
+def test_current_vres_uses_owner_maxima():
+    m, _ = _many_amap(1)
+    k, p = _Stub([]), _Stub([])
+    rt.CurrentVres(_owners(knowledge=k, procedures=p)).retrieve(
+        {"query": "q", "request": {}}, m, SCORING
+    )
+    assert k.limits == [50] and p.limits == [20]
+
+
+def _raw(src, rank):
+    return {"source_key": src, "content": "c", "rank": rank, "section": None}
+
+
+def _aliases(entries):
+    return [e["alias"] for e in entries]
+
+
+def test_raw_order_equal_rank_uses_alias_and_different_rank_keeps_rank():
+    m = eb.AliasMap(["dev_a", "dev_b", "dev_c"])
+    for n, k in (("dev_a", "S1"), ("dev_b", "S2"), ("dev_c", "S3")):
+        m.bind(n, k)
+    tied = rt.ordered_raw_entries([_raw("S2", 0.5), _raw("S1", 0.5)], m)
+    assert _aliases(tied) == ["dev_a", "dev_b"] and [e["rank"] for e in tied] == [1, 2]
+    mixed = rt.ordered_raw_entries([_raw("S3", 0.9), _raw("S1", 0.5), _raw("S2", 0.7)], m)
+    assert _aliases(mixed) == ["dev_c", "dev_b", "dev_a"]
+
+
+def _krow(key, rank, confidence):
+    return {
+        "knowledge_key": key,
+        "title": "t",
+        "statement": "s",
+        "rank": rank,
+        "confidence": confidence,
+    }
+
+
+def test_knowledge_order_rank_then_confidence_null_last_then_alias():
+    m = eb.AliasMap(["dev_a", "dev_b", "dev_c"])
+    for n, k in (("dev_a", "K1"), ("dev_b", "K2"), ("dev_c", "K3")):
+        m.bind(n, k)
+    both = rt.ordered_knowledge_entries([_krow("K2", 0.5, 0.5), _krow("K1", 0.5, 0.5)], m)
+    assert _aliases(both) == ["dev_a", "dev_b"]
+    conf = rt.ordered_knowledge_entries([_krow("K1", 0.5, 0.2), _krow("K2", 0.5, 0.9)], m)
+    assert _aliases(conf) == ["dev_b", "dev_a"]  # higher confidence first, not alias order
+    null = rt.ordered_knowledge_entries([_krow("K1", 0.5, None), _krow("K2", 0.5, 0.1)], m)
+    assert _aliases(null) == ["dev_b", "dev_a"]  # NULL last
+    rank = rt.ordered_knowledge_entries([_krow("K2", 0.9, None), _krow("K1", 0.1, 0.99)], m)
+    assert _aliases(rank) == ["dev_b", "dev_a"]
+
+
+def _prow(key, score):
+    return {"procedure_key": key, "name": "n", "description": "d", "score": score}
+
+
+def test_procedure_order_score_then_alias_and_native_order_kept_on_score_difference():
+    m = eb.AliasMap(["dev_a", "dev_b"])
+    m.bind("dev_a", "P1")
+    m.bind("dev_b", "P2")
+    assert _aliases(rt.ordered_procedure_entries([_prow("P2", 0.4), _prow("P1", 0.4)], m)) == [
+        "dev_a",
+        "dev_b",
+    ]
+    assert _aliases(rt.ordered_procedure_entries([_prow("P2", 0.9), _prow("P1", 0.4)], m)) == [
+        "dev_b",
+        "dev_a",
+    ]
+
+
+class _KStatus:
+    def __init__(self, statuses):
+        self.statuses, self.updates = statuses, []
+
+    def get(self, key):
+        return {"status": self.statuses[key]}
+
+    def update(self, key, **kw):
+        self.updates.append((key, kw))
+
+
+def _successor_runtime(statuses):
+    k = _KStatus(statuses)
+    runtime = rt.BenchmarkRuntime.__new__(rt.BenchmarkRuntime)
+    runtime.o = _owners(knowledge=k)
+    return runtime, k
+
+
+def test_successor_maturity_step_only_for_challenged_old_and_proposed_new():
+    runtime, k = _successor_runtime({"old": "challenged", "new": "proposed"})
+    runtime._match_successor_maturity("old", "new")
+    assert k.updates == [("new", {"status": "observed"})]  # one legal owner step, nothing higher
+    for pair in (("proposed", "proposed"), ("challenged", "observed"), ("validated", "proposed")):
+        runtime, k = _successor_runtime({"old": pair[0], "new": pair[1]})
+        runtime._match_successor_maturity("old", "new")
+        assert k.updates == []  # proposed->proposed stays executable; others are the owner's call

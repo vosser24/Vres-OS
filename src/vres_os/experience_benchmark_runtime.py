@@ -20,7 +20,10 @@ from . import experience_benchmark_retrieval as retrieval
 from . import experience_retrieval as er
 from .experience_benchmark import BenchmarkError
 
-NATIVE_LIMIT = 10  # one native result limit for every lexical owner call
+# Owner-maximum native limits: the final cut is the common token budget only, never an item count.
+RAW_REFIND_NATIVE_LIMIT = 50  # knowledge.chunk_search maximum
+CURRENT_KNOWLEDGE_NATIVE_LIMIT = 50  # knowledge.search maximum
+CURRENT_PROCEDURE_NATIVE_LIMIT = 20  # procedures.find_matches maximum
 EXECUTABLE_OPS = (
     "source_add",
     "knowledge_propose",
@@ -36,10 +39,7 @@ EXECUTABLE_OPS = (
     "source_revoke",
 )
 DEFAULT_TITLE = "Note"
-# The owner rejects a challenged-then-superseded item whose successor is less mature
-# (check_supersession); every benchmark item therefore enters at `observed`, the lowest status
-# that keeps all frozen cases executable.
-INITIAL_STATUS = "observed"
+INITIAL_STATUS = "proposed"  # the frozen OPERATION_OWNERS["knowledge_propose"] status
 SOURCE_OWNER = "benchmark:176.e7"
 _NON_SUPPORTING_ROLES = frozenset({"warning_example", "conflict", "stale_assumption"})
 _KIND_BY_CLASS = {"procedural": "procedure", "raw_evidence": "chunk", "episodic": "experience"}
@@ -93,6 +93,40 @@ def procedure_row_entry(row: dict, alias_map: eb.AliasMap, rank: int) -> dict:
     if row.get("invariants"):
         lines.append(f"invariants: {_joined(row['invariants'])}")
     return _entry(alias, "procedure", "\n".join(lines), rank)
+
+
+def _confidence_key(value: Any) -> tuple:
+    """`confidence DESC NULLS LAST` as an ascending sort key."""
+    return (1, 0.0) if value is None else (0, -float(value))
+
+
+def _ranked(pairs: list[tuple[tuple, dict]]) -> list[dict]:
+    """Sort (public-order-key, entry) pairs by key then alias; assign ranks 1..n."""
+    ordered = sorted(pairs, key=lambda p: (p[0], p[1]["alias"]))
+    return [{**entry, "rank": n} for n, (_, entry) in enumerate(ordered, 1)]
+
+
+def ordered_raw_entries(rows: list[dict], alias_map: eb.AliasMap) -> list[dict]:
+    """raw_refind: public `rank DESC`, then alias ASC (native chunk_key tie is never trusted)."""
+    return _ranked([((-float(r["rank"]),), raw_row_entry(r, alias_map, 0)) for r in rows])
+
+
+def ordered_knowledge_entries(rows: list[dict], alias_map: eb.AliasMap) -> list[dict]:
+    """current knowledge: `rank DESC`, `confidence DESC NULLS LAST`, then alias ASC."""
+    return _ranked(
+        [
+            (
+                (-float(r["rank"]), _confidence_key(r.get("confidence"))),
+                knowledge_row_entry(r, alias_map, 0),
+            )
+            for r in rows
+        ]
+    )
+
+
+def ordered_procedure_entries(rows: list[dict], alias_map: eb.AliasMap) -> list[dict]:
+    """current procedure: public `score DESC`, then alias ASC (no updated_at / accepted_at)."""
+    return _ranked([((-float(r["score"]),), procedure_row_entry(r, alias_map, 0)) for r in rows])
 
 
 def _tie_prefix(item: dict) -> tuple:
@@ -285,9 +319,9 @@ class RawRefind(_Adapter):
     def retrieve(self, shared, alias_map, scoring):
         started = time.perf_counter_ns()
         rows = self._o.knowledge.chunk_search(
-            shared["query"], limit=NATIVE_LIMIT, project_id=alias_map.project_id
+            shared["query"], limit=RAW_REFIND_NATIVE_LIMIT, project_id=alias_map.project_id
         )
-        entries = [raw_row_entry(r, alias_map, n) for n, r in enumerate(rows, 1)]
+        entries = ordered_raw_entries(rows, alias_map)
         return self._done(entries, scoring, self._all_supporting(entries), started)
 
 
@@ -295,15 +329,17 @@ class CurrentVres(_Adapter):
     def retrieve(self, shared, alias_map, scoring):
         started = time.perf_counter_ns()
         pid = alias_map.project_id
-        k_rows = self._o.knowledge.search(shared["query"], limit=NATIVE_LIMIT, project_id=pid)
+        k_rows = self._o.knowledge.search(
+            shared["query"], limit=CURRENT_KNOWLEDGE_NATIVE_LIMIT, project_id=pid
+        )
         p_rows = self._o.procedures.find_matches(
             shared["query"],
             task_family=shared["request"].get("task_family"),
-            limit=NATIVE_LIMIT,
+            limit=CURRENT_PROCEDURE_NATIVE_LIMIT,
             project_id=pid,
         )
-        knowledge = [knowledge_row_entry(r, alias_map, n) for n, r in enumerate(k_rows, 1)]
-        procedure = [procedure_row_entry(r, alias_map, n) for n, r in enumerate(p_rows, 1)]
+        knowledge = ordered_knowledge_entries(k_rows, alias_map)
+        procedure = ordered_procedure_entries(p_rows, alias_map)
         _, collapsed = retrieval.merge_current_vres(knowledge, procedure, scoring)
         entries = _plain(collapsed)  # frozen merge collapses duplicates before budgeting
         return self._done(entries, scoring, self._all_supporting(entries), started)
@@ -508,12 +544,26 @@ class BenchmarkRuntime:
         else:
             self._lifecycle(op, pid, alias, args, amap)
 
+    def _match_successor_maturity(self, old_key: str, new_key: str) -> None:
+        """Owner rule (check_supersession): a successor may not be less mature than the old one.
+
+        A frozen case may challenge the old item (`challenged` = rank 1) before superseding it with
+        a still-`proposed` successor. Only for that exact case the successor takes the one legal
+        public-owner step proposed -> observed (`KnowledgeService.update`); no global maturity
+        change. Any other mismatch is left to the owner to reject.
+        """
+        old = self.o.knowledge.get(old_key)["status"]
+        new = self.o.knowledge.get(new_key)["status"]
+        if (old, new) == ("challenged", "proposed"):
+            self.o.knowledge.update(new_key, status="observed")
+
     def _lifecycle(self, op: str, pid: int, alias: str, args: dict, amap) -> None:
         target = amap.runtime_key_for(alias)
         reason = args.get("reason", "benchmark lifecycle")
         action = op.removeprefix("lifecycle_")
         if action == "supersede":
             old = amap.runtime_key_for(args["supersedes"])
+            self._match_successor_maturity(old, target)
             task, approval = self._approve(pid, eb.approval_plan(op, old, target))
             self.o.lifecycle.supersede(
                 old, target, project_id=pid, approval_key=approval, reason=reason, task_key=task

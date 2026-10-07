@@ -73,7 +73,7 @@ def _run(runtime, mode, case):
 def test_memory_disabled_returns_nothing(runtime):
     case = _case("c_md", ["dev_a"], "reporting", [_k("dev_a", "The reporting port is 8417.", 0)])
     result, _ = _run(runtime, "memory_disabled", case)
-    assert result["raw_pack"] == [] and result["pack"] == []
+    assert result["pack"] == [] and "raw_pack" not in result
     assert result["signals"]["supporting_aliases"] == []
 
 

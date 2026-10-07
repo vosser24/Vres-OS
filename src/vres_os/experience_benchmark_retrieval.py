@@ -5,11 +5,12 @@ runtime half (scenario materialization and the four adapters that call public ow
 `experience_benchmark_runtime`. Contract: docs/architecture/EXPERIENCE-INTELLIGENCE-E7-*.md.
 
 Conventions fixed here (not contract numerics):
-  * `raw_pack` is R_raw: normalized in native order, content-truncated, then cut by the COMMON
-    token budget, BEFORE the metric-level exact-alias collapse. Duplicate and near-duplicate metrics
-    read it. `pack` is its first-occurrence alias collapse, used for relevance metrics. The owner's
-    unbudgeted native response is never scored. (`current_vres` collapses duplicate aliases in its
-    mode-level merge before budgeting, so its R_raw starts collapsed.)
+  * `pack` is the ONE canonical EvidencePack R: normalized in native order, content-truncated,
+    then cut by the COMMON token budget. Duplicates inside the budget are preserved. Relevance
+    metrics (top-k, recall, precision, coverage, irrelevant rate) read the first occurrence of each
+    alias; duplicate rates, the token estimate, the digest and worker input read R itself. The
+    owner's unbudgeted native response is never scored. (`current_vres` collapses duplicate aliases
+    in its frozen mode-level merge before budgeting, so its R starts collapsed.)
   * Every ratio is {"numerator": int, "denominator": int} or {"status": "not_applicable",
     "reason": <frozen reason>}. Booleans are pairs (0|1, 1). No float enters the result identity.
   * Latency (`elapsed_ns`) lives in a `timings` sidecar that is never part of result identity.
@@ -24,7 +25,7 @@ from typing import Any
 from . import experience_benchmark as eb
 from .experience_benchmark import BenchmarkError
 
-RESULT_SCHEMA_VERSION = 1
+RESULT_SCHEMA_VERSION = 2
 STATUS_EXECUTED = "executed"
 STATUS_OWNER_GAP = "not_run_owner_gap"
 NOT_APPLICABLE = "not_applicable"
@@ -197,13 +198,15 @@ def resolve_reference(alias_map: eb.AliasMap, refs: list[str | None]) -> str:
 def finish_adapter(
     entries: list[dict], scoring: dict, *, signals: dict | None = None, elapsed_ns: int
 ) -> dict:
-    """Common adapter tail: normalize, budget (R_raw), collapse for relevance, estimate."""
-    raw_pack = apply_budget(normalize_pack(entries, scoring), scoring)
+    """Common adapter tail: canonical R = normalize + common budget; support follows R."""
+    pack = apply_budget(normalize_pack(entries, scoring), scoring)
+    sig = validate_signals(signals if signals is not None else build_signals())
+    returned = {i["alias"] for i in pack}
+    sig = {**sig, "supporting_aliases": [a for a in sig["supporting_aliases"] if a in returned]}
     return {
-        "raw_pack": raw_pack,
-        "pack": collapse_exact(raw_pack),
-        "signals": validate_signals(signals if signals is not None else build_signals()),
-        "token_estimate": estimate_tokens(raw_pack, scoring),
+        "pack": pack,
+        "signals": sig,
+        "token_estimate": estimate_tokens(pack, scoring),
         "elapsed_ns": elapsed_ns,
     }
 
@@ -233,12 +236,11 @@ def _near_extras(near: dict[str, str], returned: set[str]) -> int:
 def score_retrieval(
     expected: dict,
     request: dict,
-    raw_pack: list[dict],
     pack: list[dict],
     signals: dict,
     scoring: dict,
 ) -> dict[str, dict]:
-    """A2.0/A2.1/B4 retrieval metrics for ONE case and ONE mode, after retrieval."""
+    """A2.0/A2.1/B4 retrieval metrics for ONE case/mode over the canonical pack R."""
     relevant = set(expected.get("relevant", ()))
     acceptable = set(expected.get("acceptable", ()))
     stale = set(expected.get("stale", ()))
@@ -261,7 +263,7 @@ def score_retrieval(
             sum(1 for g in groups if set(g) <= topset or set(g) <= flagged), len(groups)
         )
     out["relevant_evidence_coverage"] = _pair(len(relevant & present), len(relevant))
-    raw_aliases = [i["alias"] for i in raw_pack]
+    raw_aliases = [i["alias"] for i in pack]
     raw_n, unique = len(raw_aliases), set(raw_aliases)
     near_extras = _near_extras(expected.get("near_duplicate_of", {}), unique)
     out["exact_duplicate_rate"] = _pair(raw_n - len(unique), raw_n)
@@ -362,7 +364,6 @@ def run_case(case: dict, expected: dict, scoring: dict, adapters: dict, material
         metrics = score_retrieval(
             expected,
             case["request"],
-            result["raw_pack"],
             result["pack"],
             result["signals"],
             scoring,
@@ -370,7 +371,6 @@ def run_case(case: dict, expected: dict, scoring: dict, adapters: dict, material
         modes[mode] = {
             "pack": result["pack"],
             "pack_digest": eb.pack_digest(result["pack"]),
-            "raw_pack_digest": eb.pack_digest(result["raw_pack"]),
             "signals": result["signals"],
             "metrics": metrics,
             "token_estimate": result["token_estimate"],

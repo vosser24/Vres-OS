@@ -178,11 +178,10 @@ def pack_of(*aliases):
     )
 
 
-def score(aliases, expected=EXP, request=REQ, signals=None, raw=None):
-    pack = pack_of(*aliases)
-    raw_pack = pack_of(*raw) if raw is not None else pack
+def score(aliases, expected=EXP, request=REQ, signals=None):
+    """Score the ONE canonical EvidencePack R (duplicates preserved)."""
     return rt.score_retrieval(
-        expected, request, raw_pack, pack, signals or rt.build_signals(), SCORING
+        expected, request, pack_of(*aliases), signals or rt.build_signals(), SCORING
     )
 
 
@@ -232,7 +231,7 @@ def test_whole_pack_coverage_ignores_k():
 
 def test_exact_near_and_combined_duplicates():
     exp = {**EXP, "near_duplicate_of": {"dev_r2": "dev_r1"}}
-    m = score(["dev_r1", "dev_r2"], expected=exp, raw=["dev_r1", "dev_r1", "dev_r2", "dev_x"])
+    m = score(["dev_r1", "dev_r1", "dev_r2", "dev_x"], expected=exp)
     assert m["exact_duplicate_rate"] == pair(1, 4)
     assert m["near_duplicate_rate"] == pair(1, 4)
     assert m["combined_duplicate_memory_rate"] == pair(2, 4)
@@ -242,7 +241,7 @@ def test_exact_near_and_combined_duplicates():
 
 
 def test_top_k_counts_alias_once_at_first_position():
-    m = score(["dev_r1", "dev_r1", "dev_x"], raw=["dev_r1", "dev_r1", "dev_x"])
+    m = score(["dev_r1", "dev_r1", "dev_x"])
     assert m["precision_at_k:3"] == pair(1, 2)
 
 
@@ -324,13 +323,12 @@ def test_duplicates_are_scored_on_the_budgeted_pack_only():
         entry("dev_a", "x" * 40, rank=3),
     ]
     out = _fin(entries, scoring)
-    assert [i["alias"] for i in out["raw_pack"]] == ["dev_a"]  # R_raw is budgeted
-    m = rt.score_retrieval(EXP, REQ, out["raw_pack"], out["pack"], out["signals"], scoring)
+    assert [i["alias"] for i in out["pack"]] == ["dev_a"]  # R is budgeted
+    m = rt.score_retrieval(EXP, REQ, out["pack"], out["signals"], scoring)
     assert m["exact_duplicate_rate"] == pair(0, 1)
     inside = _fin([entry("dev_a", "x", rank=1), entry("dev_a", "x", rank=2)], SCORING)
-    assert [i["alias"] for i in inside["raw_pack"]] == ["dev_a", "dev_a"]
-    assert [i["alias"] for i in inside["pack"]] == ["dev_a"]  # relevance view collapses
-    m = rt.score_retrieval(EXP, REQ, inside["raw_pack"], inside["pack"], inside["signals"], SCORING)
+    assert [i["alias"] for i in inside["pack"]] == ["dev_a", "dev_a"]  # R keeps the repeat
+    m = rt.score_retrieval(EXP, REQ, inside["pack"], inside["signals"], SCORING)
     assert m["exact_duplicate_rate"] == pair(1, 2)
 
 
@@ -339,7 +337,7 @@ def test_near_duplicate_beyond_budget_contributes_zero():
     one = [entry("dev_a", "x" * 40, rank=1)]
     scoring = _tight(rt.estimate_tokens(rt.normalize_pack(one, SCORING), SCORING) + 2)
     out = _fin([entry("dev_a", "x" * 40, rank=1), entry("dev_b", "x" * 400, rank=2)], scoring)
-    m = rt.score_retrieval(exp, REQ, out["raw_pack"], out["pack"], out["signals"], scoring)
+    m = rt.score_retrieval(exp, REQ, out["pack"], out["signals"], scoring)
     assert m["near_duplicate_rate"] == pair(0, 1)
 
 
@@ -350,26 +348,98 @@ def test_current_vres_merge_collapse_precedes_budget_and_duplicates_stay_gone():
     out = _fin(
         [{k_: v for k_, v in i.items() if k_ not in ("truncated",)} for i in collapsed], SCORING
     )
-    assert [i["alias"] for i in out["raw_pack"]] == ["dev_k1", "dev_k2"]
-    m = rt.score_retrieval(EXP, REQ, out["raw_pack"], out["pack"], out["signals"], SCORING)
+    assert [i["alias"] for i in out["pack"]] == ["dev_k1", "dev_k2"]
+    m = rt.score_retrieval(EXP, REQ, out["pack"], out["signals"], SCORING)
     assert m["exact_duplicate_rate"] == pair(0, 2)
 
 
-def test_relevance_topk_collapses_exact_repeats_at_first_occurrence():
-    m = score(["dev_r1"], raw=["dev_r1", "dev_r1", "dev_r2"])
-    assert m["recall_at_k:3"] == pair(1, 2)  # pack (collapsed view) drives relevance
-    out = _fin(
-        [entry("dev_r1", "t", rank=1), entry("dev_r1", "t", rank=2), entry("dev_r2", "u", rank=3)],
-        SCORING,
+def test_canonical_pack_keeps_in_budget_duplicates_and_relevance_counts_them_once():
+    entries = [
+        entry("dev_r1", "t", rank=1),
+        entry("dev_r1", "t", rank=2),
+        entry("dev_r2", "u", rank=3),
+    ]
+    out = _fin(entries, SCORING)
+    assert [i["alias"] for i in out["pack"]] == ["dev_r1", "dev_r1", "dev_r2"]  # R keeps repeats
+    assert [i["rank"] for i in out["pack"]] == [1, 2, 3]
+    assert "raw_pack" not in out
+    m = rt.score_retrieval(EXP, REQ, out["pack"], out["signals"], SCORING)
+    assert m["recall_at_k:3"] == pair(2, 2)  # the repeat does not displace r2 from the top-k
+    assert m["precision_at_k:3"] == pair(2, 2)
+    assert m["exact_duplicate_rate"] == pair(1, 3)  # the extra occurrence is the duplicate
+    assert out["token_estimate"] == rt.estimate_tokens(out["pack"], SCORING)
+    deduped = _fin([entries[0], entries[2]], SCORING)
+    assert out["token_estimate"] > deduped["token_estimate"]
+    assert eb.pack_digest(out["pack"]) != eb.pack_digest(deduped["pack"])
+
+
+def test_supporting_aliases_follow_the_common_pack():
+    one = [entry("dev_a", "x" * 40, rank=1)]
+    scoring = _tight(rt.estimate_tokens(rt.normalize_pack(one, SCORING), SCORING) + 2)
+    entries = [entry("dev_a", "x" * 40, rank=1), entry("dev_p", "y" * 400, rank=2)]
+    sig = rt.build_signals(
+        supporting_aliases=["dev_a", "dev_p"],
+        premise_mismatch=["dev_p"],
+        conflict_flagged=["dev_p"],
     )
-    assert [i["alias"] for i in out["pack"]] == ["dev_r1", "dev_r2"]
-    assert [i["rank"] for i in out["pack"]] == [1, 2]
+    out = rt.finish_adapter(entries, scoring, signals=sig, elapsed_ns=1)
+    assert [i["alias"] for i in out["pack"]] == ["dev_a"]
+    assert out["signals"]["supporting_aliases"] == ["dev_a"]  # dev_p was cut by the budget
+    assert out["signals"]["premise_mismatch"] == ["dev_p"]  # owner diagnostics stay separate
+    assert out["signals"]["conflict_flagged"] == ["dev_p"]
+
+
+def test_premise_awareness_follows_returned_support_only():
+    exp = {"relevant": ["dev_r"], "premise": ["dev_p"]}
+    tight = _tight(rt.estimate_tokens(pack_of("dev_r"), SCORING) + 2)
+    base = dict(premise_mismatch=["dev_p"], supporting_aliases=["dev_r", "dev_p"])
+
+    def run(entries, scoring):
+        out = rt.finish_adapter(entries, scoring, signals=rt.build_signals(**base), elapsed_ns=1)
+        return rt.score_retrieval(exp, REQ, out["pack"], out["signals"], scoring)
+
+    # premise item only beyond the common budget: not returned, so not "supporting"
+    cut = run([entry("dev_r", "r", rank=1), entry("dev_p", "p" * 400, rank=2)], tight)
+    assert cut["premise_awareness_accuracy"] == pair(1, 1)
+    # premise item inside R as supporting: fails
+    inside = run([entry("dev_r", "r", rank=1), entry("dev_p", "p", rank=2)], SCORING)
+    assert inside["premise_awareness_accuracy"] == pair(0, 1)
+    # surfaced mismatch with the alias in R only as a non-supporting warning: passes
+    warn = rt.build_signals(premise_mismatch=["dev_p"], supporting_aliases=["dev_r"])
+    out = rt.finish_adapter(
+        [entry("dev_r", "r", rank=1), entry("dev_p", "p", rank=2)],
+        SCORING,
+        signals=warn,
+        elapsed_ns=1,
+    )
+    m = rt.score_retrieval(exp, REQ, out["pack"], out["signals"], SCORING)
+    assert m["premise_awareness_accuracy"] == pair(1, 1)
+
+
+def test_result_schema_is_v2_and_run_case_stores_only_canonical_pack():
+    assert rt.RESULT_SCHEMA_VERSION == 2
+    bundle = load_dev()
+    case = next(c for c in bundle["cases"] if c["case_id"] == "dev_recurring_recount")
+    adapters = {
+        m: FakeAdapter([entry("dev_ok", "x"), entry("dev_ok", "x", rank=2)]) for m in eb.MODES
+    }
+    out = rt.run_case(
+        case,
+        bundle["expected"][case["case_id"]],
+        SCORING,
+        adapters,
+        lambda c: eb.AliasMap(c["aliases"]),
+    )
+    mode = out["modes"]["raw_refind"]
+    assert [i["alias"] for i in mode["pack"]] == ["dev_ok", "dev_ok"]
+    assert mode["pack_digest"] == eb.pack_digest(mode["pack"])
+    assert "raw_pack" not in json.dumps(out) and "raw_pack_digest" not in json.dumps(out)
 
 
 RID = {
     "experience_retrieval_schema": "176.e5.v1",
     "e5_policy_digest": "f" * 64,
-    "result_schema_version": 1,
+    "result_schema_version": 2,
     "evidence_pack_schema": 1,
 }
 
