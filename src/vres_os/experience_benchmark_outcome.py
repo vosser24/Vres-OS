@@ -11,7 +11,8 @@ from vres_os import experience_benchmark_retrieval as rv
 from vres_os import experience_benchmark_worker as worker
 from vres_os.experience_benchmark import BenchmarkError
 
-RESULT_SCHEMA_VERSION = 1
+RESULT_SCHEMA_VERSION = 2
+SIDECAR_METHOD = "retrieval_plus_proxy_worker_v1"
 CAUSES = (
     "premise_mismatch",
     "stale",
@@ -225,15 +226,56 @@ _RUN_KEYS = {
     "cases",
     "owner_gap",
     "aggregates",
+    "measurement_sidecar",
     "result_digest",
 }
+_TIMING_KEYS = {"retrieval_elapsed_ns", "worker_elapsed_ns", "combined_elapsed_ns"}
+
+
+def timing_row(retrieval_elapsed_ns: int, worker_elapsed_ns: int) -> dict:
+    """Retrieval (adapter-measured, once) plus worker only; wall time never enters the digest."""
+    return {
+        "retrieval_elapsed_ns": retrieval_elapsed_ns,
+        "worker_elapsed_ns": worker_elapsed_ns,
+        "combined_elapsed_ns": retrieval_elapsed_ns + worker_elapsed_ns,
+    }
+
+
+def _is_ns(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def validate_measurement_sidecar(sidecar: dict, executed_ids: list[str] | None = None) -> dict:
+    eb._closed(sidecar, {"method", "cases"}, set(), "measurement sidecar")
+    if sidecar["method"] != SIDECAR_METHOD:
+        raise BenchmarkError("measurement sidecar method mismatch")
+    if executed_ids is not None and sorted(sidecar["cases"]) != sorted(executed_ids):
+        raise BenchmarkError("measurement sidecar must cover exactly the executed cases")
+    for case_id, modes in sidecar["cases"].items():
+        if sorted(modes) != sorted(eb.MODES):
+            raise BenchmarkError(f"measurement sidecar {case_id} needs exactly the four modes")
+        for mode, row in modes.items():
+            eb._closed(row, _TIMING_KEYS, set(), f"timing {case_id}/{mode}")
+            if not all(_is_ns(v) for v in row.values()):
+                raise BenchmarkError("timings must be non-negative integer nanoseconds")
+            if row["combined_elapsed_ns"] != row["retrieval_elapsed_ns"] + row["worker_elapsed_ns"]:
+                raise BenchmarkError("combined_elapsed_ns must equal retrieval + worker")
+    return sidecar
 
 
 def validate_outcome_run(result: dict) -> dict:
     eb._closed(result, _RUN_KEYS, set(), "outcome run")
     if result["model_judge"] != "not_used" or result["kind"] != "outcome_run":
         raise BenchmarkError("outcome run must declare model_judge not_used")
+    executed = [c["case_id"] for c in result["cases"] if c["status"] == rv.STATUS_EXECUTED]
+    validate_measurement_sidecar(result["measurement_sidecar"], executed)
     return result
+
+
+def deterministic_digest(result: dict) -> str:
+    """Digest of the deterministic body: no sidecar and no stored digest."""
+    body = {k: v for k, v in result.items() if k not in ("measurement_sidecar", "result_digest")}
+    return eb.sha256_hex(eb.canonical_bytes(body))
 
 
 def build_outcome_run(
@@ -250,6 +292,13 @@ def build_outcome_run(
     if split not in eb.DEVELOPMENT_SPLITS:
         raise BenchmarkError("outcome runs exist only for development splits")
     ordered = [rv.case_identity(c) for c in cases]
+    sidecar = {
+        "method": SIDECAR_METHOD,
+        "cases": {c["case_id"]: c["timings"] for c in cases if c["status"] == rv.STATUS_EXECUTED},
+    }
+    validate_measurement_sidecar(
+        sidecar, [c["case_id"] for c in cases if c["status"] == rv.STATUS_EXECUTED]
+    )
     gaps = [c for c in ordered if c["status"] == rv.STATUS_OWNER_GAP]
     executed = [c for c in ordered if c["status"] == rv.STATUS_EXECUTED]
     reasons: dict[str, int] = {}
@@ -288,5 +337,7 @@ def build_outcome_run(
         },
         "aggregates": aggregates,
     }
+    # the digest covers the deterministic body only; the sidecar is attached afterwards
     result["result_digest"] = eb.sha256_hex(eb.canonical_bytes(result))
+    result["measurement_sidecar"] = sidecar
     return result

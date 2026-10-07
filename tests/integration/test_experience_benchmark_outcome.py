@@ -103,9 +103,23 @@ def test_aggregates_report_trace_metrics_and_b5_denominators(runtime):
     assert hybrid["token_cost"]["total"] > current["token_cost"]["total"]
 
 
-def test_result_has_no_timings_or_physical_keys(runtime):
+def test_sidecar_is_measured_once_and_the_deterministic_body_is_clean(runtime):
     """Reorder stability needs two clean databases; it is proven by the two-DB harness."""
-    text = eb.canonical_bytes(_run(runtime)).decode("utf-8")
+    run = _run(runtime)
+    assert run["schema_version"] == 2
+    sidecar = run["measurement_sidecar"]
+    assert sidecar["method"] == "retrieval_plus_proxy_worker_v1"
+    assert sorted(sidecar["cases"]) == ["dev_memory_not_needed", "dev_procedure_reuse"]
+    for modes in sidecar["cases"].values():
+        assert sorted(modes) == sorted(eb.MODES)
+        for row in modes.values():
+            assert all(isinstance(v, int) and v > 0 for v in row.values())
+            assert (
+                row["combined_elapsed_ns"] == row["retrieval_elapsed_ns"] + row["worker_elapsed_ns"]
+            )
+    assert oc.deterministic_digest(run) == run["result_digest"]
+    body = {k: v for k, v in run.items() if k != "measurement_sidecar"}
+    text = eb.canonical_bytes(body).decode("utf-8")
     assert "elapsed" not in text and "timings" not in text
     for key in runtime.physical:
         assert key not in text

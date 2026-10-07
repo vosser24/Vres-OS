@@ -665,13 +665,14 @@ class BenchmarkRuntime:
         }
         raw, timings = {}, {}
         for mode in eb.MODES:
-            started = time.perf_counter_ns()
             got = self.adapters[mode].retrieve(shared, amap, self.scoring)
+            worker_started = time.perf_counter_ns()
             rows = worker.run_worker(
                 case["query"], case["request"], case["task"], got["pack"], config
             )
+            worker_elapsed = time.perf_counter_ns() - worker_started
             raw[mode] = (got, rows)
-            timings[mode] = got["elapsed_ns"] + (time.perf_counter_ns() - started)
+            timings[mode] = outcome.timing_row(got["elapsed_ns"], worker_elapsed)
         criteria = expected["outcome"]["criteria"]
         scored = {
             mode: outcome.mode_result(

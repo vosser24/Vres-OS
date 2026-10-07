@@ -112,3 +112,28 @@ removed (cleanup PASS, zero leftover roles). Timings stay outside the digest.
 3. `candidate_hybrid` surfaced the relevant alias at every executable checkpoint, at roughly 17x the
    token cost of the empty-pack modes on the outcome cohort (69 vs 4).
 4. Failed-episode and successful-episode writers remain owner gaps (E1/E2).
+
+## Correction: outcome timing (2026-10-07)
+
+- The initial Chunk 4 implementation double-counted adapter latency in the ephemeral `run_outcome_case`
+  timing field: it added the adapter's own `elapsed_ns` to an outer interval that already contained the
+  adapter call plus the worker.
+- `build_outcome_run` then dropped that field (`case_identity`), so deterministic results were NOT
+  contaminated. Every previously reported deterministic pack, worker trace, criterion result, B5 event,
+  token cost and the streaming digest remain valid and unchanged. The measured product observations
+  above are unchanged.
+- Outcome wall-time evidence was therefore missing, not falsely part of the protected identity.
+- Repair: each executed case/mode now records `retrieval_elapsed_ns` (the adapter's own elapsed, not
+  remeasured), `worker_elapsed_ns` (one interval around `run_worker` only) and `combined_elapsed_ns`
+  (their integer sum). The `outcome_run` exposes them in a closed top-level `measurement_sidecar`
+  (`method` `retrieval_plus_proxy_worker_v1`, `cases` only for executed cases; owner-gap cases get none).
+- The sidecar is outside `result_digest`, which is computed from the deterministic body only.
+  `RESULT_SCHEMA_VERSION` for the outcome run is now 2, so the outcome result digest changed; the
+  development outcome digest above (`72366a3b...`) is superseded by the schema-2 digest. The retrieval,
+  faithfulness and streaming schemas, the worker policy digest and every corpus/scoring/manifest
+  identity are unchanged.
+- Wall time is measurement evidence only, with no threshold, and is kept apart from the deterministic
+  `token_cost` (pack token estimate plus tool-call equivalents). A/B equality is required for the
+  deterministic body, not for timing values.
+- Chunk 6 still owns the repeated Latin-square p50/p95/max latency methodology and the
+  measurement-record digest.
