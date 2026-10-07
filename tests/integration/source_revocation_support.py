@@ -73,19 +73,16 @@ def task(pid) -> str:
 
 
 def approve(pid, subject, *, approval_type="e4_lifecycle", approval_pid=None) -> str:
+    """Approval through the protected ingress (needs the `provenance_writer` fixture)."""
+    from trusted_provenance_writer import seed_test_user_instruction
+
+    from vres_os.approvals import ApprovalService
+
     owner = approval_pid if approval_pid is not None else pid
     task_key = task(owner)
-    Repository().record_event(task_key, "USER_INSTRUCTION", "user", {"text": "Approved"})
-    key = f"APR-{uuid.uuid4().hex[:12]}"
-    with connect() as conn, conn.transaction():
-        ev = conn.execute(
-            "SELECT e.id FROM vres.task_events e JOIN vres.tasks t ON t.id=e.task_id WHERE t.task_key=%s "
-            "ORDER BY e.id DESC LIMIT 1", (task_key,)).fetchone()["id"]
-        conn.execute(
-            """INSERT INTO vres.approval_events(approval_key,project_id,source_event_id,approval_type,subject_key,
-               statement,user_text) VALUES (%s,%s,%s,%s,%s,'approve','Approved')""",
-            (key, owner, ev, approval_type, subject))
-    return key
+    seed_test_user_instruction(owner, task_key, "Approved")
+    return ApprovalService().record_latest_user_approval(
+        task_key=task_key, approval_type=approval_type, statement="approve", subject_key=subject)
 
 
 def revoke(pid, skey, *, apr=None, reason="source found poisoned", **kw):
@@ -159,5 +156,11 @@ def cleanup_project(pid) -> None:
         conn.execute("DELETE FROM vres.sources WHERE project_id=%s", (pid,))
         conn.execute("DELETE FROM vres.approval_events WHERE project_id=%s", (pid,))
         conn.execute("DELETE FROM vres.sessions WHERE project_id=%s", (pid,))
-        conn.execute("DELETE FROM vres.tasks WHERE project_id=%s", (pid,))
-        conn.execute("DELETE FROM vres.projects WHERE id=%s", (pid,))
+        # Seeded USER_INSTRUCTION events are delete-protected and no trigger is lifted here: a task
+        # that owns one (and so its project) stays behind in the disposable `_test` database.
+        conn.execute(
+            "DELETE FROM vres.tasks t WHERE t.project_id=%s AND NOT EXISTS ("
+            "SELECT 1 FROM vres.task_events e WHERE e.task_id=t.id AND e.event_type='USER_INSTRUCTION')",
+            (pid,))
+        conn.execute("DELETE FROM vres.projects p WHERE p.id=%s AND NOT EXISTS ("
+                     "SELECT 1 FROM vres.tasks t WHERE t.project_id=p.id)", (pid,))

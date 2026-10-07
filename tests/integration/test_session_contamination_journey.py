@@ -11,6 +11,8 @@ import pytest
 
 pytest.importorskip("psycopg")
 
+pytestmark = pytest.mark.usefixtures("provenance_writer")
+
 from psycopg.conninfo import conninfo_to_dict, make_conninfo  # noqa: E402
 
 from embedding_lifecycle_support import (  # noqa: E402

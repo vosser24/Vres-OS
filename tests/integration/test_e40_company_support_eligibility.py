@@ -13,6 +13,8 @@ import pytest
 
 pytest.importorskip("psycopg")
 
+pytestmark = pytest.mark.usefixtures("provenance_writer")
+
 import embedding_lifecycle_support as els  # noqa: E402
 import source_revocation_support as srs  # noqa: E402
 from test_experience_retrieval_journey import (  # noqa: E402,F401

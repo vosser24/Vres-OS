@@ -10,6 +10,8 @@ import pytest
 
 pytest.importorskip("psycopg")
 
+pytestmark = pytest.mark.usefixtures("provenance_writer")
+
 import source_revocation_support as srs  # noqa: E402
 
 from vres_os.db import connect

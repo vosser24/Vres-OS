@@ -10,6 +10,8 @@ import pytest
 
 pytest.importorskip("psycopg")
 
+pytestmark = pytest.mark.usefixtures("provenance_writer")
+
 from embedding_lifecycle_support import (  # noqa: E402
     WAIT, Gate, Runner, chunk, chunk_state, cleared, fake_embeddings, gate_module, ids_of, job, job_state,
     knowledge_row, mk, source_row, wait_blocked_by,

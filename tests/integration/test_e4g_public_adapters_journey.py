@@ -10,6 +10,8 @@ import pytest
 
 pytest.importorskip("psycopg")
 
+pytestmark = pytest.mark.usefixtures("provenance_writer")
+
 from mcp.server.fastmcp.exceptions import ToolError  # noqa: E402
 
 from source_revocation_support import (  # noqa: E402

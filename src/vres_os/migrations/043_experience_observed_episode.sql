@@ -14,6 +14,7 @@ BEGIN
             AND report_key IS NULL
             AND trust_class = 'external_untrusted_observation'
             AND policy_version = '176.e1.v2'
+            AND outcome_status IN ('completed','failed')
            )
     ) THEN
         RAISE EXCEPTION 'Unexpected pre-existing observed experience episode does not conform to E1 v2';
@@ -51,7 +52,11 @@ ALTER TABLE vres.experience_episodes
     DROP CONSTRAINT IF EXISTS ck_experience_episode_participation_provenance;
 ALTER TABLE vres.experience_episodes
     ADD CONSTRAINT ck_experience_episode_participation_provenance CHECK (
-        (participation_class = 'participated' AND task_id IS NOT NULL)
+        (
+            participation_class = 'participated'
+            AND task_id IS NOT NULL
+            AND policy_version <> '176.e1.v2'
+        )
         OR (
             participation_class = 'observed'
             AND project_id IS NOT NULL
@@ -60,5 +65,6 @@ ALTER TABLE vres.experience_episodes
             AND report_key IS NULL
             AND trust_class = 'external_untrusted_observation'
             AND policy_version = '176.e1.v2'
+            AND outcome_status IN ('completed','failed')
         )
     );

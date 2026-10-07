@@ -10,6 +10,8 @@ import pytest
 
 pytest.importorskip("psycopg")
 
+pytestmark = pytest.mark.usefixtures("provenance_writer")
+
 from embedding_lifecycle_support import WAIT, Gate, GatedConn, Runner, gate_module, wait_blocked_by  # noqa: E402
 from source_revocation_support import (  # noqa: E402
     approve, evidence, knowledge, mk, revoke, source, source_status, trusted_ack,

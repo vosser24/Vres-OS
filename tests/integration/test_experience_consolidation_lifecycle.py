@@ -10,6 +10,8 @@ import pytest
 
 pytest.importorskip("psycopg")
 
+pytestmark = pytest.mark.usefixtures("provenance_writer")
+
 from source_revocation_support import (  # noqa: E402
     approve, derived, events, mk, race, revoke, source, status, svc, task,
 )
@@ -38,9 +40,19 @@ def other_project(pg_project, tmp_path):
         conn.execute("DELETE FROM vres.relations WHERE (source_kind='knowledge' AND source_key IN (SELECT knowledge_key "
                      "FROM vres.knowledge_items WHERE project_id=%s)) OR (source_kind='episode' AND source_key IN "
                      "(SELECT episode_key FROM vres.experience_episodes WHERE project_id=%s))", (pid, pid))
-        for table in ("experience_episodes", "knowledge_items", "sources", "approval_events", "sessions", "tasks"):
+        for table in (
+            "experience_episodes", "knowledge_items", "sources", "approval_events", "sessions",
+        ):
             conn.execute(f"DELETE FROM vres.{table} WHERE project_id=%s", (pid,))
-        conn.execute("DELETE FROM vres.projects WHERE id=%s", (pid,))
+        # Seeded USER_INSTRUCTION events are delete-protected; no trigger is lifted, so a task that
+        # owns one (and its project) stays behind in the disposable `_test` database.
+        conn.execute(
+            "DELETE FROM vres.tasks t WHERE t.project_id=%s AND NOT EXISTS (SELECT 1 FROM "
+            "vres.task_events e WHERE e.task_id=t.id AND e.event_type='USER_INSTRUCTION')",
+            (pid,),
+        )
+        conn.execute("DELETE FROM vres.projects p WHERE p.id=%s AND NOT EXISTS (SELECT 1 FROM "
+                     "vres.tasks t WHERE t.project_id=p.id)", (pid,))
 
 
 def _episode(pid, *, outcome="failed", error="port 80 already in use") -> str:

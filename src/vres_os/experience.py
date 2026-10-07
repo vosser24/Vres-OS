@@ -10,7 +10,12 @@ from typing import Any
 from .db import connect
 from .relations import relate_in_conn
 from .sources import require_active_source
-from .sensitive_policy import SENSITIVE_REVIEW_REQUIRED, SENSITIVE_SANITIZED, sanitize_extracted_text
+from .sensitive_policy import (
+    SENSITIVE_EXCLUDED,
+    SENSITIVE_REVIEW_REQUIRED,
+    SENSITIVE_SANITIZED,
+    sanitize_extracted_text,
+)
 
 POLICY_VERSION = "176.e1.v1"
 POLICY_SCHEMA_VERSION = 1
@@ -506,8 +511,8 @@ class ExperienceEpisodeService:
                 )
 
             source = conn.execute(
-                "SELECT id,project_id,authority_level,"
-                "COALESCE(created_at,ingested_at) AS observed_at "
+                "SELECT id,project_id,authority_level,ingested_at AS observed_at,"
+                "metadata->>'sensitive_disposition' AS sensitive_disposition "
                 "FROM vres.sources WHERE source_key=%s",
                 (source_key,),
             ).fetchone()
@@ -523,12 +528,20 @@ class ExperienceEpisodeService:
                 )
             require_active_source(conn, int(source["id"]))
             chunks = conn.execute(
-                "SELECT content FROM vres.knowledge_chunks WHERE source_id=%s "
+                "SELECT content,metadata->>'sensitive_disposition' AS sensitive_disposition "
+                "FROM vres.knowledge_chunks WHERE source_id=%s "
                 "ORDER BY ordinal,id LIMIT 201",
                 (source["id"],),
             ).fetchall()
             if not chunks:
                 raise ValueError("Observed episodes require at least one persisted source chunk")
+            blocked = (SENSITIVE_EXCLUDED, SENSITIVE_REVIEW_REQUIRED)
+            if source["sensitive_disposition"] in blocked or any(
+                c["sensitive_disposition"] in blocked for c in chunks
+            ):
+                raise ValueError(
+                    "Observed episodes refuse sensitive-excluded or review-required sources"
+                )
             if len(chunks) > _SOURCE_MAX_LIST:
                 raise ValueError("Observed source exceeds the E1 chunk budget")
 

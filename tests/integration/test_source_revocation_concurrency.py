@@ -3,6 +3,8 @@ import pytest
 
 pytest.importorskip("psycopg")
 
+pytestmark = pytest.mark.usefixtures("provenance_writer")
+
 from source_revocation_support import (  # noqa: E402
     approve, events, evidence, knowledge, race, revoke, source, status,
 )

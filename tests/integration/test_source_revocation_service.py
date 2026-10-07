@@ -7,6 +7,8 @@ import pytest
 
 pytest.importorskip("psycopg")
 
+pytestmark = pytest.mark.usefixtures("provenance_writer")
+
 from source_revocation_support import (  # noqa: E402
     approve, cleanup_project, derived, episode, events, evidence, knowledge, mk, raw_relation, revoke, source,
     source_status, status, svc, task,
@@ -528,6 +530,7 @@ def test_chunks_and_text_retained_embeddings_cleared_jobs_skipped_sessions_untou
             (f"C-{k}", sid, kid, uuid.uuid4().hex))
     assert SourceService().add_chunks(source_id=sid, text="Revocation chunk body. " * 20,
                                       embedding_model="synthetic") >= 1
+    apr = approve(pg_project, f"revoke_source:{s}")  # protected ingress opens its own session first
     session_key = Repository().open_session(pg_project, f"prov-{mk()}")
     snap_chunks = ("SELECT * FROM vres.knowledge_chunks WHERE source_id=%s OR knowledge_id=%s ORDER BY id")
     snap_jobs = ("SELECT j.* FROM vres.embedding_jobs j JOIN vres.knowledge_chunks c ON c.id=j.chunk_id "
@@ -537,7 +540,7 @@ def test_chunks_and_text_retained_embeddings_cleared_jobs_skipped_sessions_untou
         jobs = conn.execute(snap_jobs, (sid,)).fetchall()
         sessions = conn.execute("SELECT * FROM vres.sessions WHERE project_id=%s ORDER BY id", (pg_project,)).fetchall()
     assert chunks and jobs and any(r["session_key"] == session_key for r in sessions)
-    out = revoke(pg_project, s)
+    out = revoke(pg_project, s, apr=apr)
     derived_cols = {"embedding", "embedding_model", "embedding_dimensions", "embedded_at", "embedding_vector"}
     with connect() as conn:
         after = conn.execute(snap_chunks, (sid, kid)).fetchall()
