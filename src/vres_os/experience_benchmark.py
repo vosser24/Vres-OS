@@ -287,6 +287,32 @@ _SCORING_SECTIONS = {
     "current_vres",
     "faithfulness",
     "metric_semantics",
+    "streaming",
+}
+_PROXY_WORKER_SYMBOLS = {
+    "policy_version": "176.e7.proxy.v1",
+    "action_matcher": "exact_or_prefix_both_min_length_4",
+    "tie_break": "smallest_sha256_hex_of_utf8_action_id",
+    "negative_cues": ["do not", "don t", "never", "avoid", "failed", "failure", "stale", "wrong"],
+    "retry_semantics": "ambiguous_nonzero_top_tie_repeats_final_choice_retry_limit_times",
+}
+_STREAMING_SEMANTICS = {
+    "checkpoint_semantics_version": 1,
+    "checkpoint_state": "fresh_isolated_prefix_rebuild_t_le_after_t",
+    "forward_transfer": (
+        "success_gain_or_equal_success_fewer_criterion_failures_vs_memory_disabled"
+    ),
+    "retained_competence": "relevant_at_earlier_and_later_checkpoint_present_in_later_pack",
+    "new_gotcha_acquisition": "consolidated_failure_gotcha_negative_relevant_present_in_pack",
+    "stale_knowledge_update": "new_relevant_present_and_no_stale_in_supporting_aliases",
+    "selective_forgetting": "stale_aliases_absent_from_supporting_aliases",
+    "negative_transfer": "b5_per_checkpoint_when_outcome_exists",
+    "learning_curve": [
+        "relevant_evidence_coverage",
+        "stale_memory_suppression",
+        "outcome_success",
+        "criterion_failures",
+    ],
 }
 
 
@@ -559,7 +585,15 @@ def validate_scoring_config(cfg: Any) -> dict:
         raise BenchmarkError(f"latency.mode_order must be a permutation of {list(MODES)}")
     _exact(latency["rotation"], _ROTATION, "latency.rotation")
     _validate_time_config(cfg["time"])
-    worker = _closed(cfg["proxy_worker"], {"version", "max_trace_steps"}, set(), "proxy_worker")
+    worker = _closed(
+        cfg["proxy_worker"],
+        {"version", "max_trace_steps", *_PROXY_WORKER_SYMBOLS},
+        set(),
+        "proxy_worker",
+    )
+    for key, value in _PROXY_WORKER_SYMBOLS.items():
+        _exact(worker[key], value, f"proxy_worker.{key}")
+    _exact(cfg["streaming"], _STREAMING_SEMANTICS, "scoring streaming")
     if not _is_pos_int(worker["version"]):
         raise BenchmarkError("proxy_worker.version must be a positive integer")
     if not _is_pos_int(worker["max_trace_steps"]):
@@ -1367,6 +1401,9 @@ def _validate_request(req: Any) -> None:
                 check(item, f"request.{name} item")
 
 
+RETRY_WHEN = ("never", "ambiguous_nonzero")
+
+
 def _validate_task(task: Any) -> dict[str, set[str]]:
     """Public task template for the proxy worker. Returns {step: actions} for cross-checks."""
     _closed(task, {"template", "inputs", "steps"}, set(), "task")
@@ -1383,7 +1420,12 @@ def _validate_task(task: Any) -> dict[str, set[str]]:
         raise BenchmarkError("task.steps must be a non-empty list")
     out: dict[str, set[str]] = {}
     for entry in steps:
-        _closed(entry, {"step", "actions", "retry_limit", "may_abstain"}, set(), "task step")
+        _closed(
+            entry,
+            {"step", "actions", "retry_limit", "retry_when", "may_abstain"},
+            set(),
+            "task step",
+        )
         name = _id_arg(entry["step"], "task step name")
         if name in out:
             raise BenchmarkError(f"task has duplicate step {name!r}")
@@ -1394,6 +1436,8 @@ def _validate_task(task: Any) -> dict[str, set[str]]:
             _id_arg(action, f"task step {name} action")
         if not _is_nonneg_int(entry["retry_limit"]):
             raise BenchmarkError(f"task step {name} retry_limit must be a non-negative integer")
+        if entry["retry_when"] not in RETRY_WHEN:
+            raise BenchmarkError(f"task step {name} retry_when must be one of {list(RETRY_WHEN)}")
         if type(entry["may_abstain"]) is not bool:
             raise BenchmarkError(f"task step {name} may_abstain must be a boolean")
         out[name] = set(actions)
@@ -1693,6 +1737,59 @@ def _validate_security(sec: Any, aliases: set[str], case_id: str, case: dict) ->
         )
 
 
+STREAMING_MEASURES = (
+    "forward_transfer",
+    "retained_competence",
+    "new_gotcha_acquisition",
+    "stale_knowledge_update",
+    "selective_forgetting",
+    "negative_transfer",
+    "learning_curve",
+)
+_CHECKPOINT_LABELS = ("relevant", "acceptable", "irrelevant", "stale")
+
+
+def _validate_streaming(block: Any, case: dict, case_id: str) -> None:
+    """Private per-checkpoint labels; never an adapter or worker input."""
+    _closed(block, {"checkpoints", "measures"}, set(), f"{case_id}.streaming")
+    first_seen: dict[str, int] = {}
+    for step in case.get("timeline", []):
+        first_seen.setdefault(step["alias"], step["t"])
+    times = {step["t"] for step in case.get("timeline", [])}
+    checkpoints = block["checkpoints"]
+    if not isinstance(checkpoints, list) or not checkpoints:
+        raise BenchmarkError(f"{case_id}.streaming checkpoints must be a non-empty list")
+    if len(checkpoints) < 2 and classify_case(case) == "EXECUTABLE":
+        raise BenchmarkError(f"{case_id}.streaming needs at least two checkpoints")
+    previous = None
+    for cp in checkpoints:
+        _closed(cp, {"after_t"}, {*_CHECKPOINT_LABELS, "must_abstain"}, f"{case_id}.checkpoint")
+        t = cp["after_t"]
+        if not _is_nonneg_int(t) or t not in times:
+            raise BenchmarkError(f"{case_id}.checkpoint after_t must be a timeline instant")
+        if previous is not None and t <= previous:
+            raise BenchmarkError(f"{case_id}.streaming checkpoints must strictly increase")
+        previous = t
+        seen: set[str] = set()
+        for label in _CHECKPOINT_LABELS:
+            aliases = _alias_list(cp.get(label, []), set(case["aliases"]), f"{case_id}.{label}")
+            for alias in aliases:
+                if first_seen.get(alias, t + 1) > t:
+                    raise BenchmarkError(f"{case_id}.checkpoint labels {alias!r} before it exists")
+                if alias in seen:
+                    raise BenchmarkError(f"{case_id}.checkpoint label sets must be disjoint")
+                seen.add(alias)
+        if "must_abstain" in cp and not isinstance(cp["must_abstain"], bool):
+            raise BenchmarkError(f"{case_id}.checkpoint must_abstain must be a boolean")
+    measures = block["measures"]
+    if (
+        not isinstance(measures, list)
+        or len(set(map(str, measures))) != len(measures)
+        or any(m not in STREAMING_MEASURES for m in measures)
+    ):
+        raise BenchmarkError(f"{case_id}.streaming measures must be unique closed names")
+
+
 def parse_expected(normalized: bytes, cases: list[dict]) -> dict[str, dict]:
     parsed = loads_strict(normalized.decode("utf-8"))
     _closed(parsed, {"schema_version", "cases"}, set(), "expected evidence")
@@ -1722,6 +1819,7 @@ def parse_expected(normalized: bytes, cases: list[dict]) -> dict[str, dict]:
                 "outcome",
                 "faithfulness",
                 "security",
+                "streaming",
             },
             f"expected evidence for {case_id}",
         )
@@ -1765,6 +1863,8 @@ def parse_expected(normalized: bytes, cases: list[dict]) -> dict[str, dict]:
             _validate_faithfulness(entry["faithfulness"], entry, aliases, case_id)
         if "security" in entry:
             _validate_security(entry["security"], aliases, case_id, case)
+        if "streaming" in entry:
+            _validate_streaming(entry["streaming"], case, case_id)
     return entries
 
 

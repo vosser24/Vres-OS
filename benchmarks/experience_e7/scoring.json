@@ -352,7 +352,21 @@
     "version": 1
   },
   "proxy_worker": {
+    "action_matcher": "exact_or_prefix_both_min_length_4",
     "max_trace_steps": 16,
+    "negative_cues": [
+      "do not",
+      "don t",
+      "never",
+      "avoid",
+      "failed",
+      "failure",
+      "stale",
+      "wrong"
+    ],
+    "policy_version": "176.e7.proxy.v1",
+    "retry_semantics": "ambiguous_nonzero_top_tie_repeats_final_choice_retry_limit_times",
+    "tie_break": "smallest_sha256_hex_of_utf8_action_id",
     "version": 1
   },
   "retrieval": {
@@ -363,6 +377,22 @@
     ]
   },
   "schema_version": 1,
+  "streaming": {
+    "checkpoint_semantics_version": 1,
+    "checkpoint_state": "fresh_isolated_prefix_rebuild_t_le_after_t",
+    "forward_transfer": "success_gain_or_equal_success_fewer_criterion_failures_vs_memory_disabled",
+    "learning_curve": [
+      "relevant_evidence_coverage",
+      "stale_memory_suppression",
+      "outcome_success",
+      "criterion_failures"
+    ],
+    "negative_transfer": "b5_per_checkpoint_when_outcome_exists",
+    "new_gotcha_acquisition": "consolidated_failure_gotcha_negative_relevant_present_in_pack",
+    "retained_competence": "relevant_at_earlier_and_later_checkpoint_present_in_later_pack",
+    "selective_forgetting": "stale_aliases_absent_from_supporting_aliases",
+    "stale_knowledge_update": "new_relevant_present_and_no_stale_in_supporting_aliases"
+  },
   "time": {
     "epoch_anchor": "2026-01-01T00:00:00Z",
     "step_seconds": 3600

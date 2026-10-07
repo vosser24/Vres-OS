@@ -17,7 +17,10 @@ from typing import Any
 
 from . import experience_benchmark as eb
 from . import experience_benchmark_faithfulness as faithfulness
+from . import experience_benchmark_outcome as outcome
 from . import experience_benchmark_retrieval as retrieval
+from . import experience_benchmark_streaming as streaming
+from . import experience_benchmark_worker as worker
 from . import experience_retrieval as er
 from .experience_benchmark import BenchmarkError
 
@@ -645,6 +648,156 @@ class BenchmarkRuntime:
     def run_faithfulness_case(self, case: dict, expected: dict) -> dict:
         return faithfulness.run_case(case, expected, lambda c: self.materialize_traced(c)[1])
 
+    def run_outcome_case(self, case: dict, expected: dict) -> dict:
+        """Materialize once; identical public task input for every mode, only the pack differs.
+
+        The worker receives query, request, task and the canonical pack only. Private criteria and
+        labels are read after every trace is complete.
+        """
+        gap = retrieval.owner_gap_result(case)
+        if gap is not None:
+            return gap
+        amap = self.materialize(case)
+        shared = retrieval.public_input(case)
+        config = {
+            "policy_version": worker.WORKER_POLICY_VERSION,
+            "max_trace_steps": self.scoring["proxy_worker"]["max_trace_steps"],
+        }
+        raw, timings = {}, {}
+        for mode in eb.MODES:
+            started = time.perf_counter_ns()
+            got = self.adapters[mode].retrieve(shared, amap, self.scoring)
+            rows = worker.run_worker(
+                case["query"], case["request"], case["task"], got["pack"], config
+            )
+            raw[mode] = (got, rows)
+            timings[mode] = got["elapsed_ns"] + (time.perf_counter_ns() - started)
+        criteria = expected["outcome"]["criteria"]
+        scored = {
+            mode: outcome.mode_result(
+                rows, [i["alias"] for i in got["pack"]], got["token_estimate"], criteria
+            )
+            for mode, (got, rows) in raw.items()
+        }
+        labels = {k: list(expected.get(k, [])) for k in eb._LABEL_LISTS}
+        labels["memory_not_needed"] = bool(expected.get("memory_not_needed", False))
+        modes = {}
+        for mode, (got, rows) in raw.items():
+            entry = {
+                "pack": got["pack"],
+                "pack_digest": eb.pack_digest(got["pack"]),
+                "token_estimate": got["token_estimate"],
+                "trace": rows,
+                "outcome": scored[mode]["outcome"],
+                "negative_transfer": outcome.negative_transfer(
+                    labels,
+                    len(criteria),
+                    scored[outcome.REFERENCE_MODE],
+                    scored[mode],
+                    is_reference=mode == outcome.REFERENCE_MODE,
+                ),
+            }
+            modes[mode] = entry
+        return {
+            "case_id": case["case_id"],
+            "status": retrieval.STATUS_EXECUTED,
+            "labels": labels,
+            "modes": modes,
+            "timings": timings,
+        }
+
+    def run_streaming_case(self, case: dict, expected: dict) -> dict:
+        """Admit the full case first (a gap short-circuits the sequence); then one fresh prefix
+        rebuild per checkpoint, all four modes, identical public input. Labels load afterwards."""
+        gap = retrieval.owner_gap_result(case)
+        if gap is not None:
+            return gap
+        block = expected["streaming"]
+        shared = retrieval.public_input(case)
+        has_task = "task" in case and "outcome" in expected
+        config = {
+            "policy_version": worker.WORKER_POLICY_VERSION,
+            "max_trace_steps": self.scoring["proxy_worker"]["max_trace_steps"],
+        }
+        raw: list[dict] = []
+        for cp in block["checkpoints"]:
+            amap = self.materialize(streaming.prefix_case(case, cp["after_t"]))
+            at: dict = {}
+            for mode in eb.MODES:
+                got = self.adapters[mode].retrieve(shared, amap, self.scoring)
+                rows = (
+                    worker.run_worker(
+                        case["query"], case["request"], case["task"], got["pack"], config
+                    )
+                    if has_task
+                    else None
+                )
+                at[mode] = (got, rows)
+            raw.append(at)
+        criteria = expected["outcome"]["criteria"] if has_task else None
+        positions = {mode: [] for mode in eb.MODES}
+        metrics = {mode: [] for mode in eb.MODES}
+        records = []
+        for cp, at in zip(block["checkpoints"], raw, strict=True):
+            labels = {k: list(cp.get(k, [])) for k in ("relevant", "acceptable", "irrelevant")}
+            labels["stale"] = list(cp.get("stale", []))
+            labels["premise"] = list(expected.get("premise", []))
+            labels["memory_not_needed"] = bool(expected.get("memory_not_needed", False))
+            scored = {}
+            if has_task:
+                scored = {
+                    mode: outcome.mode_result(
+                        rows, [i["alias"] for i in got["pack"]], got["token_estimate"], criteria
+                    )
+                    for mode, (got, rows) in at.items()
+                }
+            record = {"after_t": cp["after_t"], "modes": {}}
+            for mode, (got, rows) in at.items():
+                met = retrieval.score_retrieval(
+                    {**labels, "must_abstain": cp.get("must_abstain", False)},
+                    case["request"],
+                    got["pack"],
+                    got["signals"],
+                    self.scoring,
+                )
+                nt = None
+                if has_task:
+                    nt = outcome.negative_transfer(
+                        labels,
+                        len(criteria),
+                        scored[outcome.REFERENCE_MODE],
+                        scored[mode],
+                        is_reference=mode == outcome.REFERENCE_MODE,
+                    )
+                entry = {
+                    "pack": got["pack"],
+                    "pack_digest": eb.pack_digest(got["pack"]),
+                    "token_estimate": got["token_estimate"],
+                    "signals": got["signals"],
+                    "metrics": met,
+                }
+                if has_task:
+                    entry["trace"] = rows
+                    entry["outcome"] = scored[mode]["outcome"]
+                    entry["negative_transfer"] = nt
+                record["modes"][mode] = entry
+                metrics[mode].append(met)
+                positions[mode].append(
+                    {
+                        "pack_aliases": [i["alias"] for i in got["pack"]],
+                        "supporting_aliases": got["signals"]["supporting_aliases"],
+                        "outcome": scored[mode]["outcome"] if has_task else None,
+                        "negative_transfer": nt,
+                    }
+                )
+            records.append(record)
+        return {
+            "case_id": case["case_id"],
+            "status": retrieval.STATUS_EXECUTED,
+            "positions": records,
+            "measures": streaming.case_measures(block, case, positions, metrics),
+        }
+
     def physical_fingerprint(self) -> str:
         return eb.sha256_hex("\n".join(sorted(self.physical)).encode("utf-8"))
 
@@ -698,5 +851,66 @@ def run_faithfulness(
         digests=bundle["digests"],
         scoring_digest=eb.scoring_digest(runtime.scoring),
         policy=faithfulness.policy_identity(),
+        cases=sorted(results, key=lambda c: c["case_id"]),
+    )
+
+
+def run_outcome(
+    runtime: BenchmarkRuntime,
+    root: str | Path,
+    split: str,
+    *,
+    source: dict,
+    order: list[str] | None = None,
+) -> dict:
+    """Run the outcome cohort (from expected outcomes); `order` only permutes execution."""
+    bundle = eb.load_development_bundle(root, split)
+    executable, gap = outcome.outcome_cohort(bundle)
+    cohort = sorted(executable + gap)
+    if order is not None and sorted(order) != cohort:
+        raise BenchmarkError("outcome run order must be a permutation of the cohort")
+    by_id = {c["case_id"]: c for c in bundle["cases"]}
+    results = [runtime.run_outcome_case(by_id[i], bundle["expected"][i]) for i in (order or cohort)]
+    return outcome.build_outcome_run(
+        split=split,
+        source=source,
+        digests=bundle["digests"],
+        scoring_digest=eb.scoring_digest(runtime.scoring),
+        retrieval_identity=retrieval_identity(),
+        worker_identity=outcome.worker_policy_identity(
+            runtime.scoring["proxy_worker"]["max_trace_steps"]
+        ),
+        cases=sorted(results, key=lambda c: c["case_id"]),
+    )
+
+
+def run_streaming(
+    runtime: BenchmarkRuntime,
+    root: str | Path,
+    split: str,
+    *,
+    source: dict,
+    order: list[str] | None = None,
+) -> dict:
+    """Run the streaming cohort (from private blocks); `order` only permutes execution."""
+    bundle = eb.load_development_bundle(root, split)
+    executable, gap = streaming.streaming_cohort(bundle)
+    cohort = sorted(executable + gap)
+    if order is not None and sorted(order) != cohort:
+        raise BenchmarkError("streaming run order must be a permutation of the cohort")
+    by_id = {c["case_id"]: c for c in bundle["cases"]}
+    results = [
+        runtime.run_streaming_case(by_id[i], bundle["expected"][i]) for i in (order or cohort)
+    ]
+    return streaming.build_streaming_run(
+        split=split,
+        source=source,
+        digests=bundle["digests"],
+        scoring_digest=eb.scoring_digest(runtime.scoring),
+        retrieval_identity=retrieval_identity(),
+        worker_identity=outcome.worker_policy_identity(
+            runtime.scoring["proxy_worker"]["max_trace_steps"]
+        ),
+        checkpoint_expectations={i: bundle["expected"][i]["streaming"] for i in cohort},
         cases=sorted(results, key=lambda c: c["case_id"]),
     )

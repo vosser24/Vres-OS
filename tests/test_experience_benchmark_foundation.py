@@ -460,7 +460,12 @@ def _scoring(repeats):
             "rotation": "cyclic_latin_square",
         },
         "time": {"epoch_anchor": "2026-01-01T00:00:00Z", "step_seconds": 3600},
-        "proxy_worker": {"version": 1, "max_trace_steps": 16},
+        "proxy_worker": {
+            "version": 1,
+            "max_trace_steps": 16,
+            **copy.deepcopy(eb._PROXY_WORKER_SYMBOLS),
+        },
+        "streaming": copy.deepcopy(eb._STREAMING_SEMANTICS),
         "display": {"decimal_scale": 4},
         "aggregation": {"reported": ["micro", "macro"], "per_split": True},
         "current_vres": {

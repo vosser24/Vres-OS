@@ -250,9 +250,16 @@ TASK = {
             "step": "choose_target",
             "actions": ["use_prod", "use_staging"],
             "retry_limit": 1,
+            "retry_when": "ambiguous_nonzero",
             "may_abstain": False,
         },
-        {"step": "send", "actions": ["send_now", "hold"], "retry_limit": 0, "may_abstain": True},
+        {
+            "step": "send",
+            "actions": ["send_now", "hold"],
+            "retry_limit": 0,
+            "retry_when": "never",
+            "may_abstain": True,
+        },
     ],
 }
 
@@ -287,6 +294,9 @@ def test_task_valid_loads(root):
         (lambda t: t["steps"][0].update(retry_limit=-1), "retry_limit"),
         (lambda t: t["steps"][0].update(retry_limit=True), "retry_limit"),
         (lambda t: t["steps"][0].update(may_abstain="no"), "may_abstain"),
+        (lambda t: t["steps"][0].pop("retry_when"), "retry_when"),
+        (lambda t: t["steps"][0].update(retry_when="always"), "retry_when"),
+        (lambda t: t["steps"][0].update(retry_when=None), "retry_when"),
         (lambda t: t["inputs"].update(n=1.5), "float"),
         (lambda t: t["inputs"].update(nested={"a": "b"}), "inputs"),
     ],
@@ -527,7 +537,12 @@ def full_scoring():
             "rotation": "cyclic_latin_square",
         },
         "time": {"epoch_anchor": "2026-01-01T00:00:00Z", "step_seconds": 3600},
-        "proxy_worker": {"version": 1, "max_trace_steps": 16},
+        "proxy_worker": {
+            "version": 1,
+            "max_trace_steps": 16,
+            **copy.deepcopy(eb._PROXY_WORKER_SYMBOLS),
+        },
+        "streaming": copy.deepcopy(eb._STREAMING_SEMANTICS),
         "display": {"decimal_scale": 4},
         "aggregation": {"reported": ["micro", "macro"], "per_split": True},
         "current_vres": {
@@ -572,6 +587,7 @@ def test_scoring_digest_changes_with_any_parameter():
         "current_vres",
         "faithfulness",
         "metric_semantics",
+        "streaming",
     ],
 )
 def test_scoring_missing_section_rejected(section):

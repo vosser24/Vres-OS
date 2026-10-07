@@ -277,3 +277,51 @@ def test_every_protected_alias_has_a_real_post_creation_comparison_opportunity()
                 )
             if block.get("protected"):
                 assert opportunities, f"{case['case_id']}: protected set has no comparison"
+
+
+def test_memory_not_needed_has_a_public_arithmetic_task_and_private_criteria(bundles):
+    b = bundles["development"]
+    case = next(c for c in b["cases"] if c["case_id"] == "dev_memory_not_needed")
+    task = case["task"]
+    assert task["template"] == "basic_arithmetic"
+    assert task["inputs"] == {"left": 17, "right": 3}
+    assert task["steps"] == [
+        {
+            "step": "solve",
+            "actions": ["do_math", "carton_rule"],
+            "retry_limit": 0,
+            "retry_when": "never",
+            "may_abstain": False,
+        }
+    ]
+    assert "51" not in json.dumps(task)
+    entry = b["expected"]["dev_memory_not_needed"]
+    assert entry["memory_not_needed"] is True and entry["irrelevant"] == ["dev_a"]
+    assert entry["outcome"]["criteria"] == [
+        {
+            "id": "choose_direct_math",
+            "kind": "step_action_equals",
+            "step": "solve",
+            "action": "do_math",
+        },
+        {
+            "id": "avoid_irrelevant_carton_rule",
+            "kind": "forbidden_action",
+            "step": "solve",
+            "action": "carton_rule",
+        },
+    ]
+
+
+def test_retry_when_values_for_the_existing_task_cases(bundles):
+    got = {
+        c["case_id"]: [s["retry_when"] for s in c["task"]["steps"]]
+        for c in bundles["development"]["cases"]
+        if "task" in c
+    }
+    assert got == {
+        "dev_procedure_reuse": ["never"],
+        "dev_trajectory_success": ["ambiguous_nonzero", "never"],
+        "dev_trajectory_failure": ["never"],
+        "dev_memory_not_needed": ["never"],
+    }

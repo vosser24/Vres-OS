@@ -45,7 +45,36 @@
       ],
       "stale": [
         "dev_a"
-      ]
+      ],
+      "streaming": {
+        "checkpoints": [
+          {
+            "after_t": 2,
+            "relevant": [
+              "dev_b"
+            ],
+            "stale": [
+              "dev_a"
+            ]
+          },
+          {
+            "acceptable": [
+              "dev_c"
+            ],
+            "after_t": 4,
+            "relevant": [
+              "dev_b"
+            ],
+            "stale": [
+              "dev_a"
+            ]
+          }
+        ],
+        "measures": [
+          "selective_forgetting",
+          "learning_curve"
+        ]
+      }
     },
     "dev_conflict_records": {
       "conflict_pair": [
@@ -155,7 +184,23 @@
       "irrelevant": [
         "dev_a"
       ],
-      "memory_not_needed": true
+      "memory_not_needed": true,
+      "outcome": {
+        "criteria": [
+          {
+            "action": "do_math",
+            "id": "choose_direct_math",
+            "kind": "step_action_equals",
+            "step": "solve"
+          },
+          {
+            "action": "carton_rule",
+            "id": "avoid_irrelevant_carton_rule",
+            "kind": "forbidden_action",
+            "step": "solve"
+          }
+        ]
+      }
     },
     "dev_near_duplicate": {
       "acceptable": [
@@ -233,7 +278,32 @@
       },
       "relevant": [
         "dev_p"
-      ]
+      ],
+      "streaming": {
+        "checkpoints": [
+          {
+            "after_t": 0,
+            "relevant": [
+              "dev_p"
+            ]
+          },
+          {
+            "after_t": 1,
+            "irrelevant": [
+              "dev_n"
+            ],
+            "relevant": [
+              "dev_p"
+            ]
+          }
+        ],
+        "measures": [
+          "forward_transfer",
+          "retained_competence",
+          "negative_transfer",
+          "learning_curve"
+        ]
+      }
     },
     "dev_recurring_priceexport": {
       "faithfulness": {
@@ -365,7 +435,39 @@
       ],
       "stale": [
         "dev_a"
-      ]
+      ],
+      "streaming": {
+        "checkpoints": [
+          {
+            "acceptable": [
+              "dev_old"
+            ],
+            "after_t": 2,
+            "relevant": [
+              "dev_a"
+            ]
+          },
+          {
+            "acceptable": [
+              "dev_src"
+            ],
+            "after_t": 9,
+            "irrelevant": [
+              "dev_old"
+            ],
+            "relevant": [
+              "dev_b"
+            ],
+            "stale": [
+              "dev_a"
+            ]
+          }
+        ],
+        "measures": [
+          "stale_knowledge_update",
+          "learning_curve"
+        ]
+      }
     },
     "dev_trajectory_failure": {
       "acceptable": [
@@ -393,7 +495,25 @@
       },
       "relevant": [
         "dev_x"
-      ]
+      ],
+      "streaming": {
+        "checkpoints": [
+          {
+            "acceptable": [
+              "dev_e"
+            ],
+            "after_t": 1,
+            "relevant": [
+              "dev_x"
+            ]
+          }
+        ],
+        "measures": [
+          "new_gotcha_acquisition",
+          "negative_transfer",
+          "learning_curve"
+        ]
+      }
     },
     "dev_trajectory_success": {
       "irrelevant": [
