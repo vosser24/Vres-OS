@@ -5,8 +5,11 @@ runtime half (scenario materialization and the four adapters that call public ow
 `experience_benchmark_runtime`. Contract: docs/architecture/EXPERIENCE-INTELLIGENCE-E7-*.md.
 
 Conventions fixed here (not contract numerics):
-  * Duplicate scoring reads the RAW pack: normalized items as the owner returned them, before the
-    exact-alias collapse and before the common budget. Everything else reads the budgeted pack.
+  * `raw_pack` is R_raw: normalized in native order, content-truncated, then cut by the COMMON
+    token budget, BEFORE the metric-level exact-alias collapse. Duplicate and near-duplicate metrics
+    read it. `pack` is its first-occurrence alias collapse, used for relevance metrics. The owner's
+    unbudgeted native response is never scored. (`current_vres` collapses duplicate aliases in its
+    mode-level merge before budgeting, so its R_raw starts collapsed.)
   * Every ratio is {"numerator": int, "denominator": int} or {"status": "not_applicable",
     "reason": <frozen reason>}. Booleans are pairs (0|1, 1). No float enters the result identity.
   * Latency (`elapsed_ns`) lives in a `timings` sidecar that is never part of result identity.
@@ -132,10 +135,15 @@ def merge_current_vres(
 
 
 def validate_signals(signals: Any) -> dict:
-    eb._closed(signals, {"abstained", "conflict_flagged", "premise_mismatch"}, set(), "signals")
+    eb._closed(
+        signals,
+        {"abstained", "conflict_flagged", "premise_mismatch", "supporting_aliases"},
+        set(),
+        "signals",
+    )
     if type(signals["abstained"]) is not bool:
         raise BenchmarkError("signals.abstained must be a boolean")
-    for name in ("conflict_flagged", "premise_mismatch"):
+    for name in ("conflict_flagged", "premise_mismatch", "supporting_aliases"):
         value = signals[name]
         if not isinstance(value, list) or value != sorted(set(value)):
             raise BenchmarkError(f"signals.{name} must be a sorted unique alias list")
@@ -147,12 +155,17 @@ def validate_signals(signals: Any) -> dict:
     return signals
 
 
-def build_signals(*, premise_mismatch=(), conflict_flagged=(), abstained: bool = False) -> dict:
+def build_signals(
+    *, premise_mismatch=(), conflict_flagged=(), supporting_aliases=(), abstained: bool = False
+) -> dict:
+    """Scorer-only public owner signals. `supporting_aliases` are pack aliases the owner returned
+    in a supporting role (not demoted/warning); modes with no such role mark all supporting."""
     return validate_signals(
         {
             "abstained": abstained,
             "conflict_flagged": sorted(set(conflict_flagged)),
             "premise_mismatch": sorted(set(premise_mismatch)),
+            "supporting_aliases": sorted(set(supporting_aliases)),
         }
     )
 
@@ -182,23 +195,15 @@ def resolve_reference(alias_map: eb.AliasMap, refs: list[str | None]) -> str:
 
 
 def finish_adapter(
-    entries: list[dict],
-    scoring: dict,
-    *,
-    signals: dict | None = None,
-    elapsed_ns: int,
-    collapse: bool = False,
-    raw_entries: list[dict] | None = None,
+    entries: list[dict], scoring: dict, *, signals: dict | None = None, elapsed_ns: int
 ) -> dict:
-    """Common tail for every adapter: normalize, (collapse), budget, estimate. One serializer."""
-    raw_pack = normalize_pack(raw_entries if raw_entries is not None else entries, scoring)
-    pack = collapse_exact(raw_pack) if collapse else raw_pack
-    budgeted = apply_budget(pack, scoring)
+    """Common adapter tail: normalize, budget (R_raw), collapse for relevance, estimate."""
+    raw_pack = apply_budget(normalize_pack(entries, scoring), scoring)
     return {
         "raw_pack": raw_pack,
-        "pack": budgeted,
+        "pack": collapse_exact(raw_pack),
         "signals": validate_signals(signals if signals is not None else build_signals()),
-        "token_estimate": estimate_tokens(budgeted, scoring),
+        "token_estimate": estimate_tokens(raw_pack, scoring),
         "elapsed_ns": elapsed_ns,
     }
 
@@ -214,14 +219,15 @@ def _first_unique(aliases: list[str]) -> list[str]:
     return list(dict.fromkeys(aliases))
 
 
-def _near_roots(near: dict[str, str]) -> dict[str, str]:
-    roots = {}
-    for alias in near:
-        node = alias
-        while node in near:
-            node = near[node]
-        roots[alias] = node
-    return roots
+def _near_extras(near: dict[str, str], returned: set[str]) -> int:
+    """Per cluster: distinct returned members minus one (canonical need not be returned)."""
+    clusters: dict[str, set[str]] = {}
+    for member in near:
+        root = member
+        while root in near and near[root] != root:
+            root = near[root]
+        clusters.setdefault(root, {root}).add(member)
+    return sum(max(len(members & returned) - 1, 0) for members in clusters.values())
 
 
 def score_retrieval(
@@ -257,8 +263,7 @@ def score_retrieval(
     out["relevant_evidence_coverage"] = _pair(len(relevant & present), len(relevant))
     raw_aliases = [i["alias"] for i in raw_pack]
     raw_n, unique = len(raw_aliases), set(raw_aliases)
-    roots = _near_roots(expected.get("near_duplicate_of", {}))
-    near_extras = sum(1 for a in unique if a in roots and roots[a] in unique and roots[a] != a)
+    near_extras = _near_extras(expected.get("near_duplicate_of", {}), unique)
     out["exact_duplicate_rate"] = _pair(raw_n - len(unique), raw_n)
     out["near_duplicate_rate"] = _pair(near_extras, raw_n)
     out["combined_duplicate_memory_rate"] = _pair(raw_n - len(unique) + near_extras, raw_n)
@@ -268,8 +273,8 @@ def score_retrieval(
         out["stale_memory_suppression"] = _pair(len(stale - present), len(stale))
     if premise:
         surfaced = bool(premise & set(signals["premise_mismatch"]))
-        unsupported = (premise & present) <= set(signals["premise_mismatch"])
-        out["premise_awareness_accuracy"] = _pair(int(surfaced and unsupported), 1)
+        supported = bool(premise & set(signals["supporting_aliases"]))
+        out["premise_awareness_accuracy"] = _pair(int(surfaced and not supported), 1)
     else:
         out["premise_awareness_accuracy"] = _pair(0, 0)
     abstain = expected.get("must_abstain") is True
@@ -384,9 +389,40 @@ def case_identity(case_result: dict) -> dict:
     return {k: v for k, v in case_result.items() if k != "timings"}
 
 
+_RETRIEVAL_IDENTITY_KEYS = {
+    "experience_retrieval_schema",
+    "e5_policy_digest",
+    "result_schema_version",
+    "evidence_pack_schema",
+}
+
+
+def validate_retrieval_identity(identity: Any) -> dict:
+    """Closed identity the runtime supplies: released E5 schema + policy digest + result schemas."""
+    eb._closed(identity, _RETRIEVAL_IDENTITY_KEYS, set(), "retrieval identity")
+    if (
+        not isinstance(identity["experience_retrieval_schema"], str)
+        or not identity["experience_retrieval_schema"]
+    ):
+        raise BenchmarkError("retrieval identity needs the retrieval schema version")
+    if not eb._HEX64.fullmatch(str(identity["e5_policy_digest"])):
+        raise BenchmarkError("retrieval identity needs a sha256 policy digest")
+    for name in ("result_schema_version", "evidence_pack_schema"):
+        if not eb._is_pos_int(identity[name]):
+            raise BenchmarkError(f"retrieval identity {name} must be a positive integer")
+    return identity
+
+
 def build_run_result(
-    *, split: str, source: dict, digests: dict, scoring_digest: str, cases: list[dict]
+    *,
+    split: str,
+    source: dict,
+    digests: dict,
+    scoring_digest: str,
+    retrieval_identity: dict,
+    cases: list[dict],
 ) -> dict:
+    validate_retrieval_identity(retrieval_identity)
     if split not in eb.DEVELOPMENT_SPLITS:
         raise BenchmarkError("run results exist only for development splits in Chunk 2")
     ordered = [case_identity(c) for c in cases]
@@ -404,7 +440,7 @@ def build_run_result(
         "kind": "retrieval_run",
         "split": split,
         "source": {"commit": source["commit"], "tree": source["tree"]},
-        "identity": {**digests, "scoring": scoring_digest},
+        "identity": {**digests, "scoring": scoring_digest, "retrieval": dict(retrieval_identity)},
         "policy": {
             "estimator": "utf8_bytes_ceil_div:1",
             "evidence_schema": eb.SCHEMA_VERSIONS["evidence_pack"],

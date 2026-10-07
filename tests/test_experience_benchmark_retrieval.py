@@ -143,12 +143,18 @@ def test_signals_closed_schema():
         "abstained": False,
         "conflict_flagged": ["dev_c"],
         "premise_mismatch": ["dev_a", "dev_b"],
+        "supporting_aliases": [],
     }
     assert rt.build_signals() == {
         "abstained": False,
         "conflict_flagged": [],
         "premise_mismatch": [],
+        "supporting_aliases": [],
     }
+    assert rt.build_signals(supporting_aliases=["dev_z", "dev_y"])["supporting_aliases"] == [
+        "dev_y",
+        "dev_z",
+    ]
     with pytest.raises(eb.BenchmarkError):
         rt.validate_signals({**s, "score": 1})
     with pytest.raises(eb.BenchmarkError):
@@ -264,15 +270,131 @@ def test_contradiction_retrieval_top_k_or_owner_surfaced():
     assert score(["dev_a"], expected=EXP)["contradiction_retrieval:3"] == NA
 
 
-def test_premise_awareness():
+def test_premise_awareness_needs_surfaced_mismatch_and_no_support():
     exp = {"relevant": ["dev_r"], "premise": ["dev_p"]}
-    sig = rt.build_signals(premise_mismatch=["dev_p"])
-    assert score(["dev_r", "dev_p"], expected=exp, signals=sig)[
-        "premise_awareness_accuracy"
-    ] == pair(1, 1)
-    assert score(["dev_r", "dev_p"], expected=exp)["premise_awareness_accuracy"] == pair(0, 1)
-    assert score(["dev_r"], expected=exp)["premise_awareness_accuracy"] == pair(0, 1)
+    surfaced = {"premise_mismatch": ["dev_p"]}
+    ok = rt.build_signals(**surfaced, supporting_aliases=["dev_r"])
+    bad = rt.build_signals(**surfaced, supporting_aliases=["dev_r", "dev_p"])
+    unsurfaced = rt.build_signals(supporting_aliases=["dev_r"])
+    # present only as a warning (not supporting): PASS
+    assert score(["dev_r", "dev_p"], expected=exp, signals=ok)["premise_awareness_accuracy"] == (
+        pair(1, 1)
+    )
+    # mismatch surfaced but the premise item still supports: FAIL
+    assert score(["dev_r", "dev_p"], expected=exp, signals=bad)["premise_awareness_accuracy"] == (
+        pair(0, 1)
+    )
+    # mismatch not surfaced: FAIL
+    assert score(["dev_r"], expected=exp, signals=unsurfaced)["premise_awareness_accuracy"] == (
+        pair(0, 1)
+    )
     assert score(["dev_r"])["premise_awareness_accuracy"] == NA
+
+
+def test_near_duplicates_count_distinct_cluster_members_without_canonical():
+    exp = {**EXP, "near_duplicate_of": {"dev_b": "dev_a", "dev_c": "dev_a"}}
+
+    def extra(*aliases):
+        m = score(list(aliases), expected=exp)
+        return m["near_duplicate_rate"]["numerator"]
+
+    assert extra("dev_b", "dev_c") == 1
+    assert extra("dev_a", "dev_b", "dev_c") == 2
+    assert extra("dev_b") == 0
+    # a repeated member is an exact duplicate, not a second near-duplicate
+    assert extra("dev_b", "dev_b") == 0
+
+
+def _tight(tokens):
+    scoring = json.loads(json.dumps(SCORING))
+    scoring["evidence"]["pack_budget_tokens"] = tokens
+    return scoring
+
+
+def _fin(entries, scoring):
+    return rt.finish_adapter(entries, scoring, elapsed_ns=1)
+
+
+def test_duplicates_are_scored_on_the_budgeted_pack_only():
+    one = [entry("dev_a", "x" * 40, rank=1)]
+    scoring = _tight(rt.estimate_tokens(rt.normalize_pack(one, SCORING), SCORING) + 2)
+    entries = [
+        entry("dev_a", "x" * 40, rank=1),
+        entry("dev_b", "y" * 400, rank=2),
+        entry("dev_a", "x" * 40, rank=3),
+    ]
+    out = _fin(entries, scoring)
+    assert [i["alias"] for i in out["raw_pack"]] == ["dev_a"]  # R_raw is budgeted
+    m = rt.score_retrieval(EXP, REQ, out["raw_pack"], out["pack"], out["signals"], scoring)
+    assert m["exact_duplicate_rate"] == pair(0, 1)
+    inside = _fin([entry("dev_a", "x", rank=1), entry("dev_a", "x", rank=2)], SCORING)
+    assert [i["alias"] for i in inside["raw_pack"]] == ["dev_a", "dev_a"]
+    assert [i["alias"] for i in inside["pack"]] == ["dev_a"]  # relevance view collapses
+    m = rt.score_retrieval(EXP, REQ, inside["raw_pack"], inside["pack"], inside["signals"], SCORING)
+    assert m["exact_duplicate_rate"] == pair(1, 2)
+
+
+def test_near_duplicate_beyond_budget_contributes_zero():
+    exp = {**EXP, "near_duplicate_of": {"dev_b": "dev_a"}}
+    one = [entry("dev_a", "x" * 40, rank=1)]
+    scoring = _tight(rt.estimate_tokens(rt.normalize_pack(one, SCORING), SCORING) + 2)
+    out = _fin([entry("dev_a", "x" * 40, rank=1), entry("dev_b", "x" * 400, rank=2)], scoring)
+    m = rt.score_retrieval(exp, REQ, out["raw_pack"], out["pack"], out["signals"], scoring)
+    assert m["near_duplicate_rate"] == pair(0, 1)
+
+
+def test_current_vres_merge_collapse_precedes_budget_and_duplicates_stay_gone():
+    k = [entry("dev_k1", "a", rank=1), entry("dev_k2", "b", rank=2)]
+    p = [entry("dev_k1", "a", kind="procedure", rank=1)]
+    _, collapsed = rt.merge_current_vres(k, p, SCORING)
+    out = _fin(
+        [{k_: v for k_, v in i.items() if k_ not in ("truncated",)} for i in collapsed], SCORING
+    )
+    assert [i["alias"] for i in out["raw_pack"]] == ["dev_k1", "dev_k2"]
+    m = rt.score_retrieval(EXP, REQ, out["raw_pack"], out["pack"], out["signals"], SCORING)
+    assert m["exact_duplicate_rate"] == pair(0, 2)
+
+
+def test_relevance_topk_collapses_exact_repeats_at_first_occurrence():
+    m = score(["dev_r1"], raw=["dev_r1", "dev_r1", "dev_r2"])
+    assert m["recall_at_k:3"] == pair(1, 2)  # pack (collapsed view) drives relevance
+    out = _fin(
+        [entry("dev_r1", "t", rank=1), entry("dev_r1", "t", rank=2), entry("dev_r2", "u", rank=3)],
+        SCORING,
+    )
+    assert [i["alias"] for i in out["pack"]] == ["dev_r1", "dev_r2"]
+    assert [i["rank"] for i in out["pack"]] == [1, 2]
+
+
+RID = {
+    "experience_retrieval_schema": "176.e5.v1",
+    "e5_policy_digest": "f" * 64,
+    "result_schema_version": 1,
+    "evidence_pack_schema": 1,
+}
+
+
+def test_run_identity_binds_retrieval_policy_and_schema():
+    kw = dict(
+        split="development",
+        source={"commit": "c" * 40, "tree": "t" * 40},
+        digests={"corpus": "a" * 64, "expected_evidence": "b" * 64, "bundle": "d" * 64},
+        scoring_digest="e" * 64,
+        cases=[],
+    )
+    base = rt.build_run_result(**kw, retrieval_identity=RID)
+    assert base["identity"]["retrieval"] == RID
+    for change in (
+        {"e5_policy_digest": "0" * 64},
+        {"experience_retrieval_schema": "176.e5.v2"},
+        {"evidence_pack_schema": 2},
+    ):
+        other = rt.build_run_result(**kw, retrieval_identity={**RID, **change})
+        assert other["result_digest"] != base["result_digest"]
+    with pytest.raises(eb.BenchmarkError):
+        rt.build_run_result(**kw, retrieval_identity={**RID, "extra": 1})
+    with pytest.raises(eb.BenchmarkError):
+        rt.build_run_result(**kw, retrieval_identity={**RID, "e5_policy_digest": "xyz"})
 
 
 def test_correct_and_false_abstention():
@@ -365,9 +487,7 @@ class FakeAdapter:
 
     def retrieve(self, public_input, alias_map, scoring):
         self.seen.append(public_input)
-        return rt.finish_adapter(
-            self.entries, scoring, signals=self.signals, elapsed_ns=123456, collapse=False
-        )
+        return rt.finish_adapter(self.entries, scoring, signals=self.signals, elapsed_ns=123456)
 
 
 def test_run_case_gives_every_mode_identical_public_input_without_answers():
@@ -410,6 +530,7 @@ def test_result_digest_excludes_latency_and_physical_identity():
         source={"commit": "c" * 40, "tree": "t" * 40},
         digests={"corpus": "a" * 64, "expected_evidence": "b" * 64, "bundle": "d" * 64},
         scoring_digest="e" * 64,
+        retrieval_identity=RID,
         cases=[{**base, "timings": {"raw_refind": 1}}],
     )
     run2 = rt.build_run_result(
@@ -417,6 +538,7 @@ def test_result_digest_excludes_latency_and_physical_identity():
         source={"commit": "c" * 40, "tree": "t" * 40},
         digests={"corpus": "a" * 64, "expected_evidence": "b" * 64, "bundle": "d" * 64},
         scoring_digest="e" * 64,
+        retrieval_identity=RID,
         cases=[{**base, "timings": {"raw_refind": 999}}],
     )
     assert run1["result_digest"] == run2["result_digest"]
@@ -426,6 +548,7 @@ def test_result_digest_excludes_latency_and_physical_identity():
         source={"commit": "d" * 40, "tree": "t" * 40},
         digests={"corpus": "a" * 64, "expected_evidence": "b" * 64, "bundle": "d" * 64},
         scoring_digest="e" * 64,
+        retrieval_identity=RID,
         cases=[base],
     )
     assert other["result_digest"] != run1["result_digest"]
@@ -452,6 +575,7 @@ def test_run_result_counts_owner_gap_separately_and_excludes_from_metrics():
         source={"commit": "c" * 40, "tree": "t" * 40},
         digests={"corpus": "a" * 64, "expected_evidence": "b" * 64, "bundle": "d" * 64},
         scoring_digest="e" * 64,
+        retrieval_identity=RID,
         cases=[gap, ok],
     )
     assert run["owner_gap"] == {
