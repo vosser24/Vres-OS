@@ -56,10 +56,10 @@ def test_policy_row_and_frozen_digests(db_ready):
 
 
 def test_migration_count_and_latest(db_ready):
-    assert _scalar("SELECT count(*) FROM vres.schema_migrations") == 42
+    assert _scalar("SELECT count(*) FROM vres.schema_migrations") == 43
     assert (
         _scalar("SELECT max(version) FROM vres.schema_migrations")
-        == "042_experience_retrieval_policy_v2.sql"
+        == "043_experience_observed_episode.sql"
     )
 
 
@@ -337,12 +337,13 @@ def test_k_real_040_to_041_upgrade_preserves_seeded_state(disposable_040):
     assert db.migrate() == [
         "041_experience_retrieval_observability.sql",
         "042_experience_retrieval_policy_v2.sql",
+        "043_experience_observed_episode.sql",
     ]
     with connect() as conn:
         count = conn.execute("SELECT count(*) AS n FROM vres.schema_migrations").fetchone()
-        assert count["n"] == 42
+        assert count["n"] == 43
         latest = conn.execute("SELECT max(version) AS v FROM vres.schema_migrations").fetchone()
-        assert latest["v"] == "042_experience_retrieval_policy_v2.sql"
+        assert latest["v"] == "043_experience_observed_episode.sql"
         tables_after = {r["table_name"] for r in conn.execute(
             "SELECT table_name FROM information_schema.tables WHERE table_schema='vres'")}
         assert tables_after - tables_before == {"experience_retrieval_observations", "experience_retrieval_items",
@@ -352,10 +353,12 @@ def test_k_real_040_to_041_upgrade_preserves_seeded_state(disposable_040):
         policies_after = state_after.pop("experience_policy_versions")
         policies_before = state_before.pop("experience_policy_versions")
         assert state_after == state_before
-        assert [p for p in policies_after if p["policy_version"] != "176.e6.v1"] == policies_before
+        assert [p for p in policies_after if p["policy_version"] not in ("176.e6.v1", "176.e1.v2")] == policies_before
+        assert [p["policy_version"] for p in policies_after if p["policy_version"] == "176.e1.v2"] == ["176.e1.v2"]
         assert [p["policy"] for p in policies_after if p["policy_version"] == "176.e6.v1"] == [eo.E6_POLICY]
-        assert _table_defs(conn, [t for t in _SEED_WATCH if t != "experience_policy_versions"]) == \
-            {t: d for t, d in defs_before.items() if t != "experience_policy_versions"}
+        # 043 deliberately relaxes experience_episodes (task_id nullable + provenance CHECK).
+        unchanged = [t for t in _SEED_WATCH if t not in ("experience_policy_versions", "experience_episodes")]
+        assert _table_defs(conn, unchanged) == {t: defs_before[t] for t in unchanged}
         assert conn.execute("SELECT count(*) AS n FROM vres.experience_retrieval_observations").fetchone()["n"] == 0
     assert db.migrate() == []
 

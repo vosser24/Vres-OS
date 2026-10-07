@@ -42,6 +42,8 @@ EXECUTABLE_OPS = (
     "lifecycle_supersede",
     "lifecycle_refresh",
     "source_revoke",
+    "episode_observe",
+    "experience_consolidate",
 )
 DEFAULT_TITLE = "Note"
 INITIAL_STATUS = "proposed"  # the frozen OPERATION_OWNERS["knowledge_propose"] status
@@ -228,6 +230,8 @@ class Owners:
     revocation: Any
     retrieval: Any
     user_input: Any = None  # trusted-writer ingress for the synthetic approval fixture
+    episodes: Any = None  # E1 public owner (observed episodes only in the deterministic benchmark)
+    consolidation: Any = None  # E2 public owner
 
 
 class TrustedUserInput:
@@ -256,6 +260,8 @@ class _Clock:
 
 def default_owners(clock: Callable[[], datetime]) -> Owners:
     from .approvals import ApprovalService
+    from .experience import ExperienceEpisodeService
+    from .experience_consolidation import ExperienceConsolidationService
     from .experience_lifecycle import ExperienceLifecycleService
     from .experience_retrieval import ExperienceRetrievalService
     from .knowledge import KnowledgeService
@@ -274,6 +280,8 @@ def default_owners(clock: Callable[[], datetime]) -> Owners:
         revocation=SourceRevocationService(clock),
         retrieval=ExperienceRetrievalService(),
         user_input=TrustedUserInput(),
+        episodes=ExperienceEpisodeService(),
+        consolidation=ExperienceConsolidationService(),
     )
 
 
@@ -438,6 +446,7 @@ class BenchmarkRuntime:
         self.candidate_results: dict[
             tuple[str, str], dict
         ] = {}  # public evaluate_candidate returns
+        self.consolidation_results: dict[tuple[str, str], dict] = {}  # public consolidate returns
         self.adapters = {
             "memory_disabled": MemoryDisabled(owners),
             "raw_refind": RawRefind(owners),
@@ -575,6 +584,45 @@ class BenchmarkRuntime:
                 metadata={"trust_class": args.get("trust_class", "trusted_project_source")},
             )
             amap.bind(alias, key)
+        elif op == "episode_observe":
+            text = args["objective"]
+            title = f"E7 observed episode {case_id}/{alias}"
+            source_key, source_id = self.o.sources.register(
+                source_type="benchmark",
+                title=title,
+                origin=SOURCE_OWNER,
+                path_or_uri=f"benchmark://{self.nonce}/{case_id}/{alias}",
+                content_hash=hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                version="1",
+                project_id=pid,
+                authority_level="external_untrusted_observation",
+                created_at=self.clock.now,
+            )
+            self.o.sources.add_chunks(source_id=source_id, text=text)
+            outcome = "completed" if args["result"] == "success" else "failed"
+            episode = self.o.episodes.observe_external_source(pid, source_key, outcome)
+            amap.bind(alias, episode["episode_key"])
+        elif op == "experience_consolidate":
+            result = self.o.consolidation.consolidate(
+                {
+                    "project_id": pid,
+                    "polarity": args["polarity"],
+                    "trigger": args["trigger"],
+                    "subject_key": args["subject_key"],
+                    "title": args["title"],
+                    "statement": args["statement"],
+                    "evidence": [
+                        {
+                            "episode_key": key_of(e["episode"]),
+                            "pointer": e["pointer"],
+                            "quote": e["quote"],
+                        }
+                        for e in args["evidence"]
+                    ],
+                }
+            )
+            self.consolidation_results[(case_id, alias)] = result
+            amap.bind(alias, result["transition_key"])
         elif op == "knowledge_attach_source":
             self.o.sources.attach_evidence(
                 knowledge_key=key_of(alias),

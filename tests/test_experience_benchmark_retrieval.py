@@ -544,7 +544,7 @@ def test_owner_gap_short_circuits_without_materialize_or_adapters():
 
 
 def test_owner_gap_matrix_is_derived_from_corpus_not_hardcoded():
-    for split, executable, gap in (("development", 18, 6), ("adversarial", 14, 6)):
+    for split, executable, gap in (("development", 18, 6), ("adversarial", 17, 3)):
         cases = eb.load_development_bundle(ROOT, split)["cases"]
         labels = [eb.classify_case(c) for c in cases]
         assert labels.count("EXECUTABLE") == executable

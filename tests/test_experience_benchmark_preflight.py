@@ -324,9 +324,7 @@ def test_failure_and_observed_report_both_reasons():
             S(1, "episode_capture", "dev_b", objective="o", result="failure"),
         ]
     )
-    assert eb.classify_case(gap) == (
-        "OWNER_GAP:failed_episode_requires_host_observed_routed_work_unit,observed_episode_writer_missing"
-    )
+    assert eb.classify_case(gap) == FAILURE_GAP
 
 
 def test_no_episode_capture_is_executable(dev, adv):
@@ -354,9 +352,9 @@ def test_benchmark_never_synthesises_routing_or_private_decisions():
     assert not called & {"execute", "executemany"}  # no SQL from the benchmark foundation
 
 
-def test_observed_episode_gets_the_observed_writer_gap():
-    gap = case([S(0, "episode_observe", "dev_a", objective="o", result="failure")])
-    assert eb.classify_case(gap) == "OWNER_GAP:observed_episode_writer_missing"
+def test_observed_episode_is_executable_and_has_no_writer_gap():
+    ok = case([S(0, "episode_observe", "dev_a", objective="o", result="failure")])
+    assert eb.classify_case(ok) == "EXECUTABLE"
 
 
 def test_multiple_owner_gap_reasons_are_all_reported_sorted():
@@ -368,8 +366,7 @@ def test_multiple_owner_gap_reasons_are_all_reported_sorted():
     )
     label = eb.classify_case(gap)
     assert label == (
-        "OWNER_GAP:observed_episode_writer_missing,"
-        "successful_episode_requires_protected_or_host_attested_terminal_state"
+        "OWNER_GAP:successful_episode_requires_protected_or_host_attested_terminal_state"
     )
 
 
@@ -599,11 +596,11 @@ def test_every_case_is_executable_or_stable_owner_gap(dev, adv):
         ), (c["case_id"], label)
 
 
-def test_episode_observe_cases_are_owner_gap(dev, adv):
+def test_episode_observe_cases_are_not_owner_gap(dev, adv):
     for c in [*dev.values(), *adv.values()]:
         has = any(s["op"] == "episode_observe" for s in c["timeline"])
         if has:
-            assert "observed_episode_writer_missing" in eb.classify_case(c)
+            assert "observed_episode_writer" not in eb.classify_case(c)
 
 
 def test_every_success_episode_case_is_owner_gap(dev, adv):
@@ -624,8 +621,8 @@ def test_classification_matrix_counts():
     matrix = report["execution_matrix"]
     assert matrix["development"]["executable_count"] == 18
     assert matrix["development"]["owner_gap_count"] == 6
-    assert matrix["adversarial"]["executable_count"] == 14
-    assert matrix["adversarial"]["owner_gap_count"] == 6
+    assert matrix["adversarial"]["executable_count"] == 17
+    assert matrix["adversarial"]["owner_gap_count"] == 3
     for rows in matrix.values():
         for label in rows["owner_gap"].values():
             assert set(label.split(",")) <= set(eb.OWNER_GAP_REASONS.values())

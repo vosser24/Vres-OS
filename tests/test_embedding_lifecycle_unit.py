@@ -144,7 +144,7 @@ def test_source_revocation_invalidates_on_its_own_transaction_and_imports_no_wor
 
 def test_no_new_chunk_or_embedding_schema_in_040_or_the_041_e6_migration():
     names = sorted(p.name for p in (SRC_DIR / "migrations").glob("*.sql"))
-    assert names[-1] == "042_experience_retrieval_policy_v2.sql"
+    assert names[-1] == "043_experience_observed_episode.sql"
     for name in ("040_context_refresh_attestation.sql", "041_experience_retrieval_observability.sql"):
         sql = (SRC_DIR / "migrations" / name).read_text(encoding="utf-8")
         assert "knowledge_chunks" not in sql and "embedding" not in sql, name  # neither adds chunk/embedding schema

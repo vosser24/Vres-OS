@@ -18,8 +18,26 @@ from vres_os.repository import Repository
 _LEDGER_BYPASS = "SELECT set_config('vres.allow_experience_ledger_delete','on',true)"
 
 
+def _observed_episode(project_id, outcome):
+    from vres_os.experience import ExperienceEpisodeService
+    from vres_os.sources import SourceService
+
+    text = f"Observed deployment note {uuid.uuid4().hex}: port 80 already in use"
+    svc = SourceService()
+    key, sid = svc.register(
+        source_type="test", title="E2 observed", origin="pytest", path_or_uri=f"pytest://{uuid.uuid4().hex}",
+        content_hash=uuid.uuid4().hex * 2, version="1", project_id=project_id,
+        authority_level="external_untrusted_observation",
+    )
+    svc.add_chunks(source_id=sid, text=text)
+    episode = ExperienceEpisodeService().observe_external_source(project_id, key, outcome)
+    return episode["episode_key"]
+
+
 def _episode(project_id, *, outcome="failed", trust="trusted_project_source", participation="participated",
              error="Worker failed: port 80 already in use"):
+    if participation == "observed":
+        return _observed_episode(project_id, outcome)
     task_key = Repository().begin_task(project_id, "E2 episode", "seed", "experience-test", "chairman")
     payload = {"objective": "Deploy the service", "work_units": [{"last_error": error}]}
     key = f"EXP-E2-{uuid.uuid4().hex[:10]}"
@@ -221,7 +239,12 @@ def test_same_statement_opposite_polarity_is_quarantined_as_conflict(pg_project)
 )
 def test_untrusted_or_injection_shaped_candidates_are_quarantined_without_knowledge(pg_project, kwargs, over, reason):
     episode = _episode(pg_project, **kwargs)
-    transition = ExperienceConsolidationService().consolidate(_candidate(pg_project, [episode], **over))
+    candidate = _candidate(pg_project, [episode], **over)
+    if kwargs.get("participation") == "observed":
+        candidate["evidence"] = [
+            {"episode_key": episode, "pointer": "/objective", "quote": "port 80"}
+        ]
+    transition = ExperienceConsolidationService().consolidate(candidate)
     assert transition["verdict"] == "quarantined" and transition["knowledge_key"] is None
     assert reason in transition["reason_codes"]
     assert _counts(pg_project) == (0, 1)

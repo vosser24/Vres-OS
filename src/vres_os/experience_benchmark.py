@@ -858,7 +858,6 @@ APPROVAL_FIXTURE_NOTE = (
 _APPROVAL = "approval_key: " + APPROVAL_FIXTURE_NOTE
 OWNER_GAP_REASONS = MappingProxyType(
     {
-        "episode_observe": "observed_episode_writer_missing",
         "episode_capture_failure": "failed_episode_requires_host_observed_routed_work_unit",
         "episode_capture_success": (
             "successful_episode_requires_protected_or_host_attested_terminal_state"
@@ -1014,14 +1013,26 @@ OPERATION_OWNERS = MappingProxyType(
             },
         ),
         "episode_observe": _row(
-            None,
-            None,
+            "ExperienceEpisodeService",
+            "observe_external_source",
             "episode",
             None,
             {},
-            {"objective": "none: no owner", "result": "none: no owner"},
-            {},
-            gap=_GAP,
+            {
+                "objective": "SourceService.add_chunks text of a project-local observation source",
+                "result": "claimed_outcome: success -> completed, failure -> failed",
+                "project": "register project_id via the isolated-runtime project map",
+                "lineage": "case-local grouping label only; never passed to an owner",
+                "capability": "never written to the row",
+            },
+            {
+                "source_type/origin/path_or_uri/version": "fixed benchmark constants per alias",
+                "trust_class": "register authority_level=external_untrusted_observation",
+                "title": "deterministic title derived from the episode alias",
+                "participation_class": "observed, external_untrusted_observation (owner-fixed)",
+                "alias": "episode_key returned by observe_external_source; no direct SQL",
+            },
+            chain=("register", "add_chunks", "observe_external_source"),
         ),
         "experience_consolidate": _row(
             "ExperienceConsolidationService",

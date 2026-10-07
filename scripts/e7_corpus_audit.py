@@ -259,7 +259,7 @@ def audit(root: Path) -> dict:
         sorted(ops_used - set(eb.OPERATION_OWNERS)),
     )
     gap_ops = sorted(op for op, row in eb.OPERATION_OWNERS.items() if row["owner_gap"])
-    check("owner_gap_ops_recorded", gap_ops == ["episode_observe"], gap_ops)
+    check("owner_gap_ops_recorded", gap_ops == [], gap_ops)
     observed_wrong = [
         c["case_id"]
         for c in all_cases

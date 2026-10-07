@@ -313,13 +313,12 @@ def test_every_operation_has_owner_method_alias_kind_translation_and_harness_fie
             assert kind is None or kind in eb.ALIAS_KINDS, (op, kind)
 
 
-def test_owner_gap_is_recorded_only_for_the_observed_episode_writer():
+def test_no_operation_is_an_owner_gap_after_the_observed_owner_exists():
     gaps = {op for op, row in eb.OPERATION_OWNERS.items() if row["owner_gap"]}
-    assert gaps == {"episode_observe"}
+    assert gaps == set()
     row = eb.OPERATION_OWNERS["episode_observe"]
-    assert row["owner"] is None and row["method"] is None
-    assert "OWNER GAP" in row["gap_record"]
-    assert "NO PUBLIC OBSERVED-EPISODE WRITER" in row["gap_record"]
+    assert row["owner"] == "ExperienceEpisodeService"
+    assert row["method"] == "observe_external_source"
 
 
 def test_owner_methods_exist_in_the_runtime_owner_sources():
@@ -539,10 +538,10 @@ def test_episode_capture_rejects_any_validation_argument():
             parse(episode(validation=value))
 
 
-def test_episode_observe_is_a_separate_owner_gap_operation():
+def test_episode_observe_is_a_separate_owner_operation():
     step = S(0, "episode_observe", "dev_o", objective="We read their write-up.", result="success")
     assert parse(step)
-    assert eb.OPERATION_OWNERS["episode_observe"]["owner_gap"] is True
+    assert eb.OPERATION_OWNERS["episode_observe"]["owner_gap"] is False
     assert eb.OPERATION_OWNERS["episode_capture"]["owner_gap"] is False
     bad = S(0, "episode_observe", "dev_o", objective="x", result="success", validation="passed")
     with pytest.raises(eb.BenchmarkError, match="validation"):

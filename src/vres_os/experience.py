@@ -9,6 +9,7 @@ from typing import Any
 
 from .db import connect
 from .relations import relate_in_conn
+from .sources import require_active_source
 from .sensitive_policy import SENSITIVE_REVIEW_REQUIRED, SENSITIVE_SANITIZED, sanitize_extracted_text
 
 POLICY_VERSION = "176.e1.v1"
@@ -20,6 +21,22 @@ POLICY = {
     "payload": "bounded_sanitized_no_private_reasoning",
     "relations": "existing_relations_and_relation_evidence",
     "authority": "no_promotion",
+}
+
+OBSERVED_POLICY_VERSION = "176.e1.v2"
+OBSERVED_POLICY_SCHEMA_VERSION = 2
+OBSERVED_TRUST_CLASS = "external_untrusted_observation"
+OBSERVED_OUTCOMES = frozenset({"completed", "failed"})
+OBSERVED_POLICY = {
+    "policy_version": OBSERVED_POLICY_VERSION,
+    "schema_version": OBSERVED_POLICY_SCHEMA_VERSION,
+    "capture": "external_source_observation_only",
+    "participation": "observed_only",
+    "trust": "external_untrusted_observation_only",
+    "payload": "bounded_sanitized_no_private_reasoning",
+    "authority": "no_promotion",
+    "provenance": "active_project_source_required",
+    "relations": "existing_relations_and_relation_evidence",
 }
 
 _MAX_TEXT = 4000
@@ -66,6 +83,7 @@ def _sha256(value: Any) -> str:
 
 
 POLICY_DIGEST = _sha256(POLICY)
+OBSERVED_POLICY_DIGEST = _sha256(OBSERVED_POLICY)
 
 
 def _normalize_key(key: Any) -> str:
@@ -450,6 +468,149 @@ class ExperienceEpisodeService:
                                    str(row["source_key"]), provenance=provenance, confidence=1.0)
 
             return self.get(episode_key, project_id=task["project_id"], conn=conn)
+
+    def observe_external_source(
+        self, project_id: int, source_key: str, claimed_outcome: str
+    ) -> dict[str, Any]:
+        """E1 v2: record one OBSERVED (never participated) episode from persisted external evidence.
+
+        The caller names only the project, an existing source and a closed outcome. Everything else
+        (objective, trust, participation, policy, digests, time) is derived here from the
+        source truth.
+        """
+        source_key = source_key.strip() if isinstance(source_key, str) else ""
+        if not source_key:
+            raise ValueError("source_key is required")
+        if isinstance(project_id, bool) or not isinstance(project_id, int):
+            raise ValueError("project_id must be an integer")
+        if claimed_outcome not in OBSERVED_OUTCOMES:
+            raise ValueError("claimed_outcome must be one of: completed, failed")
+
+        with connect() as conn, conn.transaction():
+            conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
+                (f"experience-observe:{project_id}:{source_key}:{claimed_outcome}",),
+            )
+            policy = conn.execute(
+                "SELECT schema_version,policy_digest FROM vres.experience_policy_versions "
+                "WHERE policy_version=%s",
+                (OBSERVED_POLICY_VERSION,),
+            ).fetchone()
+            if (
+                not policy
+                or int(policy["schema_version"]) != OBSERVED_POLICY_SCHEMA_VERSION
+                or str(policy["policy_digest"]) != OBSERVED_POLICY_DIGEST
+            ):
+                raise RuntimeError(
+                    "Experience policy version/digest does not match the E1 v2 runtime contract"
+                )
+
+            source = conn.execute(
+                "SELECT id,project_id,authority_level,"
+                "COALESCE(created_at,ingested_at) AS observed_at "
+                "FROM vres.sources WHERE source_key=%s",
+                (source_key,),
+            ).fetchone()
+            if not source:
+                raise KeyError(f"Unknown source {source_key}")
+            if source["project_id"] is None or int(source["project_id"]) != project_id:
+                raise ValueError(
+                    "Observed episodes require a source that belongs exactly to the project"
+                )
+            if source["authority_level"] != OBSERVED_TRUST_CLASS:
+                raise ValueError(
+                    "Observed episodes require an external_untrusted_observation source"
+                )
+            require_active_source(conn, int(source["id"]))
+            chunks = conn.execute(
+                "SELECT content FROM vres.knowledge_chunks WHERE source_id=%s "
+                "ORDER BY ordinal,id LIMIT 201",
+                (source["id"],),
+            ).fetchall()
+            if not chunks:
+                raise ValueError("Observed episodes require at least one persisted source chunk")
+            if len(chunks) > _SOURCE_MAX_LIST:
+                raise ValueError("Observed source exceeds the E1 chunk budget")
+
+            payload_source = {
+                "objective": "\n".join(str(c["content"]) for c in chunks),
+                "outcome_status": claimed_outcome,
+                "source_keys": [source_key],
+                "applicability": {"project_id": project_id},
+                "failure_classification": "failure" if claimed_outcome == "failed" else "success",
+            }
+            safe_source, source_disposition = _prepare_source_evidence(payload_source)
+            if len(_canonical(safe_source).encode("utf-8")) > _SOURCE_MAX_BYTES:
+                raise ValueError("Experience source evidence exceeds the E1 digest byte budget")
+            payload, payload_disposition = _prepare_payload(safe_source)
+            security_disposition = (
+                SENSITIVE_SANITIZED
+                if SENSITIVE_SANITIZED in (source_disposition, payload_disposition)
+                else "sanitized"
+            )
+            observed_at = source["observed_at"]
+            source_digest = _sha256(
+                {
+                    "source_key": source_key,
+                    "project_id": project_id,
+                    "observed_at": observed_at,
+                    "evidence": safe_source,
+                }
+            )
+            payload_digest = _sha256(
+                {
+                    "policy_version": OBSERVED_POLICY_VERSION,
+                    "policy_digest": OBSERVED_POLICY_DIGEST,
+                    "participation_class": "observed",
+                    "trust_class": OBSERVED_TRUST_CLASS,
+                    "security_disposition": security_disposition,
+                    "source_digest": source_digest,
+                    "payload": payload,
+                }
+            )
+            identity = _sha256(
+                {
+                    "policy_version": OBSERVED_POLICY_VERSION,
+                    "project_id": project_id,
+                    "source_key": source_key,
+                    "outcome_status": claimed_outcome,
+                }
+            )
+            episode_key = f"EXP-OBS-{identity[:24]}"
+            existing = conn.execute(
+                "SELECT source_digest,payload_digest FROM vres.experience_episodes "
+                "WHERE episode_key=%s",
+                (episode_key,),
+            ).fetchone()
+            if existing:
+                if (
+                    existing["source_digest"] != source_digest
+                    or existing["payload_digest"] != payload_digest
+                ):
+                    raise ValueError(
+                        "Immutable experience episode conflicts with changed source evidence"
+                    )
+                return self.get(episode_key, project_id=project_id, conn=conn)
+
+            conn.execute(
+                """
+                INSERT INTO vres.experience_episodes(
+                  episode_key,project_id,task_id,work_unit_key,report_key,task_family,
+                  policy_version,participation_class,trust_class,outcome_status,payload,
+                  source_digest,payload_digest,security_disposition,observed_at
+                ) VALUES (%s,%s,NULL,NULL,NULL,NULL,%s,'observed',%s,%s,%s::jsonb,%s,%s,%s,%s)
+                """,
+                (
+                    episode_key, project_id, OBSERVED_POLICY_VERSION, OBSERVED_TRUST_CLASS,
+                    claimed_outcome, _canonical(payload), source_digest, payload_digest,
+                    security_disposition, observed_at,
+                ),
+            )
+            relate_in_conn(
+                conn, "episode", episode_key, "derived_from", "source", source_key,
+                provenance=f"{OBSERVED_POLICY_VERSION} external source observation", confidence=1.0,
+            )
+            return self.get(episode_key, project_id=project_id, conn=conn)
 
     def get(self, episode_key: str, *, project_id: int | None, conn=None) -> dict[str, Any]:
         def read(active_conn):
