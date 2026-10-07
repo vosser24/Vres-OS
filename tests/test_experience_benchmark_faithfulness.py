@@ -325,7 +325,8 @@ def test_change_that_targets_the_alias_is_authorised():
     out = invariant(
         ["a"],
         (0, "knowledge_propose", "a", [], A0),
-        (1, "knowledge_observe", "a", [], {"a": snap("a", "keep", status="observed")}),
+        (1, "knowledge_propose", "b", [], {**A0, "b": snap("b")}),
+        (2, "knowledge_observe", "a", [], {**A0, "a": snap("a", "keep", status="observed")}),
     )
     assert out["status"] == "PASS"
 
@@ -527,3 +528,74 @@ def test_policy_identity_is_closed_and_stable():
     }
     assert POLICY["equivalence"] == "nfc_collapse_whitespace_exact"
     copy.deepcopy(POLICY)
+
+
+# ---- zero-comparison and narrow authorised-mutation semantics --------------
+
+
+def test_protected_alias_created_on_the_final_step_is_not_evaluated_not_pass():
+    out = invariant(
+        ["a"],
+        (0, "knowledge_propose", "b", [], {"b": snap("b")}),
+        (1, "knowledge_propose", "a", [], {"b": snap("b"), "a": snap("a", "keep")}),
+    )
+    assert out == {"status": "NOT_EVALUATED", "violations": []}
+
+
+def test_only_authorised_operations_after_creation_is_not_evaluated():
+    out = invariant(
+        ["a"],
+        (0, "knowledge_propose", "a", [], A0),
+        (1, "knowledge_observe", "a", [], {"a": snap("a", "keep", status="observed")}),
+    )
+    assert out == {"status": "NOT_EVALUATED", "violations": []}
+
+
+def test_one_real_comparison_passes_even_with_later_authorised_change():
+    out = invariant(
+        ["a"],
+        (0, "knowledge_propose", "a", [], A0),
+        (1, "knowledge_propose", "b", [], {**A0, "b": snap("b")}),
+        (2, "knowledge_observe", "a", [], {**A0, "a": snap("a", "keep", status="observed")}),
+    )
+    assert out == {"status": "PASS", "violations": []}
+
+
+def test_a_violation_fails_even_when_other_aliases_are_not_evaluated():
+    out = invariant(
+        ["a", "late"],
+        (0, "knowledge_propose", "a", [], A0),
+        (1, "knowledge_propose", "b", [], {"a": snap("a", "x"), "b": snap("b")}),
+        (2, "knowledge_propose", "late", [], {"a": snap("a", "x"), "late": snap("late")}),
+    )
+    assert out["status"] == "FAIL"
+
+
+def test_a_plain_reference_does_not_authorise_mutation_of_a_protected_alias():
+    out = invariant(
+        ["a"],
+        (0, "knowledge_propose", "a", [], A0),
+        (1, "knowledge_propose", "b", [], {**A0, "b": snap("b")}),
+        (2, "knowledge_observe", "b", ["a"], {"a": snap("a", "drift"), "b": snap("b")}),
+    )
+    assert out["status"] == "FAIL"
+    assert out["violations"] == [{"alias": "a", "op": "knowledge_observe", "t": 2}]
+
+
+@pytest.mark.parametrize("op", ["knowledge_supersede", "lifecycle_supersede"])
+def test_supersession_authorises_only_the_superseded_alias(op):
+    after = {
+        "a": snap("a", "keep", status="superseded", sup="b"),
+        "b": snap("b"),
+        "p": snap("p", "other", status="rejected"),
+    }
+    base = {"a": snap("a", "keep"), "b": snap("b"), "p": snap("p", "other")}
+    out = invariant(
+        ["a", "p"],
+        (0, "knowledge_propose", "a", [], {"a": base["a"]}),
+        (1, "knowledge_propose", "p", [], {"a": base["a"], "p": base["p"]}),
+        (2, "knowledge_propose", "b", [], base),
+        (3, op, "b", ["a"], after),
+    )
+    assert out["status"] == "FAIL"
+    assert out["violations"] == [{"alias": "p", "op": op, "t": 3}]

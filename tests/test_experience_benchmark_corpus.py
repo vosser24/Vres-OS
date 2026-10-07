@@ -255,3 +255,25 @@ def test_supported_claim_has_an_equivalent_expected_source_fact(bundles):
         facts = {f["alias"]: f["text"] for f in block.get("source_facts", [])}
         for source in claim["sources"]:
             assert _canon(facts[source]) == _canon(claim["text"]), (case_id, source)
+
+
+def test_every_protected_alias_has_a_real_post_creation_comparison_opportunity():
+    superseding = {"knowledge_supersede", "lifecycle_supersede"}
+    for split in eb.DEVELOPMENT_SPLITS:
+        bundle = eb.load_development_bundle(ROOT, split)
+        for case in bundle["cases"]:
+            if eb.classify_case(case) != "EXECUTABLE":
+                continue  # owner-gap cases run no owner, so no invariant is evaluated
+            block = bundle["expected"][case["case_id"]].get("faithfulness", {})
+            opportunities = 0
+            for alias in block.get("protected", []):
+                steps = case["timeline"]
+                born = next(i for i, s in enumerate(steps) if s["alias"] == alias)
+                opportunities += sum(
+                    1
+                    for s in steps[born + 1 :]
+                    if s["alias"] != alias
+                    and not (s["op"] in superseding and s["args"]["supersedes"] == alias)
+                )
+            if block.get("protected"):
+                assert opportunities, f"{case['case_id']}: protected set has no comparison"

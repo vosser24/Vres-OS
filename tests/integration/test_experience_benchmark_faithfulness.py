@@ -165,3 +165,22 @@ def test_owner_gap_faithfulness_cases_make_zero_owner_calls(runtime):
         result = counting.run_faithfulness_case(case, bundle["expected"][case_id])
         assert result["status"] == "not_run_owner_gap"
     assert log == [] and not counting.physical
+
+
+def test_dynamic_export_protected_alias_is_really_compared_across_later_operations(runtime):
+    case = _by_id(_run(runtime, "development"))["dev_dynamic_export"]
+    rows = case["trace"]["rows"]
+    assert [(r["op"], r["alias"]) for r in rows] == [
+        ("source_add", "dev_src"),
+        ("knowledge_propose", "dev_a"),
+        ("knowledge_propose", "dev_d"),
+        ("knowledge_propose", "dev_b"),
+        ("knowledge_supersede", "dev_b"),
+    ]
+    born = rows[2]["after"]["dev_d"]
+    assert "dev_b" not in rows[2]["after"]
+    assert born["statement"] == "The weekly assortment export runs on Sunday evening."
+    for later in rows[3:]:  # dev_b creation, then dev_a -> dev_b supersession
+        assert later["after"]["dev_d"] == born
+    assert rows[-1]["after"]["dev_a"]["superseded_by"] == "dev_b"
+    assert case["invariant"] == {"status": "PASS", "violations": []}

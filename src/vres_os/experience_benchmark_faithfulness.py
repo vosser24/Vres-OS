@@ -171,8 +171,20 @@ def temporal_ok(updates: list[dict], trace: dict) -> bool:
 # ---- prior-memory / corruption invariant ----------------------------------------------------
 
 
+_SUPERSEDING_OPS = frozenset({"knowledge_supersede", "lifecycle_supersede"})
+
+
+def _authorised(row: dict) -> set[str]:
+    """Aliases this operation may change: its own alias, plus `supersedes` for supersession."""
+    out = {row["alias"]}
+    if row["op"] in _SUPERSEDING_OPS:
+        out.update(row["refs"])
+    return out
+
+
 def score_invariant(protected: list[str], trace: dict) -> dict:
-    violations = []
+    """PASS needs at least one real comparison; creation and authorised changes do not count."""
+    violations, comparisons = [], 0
     for alias in protected:
         baseline, started = None, False
         for row in _rows(trace):
@@ -181,10 +193,14 @@ def score_invariant(protected: list[str], trace: dict) -> dict:
                 if now is not None:
                     baseline, started = now, True
                 continue
-            if alias not in {row["alias"], *row["refs"]} and now != baseline:
-                violations.append({"alias": alias, "op": row["op"], "t": row["t"]})
+            if alias not in _authorised(row):
+                comparisons += 1
+                if now != baseline:
+                    violations.append({"alias": alias, "op": row["op"], "t": row["t"]})
             baseline = now
-    return {"status": "FAIL" if violations else "PASS", "violations": violations}
+    if violations:
+        return {"status": "FAIL", "violations": violations}
+    return {"status": "PASS" if comparisons else "NOT_EVALUATED", "violations": []}
 
 
 # ---- case ---------------------------------------------------------------------------------
