@@ -28,6 +28,12 @@ _VALUE = r'''(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;]+)'''
 _KV = re.compile(
     r'(?i)(?P<head>["\']?(?P<key>\b[\w.-]{0,64}?' + _KEYWORD + r')["\']?\s*[:=]\s*)(?P<value>' + _VALUE + ")"
 )
+# A stated credential with no separator ("the database password <value>"). Only a value that looks
+# like a secret (carries a digit or symbol) is redacted, so prose such as "password policy" is kept.
+_PHRASE = re.compile(
+    r"(?i)(?P<head>\b(?:password|passwd|pwd|passphrase|api[_ -]?key|access[_ -]?token|"
+    r"client[_ -]?secret)\s+(?:(?:is|was)\s+)?)(?P<value>(?=[^\s,;]*[\d<>_!@#$%^&*])[^\s,;]{4,})"
+)
 _URI = re.compile(r"(?i)([a-z][a-z0-9+.-]{0,31}://[^\s/:@]+:)[^\s@]*@")
 _BEARER = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/-]+=*")
 _PROVIDER = [
@@ -101,6 +107,14 @@ def _sanitize(value: str) -> SanitizeResult:
 
     out = _URI.sub(uri, value)
     out = _KV.sub(kv, out)
+
+    def phrase(match: re.Match) -> str:
+        if match.group("value").strip("\"'") in _PLACEHOLDERS:
+            return match.group(0)
+        count("phrase_credential")
+        return match.group("head") + "[REDACTED]"
+
+    out = _PHRASE.sub(phrase, out)
     out = sub("bearer_token", _BEARER, "[REDACTED_SECRET]", out)
     for pattern in _PROVIDER:
         out = sub("provider_token", pattern, "[REDACTED_SECRET]", out)

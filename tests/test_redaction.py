@@ -131,3 +131,24 @@ def test_password_policy_key_fails_closed_as_documented_false_positive():
     # with a long value is stopped for human review rather than guessed safe.
     assert sanitize_text("password_policy: required-by-security").residual
     assert not sanitize_text("password_policy: on").residual
+
+
+def test_separatorless_credential_phrase_is_redacted():
+    """#176 E7 C5: 'database password <value>' has no ':'/'=' but is still a stated credential."""
+    out = sanitize_text("Backup runbook: connect with the database password <<CANARY_1>> and run the dump.")
+    assert "CANARY_1" not in out.text
+    assert out.rule_counts == {"phrase_credential": 1}
+    assert "and run the dump." in out.text
+    assert not out.residual
+    assert sanitize_text(out.text).text == out.text  # idempotent
+    assert "x9!q" not in redact_text("the admin pwd is x9!q7 for now")
+
+
+@pytest.mark.parametrize("line", [
+    "The password policy requires rotation.",
+    "Reset the password manager entry for the secret santa list.",
+    "Token budget is tracked per request.",
+    "password reset flow documented here",
+])
+def test_plain_prose_around_credential_words_is_unchanged(line):
+    assert redact_text(line) == line

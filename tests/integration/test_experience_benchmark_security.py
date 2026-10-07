@@ -25,7 +25,7 @@ GAPS = {
 NA = {"adv_second_user"}
 EXECUTABLE = sorted(set(CASES) - set(GAPS) - NA)
 # Cases whose hardening lands in a later, separately committed regression test file section.
-HARDENED_LATER = {"adv_doc_instruction", "adv_reset_injection", "adv_secret_source"}
+HARDENED_LATER = {"adv_doc_instruction", "adv_reset_injection"}
 
 
 @pytest.fixture
