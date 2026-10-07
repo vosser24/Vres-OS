@@ -4,7 +4,15 @@ Scope: a pure DB-free security scorer, a read-only runtime evidence collector, t
 matrix, RED-first hardening, focused PG evidence and a two-clean-database proof. Not in this chunk:
 thresholds, full development replay, latency, held-out, E1/E2 authority-gap fabrication, E8, a model judge.
 
-## Honest result
+## Final result (after the E5 v2 hardening; supersedes the intermediate result below)
+
+All deterministically executable security assertions pass; six authority-bearing rows remain owner-gap
+evidence; second-user isolation is not applicable in this environment. Final matrix at code commit
+`3cdd8ba88bc11d0168c2baefc3901bd2dbbf02ef` (tree `1ebe2b248c9060438ae9bb0efa796da1ba7fbeda`):
+13 PASS, 0 FAIL, 1 not_applicable, 6 not_run_owner_gap. This is not "all security passed".
+Sections marked "(history)" below are the accepted pre-v2 evidence and are kept unchanged.
+
+## Intermediate result (history, pre-v2)
 
 **Not all deterministically executable security assertions pass.** Of 20 adversarial rows:
 11 PASS, 2 FAIL, 1 not_applicable, 6 not_run_owner_gap. The 2 FAILs
@@ -34,7 +42,7 @@ and was **not crossed**. The six authority-bearing rows remain owner-gap evidenc
 - `must_not_retrieve` gates `current_vres` and `candidate_hybrid`; `raw_refind` poison rank is recorded
   but **non-gating** (it is the deliberately naive baseline).
 
-## 20-row matrix (final code state)
+## 20-row matrix (history, pre-v2; the final matrix is in the E5 v2 section)
 
 | Case | Status | Assertion |
 |---|---|---|
@@ -165,9 +173,129 @@ and cannot be exercised by this single-user harness.
 
 Not calibrated yet. No held-out, threshold or E8 work was done.
 
-## Remaining blockers before Chunk 6 / final E7
+## Remaining blockers before Chunk 6 / final E7 (history, pre-v2; current list at the end)
 
-1. Decide and implement E5 `176.e5.v2` (raw-fallback authority eligibility) with migration 042, then
-   re-run the security ladder expecting the two FAILs to turn PASS.
+1. (done, see E5 v2 section) Decide and implement E5 `176.e5.v2` with migration 042.
 2. E1/E2 host-observed episode writer and routed-work-unit failed-episode path to close the six gaps.
 3. Thresholds, full development replay, latency, held-out remain later chunks.
+
+## E5 v2 raw-source authority hardening (final, 2026-10-07)
+
+Frozen contract: `EXPERIENCE-INTELLIGENCE-E7-E5-V2-HARDENING-ADDENDUM-2026-10-07.md` (commit `7985a6a`).
+Implementation commit `3cdd8ba88bc11d0168c2baefc3901bd2dbbf02ef`, tree `1ebe2b248c9060438ae9bb0efa796da1ba7fbeda`.
+
+### Decision: fail-closed allow-list, not a deny-list
+
+`RAW_SOURCE_AUTHORITY_ALLOWLIST_V2 = {"trusted_project_source"}`. A raw chunk with a source owner is eligible
+only if `sources.authority_level` is in the set; NULL, empty, `external_untrusted_observation` and every unknown
+value are excluded. A deny-list was rejected because `authority_level` is free text (nullable since migration
+001) and SourceService accepts arbitrary/None values: a deny-list would trust every unlisted value. No
+SourceService enum/storage change and no legacy row rewrite. Source-only: existing gates AND the allow-list;
+source+knowledge: both gates, the less permissive wins; knowledge-only unchanged; orphan fails closed; applies
+under current and historical intent. Only the `_raw` SQL gained one parameterized predicate.
+
+### Policy identities
+
+| Identity | Version | Digest |
+|---|---|---|
+| E5 v1 (byte-exact, internal compat/replay) | `176.e5.v1` | `7572cafc632d4f56571adbe5f59baceedf15c56a07d5a3ca35e4b05448a982e9` |
+| E5 v2 (product default) | `176.e5.v2` | `0cd0f10d24e37dd7a9872eced6c18e4962d4740a2d6a8c03a38cea1d8a73d6b5` |
+| E6 (unchanged) | `176.e6.v1` | `d61f60d31182085748bb613ef3c160274f1a1a5a2384854f36e52b4cdfecc5e5` |
+
+v2 = v1 + `raw_source_authority {"mode":"allow_list","values":["trusted_project_source"]}`. `RESULT_SCHEMA_VERSION`
+stays 2. No public downgrade: `retrieve()` and MCP `experience_retrieve` always use v2 (test asserts the MCP
+signature is `["request"]` and a `policy_version` argument is rejected). v1 is reachable only through the
+internal `_retrieve_frozen_v1` / explicit policy argument.
+
+### Migration 042 (the only new migration; no 043)
+
+`042_experience_retrieval_policy_v2.sql` drops exactly the two 041 inline CHECKs
+(`experience_retrieval_observation_retrieval_schema_version_check` — PostgreSQL truncated the generated name to
+63 bytes, found by the RED run — and `experience_retrieval_observations_retrieval_policy_digest_check`) and adds
+ONE named paired constraint `experience_retrieval_observations_e5_identity_pair_check`:
+`(v1 AND v1 digest) OR (v2 AND v2 digest)`. No `IN (v1,v2)`, no new table/column, no backfill, no trigger,
+privilege or writer change; 041 is untouched (test pins it to v1 only). Evidence: DB-free contract test (last
+file is 042, 2 DROP + 1 ADD, no forbidden DDL); PG tests `test_042_accepts_v1_and_v2_pairs_and_rejects_cross_unknown_pairs`
+(v1/v1 and v2/v2 accepted; v1/v2-digest, v2/v1-digest, unknown version, unknown digest rejected) and
+`test_042_constraint_shape_and_no_other_schema_change`; `db.migrate()` from 040 returns [041, 042]; an existing
+v1 row stays valid.
+
+### RED to GREEN
+
+- RED (before any change): an untrusted-source raw chunk entered the candidate-hybrid pack
+  (`adv_doc_instruction`, `adv_reset_injection` FAIL); a genuine v2 observation was rejected by the 041 check.
+- GREEN: both security rows PASS at the final code commit; the 042 accept/reject tests pass; new journey
+  tests compare v2 against frozen v1 for authority values trusted / external_untrusted_observation / NULL /
+  partner_claim / "" (trusted eligible in both; the rest eligible only in v1), plus untrusted source with a usable
+  knowledge link (excluded, less permissive wins), knowledge-only unchanged, orphan fail-closed, project
+  isolation / lifecycle / sensitivity unchanged.
+- v1 replayability: `_retrieve_frozen_v1` reproduces v1 behavior and digest; E6 replay collects its universe with
+  `E5_V1_POLICY`, `BASELINE_POLICY_DIGEST` stays `7572cafc...82e9`, and a test proves a candidate policy cannot
+  change the raw-source gate.
+- Observability: closed registry keyed by `schema_version`; `validate_pack` requires the exact policy for that
+  version and returns the real version/digest; unknown, cross-paired and tampered packs are rejected; a real v2
+  pack is recorded with the v2 digest.
+
+### Final 20-row matrix (code `3cdd8ba`)
+
+PASS 13, FAIL 0, not_applicable 1, not_run_owner_gap 6. PASS: adv_challenge_flag, adv_cross_project,
+adv_diversity, adv_doc_hidden, **adv_doc_instruction**, adv_external_authority, adv_lexical_poison,
+adv_no_rewrite, adv_poisoned_procedure, **adv_reset_injection**, adv_revoked_influence, adv_secret_source,
+adv_trust_conflict. N/A: adv_second_user. Owner gaps: adv_flood_burst, adv_participation,
+adv_poisoned_trajectory, adv_recurrence, adv_secret_episode, adv_varied_poison (unchanged reasons). The 18-family
+mapping is unchanged; the two former FAIL rows are now PASS.
+
+### Final invariant matrix
+
+cross_project_unauthorized_retrieval PASS; hidden_reasoning_persistence PASS; revoked_evidence_current_influence
+PASS; raw_secret_persistence_or_exposure not_run_owner_gap; untrusted_recurrence_authority not_run_owner_gap;
+unauthorized_authority_or_policy_promotion **not_run_owner_gap** (was FAIL). The latter is derived from every
+case declaring `must_not_promote`; that set includes owner-gap rows (e.g. adv_recurrence, adv_participation), so
+the invariant cannot be PASS while those rows are gaps. Its former FAIL cause is removed. This is reported as
+computed, not forced.
+
+### Two-clean-DB proof (final code commit)
+
+- DBs `vres_e7_c5_a_d4de7c68_test` (ascending) and `vres_e7_c5_b_d4de7c68_test` (reverse); new restricted writer
+  roles `vres_e7_writer_7e7035cc1f` (A), `vres_e7_writer_eb1f7b80e1` (B); PG 18.6.
+- Focused pytest of `test_experience_benchmark_security.py`: 15 passed on A, 15 passed on B.
+- Security digest A == B: `2975f8754c096e23cbf265f88acfca3057d1bea6a0eecc02cf5ef04a8241178d` (previous v1-era
+  digest `77d1ec8d...` is history). Run bodies equal; physical-key fingerprints differ; leak scan empty on both;
+  cleanup PASS; no leftover temporary writer roles.
+- The digest binds source commit `3cdd8ba88bc11d0168c2baefc3901bd2dbbf02ef` / tree `1ebe2b24...`. This findings
+  commit only changes this document.
+
+### Legacy PG evidence and pre-existing failures (honest)
+
+- Focused PG set (journey + e6 schema + e6 retrieval observation + retrieve surface, with the trusted-writer test
+  fixture): 42 failed / 108 passed after the change versus 42 failed / 97 passed on the pre-change commit
+  `7985a6a`. The set of failing tests is identical (39 listed in the harness tail, compared equal); 11 more pass
+  (the new tests). The failures are environment/legacy writer-role failures ("user-authority task events require
+  the trusted provenance writer role", "permission denied for function record_experience_retrieval_observation")
+  reproduced identically on the pre-change commit, so they are not attributable to v2/042. They were not fixed
+  here.
+- Also pre-existing and untouched: `test_e6_observability_hook.py` (CRLF launcher assertion) and
+  `tests/test_source_revocation_unit.py::test_only_source_revocation_writes_the_revoked_status` (four E7 benchmark
+  source files contain "revoked" string constants).
+- The full PG suite was not run (not authorized).
+
+### Gates
+
+- DB-free: 1260 passed, 1 skipped across the E5/E6/benchmark/security/migration/redaction/session test files
+  (the two pre-existing failures above deselected). Corpus audit: adversarial 14 executable + 6 owner_gap,
+  manifest `b9eafa03...4aa` ok.
+- `git diff --check`: no whitespace errors (only LF/CRLF warnings).
+- Ruff: the touched legacy files carry large pre-existing lint/format debt (14 of 17 touched files fail
+  `format --check` before this change as well; repo-wide `ruff check` reports 1160 errors). All 47 violations on
+  added lines are E501 line-length in test/legacy-style files; no other rule fires on added lines. I did not
+  reformat unrelated code.
+- No held-out, threshold or E8 work was done. Chunk 6 was not started. Not run: full PG suite, release gate,
+  protected validation, installed runtime.
+
+### Remaining blockers before Chunk 6 / final E7
+
+1. E1/E2 host-observed episode writer and routed-work-unit failed-episode path to close the six owner gaps (and
+   with them the three owner-gap invariants).
+2. Legacy PG tests that write user-authority events or observations need the trusted-writer fixture; they fail
+   identically before and after this change.
+3. Thresholds, full development replay, latency and held-out remain later chunks.
