@@ -18,7 +18,7 @@ from psycopg.types.json import Jsonb
 from .experience import _canonical, _sha256
 from .experience_observability import request_digests
 from .experience_retrieval import (
-    POLICY,
+    E5_V1_POLICY,
     SECTIONS,
     CompositionParams,
     ExperienceRetrievalService,
@@ -26,7 +26,7 @@ from .experience_retrieval import (
 
 POLICY_VERSION = "176.e6.v1"
 CAUSAL_CREDIT = "not_established"
-BASELINE_POLICY_DIGEST = _sha256(POLICY)
+BASELINE_POLICY_DIGEST = _sha256(E5_V1_POLICY)
 ISOLATION = {"transaction_isolation": "repeatable read", "transaction_read_only": "on"}
 
 _TOP_FIELDS = ("section_budgets", "max_items", "max_pack_bytes", "rrf_k")

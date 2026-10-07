@@ -276,9 +276,9 @@ def test_hook_safe_tools_never_consult_the_database(monkeypatch, capsys):
 # --- scope guards ----------------------------------------------------------------------------------------------------
 
 def test_e4_migrations_add_no_sessions_column_or_retrieval_observation_table():
-    # The current package ends at 041 (the separate E6 observability migration); E4 (039/040) must stay clean.
+    # The current package ends at 042 (E6 observability + E5 v2 identity); E4 (039/040) must stay clean.
     names = sorted(p.name for p in MIGRATIONS.glob("*.sql"))
-    assert names[-1] == "041_experience_retrieval_observability.sql"
+    assert names[-1] == "042_experience_retrieval_policy_v2.sql"
     for path in [*MIGRATIONS.glob("039_*.sql"), *MIGRATIONS.glob("040_*.sql")]:  # E4 migrations add no sessions column
         assert not re.search(r"ALTER\s+TABLE\s+(IF\s+EXISTS\s+)?vres\.sessions", path.read_text(encoding="utf-8"),
                              re.I), path.name

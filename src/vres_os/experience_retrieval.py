@@ -36,7 +36,12 @@ from .knowledge_status import (
 from .redaction import redact_text
 from .sensitive_policy import SENSITIVE_SANITIZED, sanitize_extracted_text
 
-SCHEMA_VERSION = "176.e5.v1"
+E5_V1_SCHEMA_VERSION = "176.e5.v1"
+E5_V2_SCHEMA_VERSION = "176.e5.v2"
+SCHEMA_VERSION = E5_V2_SCHEMA_VERSION  # the product default; v1 stays available only as an explicit replay baseline
+# v2 raw-source authority boundary: a FAIL-CLOSED allow-list (sources.authority_level is free text, so a deny-list
+# would trust unknown values). NULL, empty, external_untrusted_observation and any other value are not eligible.
+RAW_SOURCE_AUTHORITY_ALLOWLIST_V2 = ("trusted_project_source",)
 # One fail-closed allow-list (knowledge_status): current intent sees CURRENT only; historical intent additionally
 # sees superseded/retired (flagged) and revoked (tombstone). NULL/unknown/rejected never match.
 _K_CURRENT = status_in_sql("k.status", CURRENT_KNOWLEDGE_STATUSES)
@@ -66,8 +71,8 @@ BUDGETS = {
 MAX_ITEMS = 24
 MAX_PACK_BYTES = 16 * 1024
 MAX_TEXT = 600
-POLICY = {
-    "version": SCHEMA_VERSION,
+E5_V1_POLICY = {
+    "version": E5_V1_SCHEMA_VERSION,
     "chunk": "E5",
     "retrieval_mode": "lexical+optional_semantic; raw_fallback=lexical_only",
     "rank_order": [
@@ -79,6 +84,12 @@ POLICY = {
     "max_items": MAX_ITEMS,
     "max_pack_bytes": MAX_PACK_BYTES,
 }
+E5_V2_POLICY = {
+    **E5_V1_POLICY,
+    "version": E5_V2_SCHEMA_VERSION,
+    "raw_source_authority": {"mode": "allow_list", "values": list(RAW_SOURCE_AUTHORITY_ALLOWLIST_V2)},
+}
+POLICY = E5_V2_POLICY
 # Read-time trust handling is separate from E2's write-time quarantine (_INJECTION there is deliberately broad:
 # it holds a *proposal* back for review). At read time, ordinary words such as "policy"/"approved" must not hide
 # otherwise eligible evidence; authority is structural (role/tier), never derived from text. This narrow heuristic
@@ -132,12 +143,13 @@ class CompositionParams:
 E5_PARAMS = CompositionParams(dict(BUDGETS), MAX_ITEMS, MAX_PACK_BYTES, RRF_K)
 
 
-def _policy_for(params: CompositionParams) -> dict[str, Any]:
-    """The E5 POLICY object for E5 params; otherwise a truthful replay-only copy."""
+def _policy_for(params: CompositionParams, base: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The E5 policy object of `base` (default: product v2) for E5 params; otherwise a truthful replay-only copy."""
+    base = POLICY if base is None else base
     if params == E5_PARAMS:
-        return POLICY
+        return base
     return {
-        **POLICY, "chunk": "E6_candidate", "fusion": f"reciprocal_rank_k{params.rrf_k}_lexical_semantic",
+        **base, "chunk": "E6_candidate", "fusion": f"reciprocal_rank_k{params.rrf_k}_lexical_semantic",
         "budgets": dict(params.section_budgets), "max_items": params.max_items,
         "max_pack_bytes": params.max_pack_bytes,
     }
@@ -978,7 +990,7 @@ def _settle(kept: list[dict[str, Any]], sets: dict[str, dict[str, Any]], diag: d
 
 def compose(
     items: list[dict[str, Any]], req: dict[str, Any], diagnostics: dict[str, int], edges=(), raw_fn=None,
-    params: CompositionParams = E5_PARAMS,
+    params: CompositionParams = E5_PARAMS, base_policy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Evaluate, order, dedupe, budget and size-bound. Pure and deterministic given its inputs.
 
@@ -1088,14 +1100,14 @@ def compose(
             diag["raw_fallback"] = "used" if used else "no_results"
             cap_total()
 
-    policy = _policy_for(params)
+    policy = _policy_for(params, base_policy)
 
     def build(selected: list[dict[str, Any]], tokens: int) -> dict[str, Any]:
         # Frozen top-level keys only (contract "Experience pack"): conflict sets are carried by their member items.
         sections = {name: [_public(i) for i in selected if i["_section"] == name] for name in SECTIONS}
         empty = not selected
         return {
-            "schema_version": SCHEMA_VERSION,
+            "schema_version": policy["version"],
             "policy": policy,
             **sections,
             "abstained": empty,
@@ -1141,6 +1153,7 @@ class RetrievalUniverse:
     task_id: int | None
     snapshot_at: Any
     raw_fn: Any
+    policy: dict[str, Any] = field(default_factory=lambda: POLICY)
 
 
 class ExperienceRetrievalService:
@@ -1185,11 +1198,17 @@ class ExperienceRetrievalService:
         with self._open() as conn:
             return self.compose_universe(self.collect_universe(conn, req))
 
+    def _retrieve_frozen_v1(self, request: dict[str, Any] | RetrievalRequest) -> dict[str, Any]:
+        """Internal compatibility/replay path: the exact pre-hardening E5 v1 hard gates. Never a product surface."""
+        req = normalize_request(request)
+        with self._open() as conn:
+            return self.compose_universe(self.collect_universe(conn, req, policy=E5_V1_POLICY))
+
     def paired_compose(self, request: dict[str, Any] | RetrievalRequest, candidate: CompositionParams) -> dict[str, Any]:
         """Baseline (exact E5) and candidate composed from copies of ONE universe inside ONE snapshot."""
         req = normalize_request(request)
         with self.snapshot() as conn:
-            universe = self.collect_universe(conn, req, eager_raw=True)
+            universe = self.collect_universe(conn, req, eager_raw=True, policy=E5_V1_POLICY)
             baseline = self.compose_universe(universe, E5_PARAMS)
             cand = self.compose_universe(universe, candidate)
             isolation = {"transaction_isolation": "repeatable read", "transaction_read_only": "on"}
@@ -1198,9 +1217,14 @@ class ExperienceRetrievalService:
 
     def compose_universe(self, universe: RetrievalUniverse, params: CompositionParams = E5_PARAMS) -> dict[str, Any]:
         return compose(universe.items, universe.req, dict(universe.counts), universe.edges,
-                       raw_fn=universe.raw_fn, params=params)
+                       raw_fn=universe.raw_fn, params=params, base_policy=universe.policy)
 
-    def collect_universe(self, conn, req: dict[str, Any], *, eager_raw: bool = False) -> RetrievalUniverse:
+    def collect_universe(
+        self, conn, req: dict[str, Any], *, eager_raw: bool = False, policy: dict[str, Any] | None = None,
+    ) -> RetrievalUniverse:
+        policy = POLICY if policy is None else policy
+        if policy is not E5_V1_POLICY and policy is not E5_V2_POLICY:
+            raise ValueError("Unsupported E5 retrieval policy")
         req = dict(req)
         tokens = list(dict.fromkeys(t.casefold() for t in _TOKEN.findall(req["query"])))[:8]
         params = {
@@ -1271,7 +1295,7 @@ class ExperienceRetrievalService:
                 counts[reason] = counts.get(reason, 0) + 1
         # The raw fallback stays lazy inside this READ ONLY transaction. For a replay it is collected ONCE up front
         # (result or error memoised) so baseline and candidate each decide on their own whether to use the same rows.
-        raw_fn = lambda: self._raw(conn, params, tokens, raw_at)  # noqa: E731
+        raw_fn = lambda: self._raw(conn, params, tokens, raw_at, policy)  # noqa: E731
         if eager_raw and req["raw_fallback"]:
             try:
                 outcome = (True, raw_fn())
@@ -1283,7 +1307,7 @@ class ExperienceRetrievalService:
                     raise outcome[1]
                 return outcome[1]
 
-        return RetrievalUniverse(req, items, counts, edges, task_id, now, raw_fn)
+        return RetrievalUniverse(req, items, counts, edges, task_id, now, raw_fn, policy)
 
     def _semantic(self, req, conn=None) -> tuple[dict[int, int], dict[str, Any]]:
         """Optional semantic signal: {knowledge_id: 1-based position}. Never fails the retrieval, never trusted:
@@ -1745,7 +1769,7 @@ class ExperienceRetrievalService:
         ).fetchall()
 
     @staticmethod
-    def _raw(conn, params, tokens, raw_at=None):
+    def _raw(conn, params, tokens, raw_at=None, policy=None):
         """Lexical-only raw `knowledge_chunks` fallback: (rows, extras). Gate is in SQL BEFORE ranking.
 
         Deliberately NOT read: sources.path_or_uri, source_locations, artifacts, knowledge_evidence (no path/URI/
@@ -1770,6 +1794,12 @@ class ExperienceRetrievalService:
         match, rank = _lexical("c.search_vector", "c.content", tokens)
         sens = "('sensitive_excluded','sensitive_review_required')"
         params = {**params, "raw_at": raw_at}
+        # v2 only: source-owned chunks need an allow-listed authority_level (NULL never matches). v1 has no field.
+        authority = (policy or {}).get("raw_source_authority")
+        source_authority = ""
+        if authority:
+            params["raw_auth"] = list(authority["values"])
+            source_authority = "AND s.authority_level = ANY(%(raw_auth)s) "
         ref = "coalesce(%(raw_at)s::timestamptz, now())"
         # The LIVE allow-list below is deliberately stricter than the structured path: the E3 contract (raw fallback
         # section: chunk's knowledge 'not rejected/superseded/challenged') keeps challenged knowledge out of raw evidence
@@ -1788,7 +1818,7 @@ class ExperienceRetrievalService:
               AND (NOT %(hist)s OR c.created_at<={ref})
               AND (c.source_id IS NULL OR (
                        s.status='active' AND (s.project_id=%(pid)s OR s.project_id IS NULL)
-                   AND coalesce(s.metadata->>'sensitive_disposition','') NOT IN {sens}
+                   {source_authority}AND coalesce(s.metadata->>'sensitive_disposition','') NOT IN {sens}
                    AND (NOT %(hist)s OR s.ingested_at<={ref})))
               AND (c.knowledge_id IS NULL OR (
                        (k.project_id=%(pid)s OR k.project_id IS NULL)

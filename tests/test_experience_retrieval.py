@@ -5,7 +5,7 @@ import psycopg
 import pytest
 
 from vres_os import experience_retrieval as er
-from vres_os.experience import _canonical
+from vres_os.experience import _canonical, _sha256
 
 NOW = datetime(2026, 9, 29, 12, 0, tzinfo=timezone.utc)
 
@@ -279,7 +279,7 @@ def test_dedupe_by_key_and_text_digest():
 def test_abstention_and_no_leak():
     pack = er.compose([], _req(), {"excluded_unapproved_company": 2})
     assert pack["abstained"] is True and pack["reason"] == "no_eligible_experience"
-    assert pack["schema_version"] == "176.e5.v1" and pack["policy"]["version"] == "176.e5.v1"
+    assert pack["schema_version"] == "176.e5.v2" and pack["policy"]["version"] == "176.e5.v2"
     assert pack["policy"]["chunk"] == "E5" and all(pack[s] == [] for s in er.SECTIONS)
     assert "other_project" not in _canonical(pack["diagnostics"])
 
@@ -1482,7 +1482,8 @@ def test_e6c3_paired_compose_collects_once_and_both_compositions_get_the_same_un
     items = _lessons(4)
 
     class Spy(er.ExperienceRetrievalService):
-        def collect_universe(self, conn, req, *, eager_raw=False):
+        def collect_universe(self, conn, req, *, eager_raw=False, policy=None):
+            assert policy is er.E5_V1_POLICY  # E6 replay universe is frozen to the v1 hard gates
             seen["collect"].append((conn, eager_raw))
             seen["uni"] = _universe(items)
             return seen["uni"]
@@ -1555,3 +1556,21 @@ def test_e6c3_default_semantic_is_disabled_without_touching_the_connection(monke
     monkeypatch.setattr("vres_os.config.ConfigStore", lambda: types.SimpleNamespace(
         load=lambda: types.SimpleNamespace(embeddings_enabled=False)))
     assert er.ExperienceRetrievalService()._semantic(_req(), object()) == ({}, {"embedding": "disabled"})
+
+
+def test_v2_policy_identity_and_v1_preserved_byte_exact():
+    assert _sha256(er.E5_V1_POLICY) == "7572cafc632d4f56571adbe5f59baceedf15c56a07d5a3ca35e4b05448a982e9"
+    assert _sha256(er.E5_V2_POLICY) == "0cd0f10d24e37dd7a9872eced6c18e4962d4740a2d6a8c03a38cea1d8a73d6b5"
+    assert er.E5_V2_POLICY["raw_source_authority"] == {"mode": "allow_list", "values": ["trusted_project_source"]}
+    rest = {k: v for k, v in er.E5_V2_POLICY.items() if k not in ("version", "raw_source_authority")}
+    assert rest == {k: v for k, v in er.E5_V1_POLICY.items() if k != "version"}
+
+
+def test_no_public_policy_downgrade_surface():
+    import inspect
+
+    from vres_os import mcp_server
+    assert list(inspect.signature(mcp_server.experience_retrieve).parameters) == ["request"]
+    assert "policy_version" not in er._REQUEST_KEYS and "policy" not in er._REQUEST_KEYS
+    with pytest.raises(ValueError):
+        er.ExperienceRetrievalService().retrieve({"project_id": 1, "query": "x", "policy_version": "176.e5.v1"})

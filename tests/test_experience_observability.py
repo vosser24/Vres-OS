@@ -6,7 +6,8 @@ import pytest
 
 from vres_os import experience_observability as eo
 from vres_os.experience import _sha256
-from vres_os.experience_retrieval import BUDGETS, POLICY, SECTIONS
+from vres_os.experience_retrieval import BUDGETS, SECTIONS
+from vres_os.experience_retrieval import E5_V1_POLICY as POLICY
 
 PID = 7
 INPUT = {"query": "how do we deploy", "task_family": "engineering", "capability_keys": ["cap.deploy"]}
@@ -47,7 +48,10 @@ def _payload(pack=None, **over):
 def test_policy_identity_is_frozen():
     eo.assert_policy_identity()
     assert eo.E6_POLICY_DIGEST == "d61f60d31182085748bb613ef3c160274f1a1a5a2384854f36e52b4cdfecc5e5"
-    assert eo.RETRIEVAL_POLICY_DIGEST == "7572cafc632d4f56571adbe5f59baceedf15c56a07d5a3ca35e4b05448a982e9"
+    assert eo.SUPPORTED_RETRIEVAL_POLICIES["176.e5.v1"][1] == (
+        "7572cafc632d4f56571adbe5f59baceedf15c56a07d5a3ca35e4b05448a982e9")
+    assert eo.SUPPORTED_RETRIEVAL_POLICIES["176.e5.v2"][1] == (
+        "0cd0f10d24e37dd7a9872eced6c18e4962d4740a2d6a8c03a38cea1d8a73d6b5")
 
 
 def test_observation_is_structural_and_digest_only():
@@ -229,3 +233,51 @@ def test_agent_type_at_the_frozen_bound_is_accepted_and_main_thread_never_gets_o
     conn = _Conn()
     eo.observe_retrieval(_payload(agent_type="vres-os:sonnet-expert"), PID, connect=lambda: conn)
     assert conn.calls[0][1][2:4] == (None, None)
+
+
+# ---- #176 E7 C5: dual-version registry (E5 v1 historical + v2 current)
+
+def _v2_pack(items=None):
+    from vres_os.experience_retrieval import E5_V2_POLICY
+    pack = _pack(items)
+    pack["schema_version"] = "176.e5.v2"
+    pack["policy"] = copy.deepcopy(E5_V2_POLICY)
+    return pack
+
+
+def test_registry_is_closed_and_digests_are_exact():
+    assert set(eo.SUPPORTED_RETRIEVAL_POLICIES) == {"176.e5.v1", "176.e5.v2"}
+    for version, (policy, digest) in eo.SUPPORTED_RETRIEVAL_POLICIES.items():
+        assert policy["version"] == version and digest == _sha256(policy)
+
+
+def test_validate_pack_accepts_exact_v1_and_exact_v2_and_returns_the_actual_identity():
+    v1, _ = eo.validate_pack(_pack([_item()]), PID)
+    v2, _ = eo.validate_pack(_v2_pack([_item()]), PID)
+    assert (v1["retrieval_schema_version"], v1["retrieval_policy_digest"]) == (
+        "176.e5.v1", "7572cafc632d4f56571adbe5f59baceedf15c56a07d5a3ca35e4b05448a982e9")
+    assert (v2["retrieval_schema_version"], v2["retrieval_policy_digest"]) == (
+        "176.e5.v2", "0cd0f10d24e37dd7a9872eced6c18e4962d4740a2d6a8c03a38cea1d8a73d6b5")
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda p: p.update(schema_version="176.e5.v1"),            # v2 policy under a v1 version
+    lambda p: p.update(schema_version="176.e5.v3"),            # unknown version
+    lambda p: p.update(schema_version=None),
+    lambda p: p["policy"].update(version="176.e5.v1"),         # v2 body claiming v1 policy version
+    lambda p: p["policy"].update(raw_source_authority={"mode": "allow_list", "values": ["x"]}),
+    lambda p: p["policy"].pop("raw_source_authority", None) or p.update(schema_version="176.e5.v2"),
+])
+def test_validate_pack_rejects_cross_pair_unknown_and_tampered_policy(mutate):
+    pack = _v2_pack([_item()])
+    mutate(pack)
+    with pytest.raises(eo.ObservationRejected) as err:
+        eo.validate_pack(pack, PID)
+    assert err.value.code == "pack_schema_version"
+
+
+def test_v1_pack_with_v2_policy_is_rejected():
+    pack = _pack([_item()])
+    pack["policy"] = copy.deepcopy(eo.SUPPORTED_RETRIEVAL_POLICIES["176.e5.v2"][0])
+    with pytest.raises(eo.ObservationRejected):
+        eo.validate_pack(pack, PID)

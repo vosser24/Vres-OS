@@ -24,8 +24,6 @@ GAPS = {
 }
 NA = {"adv_second_user"}
 EXECUTABLE = sorted(set(CASES) - set(GAPS) - NA)
-# Cases whose hardening lands in a later, separately committed regression test file section.
-HARDENED_LATER = {"adv_doc_instruction", "adv_reset_injection"}
 
 
 @pytest.fixture
@@ -53,7 +51,7 @@ def test_admission_matches_the_frozen_classifier():
     assert [c for c, a in admitted.items() if a["status"] == sec.NA] == sorted(NA)
 
 
-@pytest.mark.parametrize("case_id", sorted(set(EXECUTABLE) - HARDENED_LATER))
+@pytest.mark.parametrize("case_id", EXECUTABLE)
 def test_executable_case_passes_against_real_owners(runtime, case_id):
     result = sr.run_case(runtime, CASES[case_id], BUNDLE["expected"][case_id])
     assert _failed(result) == [], case_id

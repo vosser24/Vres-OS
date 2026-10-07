@@ -838,13 +838,14 @@ def raw_rows():
         conn.execute("DELETE FROM vres.sources WHERE source_key = ANY(%s)", (created["sources"],))
 
 
-def _source(raw_rows, key, pid, *, status="active", approval=None, metadata=None, path="C:/never/opened/file.txt"):
+def _source(raw_rows, key, pid, *, status="active", approval=None, metadata=None, path="C:/never/opened/file.txt",
+            authority="trusted_project_source"):
     raw_rows["sources"].append(key)
     with connect() as conn, conn.transaction():
         return conn.execute(
             """INSERT INTO vres.sources(source_key,source_type,title,path_or_uri,project_id,status,metadata,
-               scope_approval_event_id) VALUES (%s,'document',%s,%s,%s,%s,%s::jsonb,%s) RETURNING id""",
-            (key, f"title {key}", path, pid, status, json.dumps(metadata or {}), approval),
+               scope_approval_event_id,authority_level) VALUES (%s,'document',%s,%s,%s,%s,%s::jsonb,%s,%s) RETURNING id""",
+            (key, f"title {key}", path, pid, status, json.dumps(metadata or {}), approval, authority),
         ).fetchone()["id"]
 
 
@@ -1440,3 +1441,63 @@ def test_e6c3_ordinary_retrieve_stays_read_only_and_matches_the_snapshot_composi
     with connect() as conn:
         assert conn.execute("SELECT count(*) AS n FROM vres.experience_retrieval_replays "
                             "WHERE project_id=%s", (pg_project,)).fetchone()["n"] == 0
+
+
+# ======================================================================= E7 C5: E5 v2 raw-source authority allow-list
+
+def _v1(pid, query):
+    return ExperienceRetrievalService()._retrieve_frozen_v1({"project_id": pid, "query": query})
+
+
+@pytest.mark.parametrize("authority,v1_eligible", [
+    ("trusted_project_source", True),            # B: eligible in both
+    ("external_untrusted_observation", True),    # A: v1 historical behavior, excluded in v2
+    (None, True),                                # C: NULL
+    ("partner_claim", True),                     # D: unknown value
+    ("", True),
+])
+def test_v2_raw_source_authority_allow_list_vs_frozen_v1(pg_project, raw_rows, authority, v1_eligible):
+    mk = _mk()
+    sid = _source(raw_rows, f"S-{mk}", pg_project, authority=authority)
+    _chunk(raw_rows, f"C-{mk}", source_id=sid, content=f"{mk} archive evidence")
+    v1, v2 = _v1(pg_project, mk), _retrieve(pg_project, mk)
+    assert v1["schema_version"] == "176.e5.v1" and v2["schema_version"] == "176.e5.v2"
+    assert (_raw_keys(v1) == [f"C-{mk}"]) is v1_eligible
+    assert (_raw_keys(v2) == [f"C-{mk}"]) is (authority == "trusted_project_source")
+    assert "raw_source_authority" in v2["policy"] and "raw_source_authority" not in v1["policy"]
+
+
+def test_v2_untrusted_source_with_usable_knowledge_link_is_excluded_less_permissive_wins(pg_project, raw_rows):
+    mk = _mk()
+    _knowledge(f"K-{mk}", pg_project, mk, status="proposed")
+    sid = _source(raw_rows, f"S-{mk}", pg_project, authority="external_untrusted_observation")
+    _chunk(raw_rows, f"C-{mk}", source_id=sid, knowledge_key=f"K-{mk}", content=f"{mk} linked evidence")
+    ok = _source(raw_rows, f"S2-{mk}", pg_project)
+    _chunk(raw_rows, f"C2-{mk}", source_id=ok, knowledge_key=f"K-{mk}", content=f"{mk} linked trusted evidence")
+    assert f"C-{mk}" in _raw_keys(_v1(pg_project, mk))
+    keys = _raw_keys(_retrieve(pg_project, mk, include_candidates=False))
+    assert f"C-{mk}" not in keys
+
+
+def test_v2_knowledge_only_chunk_unchanged(pg_project, raw_rows):
+    mk = _mk()
+    _knowledge(f"K-{mk}", pg_project, mk, status="proposed")
+    _chunk(raw_rows, f"C-{mk}", knowledge_key=f"K-{mk}", content=f"{mk} knowledge only chunk")
+    assert _raw_keys(_retrieve(pg_project, mk)) == _raw_keys(_v1(pg_project, mk))
+
+
+def test_v2_project_isolation_company_approval_and_lifecycle_unchanged(pg_project, other_project, raw_rows):
+    mk = _mk()
+    _chunk(raw_rows, f"C-F-{mk}", source_id=_source(raw_rows, f"S-F-{mk}", other_project), content=f"{mk} foreign")
+    _chunk(raw_rows, f"C-A-{mk}", source_id=_source(raw_rows, f"S-A-{mk}", pg_project, status="archived"),
+           content=f"{mk} archived")
+    _chunk(raw_rows, f"C-S-{mk}", content=f"{mk} sensitive", metadata={"sensitive_disposition": "sensitive_excluded"},
+           source_id=_source(raw_rows, f"S-S-{mk}", pg_project))
+    _chunk(raw_rows, f"C-OK-{mk}", source_id=_source(raw_rows, f"S-OK-{mk}", pg_project), content=f"{mk} fine")
+    assert _raw_keys(_retrieve(pg_project, mk)) == _raw_keys(_v1(pg_project, mk)) == [f"C-OK-{mk}"]
+
+
+def test_v2_orphan_chunk_still_fails_closed(pg_project, raw_rows):
+    mk = _mk()
+    _chunk(raw_rows, f"C-{mk}", content=f"{mk} orphan")
+    assert _raw_keys(_retrieve(pg_project, mk)) == []

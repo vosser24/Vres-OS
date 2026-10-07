@@ -279,7 +279,8 @@ def owner_identities() -> dict:
         "e5_policy_digest": eb.sha256_hex(eb.canonical_bytes(er.POLICY)),
         "e6_policy": e6.POLICY_VERSION,
         "e6_policy_digest": e6.E6_POLICY_DIGEST,
-        "e6_frozen_retrieval_policy_digest": e6.FROZEN_RETRIEVAL_POLICY_DIGEST,
+        "e5_v1_policy_digest": e6.FROZEN_E5_V1_POLICY_DIGEST,
+        "e5_v2_policy_digest": e6.FROZEN_E5_V2_POLICY_DIGEST,
     }
 
 

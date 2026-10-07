@@ -1,7 +1,7 @@
 """#176 E6 Chunk 1: host-observed experience retrieval observation (policy 176.e6.v1).
 
 The observer runs ONLY from a successful Claude Code PostToolUse for the exact Vres ``experience_retrieve`` tool. It
-inspects the host payload transiently, validates the returned pack against the closed E5 (176.e5.v1) shape (it never
+inspects the host payload transiently, validates the returned pack against the closed E5 (176.e5.v1 or v2) shape (it never
 repairs one) and hands only keys, enums, counts and SHA-256 digests to the protected writer function
 ``vres.record_experience_retrieval_observation``. No query, premise, memory text or payload is persisted or logged.
 Normal retrieval is untouched: nothing here is called from ``ExperienceRetrievalService.retrieve``.
@@ -15,7 +15,17 @@ from typing import Any
 
 from . import db
 from .experience import _canonical, _sha256
-from .experience_retrieval import BUDGETS, MAX_ITEMS, MAX_PACK_BYTES, POLICY, SCHEMA_VERSION, SECTIONS, normalize_request
+from .experience_retrieval import (
+    BUDGETS,
+    E5_V1_POLICY,
+    E5_V1_SCHEMA_VERSION,
+    E5_V2_POLICY,
+    E5_V2_SCHEMA_VERSION,
+    MAX_ITEMS,
+    MAX_PACK_BYTES,
+    SECTIONS,
+    normalize_request,
+)
 from .sensitive_policy import sanitize_extracted_text
 
 POLICY_VERSION = "176.e6.v1"
@@ -33,8 +43,14 @@ E6_POLICY: dict[str, Any] = {
 }
 E6_POLICY_DIGEST = _sha256(E6_POLICY)
 FROZEN_E6_POLICY_DIGEST = "d61f60d31182085748bb613ef3c160274f1a1a5a2384854f36e52b4cdfecc5e5"
-RETRIEVAL_POLICY_DIGEST = _sha256(POLICY)  # computed from the existing E5 constant, never duplicated
-FROZEN_RETRIEVAL_POLICY_DIGEST = "7572cafc632d4f56571adbe5f59baceedf15c56a07d5a3ca35e4b05448a982e9"
+FROZEN_E5_V1_POLICY_DIGEST = "7572cafc632d4f56571adbe5f59baceedf15c56a07d5a3ca35e4b05448a982e9"
+FROZEN_E5_V2_POLICY_DIGEST = "0cd0f10d24e37dd7a9872eced6c18e4962d4740a2d6a8c03a38cea1d8a73d6b5"
+# Closed registry of legitimate frozen E5 identities. The digest is always computed from the in-code policy and
+# never taken from a pack.
+SUPPORTED_RETRIEVAL_POLICIES: dict[str, tuple[dict[str, Any], str]] = {
+    E5_V1_SCHEMA_VERSION: (E5_V1_POLICY, _sha256(E5_V1_POLICY)),
+    E5_V2_SCHEMA_VERSION: (E5_V2_POLICY, _sha256(E5_V2_POLICY)),
+}
 
 MAX_DURATION_MS = 86_400_000
 MAX_AGENT_TYPE = 200
@@ -87,7 +103,10 @@ class ObservationRejected(ValueError):
 
 def assert_policy_identity() -> None:
     """Fail closed if either frozen policy digest no longer matches its in-code definition."""
-    if E6_POLICY_DIGEST != FROZEN_E6_POLICY_DIGEST or RETRIEVAL_POLICY_DIGEST != FROZEN_RETRIEVAL_POLICY_DIGEST:
+    frozen = {E5_V1_SCHEMA_VERSION: FROZEN_E5_V1_POLICY_DIGEST, E5_V2_SCHEMA_VERSION: FROZEN_E5_V2_POLICY_DIGEST}
+    if E6_POLICY_DIGEST != FROZEN_E6_POLICY_DIGEST or {
+        version: digest for version, (_, digest) in SUPPORTED_RETRIEVAL_POLICIES.items()
+    } != frozen:
         raise ObservationRejected("policy_identity_mismatch")
 
 
@@ -237,8 +256,11 @@ def validate_pack(pack: Any, project_id: int) -> tuple[dict[str, Any], list[dict
         raise _reject("internal_pack_key")
     if set(pack) != _PACK_KEYS:
         raise _reject("pack_keys")
-    if pack["schema_version"] != SCHEMA_VERSION or pack["policy"] != POLICY:
+    version = pack["schema_version"]
+    supported = SUPPORTED_RETRIEVAL_POLICIES.get(version) if isinstance(version, str) else None
+    if supported is None or pack["policy"] != supported[0]:
         raise _reject("pack_schema_version")
+    policy_digest = supported[1]
     items: list[dict[str, Any]] = []
     seen: set[str] = set()
     for section in SECTIONS:
@@ -265,8 +287,8 @@ def validate_pack(pack: Any, project_id: int) -> tuple[dict[str, Any], list[dict
         raise _reject("pack_too_large")
     evidence = _ident_list(pack["evidence_keys"], 500, "evidence_keys")
     return {
-        "retrieval_schema_version": SCHEMA_VERSION,
-        "retrieval_policy_digest": RETRIEVAL_POLICY_DIGEST,
+        "retrieval_schema_version": version,
+        "retrieval_policy_digest": policy_digest,
         "pack_digest": _sha256(pack),
         "pack_bytes": pack_bytes,
         "estimated_tokens": tokens,
