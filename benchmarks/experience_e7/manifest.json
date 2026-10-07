@@ -1,7 +1,7 @@
 {
   "bundles": {
     "adversarial": {
-      "bundle_digest": "441363834c139f5ec7a90cf1f44908beb24f89d6c28e9d7260592f97449b2a0c",
+      "bundle_digest": "e3cad7b40164b9b5abc22f1f0db57f4f63183077d257b718898352804d688301",
       "case_ids": [
         "adv_challenge_flag",
         "adv_cross_project",
@@ -25,12 +25,12 @@
         "adv_varied_poison"
       ],
       "files": {
-        "adversarial/corpus.jsonl": "1b334879123f6c97e27c3c9d3c2c5189136e2c7015b49409980f8de870e03653",
+        "adversarial/corpus.jsonl": "121b3d1481c1199de7a313caf57959f034b4d13b77a3a75ae04c8d1bc0cc1cb7",
         "adversarial/expected_evidence.json": "d1650509564a0b1255b3d80cf480e0f6b02e0bcfd580f2c3071e05816624061d"
       }
     },
     "development": {
-      "bundle_digest": "5882d870b53a4507dffbf584aaf2d6653afe26a5d3875f7e7f109f3a511437e6",
+      "bundle_digest": "2c453c02915f2eb0d0a90a6b1b45f4232d28ee8f947441e9dba953edb3065927",
       "case_ids": [
         "dev_abstain_warranty",
         "dev_asof_threshold",
@@ -58,8 +58,8 @@
         "dev_user_correction"
       ],
       "files": {
-        "development/corpus.jsonl": "cb96b60134ae3b020ddbfea4d0175363b0654e059418ff0431c69f0e1f032936",
-        "development/expected_evidence.json": "dd4bb1c2794db4d3d97691763a2753908a2fc5a1e3b504fc39d2a63712ed42d9"
+        "development/corpus.jsonl": "3b35d360bc8befabe271a0c54ca313c4e72561c704f4f528350ea0a590ef1051",
+        "development/expected_evidence.json": "f5ec5d6edfb286c249e8e83587c87c40b455166604447f147e1c84081815ddbd"
       }
     }
   },

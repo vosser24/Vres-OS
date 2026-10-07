@@ -820,7 +820,9 @@ _APPROVAL = "approval_key: " + APPROVAL_FIXTURE_NOTE
 OWNER_GAP_REASONS = MappingProxyType(
     {
         "episode_observe": "observed_episode_writer_missing",
-        "episode_capture_success_with_capability": "work_unit_passed_host_hook_only",
+        "episode_capture_success": (
+            "successful_episode_requires_protected_or_host_attested_terminal_state"
+        ),
     }
 )
 # F9: fixed deterministic integer-safe comparable metrics (no floats in digested input).
@@ -941,17 +943,19 @@ OPERATION_OWNERS = MappingProxyType(
             {
                 "objective": "task objective of the synthetic scenario task the harness binds",
                 "result": (
-                    "success without capability -> synthetic task completed through "
-                    "Repository.complete_task, task-level capture(task_key); failure -> "
-                    "governed work unit failed through OrchestrationService.fail_work_unit, "
-                    "capture(task_key, work_unit_key=<runtime work unit>)"
+                    "failure -> governed work unit failed through "
+                    "OrchestrationService.fail_work_unit, capture(task_key, "
+                    "work_unit_key=<runtime work unit>); success (with or without a "
+                    "capability) is OWNER_GAP: a successful episode needs a real protected "
+                    "validation PASS or a host-attested passed work unit, neither of which the "
+                    "benchmark may manufacture"
                 ),
                 "project": "task project via the isolated-runtime project map",
                 "lineage": "case-local grouping label only; never passed to an owner",
                 "capability": (
                     "capability key placed on the governed work unit through a real project "
                     "capability path so E1 derives it; never written into the episode row; "
-                    "success with a capability is OWNER_GAP:work_unit_passed_host_hook_only"
+                    "a capability does not change the success owner gap"
                 ),
             },
             {
@@ -968,7 +972,7 @@ OPERATION_OWNERS = MappingProxyType(
             },
             chain=(
                 "Repository.begin_task",
-                "Repository.complete_task | OrchestrationService.fail_work_unit",
+                "OrchestrationService.fail_work_unit",
                 "capture",
             ),
         ),
@@ -1317,9 +1321,9 @@ def classify_case(case: dict) -> str:
             reasons.add(OWNER_GAP_REASONS[op])
         if op in APPROVAL_BOUND_OPS and args.get("approval_fixture") is not True:
             raise BenchmarkError(f"{op} requires the explicit approval_fixture=true field")
-        if op == "episode_capture" and args["result"] == "success" and args.get("capability"):
-            reasons.add(OWNER_GAP_REASONS["episode_capture_success_with_capability"])
-    return "OWNER_GAP:" + sorted(reasons)[0] if reasons else "EXECUTABLE"
+        if op == "episode_capture" and args["result"] == "success":
+            reasons.add(OWNER_GAP_REASONS["episode_capture_success"])
+    return "OWNER_GAP:" + ",".join(sorted(reasons)) if reasons else "EXECUTABLE"
 
 
 def _validate_request(req: Any) -> None:

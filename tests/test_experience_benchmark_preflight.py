@@ -261,7 +261,8 @@ def test_episode_capture_row_maps_failure_to_failed_work_unit():
     row = eb.OPERATION_OWNERS["episode_capture"]
     text = json.dumps(row["translation"], default=dict)
     assert "fail_work_unit" in text
-    assert "complete_task" in text
+    assert "complete_task" not in text
+    assert "complete_task" not in json.dumps(row["methods"], default=dict)
     assert "trusted_project_source" in json.dumps(row["harness"], default=dict)
     assert "unavailable_by_design" in json.dumps(row["harness"], default=dict)
 
@@ -278,13 +279,55 @@ def test_no_corpus_case_declares_validation_passed(dev, adv):
             assert "validation" not in step.get("args", {}), c["case_id"]
 
 
-def test_success_with_capability_is_owner_gap():
+SUCCESS_GAP = "OWNER_GAP:successful_episode_requires_protected_or_host_attested_terminal_state"
+
+
+def test_success_without_capability_is_owner_gap():
+    gap = case([S(0, "episode_capture", "dev_a", objective="o", result="success")])
+    assert eb.classify_case(gap) == SUCCESS_GAP
+
+
+def test_success_with_capability_has_the_same_owner_gap():
     gap = case(
         [S(0, "episode_capture", "dev_a", objective="o", result="success", capability="cap")]
     )
-    assert eb.classify_case(gap) == "OWNER_GAP:work_unit_passed_host_hook_only"
-    ok = case([S(0, "episode_capture", "dev_a", objective="o", result="failure", capability="cap")])
-    assert eb.classify_case(ok) == "EXECUTABLE"
+    assert eb.classify_case(gap) == SUCCESS_GAP
+    assert "work_unit_passed_host_hook_only" not in set(eb.OWNER_GAP_REASONS.values())
+
+
+def test_failure_episode_is_executable_with_and_without_capability():
+    for extra in ({}, {"capability": "cap"}):
+        ok = case([S(0, "episode_capture", "dev_a", objective="o", result="failure", **extra)])
+        assert eb.classify_case(ok) == "EXECUTABLE"
+
+
+def test_observed_episode_gets_the_observed_writer_gap():
+    gap = case([S(0, "episode_observe", "dev_a", objective="o", result="failure")])
+    assert eb.classify_case(gap) == "OWNER_GAP:observed_episode_writer_missing"
+
+
+def test_multiple_owner_gap_reasons_are_all_reported_sorted():
+    gap = case(
+        [
+            S(0, "episode_observe", "dev_a", objective="o", result="failure"),
+            S(1, "episode_capture", "dev_b", objective="o", result="success"),
+        ]
+    )
+    label = eb.classify_case(gap)
+    assert label == (
+        "OWNER_GAP:observed_episode_writer_missing,"
+        "successful_episode_requires_protected_or_host_attested_terminal_state"
+    )
+
+
+def test_benchmark_never_manufactures_validation_or_passed_work_units():
+    text = inspect.getsource(eb)
+    assert "Repository.complete_task |" not in text
+    assert "validation_status =" not in text and "validation_status=" not in text
+    row = json.dumps(eb.OPERATION_OWNERS["episode_capture"], default=dict)
+    assert "record_worker_from_hook" not in row
+    assert "validation_status" not in row
+    assert "OWNER_GAP" in row or "owner gap" in row.lower()
 
 
 def test_trajectory_success_uses_the_precedent_episode_as_evidence(dev):
@@ -330,12 +373,22 @@ def test_recurrence_alias_is_a_transition_never_retrievable():
 def test_recurrence_cases_use_precedent_episodes_as_evidence(dev):
     expected = json.loads((ROOT / "development" / "expected_evidence.json").read_text("utf-8"))
     table = expected.get("cases", expected)
-    for cid in ("dev_recurring_priceexport", "dev_recurring_recount"):
-        assert set(table[cid]["relevant"]) == {"dev_e1", "dev_e2"}, cid
-        for step in dev[cid]["timeline"]:
-            if step["op"] == "experience_consolidate":
-                assert step["alias"] not in table[cid]["relevant"]
-                assert step["alias"] not in table[cid].get("acceptable", [])
+    cid = "dev_recurring_priceexport"
+    assert set(table[cid]["relevant"]) == {"dev_e1", "dev_e2"}, cid
+    for step in dev[cid]["timeline"]:
+        if step["op"] == "experience_consolidate":
+            assert step["alias"] not in table[cid]["relevant"]
+            assert step["alias"] not in table[cid].get("acceptable", [])
+
+
+def test_recount_case_uses_executable_procedure_evidence_not_success_episodes(dev):
+    c = dev["dev_recurring_recount"]
+    ops = [s["op"] for s in c["timeline"]]
+    assert "procedure_accept" in ops and "experience_consolidate" not in ops
+    for s in c["timeline"]:
+        if s["op"] == "episode_capture":
+            assert s["args"]["result"] == "failure"
+    assert eb.classify_case(c) == "EXECUTABLE"
 
 
 def test_recurrence_alias_in_relevant_is_rejected(tmp_path):
@@ -499,7 +552,7 @@ def test_every_case_is_executable_or_stable_owner_gap(dev, adv):
         label = eb.classify_case(c)
         assert label == "EXECUTABLE" or (
             label.startswith("OWNER_GAP:")
-            and label.split(":", 1)[1] in {*eb.OWNER_GAP_REASONS.values()}
+            and set(label.split(":", 1)[1].split(",")) <= {*eb.OWNER_GAP_REASONS.values()}
         ), (c["case_id"], label)
 
 
@@ -507,7 +560,16 @@ def test_episode_observe_cases_are_owner_gap(dev, adv):
     for c in [*dev.values(), *adv.values()]:
         has = any(s["op"] == "episode_observe" for s in c["timeline"])
         if has:
-            assert eb.classify_case(c) == "OWNER_GAP:observed_episode_writer_missing"
+            assert "observed_episode_writer_missing" in eb.classify_case(c)
+
+
+def test_every_success_episode_case_is_owner_gap(dev, adv):
+    for c in [*dev.values(), *adv.values()]:
+        has = any(
+            s["op"] == "episode_capture" and s["args"]["result"] == "success" for s in c["timeline"]
+        )
+        if has:
+            assert SUCCESS_GAP.split(":", 1)[1] in eb.classify_case(c), c["case_id"]
 
 
 def test_classification_matrix_counts():
@@ -517,12 +579,13 @@ def test_classification_matrix_counts():
     spec.loader.exec_module(module)
     report = module.audit(ROOT)
     matrix = report["execution_matrix"]
-    assert matrix["development"]["executable_count"] == 22
-    assert matrix["development"]["owner_gap_count"] == 2
+    assert matrix["development"]["executable_count"] == 20
+    assert matrix["development"]["owner_gap_count"] == 4
     assert matrix["adversarial"]["executable_count"] == 17
     assert matrix["adversarial"]["owner_gap_count"] == 3
     for rows in matrix.values():
-        assert set(rows["owner_gap"].values()) <= set(eb.OWNER_GAP_REASONS.values())
+        for label in rows["owner_gap"].values():
+            assert set(label.split(",")) <= set(eb.OWNER_GAP_REASONS.values())
     assert report["ok"]
 
 

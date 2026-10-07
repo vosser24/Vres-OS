@@ -276,8 +276,7 @@
         "dev_e3"
       ],
       "relevant": [
-        "dev_e1",
-        "dev_e2"
+        "dev_ok"
       ]
     },
     "dev_scope_trap": {
