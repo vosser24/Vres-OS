@@ -25,7 +25,7 @@ forge it, so `validation="passed"` and `validated_novel` consolidations are remo
 corpus (a `validated_novel` step is rejected). This is distinct from the observed-writer gap.
 `dev_trajectory_success` uses the successful precedent episode itself as evidence (OWNER_GAP, see F1c).
 
-## F1c. Successful episodes are an OWNER GAP (F4 ruling, supersedes the earlier mapping)
+## F1c. Success AND failure episodes are OWNER GAPS (F4 ruling, supersedes earlier mappings)
 
 `Repository.complete_task()` requires `task_state.validation_status == "passed"`, i.e. the real
 protected validation chain. A work unit becomes `passed` only through host-observed worker ingress
@@ -33,9 +33,12 @@ protected validation chain. A work unit becomes `passed` only through host-obser
 benchmark must manufacture neither authority: no manual validation status, no fabricated validation
 request/report, no fabricated passed work unit.
 
-- `episode_capture(result="failure")` is EXECUTABLE: synthetic unfinished scenario task, real
-  governed work unit started normally, `OrchestrationService.fail_work_unit`, then
-  `capture(task_key, work_unit_key=...)` (participated, failed, `trusted_project_source`).
+- `episode_capture(result="failure")`, with or without a capability, is
+  `OWNER_GAP:failed_episode_requires_host_observed_routed_work_unit`. The public
+  `OrchestrationService.fail_work_unit` path needs a work unit, and `record_work_graph()` requires a
+  routing request with status `routed`, which only `RoutingService.record_routing_from_hook`
+  creates from a real namespaced Fable arbiter with an observed transcript. That decision is not
+  fabricated, and no public task-cancel path exists for a task-level cancelled episode.
 - `episode_capture(result="success")`, with or without a capability, is
   `OWNER_GAP:successful_episode_requires_protected_or_host_attested_terminal_state`. A capability
   does not change the authority rule. No normal deterministic replay may clear this gap.
@@ -43,6 +46,8 @@ request/report, no fabricated passed work unit.
   (comma-joined, sorted).
 - A task-level `validated_runtime` success needs genuine protected-validator provenance;
   `validated_runtime_fixture = unavailable_by_design`.
+- `ExperienceEpisodeService.capture` itself is not missing; the missing component is legitimate
+  deterministic terminal provenance. No direct SQL.
 
 ### Final-acceptance closure strategy (documented, not implemented)
 
@@ -52,15 +57,19 @@ for task-level success and/or real host-attested work-unit completion), kept sep
 deterministic calibration and never faked. Until then the dependent criteria stay `not_run_owner_gap`
 and contribute no PASS.
 
-### Corpus consequences (every success episode reviewed)
+### Corpus consequences (every episode_capture reviewed)
 
-- Kept, whole case OWNER_GAP (the case truly needs a successful episode): `dev_recurring_priceexport`,
-  `dev_trajectory_success`, `dev_capability_precedent`, `dev_participation` (also observed).
-- Rewritten to an already-supported owner: `dev_recurring_recount` (accepted procedure
-  `recount-before-adjusting` is the relevant evidence; failed episode stays irrelevant),
-  `adv_reset_injection` (trusted knowledge replaces the success episode),
-  `adv_secret_episode` (failed aborted-deployment episode still carries the canary).
-- E2 recurrence is uncalibrated, so recurrence is not used as a substitute for success evidence.
+- Success, kept as OWNER_GAP: `dev_recurring_priceexport`, `dev_trajectory_success`,
+  `dev_capability_precedent`, `dev_participation` (also observed).
+- Failure, kept as OWNER_GAP (purpose depends on failure experience): `dev_gotcha_delimiter`,
+  `dev_trajectory_failure`, `adv_secret_episode`, `adv_flood_burst`, `adv_varied_poison`.
+- `dev_recurring_recount`: the incidental failed episode and its label were removed; the accepted
+  procedure `recount-before-adjusting` is the sole relevant evidence; the case stays EXECUTABLE.
+- `adv_reset_injection` uses trusted knowledge instead of an episode (EXECUTABLE).
+- E2 recurrence is uncalibrated, so recurrence is not a substitute for success evidence.
+- All owner-gap cases remain mandatory evidence, reported later only as `not_run_owner_gap`
+  (excluded from quantitative denominators, never PASS, exact reasons and case IDs in every run
+  record) until closed by runtime-owner work or a live authority-bearing cohort.
 
 ## F2. Synthetic benchmark approval fixture
 
@@ -77,8 +86,8 @@ canonical DB, never a user approval, excluded from measured evidence, never auto
 
 | split | executable | owner gap | owner-gap cases (reasons) |
 |---|---|---|---|
-| development | 20 | 4 | dev_recurring_priceexport, dev_trajectory_success, dev_capability_precedent (successful_episode_requires_protected_or_host_attested_terminal_state); dev_participation (observed_episode_writer_missing + the success reason) |
-| adversarial | 17 | 3 | adv_poisoned_trajectory, adv_recurrence, adv_participation (observed_episode_writer_missing) |
+| development | 18 | 6 | dev_recurring_priceexport, dev_trajectory_success, dev_capability_precedent (successful_episode_requires_protected_or_host_attested_terminal_state); dev_gotcha_delimiter, dev_trajectory_failure (failed_episode_requires_host_observed_routed_work_unit); dev_participation (observed_episode_writer_missing + the success reason) |
+| adversarial | 14 | 6 | adv_poisoned_trajectory, adv_recurrence, adv_participation (observed_episode_writer_missing); adv_secret_episode, adv_flood_burst, adv_varied_poison (failed_episode_requires_host_observed_routed_work_unit) |
 
 Approval-bound ops are EXECUTABLE only with the fixture. Recurrence is uncalibrated in E2
 (`recurrence_threshold_uncalibrated`): recurrence consolidations are transition results, expected

@@ -820,6 +820,7 @@ _APPROVAL = "approval_key: " + APPROVAL_FIXTURE_NOTE
 OWNER_GAP_REASONS = MappingProxyType(
     {
         "episode_observe": "observed_episode_writer_missing",
+        "episode_capture_failure": "failed_episode_requires_host_observed_routed_work_unit",
         "episode_capture_success": (
             "successful_episode_requires_protected_or_host_attested_terminal_state"
         ),
@@ -941,40 +942,37 @@ OPERATION_OWNERS = MappingProxyType(
             None,
             {},
             {
-                "objective": "task objective of the synthetic scenario task the harness binds",
+                "objective": "task objective of the scenario task a future live cohort binds",
                 "result": (
-                    "failure -> governed work unit failed through "
-                    "OrchestrationService.fail_work_unit, capture(task_key, "
-                    "work_unit_key=<runtime work unit>); success (with or without a "
-                    "capability) is OWNER_GAP: a successful episode needs a real protected "
-                    "validation PASS or a host-attested passed work unit, neither of which the "
-                    "benchmark may manufacture"
+                    "BOTH results are OWNER_GAP in the deterministic benchmark. success -> "
+                    "OWNER_GAP:successful_episode_requires_protected_or_host_attested_terminal_"
+                    "state (needs a real protected validation PASS or a host-attested passed "
+                    "work unit); failure -> OWNER_GAP:failed_episode_requires_host_observed_"
+                    "routed_work_unit (the public fail_work_unit path needs a routed request, "
+                    "which only a real host-observed Fable route creates; no public task-cancel "
+                    "path exists for a task-level cancelled episode)"
                 ),
                 "project": "task project via the isolated-runtime project map",
                 "lineage": "case-local grouping label only; never passed to an owner",
-                "capability": (
-                    "capability key placed on the governed work unit through a real project "
-                    "capability path so E1 derives it; never written into the episode row; "
-                    "a capability does not change the success owner gap"
-                ),
+                "capability": "does not change either owner gap; never written to the row",
             },
             {
-                "task_key": "isolated-runtime synthetic scenario task created for the alias",
+                "owner_scope": (
+                    "E1 public owner is ExperienceEpisodeService.capture and is not missing; "
+                    "the missing component is legitimate deterministic terminal provenance"
+                ),
                 "participation_class": "participated, trust trusted_project_source (owner-fixed)",
                 "validation": (
-                    "always none: validated_runtime_fixture = unavailable_by_design; the "
-                    "benchmark never forges protected-validator provenance"
+                    "none: validated_runtime_fixture = unavailable_by_design; the benchmark "
+                    "never forges protected-validator provenance, a validator request/report, "
+                    "a validation status, a routing decision or a passed work unit"
                 ),
-                "work_unit_chain": (
-                    "OrchestrationService.discover, RoutingService deterministic route, "
-                    "record_plan, record_work_graph, start_work_unit, fail_work_unit"
+                "execution": (
+                    "no direct SQL; live authority-bearing execution (genuine Fable routing, "
+                    "host-observed workers, protected validation) is deferred to the later "
+                    "explicit E7 closure cohort"
                 ),
             },
-            chain=(
-                "Repository.begin_task",
-                "OrchestrationService.fail_work_unit",
-                "capture",
-            ),
         ),
         "episode_observe": _row(
             None,
@@ -1321,8 +1319,8 @@ def classify_case(case: dict) -> str:
             reasons.add(OWNER_GAP_REASONS[op])
         if op in APPROVAL_BOUND_OPS and args.get("approval_fixture") is not True:
             raise BenchmarkError(f"{op} requires the explicit approval_fixture=true field")
-        if op == "episode_capture" and args["result"] == "success":
-            reasons.add(OWNER_GAP_REASONS["episode_capture_success"])
+        if op == "episode_capture":
+            reasons.add(OWNER_GAP_REASONS[f"episode_capture_{args['result']}"])
     return "OWNER_GAP:" + ",".join(sorted(reasons)) if reasons else "EXECUTABLE"
 
 

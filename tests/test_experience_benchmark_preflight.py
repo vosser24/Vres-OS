@@ -257,10 +257,17 @@ def test_source_add_owner_row_forbids_direct_chunk_insert():
 # ---- F4/F5 episode capture ----
 
 
-def test_episode_capture_row_maps_failure_to_failed_work_unit():
+def test_episode_capture_row_documents_both_results_as_owner_gaps():
     row = eb.OPERATION_OWNERS["episode_capture"]
-    text = json.dumps(row["translation"], default=dict)
-    assert "fail_work_unit" in text
+    assert row["owner"] == "ExperienceEpisodeService" and row["method"] == "capture"
+    assert row["owner_gap"] is False  # the E1 owner exists; terminal provenance is the gap
+    text = json.dumps(row, default=dict)
+    assert (
+        "failed_episode_requires_host_observed_routed_work_unit" in text
+        and "successful_episode_requires_protected_or_host_attested_terminal_state" in text
+    )
+    assert "no direct SQL" in text
+    assert "deterministic route" not in text and "deterministic Fable" not in text
     assert "complete_task" not in text
     assert "complete_task" not in json.dumps(row["methods"], default=dict)
     assert "trusted_project_source" in json.dumps(row["harness"], default=dict)
@@ -295,10 +302,50 @@ def test_success_with_capability_has_the_same_owner_gap():
     assert "work_unit_passed_host_hook_only" not in set(eb.OWNER_GAP_REASONS.values())
 
 
-def test_failure_episode_is_executable_with_and_without_capability():
+FAILURE_GAP = "OWNER_GAP:failed_episode_requires_host_observed_routed_work_unit"
+
+
+def test_failure_episode_is_owner_gap_with_and_without_capability():
     for extra in ({}, {"capability": "cap"}):
-        ok = case([S(0, "episode_capture", "dev_a", objective="o", result="failure", **extra)])
-        assert eb.classify_case(ok) == "EXECUTABLE"
+        gap = case([S(0, "episode_capture", "dev_a", objective="o", result="failure", **extra)])
+        assert eb.classify_case(gap) == FAILURE_GAP
+
+
+def test_failure_and_observed_report_both_reasons():
+    gap = case(
+        [
+            S(0, "episode_observe", "dev_a", objective="o", result="failure"),
+            S(1, "episode_capture", "dev_b", objective="o", result="failure"),
+        ]
+    )
+    assert eb.classify_case(gap) == (
+        "OWNER_GAP:failed_episode_requires_host_observed_routed_work_unit,observed_episode_writer_missing"
+    )
+
+
+def test_no_episode_capture_is_executable(dev, adv):
+    for c in [*dev.values(), *adv.values()]:
+        if any(s["op"] == "episode_capture" for s in c["timeline"]):
+            assert eb.classify_case(c) != "EXECUTABLE", c["case_id"]
+
+
+def test_recount_case_has_no_episode_capture(dev):
+    ops = [s["op"] for s in dev["dev_recurring_recount"]["timeline"]]
+    assert "episode_capture" not in ops and "procedure_accept" in ops
+    assert eb.classify_case(dev["dev_recurring_recount"]) == "EXECUTABLE"
+
+
+def test_benchmark_never_synthesises_routing_or_private_decisions():
+    import ast
+
+    tree = ast.parse(inspect.getsource(eb))
+    called = {
+        (n.func.attr if isinstance(n.func, ast.Attribute) else getattr(n.func, "id", ""))
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call)
+    }
+    assert not called & {"_record_validated_decision", "record_routing_from_hook"}
+    assert not called & {"execute", "executemany"}  # no SQL from the benchmark foundation
 
 
 def test_observed_episode_gets_the_observed_writer_gap():
@@ -379,16 +426,6 @@ def test_recurrence_cases_use_precedent_episodes_as_evidence(dev):
         if step["op"] == "experience_consolidate":
             assert step["alias"] not in table[cid]["relevant"]
             assert step["alias"] not in table[cid].get("acceptable", [])
-
-
-def test_recount_case_uses_executable_procedure_evidence_not_success_episodes(dev):
-    c = dev["dev_recurring_recount"]
-    ops = [s["op"] for s in c["timeline"]]
-    assert "procedure_accept" in ops and "experience_consolidate" not in ops
-    for s in c["timeline"]:
-        if s["op"] == "episode_capture":
-            assert s["args"]["result"] == "failure"
-    assert eb.classify_case(c) == "EXECUTABLE"
 
 
 def test_recurrence_alias_in_relevant_is_rejected(tmp_path):
@@ -579,10 +616,10 @@ def test_classification_matrix_counts():
     spec.loader.exec_module(module)
     report = module.audit(ROOT)
     matrix = report["execution_matrix"]
-    assert matrix["development"]["executable_count"] == 20
-    assert matrix["development"]["owner_gap_count"] == 4
-    assert matrix["adversarial"]["executable_count"] == 17
-    assert matrix["adversarial"]["owner_gap_count"] == 3
+    assert matrix["development"]["executable_count"] == 18
+    assert matrix["development"]["owner_gap_count"] == 6
+    assert matrix["adversarial"]["executable_count"] == 14
+    assert matrix["adversarial"]["owner_gap_count"] == 6
     for rows in matrix.values():
         for label in rows["owner_gap"].values():
             assert set(label.split(",")) <= set(eb.OWNER_GAP_REASONS.values())

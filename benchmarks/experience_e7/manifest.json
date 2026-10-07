@@ -30,7 +30,7 @@
       }
     },
     "development": {
-      "bundle_digest": "2c453c02915f2eb0d0a90a6b1b45f4232d28ee8f947441e9dba953edb3065927",
+      "bundle_digest": "3670226ea90f9d6d04e49f921978a584adca98aaf6cd436c7e56425f0146be0a",
       "case_ids": [
         "dev_abstain_warranty",
         "dev_asof_threshold",
@@ -58,8 +58,8 @@
         "dev_user_correction"
       ],
       "files": {
-        "development/corpus.jsonl": "3b35d360bc8befabe271a0c54ca313c4e72561c704f4f528350ea0a590ef1051",
-        "development/expected_evidence.json": "f5ec5d6edfb286c249e8e83587c87c40b455166604447f147e1c84081815ddbd"
+        "development/corpus.jsonl": "177b439f3fb68529d1edf6536b023fde28d648a4add33bdb7ba18e1dbd310377",
+        "development/expected_evidence.json": "d908894e6ea712bde0d9cbd0609c9a6e2dc370e6cc6baeb49fd877c4d8015a1f"
       }
     }
   },
