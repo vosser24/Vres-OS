@@ -390,6 +390,7 @@ class CandidateHybrid(_Adapter):
     def __init__(self, owners: Owners, scoring: dict):
         super().__init__(owners)
         self._time = scoring["time"]
+        self.last_result: dict | None = None  # public E5 result of the latest call (security view)
 
     def retrieve(self, shared, alias_map, scoring):
         started = time.perf_counter_ns()
@@ -404,6 +405,7 @@ class CandidateHybrid(_Adapter):
         if request["temporal_intent"] == "historical" and "as_of_t" in req:
             request["as_of"] = eb.benchmark_instant(self._time, req["as_of_t"])
         result = self._o.retrieval.retrieve(request)
+        self.last_result = result
         entries, signals = hybrid_entries_and_signals(result, alias_map)
         return self._done(entries, scoring, signals, started)
 
@@ -433,6 +435,9 @@ class BenchmarkRuntime:
         self._projects: dict[tuple[str, str], int] = {}
         self._approvals = 0
         self.physical: list[str] = []
+        self.candidate_results: dict[
+            tuple[str, str], dict
+        ] = {}  # public evaluate_candidate returns
         self.adapters = {
             "memory_disabled": MemoryDisabled(owners),
             "raw_refind": RawRefind(owners),
@@ -596,7 +601,7 @@ class BenchmarkRuntime:
             )
             amap.bind(alias, key)
         elif op == "procedure_candidate":
-            self.o.procedures.evaluate_candidate(
+            self.candidate_results[(case_id, alias)] = self.o.procedures.evaluate_candidate(
                 procedure_key=key_of(args["baseline"]),
                 candidate={
                     "method": [args["method"]],
@@ -798,6 +803,10 @@ class BenchmarkRuntime:
             "positions": records,
             "measures": streaming.case_measures(block, case, positions, metrics),
         }
+
+    def case_project_ids(self, case_id: str) -> list[int]:
+        """Physical project ids created for one case (read-only evidence collection only)."""
+        return sorted(pid for (cid, _), pid in self._projects.items() if cid == case_id)
 
     def physical_fingerprint(self) -> str:
         return eb.sha256_hex("\n".join(sorted(self.physical)).encode("utf-8"))
