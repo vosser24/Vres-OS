@@ -218,12 +218,18 @@ def test_approval_plan_rejects_non_approval_ops():
 def test_owner_map_names_the_public_approval_chain():
     chain = " ".join(eb.APPROVAL_FIXTURE_CHAIN)
     for part in (
-        "Repository.record_event",
+        "session_prompts.stage_user_instruction",
+        "session_prompts.commit_staged_user_instruction_events",
+        "trusted provenance-writer ingress",
         "USER_INSTRUCTION",
         "ApprovalService.record_latest_user_approval",
         "approval_key",
     ):
         assert part in chain
+
+
+def test_approval_chain_does_not_advertise_record_event_as_the_writer_path():
+    assert "record_event" not in " ".join(eb.APPROVAL_FIXTURE_CHAIN)
     for op in eb.APPROVAL_BOUND_OPS:
         harness = json.dumps(eb.OPERATION_OWNERS[op]["harness"], default=dict)
         assert "SYNTHETIC BENCHMARK APPROVAL FIXTURE" in harness

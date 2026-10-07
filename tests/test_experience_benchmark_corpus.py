@@ -202,3 +202,16 @@ def test_outcome_cases_keep_private_criteria_out_of_the_public_task(bundles):
                 assert crit["id"].lower() not in tokens
             for text in texts:  # precedent wording must not be copied into the worker input
                 assert text not in public
+
+
+def test_temporal_refresh_declares_its_maturity_step_explicitly(bundles):
+    case = next(
+        c for c in bundles["development"]["cases"] if c["case_id"] == "dev_temporal_refresh"
+    )
+    tail = [(s["t"], s["op"], s["alias"]) for s in case["timeline"] if s["t"] >= 6]
+    assert tail == [
+        (6, "knowledge_propose", "dev_b"),
+        (7, "knowledge_attach_source", "dev_b"),
+        (8, "knowledge_observe", "dev_b"),
+        (9, "lifecycle_supersede", "dev_b"),
+    ]

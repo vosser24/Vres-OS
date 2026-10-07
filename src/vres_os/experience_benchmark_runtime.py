@@ -31,6 +31,7 @@ EXECUTABLE_OPS = (
     "procedure_accept",
     "procedure_candidate",
     "knowledge_supersede",
+    "knowledge_observe",
     "lifecycle_retire",
     "lifecycle_reinstate",
     "lifecycle_challenge",
@@ -531,6 +532,8 @@ class BenchmarkRuntime:
             )
         elif op == "knowledge_supersede":
             self.o.knowledge.supersede(key_of(args["supersedes"]), key_of(alias))
+        elif op == "knowledge_observe":
+            self.o.knowledge.update(key_of(alias), status="observed")
         elif op == "source_revoke":
             source_key = key_of(alias)
             task, approval = self._approve(pid, eb.approval_plan(op, source_key))
@@ -544,26 +547,12 @@ class BenchmarkRuntime:
         else:
             self._lifecycle(op, pid, alias, args, amap)
 
-    def _match_successor_maturity(self, old_key: str, new_key: str) -> None:
-        """Owner rule (check_supersession): a successor may not be less mature than the old one.
-
-        A frozen case may challenge the old item (`challenged` = rank 1) before superseding it with
-        a still-`proposed` successor. Only for that exact case the successor takes the one legal
-        public-owner step proposed -> observed (`KnowledgeService.update`); no global maturity
-        change. Any other mismatch is left to the owner to reject.
-        """
-        old = self.o.knowledge.get(old_key)["status"]
-        new = self.o.knowledge.get(new_key)["status"]
-        if (old, new) == ("challenged", "proposed"):
-            self.o.knowledge.update(new_key, status="observed")
-
     def _lifecycle(self, op: str, pid: int, alias: str, args: dict, amap) -> None:
         target = amap.runtime_key_for(alias)
         reason = args.get("reason", "benchmark lifecycle")
         action = op.removeprefix("lifecycle_")
         if action == "supersede":
             old = amap.runtime_key_for(args["supersedes"])
-            self._match_successor_maturity(old, target)
             task, approval = self._approve(pid, eb.approval_plan(op, old, target))
             self.o.lifecycle.supersede(
                 old, target, project_id=pid, approval_key=approval, reason=reason, task_key=task

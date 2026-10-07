@@ -32,11 +32,20 @@ any `writer_role = session_user|current_user|postgres` rule and for `record_even
   are untouched; the original binding is restored and the role dropped (`DROP OWNED`, `DROP ROLE`)
   in `finally`.
 
-The runtime stages and commits the instruction through the existing production wrapper
-(`session_prompts.stage_user_instruction` / `commit_staged_user_instruction_events`) on the
-restricted writer connection, requires exactly one committed `USER_INSTRUCTION` (actor=user), then
-calls `ApprovalService.record_latest_user_approval` and passes the key to the owners. There is no
-direct insert into `task_events`, `approval_events` or `user_input_observations`.
+The contract chain (`APPROVAL_FIXTURE_CHAIN`) is:
+
+1. the scenario owns a synthetic case task and session;
+2. the trusted provenance-writer ingress stages synthetic benchmark user input
+   (`session_prompts.stage_user_instruction`);
+3. the trusted provenance-writer ingress commits it as a `USER_INSTRUCTION` event
+   (`session_prompts.commit_staged_user_instruction_events`, exactly one, actor=user);
+4. `ApprovalService.record_latest_user_approval` consumes that persisted instruction;
+5. the target owner operation receives the returned `approval_key`.
+
+`Repository.record_event` is not part of the chain (a regression test forbids advertising it). The
+restricted writer role itself stays integration-test infrastructure and is not moved into the
+production foundation. There is no direct insert into `task_events`, `approval_events` or
+`user_input_observations`.
 
 The approval is a **synthetic benchmark user-input provenance fixture**, not real user authority.
 
@@ -48,12 +57,21 @@ remain in `tests/test_experience_benchmark_runtime.py`.
 
 ## 3. Retrieval contract and findings from running on real owners
 
-- **Frozen setup status.** Every benchmark knowledge item enters at `proposed`
-  (`INITIAL_STATUS`), exactly as the frozen `OPERATION_OWNERS["knowledge_propose"]` says. `_RANK`
-  gives proposed 0, so proposed -> proposed supersession is allowed. Only the exact frozen case that
-  *challenges* the old item first (`dev_temporal_refresh`: challenged = rank 1) needs its successor
-  at rank >= 1: that successor takes the single legal public-owner step proposed -> observed
-  (`KnowledgeService.update`) immediately before the approved supersede. No global maturity raise.
+- **Frozen setup status and the explicit `knowledge_observe` operation.** Every benchmark
+  knowledge item enters at `proposed` (`INITIAL_STATUS`), exactly as the frozen
+  `OPERATION_OWNERS["knowledge_propose"]` says. `_RANK` gives proposed 0, so proposed -> proposed
+  supersession is allowed, but a challenged old item (rank 1) cannot be superseded by a proposed
+  successor (rank 0): the real E4 owner refuses it. The runtime does NOT repair this implicitly
+  (the earlier hidden `_match_successor_maturity` helper was removed; a source-inspection test
+  forbids any helper that conditionally promotes a successor). Instead the closed timeline
+  vocabulary has the explicit operation `knowledge_observe`: no args, no new alias, no
+  caller-supplied status, acts on an already-created knowledge alias, and maps exactly to
+  `KnowledgeService.update(<runtime knowledge key>, status="observed")` (owner `KnowledgeService`,
+  method `update`, translation `alias -> knowledge_key`, harness `status = observed`, no direct
+  SQL; no new owner, no migration). `dev_temporal_refresh` now declares
+  `t=6 knowledge_propose dev_b; t=7 knowledge_attach_source dev_b->dev_src; t=8 knowledge_observe
+  dev_b; t=9 lifecycle_supersede dev_b supersedes dev_a`. Without the observe step the real owner
+  rejects the supersede (PG regression test).
 - **Canonical EvidencePack R.** `pack` is R: normalized, content-truncated, cut by the common token
   budget, duplicates preserved. `current_vres` starts collapsed because its frozen merge collapses
   before the budget; `memory_disabled` R is `[]`. Only `pack` and `pack_digest` are stored (no
@@ -75,10 +93,13 @@ remain in `tests/test_experience_benchmark_runtime.py`.
   tied member when a native budget cuts through a physical-key tie before the benchmark sees it.
   E5 is not modified. If later replay shows instability, Chunk 5 starts with a RED and hardens the
   owner there. None of the committed subset hits it.
-- **`declared_premise_shape_not_natively_comparable_by_e5`.** `public_input(case)` carries
-  `declared_premises` unchanged to every adapter; E5 consumes free text, and no semantic parser or
-  fabricated key/value premise is added. `premise_mismatch` is therefore empty for key->value
-  premises in candidate_hybrid. The corpus is unchanged.
+- **`declared_premise_shape_not_natively_comparable_by_e5`.** The corpus `declared_premises` is a
+  list of public free-text statements, and every adapter receives that public field unchanged
+  through `public_input`. E5's native `premises` request field requires a structured `{key: value}`
+  mapping, and no deterministic, contract-approved mapping exists from the free-text corpus
+  representation. CandidateHybrid therefore does NOT populate E5 `premises` from the free-text
+  list, and no semantic parser is fabricated. Premise-mismatch diagnostics for this corpus shape are
+  consequently unavailable (miss-capable). The corpus is not modified to improve premise-awareness.
 - **Native retrieval differences vs the frozen expectations** (reported, not hidden): raw-refind
   eligibility and content differ from knowledge-owned retrieval; knowledge items are richer than
   procedures; candidate-hybrid applies hard gates; conflict diagnostics and the abstention signal are
@@ -87,21 +108,22 @@ remain in `tests/test_experience_benchmark_runtime.py`.
 
 ## 4. Focused PostgreSQL results (PG 18.6)
 
-`tests/integration/test_experience_benchmark_runtime.py`: **16 passed in each of two clean DBs**
-(none xfailed), covering memory_disabled, raw source chunk, raw knowledge-owned chunk, current_vres
+`tests/integration/test_experience_benchmark_runtime.py`: **18 passed in each of two clean DBs**
+(none xfailed; includes the two `dev_temporal_refresh` explicit-observe tests), covering memory_disabled, raw source chunk, raw knowledge-owned chunk, current_vres
 knowledge and procedure, candidate_hybrid, project isolation, revocation, lifecycle challenge, the
 approval fixture, ordinary-connection forgery refusal, writer least privilege (not superuser /
 CREATEDB / CREATEROLE, no task_events mutation), one-approval-one-target isolation, OWNER_GAP zero
 owner calls, candidate_hybrid READ ONLY and deterministic identities. `record_latest_user_approval`
-consumes the persisted event. DB-free runtime tests: 21 passed in both runs (retrieval: 50).
+consumes the persisted event. DB-free runtime tests: 22 passed in both runs.
 
 ## 5. Two-clean-DB determinism proof
 
-DBs `vres_e7_c2_a_7122e1db_test` and `vres_e7_c2_b_7122e1db_test`; cases `dev_static_port`,
+DBs `vres_e7_c2_a_2851064e_test` and `vres_e7_c2_b_2851064e_test`; cases `dev_static_port`,
 `dev_source_revoked` (approval-bound), `dev_procedure_reuse`, `dev_temporal_refresh`
-(approval-bound); run A in ascending case order, B in descending.
+(approval-bound, now executing the explicit `knowledge_observe`); run A in ascending case order, B in descending.
 
-- Result digest in both: `effba23f7405bf9d5b6be62d07835ad58c1481a64b1e47319041a7565f665b35`.
+- Result digest in both: `5a1ee7b2c88e2eb51d445e026edf028c3b6e23ee90e0bffbe0a470982cfb9136` (changed from the previous
+  `effba23f...` only because the development corpus/bundle identity changed).
 - EvidencePacks, retrieval metrics, case results and aggregates equal; 4 non-empty packs per DB.
 - Physical key fingerprint (runtime/DB keys) **differs** between the DBs; the result bytes contain
   no physical key, DB id or wall-clock timestamp (leak scan empty). Latency is outside the digest.
@@ -111,7 +133,7 @@ DBs `vres_e7_c2_a_7122e1db_test` and `vres_e7_c2_b_7122e1db_test`; cases `dev_st
 ## 6. Cleanup proof
 
 Both DBs dropped, the baseline-diffed `vres_e7_writer_%` role set is empty after the run (temp
-roles of this run: `vres_e7_writer_cdaba879e2`, `vres_e7_writer_b6f02db1eb`), canonical DB
+roles of this run: `vres_e7_writer_ec9d47804a`, `vres_e7_writer_f0bb1c0700`), canonical DB
 untouched (bootstrap used a CREATEDB role, only `_test` databases touched).
 
 ## 7. Owner-gap matrix (unchanged)
@@ -119,7 +141,11 @@ untouched (bootstrap used a CREATEDB role, only `_test` databases touched).
 Development: 18 executable / 6 OWNER_GAP. Adversarial: 14 executable / 6 OWNER_GAP.
 Gap reasons: `observed_episode_writer_missing`,
 `failed_episode_requires_host_observed_routed_work_unit`. Corpus manifest
-`9558edb2bc61a691f2afdce2c9d444b01e23d069bfdb5a56b1e6a6798391edb7` ok.
+`e227221048bbda62d93f8cfe015445e8616ef4b1ab0cda645a94d9a3b614ac81` ok.
+
+Changed identities (only `dev_temporal_refresh` changed): development `corpus.jsonl` file digest
+`177b439f...0377` -> `bbf2a240a291bd5e1790fcedc247ca569253da8aace6e80ddde9196da83ba034`; development
+bundle digest `3670226e...be0a` -> `ca06efc6531adf5d5294188d90ea656954cc5b940c0946c9847a14476130d7ea`; manifest digest -> above. Unchanged: `expected_evidence.json`, adversarial bundle, `scoring.json` (`9e336646694ab0b87d357506c2be1fb08f7face76050b42e4f635a9b7b30c9c8`); no `thresholds.json`, no held-out.
 
 ## 8. Not done (by instruction)
 

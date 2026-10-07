@@ -279,6 +279,7 @@ EXPECTED_OPS = {
     "procedure_accept",
     "procedure_candidate",
     "knowledge_supersede",
+    "knowledge_observe",
     "lifecycle_retire",
     "lifecycle_reinstate",
     "lifecycle_challenge",
@@ -796,3 +797,49 @@ def test_audit_reports_the_new_repair_checks():
         "metric_semantics_frozen",
     ):
         assert report["checks"][name]["ok"], name
+
+
+# ---- knowledge_observe: the explicit, closed maturity step ----------------
+
+
+def test_knowledge_observe_is_a_closed_operation_with_no_args():
+    assert eb._OPERATIONS["knowledge_observe"] == ({}, {})
+
+
+def test_knowledge_observe_owner_row_is_the_public_knowledge_update():
+    row = eb.OPERATION_OWNERS["knowledge_observe"]
+    assert (row["owner"], row["method"], row["creates"], row["acts_on"]) == (
+        "KnowledgeService",
+        "update",
+        None,
+        "knowledge",
+    )
+    assert dict(row["translation"]) == {"alias": "knowledge_key"}
+    assert dict(row["harness"]) == {"status": "observed"}
+    assert row["uses_direct_sql"] is False and not row["owner_gap"]
+
+
+def test_knowledge_observe_on_created_knowledge_alias_loads():
+    parse(knowledge(0, "dev_a"), S(1, "knowledge_observe", "dev_a"))
+
+
+def test_knowledge_observe_unknown_alias_rejected():
+    with pytest.raises(eb.BenchmarkError):
+        parse(S(0, "knowledge_observe", "dev_a"))
+
+
+def test_knowledge_observe_on_source_alias_rejected():
+    with pytest.raises(eb.BenchmarkError):
+        parse(source(0, "dev_a"), S(1, "knowledge_observe", "dev_a"))
+
+
+def test_knowledge_observe_on_procedure_alias_rejected():
+    proc = S(0, "procedure_accept", "dev_a", name="p", method="m")
+    with pytest.raises(eb.BenchmarkError):
+        parse(proc, S(1, "knowledge_observe", "dev_a"))
+
+
+@pytest.mark.parametrize("extra", [{"status": "validated"}, {"reason": "x"}, {"anything": 1}])
+def test_knowledge_observe_rejects_any_argument(extra):
+    with pytest.raises(eb.BenchmarkError):
+        parse(knowledge(0, "dev_a"), S(1, "knowledge_observe", "dev_a", **extra))

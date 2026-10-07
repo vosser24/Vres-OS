@@ -383,29 +383,29 @@ def test_procedure_order_score_then_alias_and_native_order_kept_on_score_differe
     ]
 
 
-class _KStatus:
-    def __init__(self, statuses):
-        self.statuses, self.updates = statuses, []
+def test_runtime_has_no_hidden_maturity_helper():
+    import inspect
 
-    def get(self, key):
-        return {"status": self.statuses[key]}
+    src = inspect.getsource(rt)
+    assert "_match_successor_maturity" not in src
+    assert not hasattr(rt.BenchmarkRuntime, "_match_successor_maturity")
+    # the only status the runtime writes by itself is the declared "observed" step
+    assert src.count("status=") == src.count('status="observed"') + src.count("status=INITIAL")
 
-    def update(self, key, **kw):
-        self.updates.append((key, kw))
 
+def test_knowledge_observe_is_executable_and_updates_to_observed_only():
+    class K:
+        def __init__(self):
+            self.updates = []
 
-def _successor_runtime(statuses):
-    k = _KStatus(statuses)
+        def update(self, key, **kw):
+            self.updates.append((key, kw))
+
+    assert "knowledge_observe" in rt.EXECUTABLE_OPS
+    k = K()
     runtime = rt.BenchmarkRuntime.__new__(rt.BenchmarkRuntime)
     runtime.o = _owners(knowledge=k)
-    return runtime, k
-
-
-def test_successor_maturity_step_only_for_challenged_old_and_proposed_new():
-    runtime, k = _successor_runtime({"old": "challenged", "new": "proposed"})
-    runtime._match_successor_maturity("old", "new")
-    assert k.updates == [("new", {"status": "observed"})]  # one legal owner step, nothing higher
-    for pair in (("proposed", "proposed"), ("challenged", "observed"), ("validated", "proposed")):
-        runtime, k = _successor_runtime({"old": pair[0], "new": pair[1]})
-        runtime._match_successor_maturity("old", "new")
-        assert k.updates == []  # proposed->proposed stays executable; others are the owner's call
+    runtime._project = lambda case_id, label: 1
+    amap = type("M", (), {"runtime_key_for": staticmethod(lambda alias: f"K-{alias}")})()
+    runtime._step("c", "p", {"t": 0, "op": "knowledge_observe", "alias": "dev_b"}, amap)
+    assert k.updates == [("K-dev_b", {"status": "observed"})]

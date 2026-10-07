@@ -775,6 +775,7 @@ _OPERATIONS: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {
         {"description": _text, "invariants": "texts"},
     ),
     "knowledge_supersede": ({"supersedes": "alias"}, {}),
+    "knowledge_observe": ({}, {}),
     "lifecycle_retire": ({"approval_fixture": _fixture}, {"reason": _text}),
     "lifecycle_reinstate": ({"approval_fixture": _fixture}, {"reason": _text}),
     "lifecycle_challenge": ({"approval_fixture": _fixture}, {"reason": _text}),
@@ -805,10 +806,14 @@ _GAP = (
     "forbidden."
 )
 APPROVAL_FIXTURE_CHAIN = (
-    "scenario owns a synthetic case task",
-    "Repository.record_event(USER_INSTRUCTION, synthetic benchmark acceptance text)",
-    "ApprovalService.record_latest_user_approval(task_key, approval_type, statement, subject_key)",
-    "owner operation receives the returned approval_key",
+    "scenario owns a synthetic case task and session",
+    "trusted provenance-writer ingress stages synthetic benchmark user input "
+    "(session_prompts.stage_user_instruction)",
+    "trusted provenance-writer ingress commits it as a USER_INSTRUCTION event "
+    "(session_prompts.commit_staged_user_instruction_events)",
+    "ApprovalService.record_latest_user_approval(task_key, approval_type, statement, subject_key) "
+    "consumes that persisted USER_INSTRUCTION",
+    "target owner operation receives the returned approval_key",
 )
 APPROVAL_FIXTURE_NOTE = (
     "SYNTHETIC BENCHMARK APPROVAL FIXTURE, never a user approval: allowed only in a fresh "
@@ -1058,6 +1063,15 @@ OPERATION_OWNERS = MappingProxyType(
             {"supersedes": "knowledge"},
             {"alias": "new_key", "supersedes": "old_key"},
             {},
+        ),
+        "knowledge_observe": _row(
+            "KnowledgeService",
+            "update",
+            None,
+            "knowledge",
+            {},
+            {"alias": "knowledge_key"},
+            {"status": "observed"},
         ),
         "lifecycle_retire": _row(
             "ExperienceLifecycleService",

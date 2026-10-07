@@ -93,6 +93,7 @@ VALID_STEPS = [
     _step(14, "lifecycle_refresh", "dev_b", review_after_t=40),
     _step(15, "episode_observe", "dev_i", objective="saw it", result="success"),
     _step(16, "source_revoke", "dev_a", reason="bad source"),
+    _step(17, "knowledge_observe", "dev_b"),
 ]
 
 

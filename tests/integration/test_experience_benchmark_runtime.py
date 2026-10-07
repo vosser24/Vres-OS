@@ -383,3 +383,28 @@ def test_committed_executable_subset_runs_end_to_end(runtime):
     assert [c["case_id"] for c in result["cases"]] == sorted(ids)
     assert all(c["status"] == "executed" for c in result["cases"])
     assert len(result["result_digest"]) == 64
+
+
+def _temporal_refresh_case(*, keep_observe):
+    bundle = eb.load_development_bundle(ROOT, "development", case_ids=["dev_temporal_refresh"])
+    case = dict(next(c for c in bundle["cases"] if c["case_id"] == "dev_temporal_refresh"))
+    ops = [s["op"] for s in case["timeline"]]
+    assert ops[-2:] == ["knowledge_observe", "lifecycle_supersede"]
+    if not keep_observe:
+        case["timeline"] = [s for s in case["timeline"] if s["op"] != "knowledge_observe"]
+    return case
+
+
+def test_temporal_refresh_without_explicit_observe_is_rejected_by_the_real_owner(runtime):
+    # no hidden repair: challenged old (rank 1) vs proposed successor (rank 0) stays refused
+    case = _temporal_refresh_case(keep_observe=False)
+    with pytest.raises(Exception, match="less mature"):
+        runtime.materialize(case)
+
+
+def test_temporal_refresh_with_explicit_observe_supersedes(runtime):
+    case = _temporal_refresh_case(keep_observe=True)
+    amap = runtime.materialize(case)
+    status = runtime.o.knowledge.get
+    assert status(amap.runtime_key_for("dev_b"))["status"] == "observed"
+    assert status(amap.runtime_key_for("dev_a"))["status"] == "superseded"
