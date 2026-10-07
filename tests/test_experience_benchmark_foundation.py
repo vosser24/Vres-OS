@@ -899,7 +899,7 @@ def test_no_runtime_module_imports_benchmark_code():
     offenders = [
         p.name
         for p in SRC.glob("*.py")
-        if p.name != "experience_benchmark.py"
+        if not p.name.startswith("experience_benchmark")
         and "experience_benchmark" in p.read_text(encoding="utf-8")
     ]
     assert offenders == []
