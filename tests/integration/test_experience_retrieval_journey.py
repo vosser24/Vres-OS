@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip("psycopg")
+pytestmark = pytest.mark.usefixtures("provenance_writer")
 
 import psycopg
 
@@ -46,12 +47,14 @@ def _knowledge(key, pid, mk, *, status="validated", statement=None, approval=Non
 
 def _decision(key, task_key, text, *, retire_after_hours=None):
     """Insert through the provenance trigger via a real USER_INSTRUCTION event; optionally retire it."""
-    Repository().record_event(task_key, "USER_INSTRUCTION", "user", {"text": text})
+    with connect() as conn:
+        pid = conn.execute(
+            "SELECT project_id FROM vres.tasks WHERE task_key=%s", (task_key,)
+        ).fetchone()["project_id"]
+    from trusted_provenance_writer import seed_test_user_instruction
+
+    ev = seed_test_user_instruction(pid, task_key, text)
     with connect() as conn, conn.transaction():
-        ev = conn.execute(
-            "SELECT e.id,e.task_id,e.session_id,e.created_at FROM vres.task_events e JOIN vres.tasks t ON t.id=e.task_id "
-            "WHERE t.task_key=%s AND e.event_type='USER_INSTRUCTION' ORDER BY e.id DESC LIMIT 1", (task_key,)
-        ).fetchone()
         conn.execute(
             """INSERT INTO vres.task_decisions(decision_key,task_id,text,status,source_kind,source_event_id,
                source_session_id,decided_at) VALUES (%s,%s,%s,'active','user_instruction',%s,%s,%s)""",
@@ -102,12 +105,10 @@ def _episode(pid, mk, *, outcome="completed", trust="trusted_project_source", pa
 
 
 def _company_approval(pid, task_key):
-    repo = Repository()
-    repo.record_event(task_key, "USER_INSTRUCTION", "user", {"text": "Approved"})
+    from trusted_provenance_writer import seed_test_user_instruction
+
+    ev = seed_test_user_instruction(pid, task_key, "Approved")["id"]
     with connect() as conn, conn.transaction():
-        ev = conn.execute(
-            "SELECT e.id FROM vres.task_events e JOIN vres.tasks t ON t.id=e.task_id WHERE t.task_key=%s "
-            "ORDER BY e.id DESC LIMIT 1", (task_key,)).fetchone()["id"]
         return conn.execute(
             """INSERT INTO vres.approval_events(approval_key,project_id,source_event_id,approval_type,subject_key,
                statement,user_text) VALUES (%s,%s,%s,'company_knowledge_publish',%s,'approve','Approved') RETURNING id""",
@@ -227,7 +228,12 @@ def other_project(tmp_path):
         conn.execute("DELETE FROM vres.experience_episodes WHERE project_id=%s", (pid,))
         conn.execute("DELETE FROM vres.knowledge_items WHERE project_id=%s", (pid,))
         conn.execute("DELETE FROM vres.procedures WHERE project_id=%s", (pid,))
+        conn.execute("DELETE FROM vres.sessions WHERE project_id=%s", (pid,))
+        conn.execute(
+            "ALTER TABLE vres.task_events DISABLE TRIGGER trg_protect_user_authority_event"
+        )
         conn.execute("DELETE FROM vres.tasks WHERE project_id=%s", (pid,))
+        conn.execute("ALTER TABLE vres.task_events ENABLE TRIGGER trg_protect_user_authority_event")
         conn.execute("DELETE FROM vres.projects WHERE id=%s", (pid,))
 
 
@@ -239,7 +245,8 @@ def test_own_project_items_retrieved_and_pack_shape(pg_project):
     _procedure(f"P-{mk}", pg_project, mk)
     ep = _episode(pg_project, mk)
     pack = _retrieve(pg_project, mk, task_key=task)
-    assert pack["schema_version"] == "176.e5.v1" and pack["policy"] == {**pack["policy"], "version": "176.e5.v1", "chunk": "E5"}
+    assert pack["schema_version"] == "176.e5.v2"
+    assert pack["policy"] == {**pack["policy"], "version": "176.e5.v2", "chunk": "E5"}
     assert not pack["abstained"]
     assert _keys(pack, "current_decisions") == [f"D-{mk}"]
     assert pack["current_decisions"][0]["role"] == "instruction"
@@ -838,14 +845,33 @@ def raw_rows():
         conn.execute("DELETE FROM vres.sources WHERE source_key = ANY(%s)", (created["sources"],))
 
 
-def _source(raw_rows, key, pid, *, status="active", approval=None, metadata=None, path="C:/never/opened/file.txt",
-            authority="trusted_project_source"):
+def _source(
+    raw_rows,
+    key,
+    pid,
+    *,
+    status="active",
+    approval=None,
+    metadata=None,
+    path="C:/never/opened/file.txt",
+    authority="trusted_project_source",
+):
     raw_rows["sources"].append(key)
     with connect() as conn, conn.transaction():
         return conn.execute(
             """INSERT INTO vres.sources(source_key,source_type,title,path_or_uri,project_id,status,metadata,
-               scope_approval_event_id,authority_level) VALUES (%s,'document',%s,%s,%s,%s,%s::jsonb,%s,%s) RETURNING id""",
-            (key, f"title {key}", path, pid, status, json.dumps(metadata or {}), approval, authority),
+               scope_approval_event_id,authority_level) VALUES
+               (%s,'document',%s,%s,%s,%s,%s::jsonb,%s,%s) RETURNING id""",
+            (
+                key,
+                f"title {key}",
+                path,
+                pid,
+                status,
+                json.dumps(metadata or {}),
+                approval,
+                authority,
+            ),
         ).fetchone()["id"]
 
 
@@ -1443,20 +1469,27 @@ def test_e6c3_ordinary_retrieve_stays_read_only_and_matches_the_snapshot_composi
                             "WHERE project_id=%s", (pg_project,)).fetchone()["n"] == 0
 
 
-# ======================================================================= E7 C5: E5 v2 raw-source authority allow-list
+# ======================================================================= E7 C5: E5 v2 raw-source
+# authority allow-list
+
 
 def _v1(pid, query):
     return ExperienceRetrievalService()._retrieve_frozen_v1({"project_id": pid, "query": query})
 
 
-@pytest.mark.parametrize("authority,v1_eligible", [
-    ("trusted_project_source", True),            # B: eligible in both
-    ("external_untrusted_observation", True),    # A: v1 historical behavior, excluded in v2
-    (None, True),                                # C: NULL
-    ("partner_claim", True),                     # D: unknown value
-    ("", True),
-])
-def test_v2_raw_source_authority_allow_list_vs_frozen_v1(pg_project, raw_rows, authority, v1_eligible):
+@pytest.mark.parametrize(
+    "authority,v1_eligible",
+    [
+        ("trusted_project_source", True),  # B: eligible in both
+        ("external_untrusted_observation", True),  # A: v1 historical behavior, excluded in v2
+        (None, True),  # C: NULL
+        ("partner_claim", True),  # D: unknown value
+        ("", True),
+    ],
+)
+def test_v2_raw_source_authority_allow_list_vs_frozen_v1(
+    pg_project, raw_rows, authority, v1_eligible
+):
     mk = _mk()
     sid = _source(raw_rows, f"S-{mk}", pg_project, authority=authority)
     _chunk(raw_rows, f"C-{mk}", source_id=sid, content=f"{mk} archive evidence")
@@ -1467,13 +1500,23 @@ def test_v2_raw_source_authority_allow_list_vs_frozen_v1(pg_project, raw_rows, a
     assert "raw_source_authority" in v2["policy"] and "raw_source_authority" not in v1["policy"]
 
 
-def test_v2_untrusted_source_with_usable_knowledge_link_is_excluded_less_permissive_wins(pg_project, raw_rows):
+def test_v2_untrusted_source_with_usable_knowledge_link_is_excluded_less_permissive_wins(
+    pg_project, raw_rows
+):
     mk = _mk()
     _knowledge(f"K-{mk}", pg_project, mk, status="proposed")
     sid = _source(raw_rows, f"S-{mk}", pg_project, authority="external_untrusted_observation")
-    _chunk(raw_rows, f"C-{mk}", source_id=sid, knowledge_key=f"K-{mk}", content=f"{mk} linked evidence")
+    _chunk(
+        raw_rows, f"C-{mk}", source_id=sid, knowledge_key=f"K-{mk}", content=f"{mk} linked evidence"
+    )
     ok = _source(raw_rows, f"S2-{mk}", pg_project)
-    _chunk(raw_rows, f"C2-{mk}", source_id=ok, knowledge_key=f"K-{mk}", content=f"{mk} linked trusted evidence")
+    _chunk(
+        raw_rows,
+        f"C2-{mk}",
+        source_id=ok,
+        knowledge_key=f"K-{mk}",
+        content=f"{mk} linked trusted evidence",
+    )
     assert f"C-{mk}" in _raw_keys(_v1(pg_project, mk))
     keys = _raw_keys(_retrieve(pg_project, mk, include_candidates=False))
     assert f"C-{mk}" not in keys
@@ -1486,14 +1529,35 @@ def test_v2_knowledge_only_chunk_unchanged(pg_project, raw_rows):
     assert _raw_keys(_retrieve(pg_project, mk)) == _raw_keys(_v1(pg_project, mk))
 
 
-def test_v2_project_isolation_company_approval_and_lifecycle_unchanged(pg_project, other_project, raw_rows):
+def test_v2_project_isolation_company_approval_and_lifecycle_unchanged(
+    pg_project, other_project, raw_rows
+):
     mk = _mk()
-    _chunk(raw_rows, f"C-F-{mk}", source_id=_source(raw_rows, f"S-F-{mk}", other_project), content=f"{mk} foreign")
-    _chunk(raw_rows, f"C-A-{mk}", source_id=_source(raw_rows, f"S-A-{mk}", pg_project, status="archived"),
-           content=f"{mk} archived")
-    _chunk(raw_rows, f"C-S-{mk}", content=f"{mk} sensitive", metadata={"sensitive_disposition": "sensitive_excluded"},
-           source_id=_source(raw_rows, f"S-S-{mk}", pg_project))
-    _chunk(raw_rows, f"C-OK-{mk}", source_id=_source(raw_rows, f"S-OK-{mk}", pg_project), content=f"{mk} fine")
+    _chunk(
+        raw_rows,
+        f"C-F-{mk}",
+        source_id=_source(raw_rows, f"S-F-{mk}", other_project),
+        content=f"{mk} foreign",
+    )
+    _chunk(
+        raw_rows,
+        f"C-A-{mk}",
+        source_id=_source(raw_rows, f"S-A-{mk}", pg_project, status="archived"),
+        content=f"{mk} archived",
+    )
+    _chunk(
+        raw_rows,
+        f"C-S-{mk}",
+        content=f"{mk} sensitive",
+        metadata={"sensitive_disposition": "sensitive_excluded"},
+        source_id=_source(raw_rows, f"S-S-{mk}", pg_project),
+    )
+    _chunk(
+        raw_rows,
+        f"C-OK-{mk}",
+        source_id=_source(raw_rows, f"S-OK-{mk}", pg_project),
+        content=f"{mk} fine",
+    )
     assert _raw_keys(_retrieve(pg_project, mk)) == _raw_keys(_v1(pg_project, mk)) == [f"C-OK-{mk}"]
 
 

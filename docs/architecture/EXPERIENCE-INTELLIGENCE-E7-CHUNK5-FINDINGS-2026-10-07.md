@@ -299,3 +299,93 @@ computed, not forced.
 2. Legacy PG tests that write user-authority events or observations need the trusted-writer fixture; they fail
    identically before and after this change.
 3. Thresholds, full development replay, latency and held-out remain later chunks.
+## Verification Hygiene (test/verification infrastructure only, 2026-10-07)
+
+Scope: tests, fixtures and verification tooling. No product, security, migration or corpus change.
+
+### Shared trusted-writer fixture
+
+- `tests/integration/trusted_provenance_writer.py` is the single generic implementation.
+  `tests/integration/e7_trusted_writer.py` is now a thin re-export for the security harness.
+- `trusted_provenance_writer(admin_dsn)` is opt-in per test (never a global autouse fixture): it creates a
+  random LOGIN role (NOSUPERUSER, NOCREATEDB, NOCREATEROLE, NOINHERIT) with an in-memory password, binds
+  `vres.provenance_authority.user_event_writer` to it, exposes only
+  `VRES_PROVENANCE_WRITER_DATABASE_URL`, and on exit restores the environment and the original binding, then
+  `DROP OWNED` / `DROP ROLE`. The admin role (postgres / session_user) is never trusted as the writer.
+- The role holds schema USAGE and EXECUTE on exactly six functions and no table privilege of any kind:
+  `stage_user_input(bigint,text,text,text,text,text,text,timestamptz)`,
+  `latest_pending_user_instruction(bigint,text)`, `commit_user_inputs(bigint,text,text)`,
+  `record_experience_retrieval_observation(bigint,text,text,text,text,jsonb,jsonb)`,
+  `record_experience_retrieval_references(bigint,text,text,text,text,text,text,text[])`,
+  `record_experience_retrieval_replay(bigint,bigint,jsonb)`.
+- Proof: `test_writer_has_only_function_execute_and_no_table_dml` (PG) queries every `vres` relation for the role's
+  INSERT/UPDATE/DELETE/TRUNCATE/SELECT privileges (none) and requires the executable-function set to equal the six
+  signatures. `tests/test_trusted_provenance_writer_fixture.py` (DB-free) fails on drift between the fixture's
+  signatures and `database_boundary.py` and on any table-privilege GRANT in the fixture.
+- `pytest` fixture `provenance_writer` (in `tests/integration/conftest.py`) wraps it. The negative boundary tests
+  stay writer-less.
+
+### Legacy USER_INSTRUCTION fixtures moved to protected ingress
+
+- `seed_test_user_instruction(project_id, task_key, text)` opens a real session, then stages and commits the text
+  through `session_prompts` (the production protected path) and returns the persisted event. `_decision` and
+  `_company_approval` in the E3 journey test use it; migration 024's trigger is not weakened. Synthetic user events
+  are removed by test cleanup, which disables and re-enables the user-authority trigger only inside the disposable
+  test DB's cleanup transaction (the existing E4 ledger pattern).
+- Two stale E5 v1 assertions (default pack is v2) and one grant-snapshot assertion that assumed only temp roles
+  hold grants (the secure-bootstrap DB also gives `vres_os` SELECT) were corrected as test assumptions.
+
+### E6 observer tests use the restricted writer
+
+- `test_e6_retrieval_observation.py` and the replay-writer test use `provenance_writer`, so `observe_retrieval`
+  reaches the DB through `VRES_PROVENANCE_WRITER_DATABASE_URL` exactly as in production. `observe_retrieval` is
+  unchanged; there is no fallback to the runtime DSN. A redundant `migrate()` in the E6 fixture was removed
+  because it re-ran boundary activation and reset the writer binding.
+
+### Targeted legacy PG set (journey, E6 schema, E6 observation, retrieve surface; fresh `_test` DB)
+
+| State | Result |
+|---|---|
+| Before (previous evidence) | 42 failed / 97 passed (139 tests) |
+| After | 152 passed, 0 failed, 0 errors (150 legacy + 2 new writer-proof tests) |
+
+Zero failures are caused by the writer role. No remainder to classify.
+
+### CRLF repair
+
+`test_e6_observability_hook.py` asserted on the launcher text using the checkout's line endings; the test now
+normalizes `\r\n` to `\n` before comparing (test-only; RED on the CRLF checkout, GREEN after).
+
+### Source-revocation whitelist repair
+
+`test_source_revocation_unit.py` exact reader whitelist now names the benchmark modules that only carry the
+lifecycle state as a string constant in cases/oracles/scoring (readers; none writes `status='revoked'`). The
+`offenders == []` assertion is unchanged (RED before, GREEN after).
+
+### No new Ruff debt
+
+- `lint_audit` against base `a36a6a3`: 0 diagnostics of any rule on Chunk-5-added lines, 0 formatter regions on
+  added lines; the 3 files created by Chunk 5 pass `ruff check` and `ruff format --check`. Legacy files were not
+  reformatted wholesale (range formatting of added lines only).
+- Production files received behavior-preserving wrapping only (`experience_observability.py`,
+  `experience_retrieval.py`). AST comparison with HEAD is identical except whitespace inside docstrings and one SQL
+  string literal (an added line break between `AND` and `coalesce(`), which is semantically identical SQL.
+
+### Final counts and proof
+
+- DB-free (`tests/` excluding the opt-in `tests/integration`, no deselections): 2562 passed, 4 skipped.
+  `tests/integration` without a database: 2 passed, 825 skipped (opt-in PG). Collecting `tests/` and
+  `tests/integration` in one invocation hits a pre-existing duplicate-basename import mismatch and is not used.
+- Fresh two-clean-DB security run (A ascending, B reversed): matrix 13 PASS / 0 FAIL / 1 N/A / 6 owner_gap; A/B
+  digests equal, per-case results equal, physical-key fingerprints differ, leak scan empty, cleanup PASS, no
+  leftover temp writer roles; focused security PG file 15 passed in each DB.
+- The result digest embeds the source commit/tree under test, so it is `52a400b8...b1242` for HEAD `f512c2f`
+  (tree `8c2d368f`) and was `2975f875...1178d` for code commit `3cdd8ba`. Evidence that this is not a behavior
+  change: the run bodies are identical excluding `source`/`result_digest`, and recomputing the digest with the
+  `3cdd8ba` source reproduces `2975f875...1178d`.
+- Unchanged: E5 v1 `7572cafc...982e9`, E5 v2 `0cd0f10d...6b5`, E6 `d61f60d3...5e5`, migration 042, adversarial
+  corpus manifest `b9eafa03...4aa`.
+
+### Statement
+
+No product or security behavior changed. Chunk 6 was not started.

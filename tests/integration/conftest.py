@@ -7,6 +7,18 @@ import pytest
 
 
 @pytest.fixture
+def provenance_writer(pg_project):
+    """Bind a random restricted trusted provenance writer for one test.
+
+    Never postgres or session_user.
+    """
+    from trusted_provenance_writer import trusted_provenance_writer
+
+    with trusted_provenance_writer(os.environ["VRES_TEST_DATABASE_URL"]) as role:
+        yield role
+
+
+@pytest.fixture
 def pg_project(monkeypatch, tmp_path):
     pytest.importorskip("psycopg")
     from psycopg.conninfo import conninfo_to_dict
@@ -82,6 +94,15 @@ def pg_project(monkeypatch, tmp_path):
             conn.execute("DELETE FROM vres.procedures WHERE project_id=%s", (pid,))
             conn.execute("DELETE FROM vres.approval_events WHERE project_id=%s", (pid,))
             conn.execute("DELETE FROM vres.sessions WHERE project_id=%s", (pid,))
+            # Synthetic USER_INSTRUCTION events are protected from deletion; like the E4 ledger
+            # above, the disposable test DB owner disables that trigger only inside this
+            # cleanup transaction.
+            conn.execute(
+                "ALTER TABLE vres.task_events DISABLE TRIGGER trg_protect_user_authority_event"
+            )
             conn.execute("DELETE FROM vres.tasks WHERE project_id=%s", (pid,))
+            conn.execute(
+                "ALTER TABLE vres.task_events ENABLE TRIGGER trg_protect_user_authority_event"
+            )
             conn.execute("DELETE FROM vres.registry_objects WHERE project_id=%s", (pid,))
             conn.execute("DELETE FROM vres.projects WHERE id=%s", (pid,))

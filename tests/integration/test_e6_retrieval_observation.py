@@ -16,7 +16,7 @@ import psycopg  # noqa: E402
 from psycopg.conninfo import conninfo_to_dict  # noqa: E402
 
 from vres_os import experience_observability as eo  # noqa: E402
-from vres_os.db import connect, migrate  # noqa: E402
+from vres_os.db import connect  # noqa: E402
 from vres_os.experience import _sha256  # noqa: E402
 from vres_os.experience_retrieval import SECTIONS, ExperienceRetrievalService  # noqa: E402
 from vres_os.project import ProjectIdentity  # noqa: E402
@@ -28,7 +28,7 @@ TOOL = eo.TOOL_NAME
 
 
 @pytest.fixture
-def e6(monkeypatch, tmp_path):
+def e6(monkeypatch, tmp_path, provenance_writer):
     dsn = os.environ.get("VRES_TEST_DATABASE_URL")
     if not dsn:
         pytest.skip("VRES_TEST_DATABASE_URL is not set")
@@ -37,7 +37,6 @@ def e6(monkeypatch, tmp_path):
     if not conninfo_to_dict(dsn).get("dbname", "").endswith("_test"):
         pytest.fail("Integration database name must end in _test; refusing an ordinary database")
     monkeypatch.setenv("VRES_DATABASE_URL", dsn)
-    migrate()
     project = ProjectIdentity(Path(tmp_path), f"pytest:e6:{uuid.uuid4().hex}", "Vres e6 test", None, None)
     return Repository().ensure_project(project)
 
@@ -96,7 +95,9 @@ def test_real_e5_pack_is_recorded_structurally_and_minimally(e6):
     obs = _rows("SELECT * FROM vres.experience_retrieval_observations WHERE observation_key=%s", (result["observation_key"],))[0]
     assert obs["project_id"] == e6 and obs["pack_digest"] == _sha256(pack) and obs["abstained"] is False
     assert obs["item_count"] == sum(len(pack[s]) for s in SECTIONS) > 0
-    assert obs["policy_version"] == "176.e6.v1" and obs["retrieval_schema_version"] == "176.e5.v2" and obs["retrieval_policy_digest"] == eo.SUPPORTED_RETRIEVAL_POLICIES["176.e5.v2"][1]
+    assert obs["policy_version"] == "176.e6.v1"
+    assert obs["retrieval_schema_version"] == "176.e5.v2"
+    assert obs["retrieval_policy_digest"] == eo.SUPPORTED_RETRIEVAL_POLICIES["176.e5.v2"][1]
     assert obs["query_digest"] == _sha256(request["query"]) and obs["duration_ms"] == 12
     assert obs["task_key"] == task and obs["work_unit_key"] is None and obs["agent_type"] is None
     items = _rows("SELECT * FROM vres.experience_retrieval_items WHERE observation_id=%s ORDER BY ordinal", (obs["id"],))

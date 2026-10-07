@@ -394,15 +394,22 @@ def test_get_returns_closed_structural_row_without_internal_ids():
 
 # ---- #176 E7 C5: E6 replay stays frozen to E5 v1 hard gates
 
+
 def test_replay_baseline_is_frozen_v1_not_the_product_default():
     from vres_os import experience_retrieval as er
+
     assert BASELINE_POLICY_DIGEST == _sha256(er.E5_V1_POLICY) != _sha256(er.POLICY)
-    assert er.E5_V1_POLICY["version"] == "176.e5.v1" and "raw_source_authority" not in er.E5_V1_POLICY
+    assert (
+        er.E5_V1_POLICY["version"] == "176.e5.v1" and "raw_source_authority" not in er.E5_V1_POLICY
+    )
     assert er.POLICY is er.E5_V2_POLICY and er.SCHEMA_VERSION == "176.e5.v2"
 
 
 def test_candidate_policy_cannot_alter_the_raw_source_gate():
     from vres_os import experience_retrieval as er
-    cand = er._policy_for(er.CompositionParams(**{**er.E5_PARAMS.__dict__, "rrf_k": er.RRF_K + 1}), er.E5_V1_POLICY)
+
+    cand = er._policy_for(
+        er.CompositionParams(**{**er.E5_PARAMS.__dict__, "rrf_k": er.RRF_K + 1}), er.E5_V1_POLICY
+    )
     assert "raw_source_authority" not in cand
     assert er._policy_for(er.E5_PARAMS, er.E5_V1_POLICY) is er.E5_V1_POLICY

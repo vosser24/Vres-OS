@@ -38,9 +38,12 @@ from .sensitive_policy import SENSITIVE_SANITIZED, sanitize_extracted_text
 
 E5_V1_SCHEMA_VERSION = "176.e5.v1"
 E5_V2_SCHEMA_VERSION = "176.e5.v2"
-SCHEMA_VERSION = E5_V2_SCHEMA_VERSION  # the product default; v1 stays available only as an explicit replay baseline
-# v2 raw-source authority boundary: a FAIL-CLOSED allow-list (sources.authority_level is free text, so a deny-list
-# would trust unknown values). NULL, empty, external_untrusted_observation and any other value are not eligible.
+# the product default; v1 stays available only as an explicit replay baseline
+SCHEMA_VERSION = E5_V2_SCHEMA_VERSION
+# v2 raw-source authority boundary: a FAIL-CLOSED allow-list (sources.authority_level is free text,
+# so a deny-list
+# would trust unknown values). NULL, empty, external_untrusted_observation and any other value are
+# not eligible.
 RAW_SOURCE_AUTHORITY_ALLOWLIST_V2 = ("trusted_project_source",)
 # One fail-closed allow-list (knowledge_status): current intent sees CURRENT only; historical intent additionally
 # sees superseded/retired (flagged) and revoked (tombstone). NULL/unknown/rejected never match.
@@ -76,8 +79,13 @@ E5_V1_POLICY = {
     "chunk": "E5",
     "retrieval_mode": "lexical+optional_semantic; raw_fallback=lexical_only",
     "rank_order": [
-        "section", "authority_tier", "scope_rank", "task_family_or_capability_match", "fusion_rank_score",
-        "recency_epoch", "memory_key",
+        "section",
+        "authority_tier",
+        "scope_rank",
+        "task_family_or_capability_match",
+        "fusion_rank_score",
+        "recency_epoch",
+        "memory_key",
     ],
     "fusion": "reciprocal_rank_k60_lexical_semantic",
     "budgets": BUDGETS,
@@ -87,7 +95,10 @@ E5_V1_POLICY = {
 E5_V2_POLICY = {
     **E5_V1_POLICY,
     "version": E5_V2_SCHEMA_VERSION,
-    "raw_source_authority": {"mode": "allow_list", "values": list(RAW_SOURCE_AUTHORITY_ALLOWLIST_V2)},
+    "raw_source_authority": {
+        "mode": "allow_list",
+        "values": list(RAW_SOURCE_AUTHORITY_ALLOWLIST_V2),
+    },
 }
 POLICY = E5_V2_POLICY
 # Read-time trust handling is separate from E2's write-time quarantine (_INJECTION there is deliberately broad:
@@ -144,13 +155,18 @@ E5_PARAMS = CompositionParams(dict(BUDGETS), MAX_ITEMS, MAX_PACK_BYTES, RRF_K)
 
 
 def _policy_for(params: CompositionParams, base: dict[str, Any] | None = None) -> dict[str, Any]:
-    """The E5 policy object of `base` (default: product v2) for E5 params; otherwise a truthful replay-only copy."""
+    """The E5 policy object of `base` (default: product v2) for E5 params;
+    otherwise a truthful replay-only copy.
+    """
     base = POLICY if base is None else base
     if params == E5_PARAMS:
         return base
     return {
-        **base, "chunk": "E6_candidate", "fusion": f"reciprocal_rank_k{params.rrf_k}_lexical_semantic",
-        "budgets": dict(params.section_budgets), "max_items": params.max_items,
+        **base,
+        "chunk": "E6_candidate",
+        "fusion": f"reciprocal_rank_k{params.rrf_k}_lexical_semantic",
+        "budgets": dict(params.section_budgets),
+        "max_items": params.max_items,
         "max_pack_bytes": params.max_pack_bytes,
     }
 
@@ -983,14 +999,23 @@ def _settle(kept: list[dict[str, Any]], sets: dict[str, dict[str, Any]], diag: d
                 continue
             del sets[key]
             diag["truncated"]["conflict_sets"] += 1
-            kept[:] = [i for i in kept if not (i["memory_key"] in names and key in i.get("_conflict_keys", []))]
+            kept[:] = [
+                i
+                for i in kept
+                if not (i["memory_key"] in names and key in i.get("_conflict_keys", []))
+            ]
             changed = True
             break
 
 
 def compose(
-    items: list[dict[str, Any]], req: dict[str, Any], diagnostics: dict[str, int], edges=(), raw_fn=None,
-    params: CompositionParams = E5_PARAMS, base_policy: dict[str, Any] | None = None,
+    items: list[dict[str, Any]],
+    req: dict[str, Any],
+    diagnostics: dict[str, int],
+    edges=(),
+    raw_fn=None,
+    params: CompositionParams = E5_PARAMS,
+    base_policy: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Evaluate, order, dedupe, budget and size-bound. Pure and deterministic given its inputs.
 
@@ -1199,7 +1224,10 @@ class ExperienceRetrievalService:
             return self.compose_universe(self.collect_universe(conn, req))
 
     def _retrieve_frozen_v1(self, request: dict[str, Any] | RetrievalRequest) -> dict[str, Any]:
-        """Internal compatibility/replay path: the exact pre-hardening E5 v1 hard gates. Never a product surface."""
+        """Internal compatibility/replay path: the exact pre-hardening E5 v1 hard gates.
+
+        Never a product surface.
+        """
         req = normalize_request(request)
         with self._open() as conn:
             return self.compose_universe(self.collect_universe(conn, req, policy=E5_V1_POLICY))
@@ -1216,11 +1244,23 @@ class ExperienceRetrievalService:
                 "baseline": baseline, "candidate": cand, "isolation": isolation}
 
     def compose_universe(self, universe: RetrievalUniverse, params: CompositionParams = E5_PARAMS) -> dict[str, Any]:
-        return compose(universe.items, universe.req, dict(universe.counts), universe.edges,
-                       raw_fn=universe.raw_fn, params=params, base_policy=universe.policy)
+        return compose(
+            universe.items,
+            universe.req,
+            dict(universe.counts),
+            universe.edges,
+            raw_fn=universe.raw_fn,
+            params=params,
+            base_policy=universe.policy,
+        )
 
     def collect_universe(
-        self, conn, req: dict[str, Any], *, eager_raw: bool = False, policy: dict[str, Any] | None = None,
+        self,
+        conn,
+        req: dict[str, Any],
+        *,
+        eager_raw: bool = False,
+        policy: dict[str, Any] | None = None,
     ) -> RetrievalUniverse:
         policy = POLICY if policy is None else policy
         if policy is not E5_V1_POLICY and policy is not E5_V2_POLICY:
@@ -1794,7 +1834,8 @@ class ExperienceRetrievalService:
         match, rank = _lexical("c.search_vector", "c.content", tokens)
         sens = "('sensitive_excluded','sensitive_review_required')"
         params = {**params, "raw_at": raw_at}
-        # v2 only: source-owned chunks need an allow-listed authority_level (NULL never matches). v1 has no field.
+        # v2 only: source-owned chunks need an allow-listed authority_level (NULL never matches). v1
+        # has no field.
         authority = (policy or {}).get("raw_source_authority")
         source_authority = ""
         if authority:
@@ -1818,7 +1859,8 @@ class ExperienceRetrievalService:
               AND (NOT %(hist)s OR c.created_at<={ref})
               AND (c.source_id IS NULL OR (
                        s.status='active' AND (s.project_id=%(pid)s OR s.project_id IS NULL)
-                   {source_authority}AND coalesce(s.metadata->>'sensitive_disposition','') NOT IN {sens}
+                   {source_authority}AND
+                       coalesce(s.metadata->>'sensitive_disposition','') NOT IN {sens}
                    AND (NOT %(hist)s OR s.ingested_at<={ref})))
               AND (c.knowledge_id IS NULL OR (
                        (k.project_id=%(pid)s OR k.project_id IS NULL)

@@ -28,7 +28,7 @@ def test_hooks_json_registers_one_successful_posttooluse_observer():
 def test_launcher_is_bounded_utf8_nobom_and_fail_safe():
     raw = LAUNCHER.read_bytes()
     assert not raw.startswith(b"\xef\xbb\xbf")
-    text = raw.decode("utf-8")
+    text = raw.decode("utf-8").replace("\r\n", "\n")  # checkout line endings are not behavior
     assert "1048577" in text and "1048576" in text and "UTF8Encoding $false" in text
     assert "-m vres_os.cli hook experience-observe" in text
     assert "exit $LASTEXITCODE" not in text and text.rstrip().endswith("exit 0\n}".strip())

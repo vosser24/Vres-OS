@@ -249,7 +249,16 @@ def test_only_source_revocation_writes_the_revoked_status():
     # The only other code-level use is the read-side exclusion tuple.
     # E4 Chunk G: session_contamination.py only words the revoked-identifier phrase shown to the user (no status write).
     # E6: experience_utility.py is a read-side lifecycle projection (reader only; writers are already rejected above).
+    # E7: the benchmark modules only name the lifecycle state in cases/oracles/scoring (readers;
+    # writers are
+    # rejected above, and no module here writes status='revoked').
     assert sorted(r[0] for r in readers) == [
-        "experience_utility.py", "knowledge_status.py", "session_contamination.py",
+        "experience_benchmark.py",
+        "experience_benchmark_faithfulness.py",
+        "experience_benchmark_security.py",
+        "experience_benchmark_security_runtime.py",
+        "experience_utility.py",
+        "knowledge_status.py",
+        "session_contamination.py",
     ]
     assert [r for r in readers if r[0] == "knowledge_status.py"] == [("knowledge_status.py", ["revoked"])]

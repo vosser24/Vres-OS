@@ -215,6 +215,7 @@ def test_approval_fixture_never_trusts_the_connecting_account():
     for rel in (
         "src/vres_os/experience_benchmark_runtime.py",
         "tests/integration/e7_trusted_writer.py",
+        "tests/integration/trusted_provenance_writer.py",
     ):
         assert not bad.search((root / rel).read_text(encoding="utf-8")), rel
     runtime_src = (root / "src/vres_os/experience_benchmark_runtime.py").read_text(encoding="utf-8")

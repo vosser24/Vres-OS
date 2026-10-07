@@ -419,17 +419,34 @@ def test_migration_041_replay_ledger_and_writer_contract():
                    "REVOKE ALL ON FUNCTION vres.record_experience_retrieval_replay(bigint,bigint,jsonb) FROM PUBLIC"):
         assert refuse in flat
     assert "GRANT " not in code and "DELETE FROM" not in code and "ALTER TABLE" not in code
-    assert not any(n.name.startswith("043") for n in resources.files("vres_os").joinpath("migrations").iterdir())
+    assert not any(
+        n.name.startswith("043")
+        for n in resources.files("vres_os").joinpath("migrations").iterdir()
+    )
 
 
 def test_migration_042_is_the_last_and_only_replaces_the_two_041_identity_checks():
-    names = sorted(n.name for n in resources.files("vres_os").joinpath("migrations").iterdir() if n.name.endswith(".sql"))
+    names = sorted(
+        n.name
+        for n in resources.files("vres_os").joinpath("migrations").iterdir()
+        if n.name.endswith(".sql")
+    )
     assert names[-1] == "042_experience_retrieval_policy_v2.sql"
     sql = _migration("042_experience_retrieval_policy_v2.sql")
     code = "\n".join(line for line in sql.splitlines() if not line.lstrip().startswith("--"))
     assert code.count("DROP CONSTRAINT") == 2 and code.count("ADD CONSTRAINT") == 1
-    for forbidden in ("CREATE TABLE", "ADD COLUMN", "UPDATE ", "INSERT ", "DELETE ", "TRIGGER", "GRANT", "REVOKE",
-                      "CREATE OR REPLACE FUNCTION", " IN ("):
+    for forbidden in (
+        "CREATE TABLE",
+        "ADD COLUMN",
+        "UPDATE ",
+        "INSERT ",
+        "DELETE ",
+        "TRIGGER",
+        "GRANT",
+        "REVOKE",
+        "CREATE OR REPLACE FUNCTION",
+        " IN (",
+    ):
         assert forbidden not in code, forbidden
     assert "experience_retrieval_observation_retrieval_schema_version_check" in code
     assert "experience_retrieval_observations_retrieval_policy_digest_check" in code

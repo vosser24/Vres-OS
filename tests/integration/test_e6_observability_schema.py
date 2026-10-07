@@ -50,22 +50,40 @@ def _scalar(q, params=()):
 def test_policy_row_and_frozen_digests(db_ready):
     digest = _scalar("SELECT policy_digest FROM vres.experience_policy_versions WHERE policy_version='176.e6.v1'")
     assert digest == eo.E6_POLICY_DIGEST == "d61f60d31182085748bb613ef3c160274f1a1a5a2384854f36e52b4cdfecc5e5"
-    assert eo.SUPPORTED_RETRIEVAL_POLICIES["176.e5.v1"][1] == "7572cafc632d4f56571adbe5f59baceedf15c56a07d5a3ca35e4b05448a982e9"
+    assert eo.SUPPORTED_RETRIEVAL_POLICIES["176.e5.v1"][1] == (
+        "7572cafc632d4f56571adbe5f59baceedf15c56a07d5a3ca35e4b05448a982e9"
+    )
 
 
 def test_migration_count_and_latest(db_ready):
     assert _scalar("SELECT count(*) FROM vres.schema_migrations") == 42
-    assert _scalar("SELECT max(version) FROM vres.schema_migrations") == "042_experience_retrieval_policy_v2.sql"
+    assert (
+        _scalar("SELECT max(version) FROM vres.schema_migrations")
+        == "042_experience_retrieval_policy_v2.sql"
+    )
 
 
 def _observation(project_id, **over):
     row = {
-        "observation_key": f"ERO-{uuid.uuid4().hex}", "idempotency_key": uuid.uuid4().hex * 2, "project_id": project_id,
-        "attribution_state": "main_thread", "policy_version": "176.e6.v1", "retrieval_schema_version": "176.e5.v1",
-        "retrieval_policy_digest": eo.SUPPORTED_RETRIEVAL_POLICIES["176.e5.v1"][1], "request_digest": HEX, "query_digest": HEX,
-        "pack_digest": HEX, "pack_bytes": 100, "estimated_tokens": 5, "item_count": 0, "abstained": True,
-        "reason": "no_eligible_experience", "temporal_intent": "current",
-        "tool_use_id": "toolu_x", "include_candidates": False, "raw_fallback": True,
+        "observation_key": f"ERO-{uuid.uuid4().hex}",
+        "idempotency_key": uuid.uuid4().hex * 2,
+        "project_id": project_id,
+        "attribution_state": "main_thread",
+        "policy_version": "176.e6.v1",
+        "retrieval_schema_version": "176.e5.v1",
+        "retrieval_policy_digest": eo.SUPPORTED_RETRIEVAL_POLICIES["176.e5.v1"][1],
+        "request_digest": HEX,
+        "query_digest": HEX,
+        "pack_digest": HEX,
+        "pack_bytes": 100,
+        "estimated_tokens": 5,
+        "item_count": 0,
+        "abstained": True,
+        "reason": "no_eligible_experience",
+        "temporal_intent": "current",
+        "tool_use_id": "toolu_x",
+        "include_candidates": False,
+        "raw_fallback": True,
         "observed_at": datetime.now(timezone.utc),
     }
     row.update(over)
@@ -241,7 +259,12 @@ def test_n_boundary_activation_is_repeatable_without_broadening_grants(db_ready)
                 f"vres.record_experience_retrieval_references(bigint,text,text,text,text,text,text,text[])|{writer}|EXECUTE",
                 f"vres.record_experience_retrieval_observation(bigint,text,text,text,text,jsonb,jsonb)|{writer}|EXECUTE",
             ])
-            assert all(a.split("|")[1] in (runtime, writer) for a in snapshots[0])  # nothing for PUBLIC or anyone else
+            # A bootstrapped DB also carries the real runtime/writer grants; they must stay
+            # read/execute-only
+            # and nothing may be granted to PUBLIC (rendered as an unknown OID=0 grantee).
+            others = [a for a in snapshots[0] if a.split("|")[1] not in (runtime, writer)]
+            assert not [a for a in others if a.split("|")[1].startswith("unknown")], others
+            assert all(a.split("|")[2] in ("SELECT", "EXECUTE") for a in others), others
         finally:
             for role in (runtime, writer):
                 admin.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role)))
@@ -311,11 +334,15 @@ def test_k_real_040_to_041_upgrade_preserves_seeded_state(disposable_040):
         state_before = {t: conn.execute(q).fetchall() for t, q in _SEED_SELECT.items()}
         defs_before = _table_defs(conn, _SEED_WATCH)
     assert len(state_before["sessions"]) == 1 and len(state_before["experience_episodes"]) == 1
-    assert db.migrate() == ["041_experience_retrieval_observability.sql", "042_experience_retrieval_policy_v2.sql"]
+    assert db.migrate() == [
+        "041_experience_retrieval_observability.sql",
+        "042_experience_retrieval_policy_v2.sql",
+    ]
     with connect() as conn:
-        assert conn.execute("SELECT count(*) AS n FROM vres.schema_migrations").fetchone()["n"] == 42
-        assert conn.execute("SELECT max(version) AS v FROM vres.schema_migrations").fetchone()["v"] == \
-            "042_experience_retrieval_policy_v2.sql"
+        count = conn.execute("SELECT count(*) AS n FROM vres.schema_migrations").fetchone()
+        assert count["n"] == 42
+        latest = conn.execute("SELECT max(version) AS v FROM vres.schema_migrations").fetchone()
+        assert latest["v"] == "042_experience_retrieval_policy_v2.sql"
         tables_after = {r["table_name"] for r in conn.execute(
             "SELECT table_name FROM information_schema.tables WHERE table_schema='vres'")}
         assert tables_after - tables_before == {"experience_retrieval_observations", "experience_retrieval_items",
@@ -475,7 +502,9 @@ def test_replay_table_is_closed_content_free_and_writer_function_is_not_public(d
         assert conn.execute("SELECT prosecdef AS d FROM pg_proc WHERE oid=%s::regprocedure", (REPLAY_FN,)).fetchone()["d"]
 
 
-def test_replay_writer_refuses_non_writer_unknown_keys_and_bad_shapes(db_ready, pid):
+def test_replay_writer_refuses_non_writer_unknown_keys_and_bad_shapes(
+    db_ready, pid, provenance_writer
+):
     from psycopg.types.json import Jsonb
     good = {"request_digest": HEX, "snapshot_at": "2026-10-06T00:00:00+00:00", "baseline_retrieval_policy_digest": HEX,
             "candidate_policy": {"rrf_k": 15}, "candidate_policy_digest": HEX, "baseline_pack_digest": HEX,
@@ -500,23 +529,41 @@ V2_ID = ("176.e5.v2", eo.SUPPORTED_RETRIEVAL_POLICIES["176.e5.v2"][1])
 
 
 def test_042_accepts_v1_and_v2_pairs_and_rejects_cross_unknown_pairs(db_ready, pid):
-    """#176 E7 C5: migration 042 replaces the two 041 equality checks with ONE paired identity check."""
+    """#176 E7 C5: migration 042 replaces the two 041 equality checks.
+
+    It installs ONE paired identity check instead.
+    """
     for version, digest in (V1_ID, V2_ID):
         with connect() as conn, conn.transaction():
             _insert_obs(conn, pid, retrieval_schema_version=version, retrieval_policy_digest=digest)
-    for version, digest in ((V1_ID[0], V2_ID[1]), (V2_ID[0], V1_ID[1]), ("176.e5.v3", V2_ID[1]),
-                            (V2_ID[0], HEX), ("x", HEX)):
+    for version, digest in (
+        (V1_ID[0], V2_ID[1]),
+        (V2_ID[0], V1_ID[1]),
+        ("176.e5.v3", V2_ID[1]),
+        (V2_ID[0], HEX),
+        ("x", HEX),
+    ):
         with pytest.raises(psycopg.errors.CheckViolation):
             with connect() as conn, conn.transaction():
-                _insert_obs(conn, pid, retrieval_schema_version=version, retrieval_policy_digest=digest)
+                _insert_obs(
+                    conn, pid, retrieval_schema_version=version, retrieval_policy_digest=digest
+                )
 
 
 def test_042_constraint_shape_and_no_other_schema_change(db_ready):
     with connect() as conn:
-        defs = {r["conname"]: r["d"] for r in conn.execute(
-            "SELECT conname, pg_get_constraintdef(oid) AS d FROM pg_constraint "
-            "WHERE conrelid='vres.experience_retrieval_observations'::regclass AND contype='c'")}
+        defs = {
+            r["conname"]: r["d"]
+            for r in conn.execute(
+                "SELECT conname, pg_get_constraintdef(oid) AS d FROM pg_constraint "
+                "WHERE conrelid='vres.experience_retrieval_observations'::regclass AND contype='c'"
+            )
+        }
     pair = defs.pop("experience_retrieval_observations_e5_identity_pair_check")
     assert V1_ID[0] in pair and V1_ID[1] in pair and V2_ID[0] in pair and V2_ID[1] in pair
     # no other check constrains the two identity columns any more
-    assert not [n for n, d in defs.items() if "retrieval_schema_version" in d or "retrieval_policy_digest" in d]
+    assert not [
+        n
+        for n, d in defs.items()
+        if "retrieval_schema_version" in d or "retrieval_policy_digest" in d
+    ]

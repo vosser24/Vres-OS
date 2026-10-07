@@ -1559,10 +1559,21 @@ def test_e6c3_default_semantic_is_disabled_without_touching_the_connection(monke
 
 
 def test_v2_policy_identity_and_v1_preserved_byte_exact():
-    assert _sha256(er.E5_V1_POLICY) == "7572cafc632d4f56571adbe5f59baceedf15c56a07d5a3ca35e4b05448a982e9"
-    assert _sha256(er.E5_V2_POLICY) == "0cd0f10d24e37dd7a9872eced6c18e4962d4740a2d6a8c03a38cea1d8a73d6b5"
-    assert er.E5_V2_POLICY["raw_source_authority"] == {"mode": "allow_list", "values": ["trusted_project_source"]}
-    rest = {k: v for k, v in er.E5_V2_POLICY.items() if k not in ("version", "raw_source_authority")}
+    assert (
+        _sha256(er.E5_V1_POLICY)
+        == "7572cafc632d4f56571adbe5f59baceedf15c56a07d5a3ca35e4b05448a982e9"
+    )
+    assert (
+        _sha256(er.E5_V2_POLICY)
+        == "0cd0f10d24e37dd7a9872eced6c18e4962d4740a2d6a8c03a38cea1d8a73d6b5"
+    )
+    assert er.E5_V2_POLICY["raw_source_authority"] == {
+        "mode": "allow_list",
+        "values": ["trusted_project_source"],
+    }
+    rest = {
+        k: v for k, v in er.E5_V2_POLICY.items() if k not in ("version", "raw_source_authority")
+    }
     assert rest == {k: v for k, v in er.E5_V1_POLICY.items() if k != "version"}
 
 
@@ -1570,7 +1581,10 @@ def test_no_public_policy_downgrade_surface():
     import inspect
 
     from vres_os import mcp_server
+
     assert list(inspect.signature(mcp_server.experience_retrieve).parameters) == ["request"]
     assert "policy_version" not in er._REQUEST_KEYS and "policy" not in er._REQUEST_KEYS
     with pytest.raises(ValueError):
-        er.ExperienceRetrievalService().retrieve({"project_id": 1, "query": "x", "policy_version": "176.e5.v1"})
+        er.ExperienceRetrievalService().retrieve(
+            {"project_id": 1, "query": "x", "policy_version": "176.e5.v1"}
+        )
