@@ -30,7 +30,7 @@
       }
     },
     "development": {
-      "bundle_digest": "ca06efc6531adf5d5294188d90ea656954cc5b940c0946c9847a14476130d7ea",
+      "bundle_digest": "eb8b2f424363f4c18c16a7b3da8522cd774121854b03748c1c8a2f07734ac7ed",
       "case_ids": [
         "dev_abstain_warranty",
         "dev_asof_threshold",
@@ -59,7 +59,7 @@
       ],
       "files": {
         "development/corpus.jsonl": "bbf2a240a291bd5e1790fcedc247ca569253da8aace6e80ddde9196da83ba034",
-        "development/expected_evidence.json": "d908894e6ea712bde0d9cbd0609c9a6e2dc370e6cc6baeb49fd877c4d8015a1f"
+        "development/expected_evidence.json": "a23097a7489e064175035034938241f283dab7b0c6e50c386336cda33adbf742"
       }
     }
   },

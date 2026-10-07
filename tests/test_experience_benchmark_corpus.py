@@ -215,3 +215,43 @@ def test_temporal_refresh_declares_its_maturity_step_explicitly(bundles):
         (8, "knowledge_observe", "dev_b"),
         (9, "lifecycle_supersede", "dev_b"),
     ]
+
+
+# ---- faithfulness annotation consistency (Chunk 3 pre-scorer audit) --------
+
+
+def _canon(text: str) -> str:
+    import unicodedata
+
+    return " ".join(unicodedata.normalize("NFC", text).split())
+
+
+def _supported_claim_rows(bundles):
+    for split, bundle in bundles.items():
+        corpus = {c["case_id"]: c for c in bundle["cases"]}
+        for case_id, expected in bundle["expected"].items():
+            block = expected.get("faithfulness")
+            if not block:
+                continue
+            statements = {
+                s["alias"]: s["args"]["statement"]
+                for s in corpus[case_id]["timeline"]
+                if s["op"] == "knowledge_propose"
+            }
+            for claim in block.get("claims", []):
+                if claim["support"] == "supported":
+                    yield split, case_id, block, claim, statements
+
+
+def test_supported_claim_text_is_the_canonical_corpus_proposition(bundles):
+    rows = list(_supported_claim_rows(bundles))
+    assert rows
+    for _split, case_id, _block, claim, statements in rows:
+        assert _canon(claim["text"]) == _canon(statements[claim["alias"]]), (case_id, claim)
+
+
+def test_supported_claim_has_an_equivalent_expected_source_fact(bundles):
+    for _split, case_id, block, claim, _statements in _supported_claim_rows(bundles):
+        facts = {f["alias"]: f["text"] for f in block.get("source_facts", [])}
+        for source in claim["sources"]:
+            assert _canon(facts[source]) == _canon(claim["text"]), (case_id, source)

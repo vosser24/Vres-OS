@@ -409,3 +409,186 @@ def test_knowledge_observe_is_executable_and_updates_to_observed_only():
     amap = type("M", (), {"runtime_key_for": staticmethod(lambda alias: f"K-{alias}")})()
     runtime._step("c", "p", {"t": 0, "op": "knowledge_observe", "alias": "dev_b"}, amap)
     assert k.updates == [("K-dev_b", {"status": "observed"})]
+
+
+# ---- Chunk 3: operation trace + knowledge snapshots (no database) ---------------------------
+
+
+def _kitem(key, statement="s", status="proposed", sup=None, evidence=(), **extra):
+    return {
+        "knowledge_key": key,
+        "project_id": 99,
+        "knowledge_type": "fact",
+        "title": "Note",
+        "statement": statement,
+        "status": status,
+        "superseded_by": sup,
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+        "last_verified_at": None,
+        "approval_key": "AP-1",
+        "evidence": [{"id": 5, "source_key": s, "source_id": 3} for s in evidence],
+        **extra,
+    }
+
+
+def test_knowledge_snapshot_has_the_closed_shape_and_only_aliases():
+    m = eb.AliasMap(["dev_a", "dev_b", "dev_src"])
+    m.bind("dev_a", "K-a")
+    m.bind("dev_b", "K-b")
+    m.bind("dev_src", "SRC-1")
+    item = _kitem("K-a", status="superseded", sup="K-b", evidence=["SRC-1"])
+    snap = rt.knowledge_snapshot("dev_a", item, m)
+    assert snap == {
+        "alias": "dev_a",
+        "kind": "knowledge",
+        "knowledge_type": "fact",
+        "title": "Note",
+        "statement": "s",
+        "status": "superseded",
+        "superseded_by": "dev_b",
+        "evidence_sources": ["dev_src"],
+    }
+    text = json.dumps(snap)
+    for forbidden in ("K-a", "K-b", "SRC-1", "AP-1", "99", "2026", "created_at"):
+        assert forbidden not in text
+
+
+def test_knowledge_snapshot_sorts_evidence_aliases_and_skips_sourceless_rows():
+    m = eb.AliasMap(["dev_a", "dev_x", "dev_y"])
+    m.bind("dev_a", "K-a")
+    m.bind("dev_x", "S-x")
+    m.bind("dev_y", "S-y")
+    item = _kitem("K-a", evidence=["S-y", "S-x"])
+    item["evidence"].append({"id": 9, "source_key": None})
+    assert rt.knowledge_snapshot("dev_a", item, m)["evidence_sources"] == ["dev_x", "dev_y"]
+
+
+@pytest.mark.parametrize("field", ["sup", "evidence"])
+def test_knowledge_snapshot_unknown_reference_fails_closed_without_the_raw_key(field):
+    m = eb.AliasMap(["dev_a"])
+    m.bind("dev_a", "K-a")
+    item = (
+        _kitem("K-a", sup="K-SECRET-9")
+        if field == "sup"
+        else _kitem("K-a", evidence=["SRC-SECRET-9"])
+    )
+    with pytest.raises(BenchmarkError) as err:
+        rt.knowledge_snapshot("dev_a", item, m)
+    assert "SECRET" not in str(err.value)
+
+
+def test_knowledge_snapshot_revoked_tombstone_is_closed_and_keyless():
+    m = eb.AliasMap(["dev_a"])
+    m.bind("dev_a", "K-a")
+    tomb = {"knowledge_key": "K-a", "project_id": 1, "status": "revoked", "evidence": []}
+    snap = rt.knowledge_snapshot("dev_a", tomb, m)
+    assert snap["status"] == "revoked" and snap["statement"] is None
+    assert snap["evidence_sources"] == [] and snap["superseded_by"] is None
+    assert "K-a" not in json.dumps(snap)
+
+
+class _TraceKnowledge:
+    """Fake of the public KnowledgeService surface the traced timeline touches."""
+
+    def __init__(self):
+        self.items, self.calls = {}, []
+
+    def propose(self, *, key, statement, knowledge_type, title, status, **_):
+        self.calls.append("propose")
+        self.items[key] = _kitem(key, statement=statement, status=status)
+
+    def update(self, key, *, status):
+        self.calls.append("update")
+        self.items[key]["status"] = status
+
+    def supersede(self, old, new):
+        self.calls.append("supersede")
+        self.items[old].update(status="superseded", superseded_by=new)
+
+    def get(self, key):
+        self.calls.append("get")
+        return dict(self.items[key])
+
+
+class _Repo:
+    def ensure_project(self, ident):
+        return 41
+
+
+def _traced_runtime(knowledge):
+    owners = _owners(knowledge=knowledge, repository=_Repo())
+    return rt.BenchmarkRuntime(SCORING, nonce="n1", owners=owners, environ={})
+
+
+def _case(*steps):
+    aliases = sorted({s["alias"] for s in steps})
+    return {
+        "case_id": "dev_x",
+        "aliases": aliases,
+        "request": {"project": "p"},
+        "timeline": list(steps),
+    }
+
+
+def _propose(t, alias, statement="s"):
+    return {
+        "t": t,
+        "op": "knowledge_propose",
+        "alias": alias,
+        "args": {"knowledge_type": "fact", "statement": statement, "project": "p"},
+    }
+
+
+def test_traced_materialization_records_exactly_the_corpus_operations():
+    k = _TraceKnowledge()
+    runtime = _traced_runtime(k)
+    case = _case(
+        _propose(0, "dev_a", "old"),
+        _propose(1, "dev_b", "new"),
+        {"t": 2, "op": "knowledge_observe", "alias": "dev_b"},
+        {"t": 3, "op": "knowledge_supersede", "alias": "dev_b", "args": {"supersedes": "dev_a"}},
+    )
+    amap, trace = runtime.materialize_traced(case)
+    rows = trace["rows"]
+    assert [(r["t"], r["op"], r["alias"], r["refs"]) for r in rows] == [
+        (0, "knowledge_propose", "dev_a", []),
+        (1, "knowledge_propose", "dev_b", []),
+        (2, "knowledge_observe", "dev_b", []),
+        (3, "knowledge_supersede", "dev_b", ["dev_a"]),
+    ]
+    assert all(r["result"] == {"status": "applied"} for r in rows)
+    assert set(rows[0]["after"]) == {"dev_a"} and rows[0]["before"] == {}
+    assert rows[1]["before"] == rows[0]["after"]
+    last = rows[-1]["after"]
+    assert last["dev_a"]["status"] == "superseded" and last["dev_a"]["superseded_by"] == "dev_b"
+    assert last["dev_b"]["status"] == "observed"
+    # owner writes are exactly the declared operations; everything else is a public read
+    assert [c for c in k.calls if c != "get"] == ["propose", "propose", "update", "supersede"]
+    for physical in amap.physical:
+        assert physical not in json.dumps(trace)
+    assert "n1" not in json.dumps(trace)
+
+
+def test_untraced_materialize_makes_no_snapshot_reads():
+    k = _TraceKnowledge()
+    _traced_runtime(k).materialize(_case(_propose(0, "dev_a")))
+    assert "get" not in k.calls
+
+
+class _Tripwire:
+    def __getattr__(self, name):
+        raise AssertionError(f"owner touched: {name}")
+
+
+def test_faithfulness_owner_gap_case_touches_no_owner_through_the_runtime():
+    bundle = eb.load_development_bundle(ROOT, "development")
+    case = next(c for c in bundle["cases"] if c["case_id"] == "dev_recurring_priceexport")
+    owners = _owners(
+        **{name: _Tripwire() for name in rt.Owners.__dataclass_fields__ if name != "user_input"}
+    )
+    runtime = rt.BenchmarkRuntime(SCORING, nonce="n1", owners=owners, environ={})
+    result = runtime.run_faithfulness_case(case, bundle["expected"][case["case_id"]])
+    assert result["status"] == "not_run_owner_gap"
+    assert result["reasons"] == eb.classify_case(case).removeprefix("OWNER_GAP:").split(",")
+    assert runtime.physical == [] and runtime._projects == {}

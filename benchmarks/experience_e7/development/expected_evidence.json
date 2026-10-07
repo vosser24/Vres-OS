@@ -93,7 +93,7 @@
               "dev_src"
             ],
             "support": "supported",
-            "text": "The nightly stock export starts at 04:30 UTC."
+            "text": "The nightly stock export starts at 04:30 UTC after the storage migration."
           }
         ],
         "protected": [
@@ -102,7 +102,7 @@
         "source_facts": [
           {
             "alias": "dev_src",
-            "text": "The nightly stock export starts at 04:30 UTC."
+            "text": "The nightly stock export starts at 04:30 UTC after the storage migration."
           }
         ],
         "temporal_updates": [
@@ -347,7 +347,7 @@
         "source_facts": [
           {
             "alias": "dev_src",
-            "text": "The renewed contract keeps oversize parcels with the pallet carrier."
+            "text": "Oversize parcels stay with the pallet carrier under the renewed contract."
           }
         ],
         "temporal_updates": [

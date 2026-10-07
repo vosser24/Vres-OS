@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from . import experience_benchmark as eb
+from . import experience_benchmark_faithfulness as faithfulness
 from . import experience_benchmark_retrieval as retrieval
 from . import experience_retrieval as er
 from .experience_benchmark import BenchmarkError
@@ -280,6 +281,42 @@ def current_database_name() -> str:
         return conn.execute("SELECT current_database() AS name").fetchone()["name"]
 
 
+def knowledge_snapshot(alias: str, item: dict, alias_map: eb.AliasMap) -> dict:
+    """Closed, alias-only semantic snapshot of a public `KnowledgeService.get` result.
+
+    Runtime keys, DB ids, evidence row ids, approval keys and every timestamp are dropped. A
+    reference that does not resolve through the AliasMap fails closed without echoing the key.
+    """
+
+    def ref(key: str) -> str:
+        found = alias_map.alias_for(key)
+        if found is None:
+            raise BenchmarkError("knowledge snapshot references an unmapped runtime key")
+        return found
+
+    successor = item.get("superseded_by")
+    return {
+        "alias": alias,
+        "kind": "knowledge",
+        "knowledge_type": item.get("knowledge_type"),
+        "title": item.get("title"),
+        "statement": item.get("statement"),
+        "status": item["status"],
+        "superseded_by": ref(successor) if successor else None,
+        "evidence_sources": sorted(
+            {ref(e["source_key"]) for e in item.get("evidence", []) if e.get("source_key")}
+        ),
+    }
+
+
+def _step_refs(step: dict) -> list[str]:
+    required, optional = eb._OPERATIONS[step["op"]]
+    args = step.get("args", {})
+    return [
+        args[k] for k, kind in {**required, **optional}.items() if kind == "alias" and k in args
+    ]
+
+
 class RuntimeAliasMap(eb.AliasMap):
     """Case-local alias map that also carries the retrieval project and physical bookkeeping."""
 
@@ -449,14 +486,49 @@ class BenchmarkRuntime:
         return task, key
 
     def materialize(self, case: dict) -> RuntimeAliasMap:
+        return self._timeline(case, None)
+
+    def materialize_traced(self, case: dict) -> tuple[RuntimeAliasMap, dict]:
+        """Materialize and return the operation trace: one row per corpus timeline step only.
+
+        Snapshots are public `KnowledgeService.get` reads taken after each step; no owner write is
+        added, so no hidden call can appear as a semantic transition.
+        """
+        rows: list[dict] = []
+        amap = self._timeline(case, rows)
+        return amap, {"rows": rows}
+
+    def _timeline(self, case: dict, rows: list[dict] | None) -> RuntimeAliasMap:
         case_id, request = case["case_id"], case["request"]
         default_label = request.get("project", "default")
         amap = RuntimeAliasMap(case["aliases"], self._project(case_id, default_label))
+        knowledge_aliases: list[str] = []
+        before: dict[str, dict] = {}
         for step in case.get("timeline", []):
             if step["op"] not in EXECUTABLE_OPS:
                 raise BenchmarkError(f"operation {step['op']!r} is not executable in a case")
             self.clock.now = _parse_instant(eb.benchmark_instant(self.scoring["time"], step["t"]))
             self._step(case_id, default_label, step, amap)
+            if rows is None:
+                continue
+            if step["op"] == "knowledge_propose":
+                knowledge_aliases.append(step["alias"])
+            after = {
+                a: knowledge_snapshot(a, self.o.knowledge.get(amap.runtime_key_for(a)), amap)
+                for a in knowledge_aliases
+            }
+            rows.append(
+                {
+                    "t": step["t"],
+                    "op": step["op"],
+                    "alias": step["alias"],
+                    "refs": _step_refs(step),
+                    "result": {"status": "applied"},
+                    "before": before,
+                    "after": after,
+                }
+            )
+            before = after
         self.physical.extend(amap.physical)
         return amap
 
@@ -570,6 +642,9 @@ class BenchmarkRuntime:
     def run_case(self, case: dict, expected: dict) -> dict:
         return retrieval.run_case(case, expected, self.scoring, self.adapters, self.materialize)
 
+    def run_faithfulness_case(self, case: dict, expected: dict) -> dict:
+        return faithfulness.run_case(case, expected, lambda c: self.materialize_traced(c)[1])
+
     def physical_fingerprint(self) -> str:
         return eb.sha256_hex("\n".join(sorted(self.physical)).encode("utf-8"))
 
@@ -597,4 +672,31 @@ def run_subset(
         scoring_digest=eb.scoring_digest(runtime.scoring),
         retrieval_identity=retrieval_identity(),
         cases=cases,
+    )
+
+
+def run_faithfulness(
+    runtime: BenchmarkRuntime,
+    root: str | Path,
+    split: str,
+    *,
+    source: dict,
+    order: list[str] | None = None,
+) -> dict:
+    """Run the faithfulness cohort of a development split; `order` only permutes execution."""
+    bundle = eb.load_development_bundle(root, split)
+    cohort = {c["case_id"]: c for c in faithfulness.faithfulness_cases(bundle)}
+    if order is not None and sorted(order) != sorted(cohort):
+        raise BenchmarkError("faithfulness run order must be a permutation of the cohort")
+    results = [
+        runtime.run_faithfulness_case(cohort[case_id], bundle["expected"][case_id])
+        for case_id in (order or sorted(cohort))
+    ]
+    return faithfulness.build_run_result(
+        split=split,
+        source=source,
+        digests=bundle["digests"],
+        scoring_digest=eb.scoring_digest(runtime.scoring),
+        policy=faithfulness.policy_identity(),
+        cases=sorted(results, key=lambda c: c["case_id"]),
     )
