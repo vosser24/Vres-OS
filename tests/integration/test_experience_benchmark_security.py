@@ -1,6 +1,6 @@
 """#176 E7 Chunk 5: focused PG proof of the security ladder (disposable `_test` DB only).
 
-One integration test per executable adversarial case (real E1-E6 owners), plus the full-run test that
+One test per executable adversarial case (real E1-E6 owners), plus the full-run test that
 proves the second-user N/A row and the six owner-gap rows make zero owner and retrieval calls.
 """
 
