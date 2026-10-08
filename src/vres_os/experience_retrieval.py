@@ -14,7 +14,7 @@ import copy
 import re
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, is_dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from typing import Any
 
 import psycopg
@@ -40,8 +40,9 @@ E5_V1_SCHEMA_VERSION = "176.e5.v1"
 E5_V2_SCHEMA_VERSION = "176.e5.v2"
 E5_V3_SCHEMA_VERSION = "176.e5.v3"
 E5_V4_SCHEMA_VERSION = "176.e5.v4"
-# the product default; v1-v3 stay available only as explicit frozen replay/compatibility paths
-SCHEMA_VERSION = E5_V4_SCHEMA_VERSION
+E5_V5_SCHEMA_VERSION = "176.e5.v5"
+# the product default; v1-v4 stay available only as explicit frozen replay/compatibility paths
+SCHEMA_VERSION = E5_V5_SCHEMA_VERSION
 LOW_TRUST_SECTION = "low_trust_observations"
 LOW_TRUST_ONLY_REASON = "only_low_trust_observations"
 LOW_TRUST_ONLY_DIAGNOSTIC = "suppressed_low_trust_only"
@@ -127,7 +128,18 @@ E5_V4_POLICY = {
         "identity": "public_semantics_v1",
     },
 }
-POLICY = E5_V4_POLICY
+# v5: v4 plus deterministic low-trust observed-episode ranking (shared lexical rank, exact time).
+E5_V5_POLICY = {
+    **E5_V4_POLICY,
+    "version": E5_V5_SCHEMA_VERSION,
+    "observed_episode_ranking": {
+        "scope": LOW_TRUST_SECTION,
+        "lexical_score_ties": "shared_competition_rank",
+        "recency": "exact_observed_at_desc",
+        "recency_tie": "semantic_digest_then_memory_key",
+    },
+}
+POLICY = E5_V5_POLICY
 # Read-time trust handling is separate from E2's write-time quarantine (_INJECTION there is deliberately broad:
 # it holds a *proposal* back for review). At read time, ordinary words such as "policy"/"approved" must not hide
 # otherwise eligible evidence; authority is structural (role/tier), never derived from text. This narrow heuristic
@@ -164,6 +176,7 @@ _PARTICIPATION = {"participated", "observed"}
 _OUTCOMES = {"completed", "cancelled", "passed", "failed"}
 _FAILED = {"failed", "cancelled"}
 _TOKEN = re.compile(r"\w+", re.UNICODE)
+_UTC_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
 @dataclass(frozen=True)
@@ -182,7 +195,7 @@ E5_PARAMS = CompositionParams(dict(BUDGETS), MAX_ITEMS, MAX_PACK_BYTES, RRF_K)
 
 
 def _policy_for(params: CompositionParams, base: dict[str, Any] | None = None) -> dict[str, Any]:
-    """The E5 policy object of `base` (default: product v4) for E5 params;
+    """The E5 policy object of `base` (default: product v5) for E5 params;
     otherwise a truthful replay-only copy.
     """
     base = POLICY if base is None else base
@@ -334,6 +347,14 @@ def _epoch(value: Any) -> int:
     return int(value.timestamp()) if isinstance(value, datetime) else 0
 
 
+def _instant_us(value: Any) -> int:
+    """Exact instant as integer microseconds since the epoch (no bucket); 0 when absent."""
+    if not isinstance(value, datetime):
+        return 0
+    delta = (value if value.tzinfo else value.replace(tzinfo=UTC)) - _UTC_EPOCH
+    return (delta.days * 86400 + delta.seconds) * 1_000_000 + delta.microseconds
+
+
 def _lex(row: dict[str, Any]) -> float:
     return round(float(row.get("rank") or 0), 6)
 
@@ -459,6 +480,7 @@ def _item(
             "fusion_rank_score": _fusion(row),
             "recency_epoch": _epoch(recency),
         },
+        "_recency_instant": recency,
         "text": _clean(text),
         "_lex_pos": row.get("lex_pos"),
         "_sem_pos": row.get("sem_pos"),
@@ -766,7 +788,7 @@ def episode_item(row: dict[str, Any], req: dict[str, Any], now: datetime) -> tup
         return None, "rejected_corrupt"
     objective = payload.get("objective") if isinstance(payload.get("objective"), str) else ""
     failed = row["outcome_status"] in _FAILED
-    low_trust = row["trust_class"] == "external_untrusted_observation" or row["participation_class"] == "observed"
+    low_trust = _is_low_trust_episode(row)
     validation = payload.get("validation")
     validation_status = _clean(validation["status"], 40) if isinstance(validation, dict) and isinstance(validation.get("status"), str) else None
     classification = payload.get("failure_classification")
@@ -926,6 +948,18 @@ def _sort_key_v4(item: dict[str, Any]):
     """v4 ranking tuple: v1-v3 dimensions, then the semantic digest, then the physical key."""
     *head, key = _sort_key(item)
     return (*head, semantic_tie_digest(item), key)
+
+
+def _sort_key_v5(item: dict[str, Any]):
+    """v5: v4, but low-trust items rank by the exact persisted instant, not whole seconds."""
+    if item["_section"] != LOW_TRUST_SECTION or "conflict" in item["flags"]:
+        return _sort_key_v4(item)
+    s = item["signals"]
+    return (
+        SECTIONS.index(item["_section"]), s["authority_tier"], s["scope_rank"],
+        -int(s["task_family_match"] or s["capability_match"]), -s["fusion_rank_score"],
+        -_instant_us(item.get("_recency_instant")), semantic_tie_digest(item), item["memory_key"],
+    )
 
 
 def _public(item: dict[str, Any]) -> dict[str, Any]:
@@ -1102,7 +1136,10 @@ def compose(
     if params.rrf_k != RRF_K:  # only the fusion score is recomputed; tier/scope/eligibility stay frozen
         for item in items:
             item["signals"]["fusion_rank_score"] = _fusion_at(item, params.rrf_k)
-    sort_key = _sort_key_v4 if policy.get("stable_tie_break") else _sort_key
+    sort_key = (
+        _sort_key_v5 if policy.get("observed_episode_ranking")
+        else _sort_key_v4 if policy.get("stable_tie_break") else _sort_key
+    )
     sets = {c["conflict_key"]: c for c in conflict_list}
     in_conflict = {m["memory_key"] for c in conflict_list for m in c["members"]}
     cited: dict[str, set[str]] = {}
@@ -1241,6 +1278,23 @@ def _positions(rows: list[dict[str, Any]], key: str) -> None:
         row["lex_pos"] = pos
 
 
+def _is_low_trust_episode(row: dict[str, Any]) -> bool:
+    return (
+        row["trust_class"] == "external_untrusted_observation"
+        or row["participation_class"] == "observed"
+    )
+
+
+def _positions_observed(rows: list[dict[str, Any]]) -> None:
+    """v5: v4 positions for every episode, then low-trust lexical hits get a shared competition rank
+    (1 + number of strictly better scores), so equal relevance never depends on the physical key."""
+    _positions(rows, "episode_key")
+    hits = [r for r in rows if _lexical_hit(r) and _is_low_trust_episode(r)]
+    scores = [_lex(r) for r in hits]
+    for row, score in zip(hits, scores, strict=True):
+        row["lex_pos"] = 1 + sum(1 for other in scores if other > score)
+
+
 @dataclass
 class RetrievalUniverse:
     """The complete hard-gated candidate universe, collected once. Compositions work on copies of `items`."""
@@ -1324,6 +1378,15 @@ class ExperienceRetrievalService:
         with self._open() as conn:
             return self.compose_universe(self.collect_universe(conn, req, policy=E5_V3_POLICY))
 
+    def _retrieve_frozen_v4(self, request: dict[str, Any] | RetrievalRequest) -> dict[str, Any]:
+        """Internal compatibility/replay path: the exact E5 v4 behavior.
+
+        Never a product surface.
+        """
+        req = normalize_request(request)
+        with self._open() as conn:
+            return self.compose_universe(self.collect_universe(conn, req, policy=E5_V4_POLICY))
+
     def paired_compose(self, request: dict[str, Any] | RetrievalRequest, candidate: CompositionParams) -> dict[str, Any]:
         """Baseline (exact E5) and candidate composed from copies of ONE universe inside ONE snapshot."""
         req = normalize_request(request)
@@ -1355,7 +1418,8 @@ class ExperienceRetrievalService:
         policy: dict[str, Any] | None = None,
     ) -> RetrievalUniverse:
         policy = POLICY if policy is None else policy
-        if not any(policy is p for p in (E5_V1_POLICY, E5_V2_POLICY, E5_V3_POLICY, E5_V4_POLICY)):
+        known = (E5_V1_POLICY, E5_V2_POLICY, E5_V3_POLICY, E5_V4_POLICY, E5_V5_POLICY)
+        if not any(policy is p for p in known):
             raise ValueError("Unsupported E5 retrieval policy")
         req = dict(req)
         tokens = list(dict.fromkeys(t.casefold() for t in _TOKEN.findall(req["query"])))[:8]
@@ -1385,8 +1449,12 @@ class ExperienceRetrievalService:
 
         # E5 resolves episodes first so already-gated, integrity-checked capability precedents can source
         # accepted procedures structurally. This never changes either item's authority tier.
-        episode_rows = self._episodes(conn, params, diag)
-        _positions(episode_rows, "episode_key")
+        v5 = bool(policy.get("observed_episode_ranking"))
+        episode_rows = self._episodes(conn, params, diag, exact_order=v5)
+        if v5:
+            _positions_observed(episode_rows)
+        else:
+            _positions(episode_rows, "episode_key")
         episode_built = [episode_item(row, req, now) for row in episode_rows]
         procedure_links = self._procedure_capability_links(conn, episode_built, req)
         procedure_rows = self._procedures(conn, params, diag, procedure_links)
@@ -1976,7 +2044,7 @@ class ExperienceRetrievalService:
         return rows, {"excluded_unapproved_company": unapproved, "possibly_truncated": len(rows) >= RAW_FETCH_LIMIT}
 
     @staticmethod
-    def _episodes(conn, params, diag):
+    def _episodes(conn, params, diag, exact_order=False):
         """Episodes gated by the E4 ledger (latest invalidate/restore event of this project wins; none = grounded; a
         corrupt state is passed through so episode_item fails it closed) and by the status of their derived_from
         sources. Current intent excludes revoked and dead-support episodes BEFORE ranking and counts them."""
@@ -2034,6 +2102,14 @@ class ExperienceRetrievalService:
         ).fetchone()
         for name in ("excluded_revoked_episode", "excluded_revoked_source"):
             diag[name] = diag.get(name, 0) + counts[name]
+        # v5 pre-limit order: persisted time, then bounded stable semantics, physical key last.
+        stable = (
+            ",e.policy_version COLLATE \"C\",e.participation_class COLLATE \"C\","
+            "e.trust_class COLLATE \"C\","
+            "e.outcome_status COLLATE \"C\",coalesce(e.task_family,'') COLLATE \"C\","
+            "coalesce(e.payload->>'objective','') COLLATE \"C\",e.episode_key"
+            if exact_order else ",e.episode_key"
+        )
         return conn.execute(
             f"""
             SELECT e.episode_key,e.project_id,e.task_id,e.task_family,e.policy_version,p.policy_digest,
@@ -2044,7 +2120,7 @@ class ExperienceRetrievalService:
                    {rank} AS rank,({match}) AS lex
             {base}
                AND (%(hist)s OR (NOT {revoked} AND NOT {dead}))
-             ORDER BY rank DESC,e.observed_at DESC,e.episode_key LIMIT 50
+             ORDER BY rank DESC,e.observed_at DESC{stable} LIMIT 50
             """,
             params,
         ).fetchall()

@@ -402,7 +402,7 @@ def test_replay_baseline_is_frozen_v1_not_the_product_default():
     assert (
         er.E5_V1_POLICY["version"] == "176.e5.v1" and "raw_source_authority" not in er.E5_V1_POLICY
     )
-    assert er.POLICY is er.E5_V4_POLICY and er.SCHEMA_VERSION == "176.e5.v4"
+    assert er.POLICY is er.E5_V5_POLICY and er.SCHEMA_VERSION == "176.e5.v5"
 
 
 def test_candidate_policy_cannot_alter_the_raw_source_gate():

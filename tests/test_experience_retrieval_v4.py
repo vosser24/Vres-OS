@@ -42,7 +42,7 @@ def _procedure():
     return er.procedure_item(_proc_row(), _req(), NOW)[0]
 
 
-def _pack(keys, *, base=None):
+def _pack(keys, *, base=er.E5_V4_POLICY):
     items = [_low(i, key) for i, key in enumerate(keys)]
     return er.compose([*items, _procedure()], _req(), {}, base_policy=base)
 
@@ -59,7 +59,7 @@ def test_policy_identities_are_exact():
     assert _sha256(er.E5_V1_POLICY) == V1 and _sha256(er.E5_V2_POLICY) == V2
     assert _sha256(er.E5_V3_POLICY) == V3
     assert er.E5_V4_SCHEMA_VERSION == "176.e5.v4" and _sha256(er.E5_V4_POLICY) == V4
-    assert er.SCHEMA_VERSION == "176.e5.v4" and er.POLICY is er.E5_V4_POLICY
+    assert er.SCHEMA_VERSION == "176.e5.v5" and er.POLICY is er.E5_V5_POLICY  # v4: base_policy
     assert er.E5_V4_POLICY["stable_tie_break"] == {
         "mode": "semantic_digest_before_physical_key",
         "digest": "sha256_canonical",
@@ -109,12 +109,15 @@ def test_v4_keeps_ranking_dimensions_ahead_of_the_tie_digest():
     items = [_low(i, ASCENDING[i]) for i in range(5)]
     fresher = items[4]
     fresher["signals"]["recency_epoch"] += 60
-    pack = er.compose([*items, _procedure()], _req(), {})
+    pack = er.compose([*items, _procedure()], _req(), {}, base_policy=er.E5_V4_POLICY)
     assert pack["low_trust_observations"][0]["text"] == fresher["text"]
     better = _low(0, "EPI-zzzzz")
     better["signals"]["fusion_rank_score"] += 1.0
     pack = er.compose(
-        [*[_low(i, ASCENDING[i]) for i in range(1, 5)], better, _procedure()], _req(), {}
+        [*[_low(i, ASCENDING[i]) for i in range(1, 5)], better, _procedure()],
+        _req(),
+        {},
+        base_policy=er.E5_V4_POLICY,
     )
     assert pack["low_trust_observations"][0]["text"] == better["text"]
 
@@ -185,7 +188,7 @@ def test_conflict_members_tie_by_digest_before_key_in_v4_only():
 
 
 def test_low_trust_only_abstention_is_preserved_in_v4():
-    only = er.compose([_low(0, "EPI-a")], _req(), {})
+    only = er.compose([_low(0, "EPI-a")], _req(), {}, base_policy=er.E5_V4_POLICY)
     assert only["schema_version"] == "176.e5.v4" and only["abstained"] is True
     assert only["reason"] == "only_low_trust_observations"
     assert only["diagnostics"]["suppressed_low_trust_only"] == 1
@@ -245,12 +248,13 @@ def _v4_pack(items=None, *, reason=None, suppressed=0):
     return pack
 
 
-def test_registry_has_four_versions_with_exact_digests():
+def test_registry_has_five_versions_with_exact_digests():
     assert set(eo.SUPPORTED_RETRIEVAL_POLICIES) == {
         "176.e5.v1",
         "176.e5.v2",
         "176.e5.v3",
         "176.e5.v4",
+        "176.e5.v5",
     }
     assert (
         eo.FROZEN_E5_V4_POLICY_DIGEST == V4

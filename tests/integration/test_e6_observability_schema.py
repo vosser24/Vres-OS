@@ -56,10 +56,10 @@ def test_policy_row_and_frozen_digests(db_ready):
 
 
 def test_migration_count_and_latest(db_ready):
-    assert _scalar("SELECT count(*) FROM vres.schema_migrations") == 45
+    assert _scalar("SELECT count(*) FROM vres.schema_migrations") == 46
     assert (
         _scalar("SELECT max(version) FROM vres.schema_migrations")
-        == "045_experience_retrieval_policy_v4.sql"
+        == "046_experience_retrieval_policy_v5.sql"
     )
 
 
@@ -340,12 +340,13 @@ def test_k_real_040_to_041_upgrade_preserves_seeded_state(disposable_040):
         "043_experience_observed_episode.sql",
         "044_experience_retrieval_policy_v3.sql",
         "045_experience_retrieval_policy_v4.sql",
+        "046_experience_retrieval_policy_v5.sql",
     ]
     with connect() as conn:
         count = conn.execute("SELECT count(*) AS n FROM vres.schema_migrations").fetchone()
-        assert count["n"] == 45
+        assert count["n"] == 46
         latest = conn.execute("SELECT max(version) AS v FROM vres.schema_migrations").fetchone()
-        assert latest["v"] == "045_experience_retrieval_policy_v4.sql"
+        assert latest["v"] == "046_experience_retrieval_policy_v5.sql"
         tables_after = {r["table_name"] for r in conn.execute(
             "SELECT table_name FROM information_schema.tables WHERE table_schema='vres'")}
         assert tables_after - tables_before == {"experience_retrieval_observations", "experience_retrieval_items",
@@ -533,11 +534,12 @@ V1_ID = ("176.e5.v1", eo.SUPPORTED_RETRIEVAL_POLICIES["176.e5.v1"][1])
 V2_ID = ("176.e5.v2", eo.SUPPORTED_RETRIEVAL_POLICIES["176.e5.v2"][1])
 V3_ID = ("176.e5.v3", eo.SUPPORTED_RETRIEVAL_POLICIES["176.e5.v3"][1])
 V4_ID = ("176.e5.v4", eo.SUPPORTED_RETRIEVAL_POLICIES["176.e5.v4"][1])
+V5_ID = ("176.e5.v5", eo.SUPPORTED_RETRIEVAL_POLICIES["176.e5.v5"][1])
 
 
-def test_045_accepts_v1_to_v4_pairs_and_rejects_cross_unknown_pairs(db_ready, pid):
-    """#176 E7 B3: migration 045 extends the ONE paired identity check (042/044) to v4."""
-    for version, digest in (V1_ID, V2_ID, V3_ID, V4_ID):
+def test_046_accepts_v1_to_v5_pairs_and_rejects_cross_unknown_pairs(db_ready, pid):
+    """#176 E7 B3: migration 046 extends the ONE paired identity check (042/044/045) to v5."""
+    for version, digest in (V1_ID, V2_ID, V3_ID, V4_ID, V5_ID):
         with connect() as conn, conn.transaction():
             _insert_obs(conn, pid, retrieval_schema_version=version, retrieval_policy_digest=digest)
     for version, digest in (
@@ -549,7 +551,10 @@ def test_045_accepts_v1_to_v4_pairs_and_rejects_cross_unknown_pairs(db_ready, pi
         (V4_ID[0], V3_ID[1]),
         (V3_ID[0], V4_ID[1]),
         (V1_ID[0], V4_ID[1]),
-        ("176.e5.v5", V4_ID[1]),
+        (V5_ID[0], V4_ID[1]),
+        (V4_ID[0], V5_ID[1]),
+        (V1_ID[0], V5_ID[1]),
+        ("176.e5.v6", V5_ID[1]),
         (V2_ID[0], HEX),
         ("x", HEX),
     ):
@@ -570,7 +575,7 @@ def test_042_constraint_shape_and_no_other_schema_change(db_ready):
             )
         }
     pair = defs.pop("experience_retrieval_observations_e5_identity_pair_check")
-    assert all(x in pair for x in (*V1_ID, *V2_ID, *V3_ID, *V4_ID))
+    assert all(x in pair for x in (*V1_ID, *V2_ID, *V3_ID, *V4_ID, *V5_ID))
     # no other check constrains the two identity columns any more
     assert not [
         n

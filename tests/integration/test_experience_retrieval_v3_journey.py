@@ -48,7 +48,9 @@ def _pack(pid, word, version):
         return svc._retrieve_frozen_v2(request)
     if version == "v3":
         return svc._retrieve_frozen_v3(request)
-    return svc.retrieve(request)  # normal product: v4
+    if version == "v4":
+        return svc._retrieve_frozen_v4(request)
+    return svc.retrieve(request)  # normal product: v5
 
 
 @pytest.fixture
@@ -110,11 +112,14 @@ def test_v3_ordinary_empty_pack_keeps_no_eligible_experience(pg_project, word):
     assert v3["diagnostics"]["suppressed_low_trust_only"] == 0
 
 
-def test_normal_v4_abstains_like_frozen_v3_for_a_lone_observed_episode(pg_project, word):
+def test_frozen_v4_and_normal_v5_abstain_like_v3_for_a_lone_episode(pg_project, word):
     ep = _observed(pg_project, word)
-    v4 = _pack(pg_project, word, "v4")
+    v4 = _pack(pg_project, word, "v5")
     v3 = _pack(pg_project, word, "v3")
-    assert v4["schema_version"] == "176.e5.v4" and v3["schema_version"] == "176.e5.v3"
+    frozen = _pack(pg_project, word, "v4")
+    assert frozen["schema_version"] == "176.e5.v4" and frozen["abstained"] is True
+    assert frozen["reason"] == REASON and frozen["evidence_keys"] == []
+    assert v4["schema_version"] == "176.e5.v5" and v3["schema_version"] == "176.e5.v3"
     assert v4["abstained"] is True and v4["reason"] == REASON and v4["evidence_keys"] == []
     assert v4["diagnostics"]["suppressed_low_trust_only"] == 1
     assert ep not in repr(v4) and word not in repr(v4["low_trust_observations"])

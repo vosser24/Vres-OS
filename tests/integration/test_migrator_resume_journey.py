@@ -139,6 +139,7 @@ def test_migrator_resumes_023_without_database_create(monkeypatch):
             "043_experience_observed_episode.sql",
             "044_experience_retrieval_policy_v3.sql",
             "045_experience_retrieval_policy_v4.sql",
+            "046_experience_retrieval_policy_v5.sql",
         ]
         assert db.migrate() == expected
 

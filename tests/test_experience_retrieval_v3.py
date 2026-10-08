@@ -41,7 +41,7 @@ def _empty_sections(pack):
 def test_policy_identities_are_exact():
     assert _sha256(er.E5_V1_POLICY) == V1 and _sha256(er.E5_V2_POLICY) == V2
     assert er.E5_V3_SCHEMA_VERSION == "176.e5.v3" and _sha256(er.E5_V3_POLICY) == V3
-    assert er.SCHEMA_VERSION == "176.e5.v4" and er.POLICY is er.E5_V4_POLICY  # v3: base_policy
+    assert er.SCHEMA_VERSION == "176.e5.v5" and er.POLICY is er.E5_V5_POLICY  # v3: base_policy
     assert er.E5_V3_POLICY["low_trust_only_abstention"] == {
         "mode": "suppress_if_only_section",
         "section": "low_trust_observations",

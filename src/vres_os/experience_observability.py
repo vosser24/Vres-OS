@@ -26,6 +26,8 @@ from .experience_retrieval import (
     E5_V3_SCHEMA_VERSION,
     E5_V4_POLICY,
     E5_V4_SCHEMA_VERSION,
+    E5_V5_POLICY,
+    E5_V5_SCHEMA_VERSION,
     LOW_TRUST_ONLY_DIAGNOSTIC,
     LOW_TRUST_ONLY_REASON,
     MAX_ITEMS,
@@ -54,6 +56,7 @@ FROZEN_E5_V1_POLICY_DIGEST = "7572cafc632d4f56571adbe5f59baceedf15c56a07d5a3ca35
 FROZEN_E5_V2_POLICY_DIGEST = "0cd0f10d24e37dd7a9872eced6c18e4962d4740a2d6a8c03a38cea1d8a73d6b5"
 FROZEN_E5_V3_POLICY_DIGEST = "272b10b6042a77bb79812ec637ec9296e28867628285165775c5aeee4af1a4ad"
 FROZEN_E5_V4_POLICY_DIGEST = "4e468f39ee775aebe33c0b2774c61b6fb7c3531ffb16be9dafa209b765717b41"
+FROZEN_E5_V5_POLICY_DIGEST = "7b5422cf9201bb195b12e9b08ae2f7048b9fbb075951ab598e0e486cfba0dcbf"
 # Closed registry of legitimate frozen E5 identities. The digest is always computed from the in-code
 # policy and
 # never taken from a pack.
@@ -62,6 +65,7 @@ SUPPORTED_RETRIEVAL_POLICIES: dict[str, tuple[dict[str, Any], str]] = {
     E5_V2_SCHEMA_VERSION: (E5_V2_POLICY, _sha256(E5_V2_POLICY)),
     E5_V3_SCHEMA_VERSION: (E5_V3_POLICY, _sha256(E5_V3_POLICY)),
     E5_V4_SCHEMA_VERSION: (E5_V4_POLICY, _sha256(E5_V4_POLICY)),
+    E5_V5_SCHEMA_VERSION: (E5_V5_POLICY, _sha256(E5_V5_POLICY)),
 }
 
 MAX_DURATION_MS = 86_400_000
@@ -109,6 +113,7 @@ _ABSTAIN_REASONS = {
     E5_V2_SCHEMA_VERSION: frozenset({_ABSTAIN_REASON}),
     E5_V3_SCHEMA_VERSION: frozenset({_ABSTAIN_REASON, LOW_TRUST_ONLY_REASON}),
     E5_V4_SCHEMA_VERSION: frozenset({_ABSTAIN_REASON, LOW_TRUST_ONLY_REASON}),
+    E5_V5_SCHEMA_VERSION: frozenset({_ABSTAIN_REASON, LOW_TRUST_ONLY_REASON}),
 }
 
 
@@ -127,6 +132,7 @@ def assert_policy_identity() -> None:
         E5_V2_SCHEMA_VERSION: FROZEN_E5_V2_POLICY_DIGEST,
         E5_V3_SCHEMA_VERSION: FROZEN_E5_V3_POLICY_DIGEST,
         E5_V4_SCHEMA_VERSION: FROZEN_E5_V4_POLICY_DIGEST,
+        E5_V5_SCHEMA_VERSION: FROZEN_E5_V5_POLICY_DIGEST,
     }
     if (
         E6_POLICY_DIGEST != FROZEN_E6_POLICY_DIGEST
@@ -201,7 +207,8 @@ def unwrap_tool_response(response: Any) -> dict[str, Any]:
 def _validate_diagnostics(diag: Any, version: str) -> dict[str, Any]:
     if not isinstance(diag, dict):
         raise _reject("invalid_diagnostics")
-    v3 = version in (E5_V3_SCHEMA_VERSION, E5_V4_SCHEMA_VERSION)  # both carry the suppression count
+    # v3+ carry the suppression count
+    v3 = version not in (E5_V1_SCHEMA_VERSION, E5_V2_SCHEMA_VERSION)
     if v3 and LOW_TRUST_ONLY_DIAGNOSTIC not in diag:
         raise _reject("diagnostics_not_allow_listed")  # v3 packs always carry the suppression count
     out: dict[str, Any] = {}

@@ -250,7 +250,7 @@ def _v2_pack(items=None):
 
 
 def test_registry_is_closed_and_digests_are_exact():
-    versions = {"176.e5.v1", "176.e5.v2", "176.e5.v3", "176.e5.v4"}
+    versions = {"176.e5.v1", "176.e5.v2", "176.e5.v3", "176.e5.v4", "176.e5.v5"}
     assert set(eo.SUPPORTED_RETRIEVAL_POLICIES) == versions
     for version, (policy, digest) in eo.SUPPORTED_RETRIEVAL_POLICIES.items():
         assert policy["version"] == version and digest == _sha256(policy)
@@ -273,7 +273,7 @@ def test_validate_pack_accepts_exact_v1_and_exact_v2_and_returns_the_actual_iden
     "mutate",
     [
         lambda p: p.update(schema_version="176.e5.v1"),  # v2 policy under a v1 version
-        lambda p: p.update(schema_version="176.e5.v4"),  # unknown version
+        lambda p: p.update(schema_version="176.e5.v9"),  # unknown version
         lambda p: p.update(schema_version=None),
         lambda p: p["policy"].update(version="176.e5.v1"),  # v2 body claiming v1 policy version
         lambda p: p["policy"].update(raw_source_authority={"mode": "allow_list", "values": ["x"]}),
