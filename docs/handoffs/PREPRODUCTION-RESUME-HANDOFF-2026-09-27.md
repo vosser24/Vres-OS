@@ -3950,3 +3950,50 @@ Do not start migration/tests/code before that checkpoint.
 Do not prepare protected validation yet.
 ```
 
+
+
+---
+
+# 36. 2026-10-08 #176 E7 Boundary 4A accepted / Boundary 4B next — superseding pointer
+
+This is the newest authoritative execution pointer in this historical handoff.
+
+Do not resume from the older E5/E6 instructions above.
+
+Newest detailed handoff:
+docs/handoffs/PREPRODUCTION-E7-B4B-RESUME-HANDOFF-2026-10-08.md
+
+Current accepted E7 branch:
+issue-176-e7-benchmark-security
+
+Current accepted E7 HEAD:
+7aac85ac4917bfd3b178978183082debdd6333ca
+
+Canonical E7 task:
+TASK-20261006-6cd9d80a92
+
+Current state:
+- E6 DONE
+- E7 Chunks 0–5 accepted
+- E7 Authority Closure Boundary 2 accepted
+- Boundary 3 accepted
+- Boundary 4A live participated development cohort accepted
+- Boundary 4B not started
+- Chunk 6 not started
+- held-out not read
+- thresholds not calibrated
+- final E7 full PostgreSQL/release/protected ladder not run
+- E8 not started
+
+First action:
+return to the normal/control Vres environment, verify the B4A fixture cleanup, checkpoint Boundary 4A acceptance on the canonical E7 task, then prepare and DryRun a fresh B4B disposable fixture.
+
+Boundary 4B live scope:
+- adv_secret_episode: 1 failed authority path
+- adv_flood_burst: 25 failed authority paths + 25 E2 consolidations
+- adv_varied_poison: 6 failed authority paths + 6 E2 consolidations
+- total 32 real Fable-routed failed work-unit authority paths
+- total 31 E2 consolidations
+- expected Sonnet workers 0
+
+For exact security assertions, fixture methodology, RED discipline, artifact requirements and the fresh-chat prompt, read the newest detailed handoff first.
