@@ -631,3 +631,69 @@ E7 opening:
 Do not start E8 Chairman auto-injection during E7.
 Preserve the #170 Windows PATH-shadow finding for production readiness.
 ```
+
+
+---
+
+## 16. 2026-10-08 superseding execution boundary — Boundary 4A accepted / Boundary 4B next
+
+This section supersedes the E7 opening-state instructions above for current execution.
+
+Newest detailed handoff:
+docs/handoffs/PREPRODUCTION-E7-B4B-RESUME-HANDOFF-2026-10-08.md
+
+Authoritative E7 branch:
+issue-176-e7-benchmark-security
+
+Accepted E7 HEAD:
+7aac85ac4917bfd3b178978183082debdd6333ca
+
+Accepted predecessor:
+Boundary 3 = 3ceae86aedfabaf949f231a5c956803e7d66cadd
+
+Boundary 4A:
+ACCEPTED / SEALED
+
+Boundary 4A artifact:
+benchmarks/experience_e7/results/authority_closure_development_live.json
+
+Boundary 4A artifact SHA-256:
+03b3c9e2c798ccdcabf53a7d1c6fe63e176662e796bae84c0fab146a2edfb661
+
+Boundary 4A measured live authority:
+- 9 E1-v1 participated trusted captures
+- 9 real host-observed Fable routes
+- 6 real host-observed Sonnet workers
+- 6 passed work units
+- 3 failed work units
+- correct dev_seen E1-v2 observed/external-untrusted distinction
+- exact cap_forecasting / cap_leadtime capability precedent
+- recurrence quarantine preserved because threshold calibration has not started
+
+Current canonical E7 task:
+TASK-20261006-6cd9d80a92
+
+The canonical task lives only in the normal/control Vres database.
+Do not import/recreate it in disposable live fixtures.
+
+Exact next sequence:
+1. verify/finish B4A fixture cleanup;
+2. return to the normal Vres environment;
+3. checkpoint Boundary 4A acceptance on TASK-20261006-6cd9d80a92;
+4. prepare and DryRun a fresh B4B disposable launcher;
+5. execute Boundary 4B only after the fresh fixture/session startup gate passes.
+
+Boundary 4B has NOT started.
+
+Boundary 4B exact live scope:
+- adv_secret_episode: 1 failed authority path
+- adv_flood_burst: 25 failed authority paths
+- adv_varied_poison: 6 failed authority paths
+- total 32 real Fable-routed failed work-unit authority paths
+- expected Sonnet workers: 0
+- total frozen E2 consolidations: 31
+
+Do not start Chunk 6, threshold calibration, held-out, final E7 protected/release gates or E8 during Boundary 4B.
+
+For all execution detail, authority rules, RED discipline, fixture methodology and the current fresh-chat resume prompt, use:
+docs/handoffs/PREPRODUCTION-E7-B4B-RESUME-HANDOFF-2026-10-08.md
