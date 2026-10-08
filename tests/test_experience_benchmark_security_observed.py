@@ -575,5 +575,7 @@ def test_hybrid_view_reports_the_actual_aliases_of_the_returned_runtime_keys():
         "low_trust_observations": [{**item, "memory_key": k} for k in ("K5", "K1", "K4")]
     }
     rows = srt.hybrid_view(result, amap)
-    assert sorted(r["alias"] for r in rows) == ["e1", "e4", "e5"]  # never relabelled to e1..e3
+    # actual aliases in E5's native order: never relabelled to e1..e3, never alias-sorted
+    assert [r["alias"] for r in rows] == ["e5", "e1", "e4"]
+    assert [r["position"] for r in rows] == [1, 2, 3]
     assert not hasattr(srt, "surfaced_aliases") and not hasattr(srt, "interchangeable_episodes")

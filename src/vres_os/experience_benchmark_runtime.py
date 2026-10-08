@@ -136,20 +136,6 @@ def ordered_procedure_entries(rows: list[dict], alias_map: eb.AliasMap) -> list[
     return _ranked([((-float(r["score"]),), procedure_row_entry(r, alias_map, 0)) for r in rows])
 
 
-def _tie_prefix(item: dict) -> tuple:
-    """The E5 ranking tuple without its final physical `memory_key` element."""
-    sig = item["signals"]
-    if "conflict" in item.get("flags", []):
-        return (sig["authority_tier"], sig["scope_rank"], 0, 0.0, 0)
-    return (
-        sig["authority_tier"],
-        sig["scope_rank"],
-        -int(sig["task_family_match"] or sig["capability_match"]),
-        -sig["fusion_rank_score"],
-        -sig["recency_epoch"],
-    )
-
-
 def _alias_of(item: dict, alias_map: eb.AliasMap) -> str:
     if item["memory_class"] == "raw_evidence":
         refs = [
@@ -163,31 +149,14 @@ def _alias_of(item: dict, alias_map: eb.AliasMap) -> str:
     return retrieval.resolve_reference(alias_map, refs)
 
 
-def _alias_tie_order(items: list[dict], aliases: list[str]) -> list[tuple[dict, str]]:
-    """Order E5 items that tie on every ranking signal by alias instead of the random physical key.
-
-    E5's final tie-break is the physical key, which differs between databases; the benchmark
-    result must not. Items are only permuted inside a run of identical ranking prefixes.
-    """
-    out: list[tuple[dict, str]] = []
-    run: list[tuple[dict, str]] = []
-    for item, alias in zip(items, aliases, strict=True):
-        if run and _tie_prefix(run[0][0]) != _tie_prefix(item):
-            out.extend(sorted(run, key=lambda pair: pair[1]))
-            run = []
-        run.append((item, alias))
-    out.extend(sorted(run, key=lambda pair: pair[1]))
-    return out
-
-
 def hybrid_entries_and_signals(result: dict, alias_map: eb.AliasMap) -> tuple[list[dict], dict]:
     """Flatten E5 sections in frozen order; roles/flags go only to the scorer sidecar."""
     entries: list[dict] = []
     mismatch, conflict, supporting = [], [], []
     for section in er.SECTIONS:
         items = result[section]
-        aliases = [_alias_of(item, alias_map) for item in items]
-        for item, alias in _alias_tie_order(items, aliases):
+        for item in items:  # E5's native order, preserved (A4: no benchmark re-rank)
+            alias = _alias_of(item, alias_map)
             flags = set(item.get("flags", []))
             entries.append(
                 _entry(

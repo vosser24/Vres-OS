@@ -205,8 +205,8 @@ def hybrid_view(result: dict, amap) -> list[dict]:
     rows: list[dict] = []
     for section in er.SECTIONS:
         items = result[section]
-        aliases = [rt._alias_of(item, amap) for item in items]
-        for item, alias in rt._alias_tie_order(items, aliases):
+        for item in items:  # E5's native order, preserved
+            alias = rt._alias_of(item, amap)
             rows.append(
                 {
                     "alias": alias,
@@ -306,7 +306,7 @@ def run_case(runtime: rt.BenchmarkRuntime, case: dict, expected: dict) -> dict:
         packs["candidate_hybrid"] = [i["alias"] for i in got["pack"]]
         result = runtime.adapters["candidate_hybrid"].last_result
         hybrid = hybrid_view(result, amap)
-        if sorted(r["alias"] for r in hybrid) != sorted(packs["candidate_hybrid"]):
+        if [r["alias"] for r in hybrid] != packs["candidate_hybrid"]:
             raise eb.BenchmarkError("candidate_hybrid pack and hybrid view disagree")
         snap_after = _knowledge_snapshots(runtime, case, amap)
         fp_after = table_fingerprints(conn) if track_rewrite else None

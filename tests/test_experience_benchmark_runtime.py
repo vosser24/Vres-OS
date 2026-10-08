@@ -222,18 +222,27 @@ def test_approval_fixture_never_trusts_the_connecting_account():
     assert "record_event" not in runtime_src and "provenance_authority" not in runtime_src
 
 
-def test_tied_items_are_ordered_by_alias_not_by_the_physical_key():
-    def run(first, second):
-        pack = _pack(
-            raw_evidence_refs=[
-                _item(first, "raw_evidence", "evidence_ref", evidence=[f"source:{first}"]),
-                _item(second, "raw_evidence", "evidence_ref", evidence=[f"source:{second}"]),
-            ]
-        )
-        return [e["alias"] for e in rt.hybrid_entries_and_signals(pack, _amap2())[0]]
+def _recurrence_amap():
+    m = eb.AliasMap(["adv_e3", "adv_e4", "adv_e5"])
+    for n in ("3", "4", "5"):
+        m.bind(f"adv_e{n}", f"EPI-{n}")
+    return m
 
-    # E5 breaks the tie by physical key; the benchmark must not depend on which key sorted first.
-    assert run("SRC-1", "SRC-2") == run("SRC-2", "SRC-1") == ["dev_a", "dev_src"]
+
+def _low_trust(key):
+    item = _item(key, "episodic", "low_trust_observation")
+    item["trust_class"] = "external_untrusted_observation"
+    return item
+
+
+def test_candidate_hybrid_preserves_the_native_e5_order_of_tied_public_signals():
+    # Identical public signals (same whole-second recency_epoch): the old alias re-sort would
+    # have produced e3,e4,e5. E5 v5 owns the order; the normalizer must not re-rank it.
+    pack = _pack(low_trust_observations=[_low_trust(k) for k in ("EPI-5", "EPI-4", "EPI-3")])
+    entries, _ = rt.hybrid_entries_and_signals(pack, _recurrence_amap())
+    assert [e["alias"] for e in entries] == ["adv_e5", "adv_e4", "adv_e3"]
+    assert [e["rank"] for e in entries] == [1, 2, 3]
+    assert not hasattr(rt, "_alias_tie_order") and not hasattr(rt, "_tie_prefix")
 
 
 def test_tie_order_never_reorders_items_that_differ_on_a_ranking_signal():
