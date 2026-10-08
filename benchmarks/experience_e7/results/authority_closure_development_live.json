@@ -1,0 +1,490 @@
+{
+ "baseline_head": "3ceae86aedfabaf949f231a5c956803e7d66cadd",
+ "capability_precedent": {
+  "capabilities_by_alias": {
+   "dev_capability_precedent:dev_e": [
+    "cap_forecasting"
+   ],
+   "dev_capability_precedent:dev_o": [
+    "cap_leadtime"
+   ]
+  },
+  "exact_expected": {
+   "dev_capability_precedent:dev_e": [
+    "cap_forecasting"
+   ],
+   "dev_capability_precedent:dev_o": [
+    "cap_leadtime"
+   ]
+  },
+  "matches_expected": true
+ },
+ "captures": [
+  {
+   "alias": "dev_capability_precedent:dev_e",
+   "episode_digest": "5b419e9b44bfd686",
+   "objective_equals_corpus": true,
+   "outcome_status": "passed",
+   "participation_class": "participated",
+   "payload_objective_equals_corpus": true,
+   "policy_version": "176.e1.v1",
+   "relations": [
+    {
+     "target_kind": "task",
+     "type": "derived_from"
+    },
+    {
+     "capability": "cap_forecasting",
+     "target_kind": "capability",
+     "type": "uses"
+    }
+   ],
+   "route": {
+    "assurance": "routine",
+    "hard_protected": false,
+    "observed_model": "claude-fable-5-1",
+    "status": "routed"
+   },
+   "trust_class": "trusted_project_source",
+   "work_unit": {
+    "attempt_count": 1,
+    "execution_tier": "sonnet",
+    "has_report": true,
+    "host_agent_observed": true,
+    "observed_model": "claude-sonnet-5-5",
+    "role": "supply-chain-director",
+    "status": "passed"
+   },
+   "worker_runs": [
+    {
+     "agent_type": "vres-os:sonnet-expert",
+     "observed_model": "claude-sonnet-5-5",
+     "status": "observed"
+    }
+   ]
+  },
+  {
+   "alias": "dev_capability_precedent:dev_o",
+   "episode_digest": "4ccbd405fc3b50c5",
+   "objective_equals_corpus": true,
+   "outcome_status": "passed",
+   "participation_class": "participated",
+   "payload_objective_equals_corpus": true,
+   "policy_version": "176.e1.v1",
+   "relations": [
+    {
+     "target_kind": "task",
+     "type": "derived_from"
+    },
+    {
+     "capability": "cap_leadtime",
+     "target_kind": "capability",
+     "type": "uses"
+    }
+   ],
+   "route": {
+    "assurance": "routine",
+    "hard_protected": false,
+    "observed_model": "claude-fable-5-1",
+    "status": "routed"
+   },
+   "trust_class": "trusted_project_source",
+   "work_unit": {
+    "attempt_count": 1,
+    "execution_tier": "sonnet",
+    "has_report": true,
+    "host_agent_observed": true,
+    "observed_model": "claude-sonnet-5-5",
+    "role": "supply-chain-director",
+    "status": "passed"
+   },
+   "worker_runs": [
+    {
+     "agent_type": "vres-os:sonnet-expert",
+     "observed_model": "claude-sonnet-5-5",
+     "status": "observed"
+    }
+   ]
+  },
+  {
+   "alias": "dev_gotcha_delimiter:dev_e1",
+   "episode_digest": "74b60ca55be6ee5a",
+   "objective_equals_corpus": true,
+   "outcome_status": "failed",
+   "participation_class": "participated",
+   "payload_objective_equals_corpus": true,
+   "policy_version": "176.e1.v1",
+   "relations": [
+    {
+     "target_kind": "task",
+     "type": "derived_from"
+    },
+    {
+     "capability": "cap.pricing",
+     "target_kind": "capability",
+     "type": "uses"
+    }
+   ],
+   "route": {
+    "assurance": "routine",
+    "hard_protected": false,
+    "observed_model": "claude-fable-5-1",
+    "status": "routed"
+   },
+   "trust_class": "trusted_project_source",
+   "work_unit": {
+    "attempt_count": 1,
+    "execution_tier": "sonnet",
+    "has_report": false,
+    "host_agent_observed": false,
+    "observed_model": null,
+    "role": "commercial-director",
+    "status": "failed"
+   },
+   "worker_runs": []
+  },
+  {
+   "alias": "dev_gotcha_delimiter:dev_e2",
+   "episode_digest": "d22adeca869f01ff",
+   "objective_equals_corpus": true,
+   "outcome_status": "failed",
+   "participation_class": "participated",
+   "payload_objective_equals_corpus": true,
+   "policy_version": "176.e1.v1",
+   "relations": [
+    {
+     "target_kind": "task",
+     "type": "derived_from"
+    },
+    {
+     "capability": "cap.pricing",
+     "target_kind": "capability",
+     "type": "uses"
+    }
+   ],
+   "route": {
+    "assurance": "routine",
+    "hard_protected": false,
+    "observed_model": "claude-fable-5-1",
+    "status": "routed"
+   },
+   "trust_class": "trusted_project_source",
+   "work_unit": {
+    "attempt_count": 1,
+    "execution_tier": "sonnet",
+    "has_report": false,
+    "host_agent_observed": false,
+    "observed_model": null,
+    "role": "commercial-director",
+    "status": "failed"
+   },
+   "worker_runs": []
+  },
+  {
+   "alias": "dev_participation:dev_own",
+   "episode_digest": "d973fcbdedbbc49e",
+   "objective_equals_corpus": true,
+   "outcome_status": "passed",
+   "participation_class": "participated",
+   "payload_objective_equals_corpus": true,
+   "policy_version": "176.e1.v1",
+   "relations": [
+    {
+     "target_kind": "task",
+     "type": "derived_from"
+    },
+    {
+     "capability": "cap.software-engineering",
+     "target_kind": "capability",
+     "type": "uses"
+    }
+   ],
+   "route": {
+    "assurance": "protected",
+    "hard_protected": false,
+    "observed_model": "claude-fable-5-1",
+    "status": "routed"
+   },
+   "trust_class": "trusted_project_source",
+   "work_unit": {
+    "attempt_count": 1,
+    "execution_tier": "sonnet",
+    "has_report": true,
+    "host_agent_observed": true,
+    "observed_model": "claude-sonnet-5-5",
+    "role": "cto",
+    "status": "passed"
+   },
+   "worker_runs": [
+    {
+     "agent_type": "vres-os:sonnet-expert",
+     "observed_model": "claude-sonnet-5-5",
+     "status": "observed"
+    }
+   ]
+  },
+  {
+   "alias": "dev_recurring_priceexport:dev_e1",
+   "episode_digest": "48b84232a08ba5dd",
+   "objective_equals_corpus": true,
+   "outcome_status": "passed",
+   "participation_class": "participated",
+   "payload_objective_equals_corpus": true,
+   "policy_version": "176.e1.v1",
+   "relations": [
+    {
+     "target_kind": "task",
+     "type": "derived_from"
+    },
+    {
+     "capability": "cap.pricing",
+     "target_kind": "capability",
+     "type": "uses"
+    }
+   ],
+   "route": {
+    "assurance": "routine",
+    "hard_protected": false,
+    "observed_model": "claude-fable-5-1",
+    "status": "routed"
+   },
+   "trust_class": "trusted_project_source",
+   "work_unit": {
+    "attempt_count": 1,
+    "execution_tier": "sonnet",
+    "has_report": true,
+    "host_agent_observed": true,
+    "observed_model": "claude-sonnet-5-5",
+    "role": "commercial-director",
+    "status": "passed"
+   },
+   "worker_runs": [
+    {
+     "agent_type": "vres-os:sonnet-expert",
+     "observed_model": "claude-sonnet-5-5",
+     "status": "observed"
+    }
+   ]
+  },
+  {
+   "alias": "dev_recurring_priceexport:dev_e2",
+   "episode_digest": "a693549a43e239e2",
+   "objective_equals_corpus": true,
+   "outcome_status": "passed",
+   "participation_class": "participated",
+   "payload_objective_equals_corpus": true,
+   "policy_version": "176.e1.v1",
+   "relations": [
+    {
+     "target_kind": "task",
+     "type": "derived_from"
+    },
+    {
+     "capability": "cap.pricing",
+     "target_kind": "capability",
+     "type": "uses"
+    }
+   ],
+   "route": {
+    "assurance": "routine",
+    "hard_protected": false,
+    "observed_model": "claude-fable-5-1",
+    "status": "routed"
+   },
+   "trust_class": "trusted_project_source",
+   "work_unit": {
+    "attempt_count": 1,
+    "execution_tier": "sonnet",
+    "has_report": true,
+    "host_agent_observed": true,
+    "observed_model": "claude-sonnet-5-5",
+    "role": "commercial-director",
+    "status": "passed"
+   },
+   "worker_runs": [
+    {
+     "agent_type": "vres-os:sonnet-expert",
+     "observed_model": "claude-sonnet-5-5",
+     "status": "observed"
+    }
+   ]
+  },
+  {
+   "alias": "dev_trajectory_failure:dev_e",
+   "episode_digest": "7d2fa77be3738d3f",
+   "objective_equals_corpus": true,
+   "outcome_status": "failed",
+   "participation_class": "participated",
+   "payload_objective_equals_corpus": true,
+   "policy_version": "176.e1.v1",
+   "relations": [
+    {
+     "target_kind": "task",
+     "type": "derived_from"
+    },
+    {
+     "capability": "cap.pricing",
+     "target_kind": "capability",
+     "type": "uses"
+    }
+   ],
+   "route": {
+    "assurance": "routine",
+    "hard_protected": false,
+    "observed_model": "claude-fable-5-1",
+    "status": "routed"
+   },
+   "trust_class": "trusted_project_source",
+   "work_unit": {
+    "attempt_count": 1,
+    "execution_tier": "sonnet",
+    "has_report": false,
+    "host_agent_observed": false,
+    "observed_model": null,
+    "role": "commercial-director",
+    "status": "failed"
+   },
+   "worker_runs": []
+  },
+  {
+   "alias": "dev_trajectory_success:dev_e",
+   "episode_digest": "9b561ca9a3eef088",
+   "objective_equals_corpus": true,
+   "outcome_status": "passed",
+   "participation_class": "participated",
+   "payload_objective_equals_corpus": true,
+   "policy_version": "176.e1.v1",
+   "relations": [
+    {
+     "target_kind": "task",
+     "type": "derived_from"
+    },
+    {
+     "capability": "cap.pricing",
+     "target_kind": "capability",
+     "type": "uses"
+    }
+   ],
+   "route": {
+    "assurance": "routine",
+    "hard_protected": false,
+    "observed_model": "claude-fable-5-1",
+    "status": "routed"
+   },
+   "trust_class": "trusted_project_source",
+   "work_unit": {
+    "attempt_count": 1,
+    "execution_tier": "sonnet",
+    "has_report": true,
+    "host_agent_observed": true,
+    "observed_model": "claude-sonnet-5-5",
+    "role": "commercial-director",
+    "status": "passed"
+   },
+   "worker_runs": [
+    {
+     "agent_type": "vres-os:sonnet-expert",
+     "observed_model": "claude-sonnet-5-5",
+     "status": "observed"
+    }
+   ]
+  }
+ ],
+ "counts": {
+  "e1_v1_participated_captures": 9,
+  "e1_v2_observed_captures": 1,
+  "fable_routes": 9,
+  "failed_work_units": 3,
+  "passed_work_units": 6,
+  "sonnet_host_observed_workers": 6
+ },
+ "dev_participation": {
+  "dev_own": {
+   "participation_class": "participated",
+   "policy_version": "176.e1.v1",
+   "task_bound": true,
+   "trust_class": "trusted_project_source",
+   "work_unit_status": "passed"
+  },
+  "dev_seen": {
+   "objective_equals_corpus": true,
+   "outcome_status": "completed",
+   "participation_class": "observed",
+   "policy_version": "176.e1.v2",
+   "relations": [
+    {
+     "target_kind": "source",
+     "type": "derived_from"
+    }
+   ],
+   "report_bound": false,
+   "source_authority_level": "external_untrusted_observation",
+   "source_project_local": true,
+   "source_status": "active",
+   "task_bound": false,
+   "trust_class": "external_untrusted_observation",
+   "work_unit_bound": false
+  }
+ },
+ "e2_consolidation": [
+  {
+   "case_id": "dev_gotcha_delimiter",
+   "evidence_episode_count": 2,
+   "polarity": "negative",
+   "policy_version": "176.e2.v1",
+   "reason_codes": [
+    "literal_support_verified"
+   ],
+   "recurrence_min_tasks_set": false,
+   "trigger": "failure_gotcha",
+   "verdict": "accepted"
+  },
+  {
+   "case_id": "dev_recurring_priceexport",
+   "evidence_episode_count": 2,
+   "polarity": "positive",
+   "policy_version": "176.e2.v1",
+   "reason_codes": [
+    "recurrence_threshold_uncalibrated"
+   ],
+   "recurrence_min_tasks_set": false,
+   "trigger": "recurrence",
+   "verdict": "quarantined"
+  },
+  {
+   "case_id": "dev_trajectory_failure",
+   "evidence_episode_count": 1,
+   "polarity": "negative",
+   "policy_version": "176.e2.v1",
+   "reason_codes": [
+    "literal_support_verified"
+   ],
+   "recurrence_min_tasks_set": false,
+   "trigger": "failure_gotcha",
+   "verdict": "accepted"
+  }
+ ],
+ "fixture_totals": {
+  "episodes": 10,
+  "tasks": 9
+ },
+ "kind": "authority_closure_run",
+ "legitimate_gaps": [
+  "dev_own route assurance is protected; protected validation not run (outside Boundary 4A)",
+  "dev_recurring_priceexport consolidation quarantined: recurrence_threshold_uncalibrated (threshold intentionally not set)",
+  "dev_trajectory_success has no E2 follow-up by design",
+  "adversarial cohort, Boundary 4B, Chunk 6, held-out, calibration not run"
+ ],
+ "model_judge": "not_used",
+ "not_claimed": [
+  "protected validation",
+  "release readiness",
+  "chunk 6",
+  "held-out",
+  "adversarial closure",
+  "threshold calibration"
+ ],
+ "phase": "development_participated",
+ "schema_version": 1,
+ "scope": "boundary_4a_live_participated_development_cohort_only"
+}
