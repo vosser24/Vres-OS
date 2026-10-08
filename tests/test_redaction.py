@@ -146,6 +146,26 @@ def test_separatorless_credential_phrase_is_redacted():
     assert "x9!q" not in redact_text("the admin pwd is x9!q7 for now")
 
 
+def test_service_key_phrase_is_redacted():
+    """#176 E7 B4B: 'the service key <value>' is a stated credential (live adversarial RED)."""
+    out = sanitize_text(
+        "Aborted the deployment; the pipeline printed the service key <<CANARY_1>> in its log before failing."
+    )
+    assert "CANARY_1" not in out.text
+    assert out.rule_counts == {"phrase_credential": 1}
+    assert "in its log before failing." in out.text
+    assert not out.residual
+    assert sanitize_text(out.text).text == out.text  # idempotent
+
+
+@pytest.mark.parametrize("line", [
+    "Rotate the service key policy quarterly.",
+    "The master key ceremony is on Friday.",
+])
+def test_key_phrase_prose_without_secret_shaped_value_is_kept(line):
+    assert sanitize_text(line).text == line
+
+
 @pytest.mark.parametrize("line", [
     "The password policy requires rotation.",
     "Reset the password manager entry for the secret santa list.",

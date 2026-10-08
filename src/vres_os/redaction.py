@@ -32,7 +32,7 @@ _KV = re.compile(
 # like a secret (carries a digit or symbol) is redacted, so prose such as "password policy" is kept.
 _PHRASE = re.compile(
     r"(?i)(?P<head>\b(?:password|passwd|pwd|passphrase|api[_ -]?key|access[_ -]?token|"
-    r"client[_ -]?secret)\s+(?:(?:is|was)\s+)?)(?P<value>(?=[^\s,;]*[\d<>_!@#$%^&*])[^\s,;]{4,})"
+    r"client[_ -]?secret|(?:service|secret|signing|encryption|master)[_ -]?key)\s+(?:(?:is|was)\s+)?)(?P<value>(?=[^\s,;]*[\d<>_!@#$%^&*])[^\s,;]{4,})"
 )
 _URI = re.compile(r"(?i)([a-z][a-z0-9+.-]{0,31}://[^\s/:@]+:)[^\s@]*@")
 _BEARER = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/-]+=*")
