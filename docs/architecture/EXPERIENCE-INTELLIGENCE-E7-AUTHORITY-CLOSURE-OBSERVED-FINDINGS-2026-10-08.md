@@ -114,3 +114,31 @@ NOT_RUN_OWNER_GAP and are not scored.
 DB-free: 2643 passed, 4 skipped (`tests/test_*.py`). PostgreSQL (opt-in harness): observability schema 17,
 retrieval observation 19, retrieval journey 77, retrieve surface 37, v3 journey 3, migrator resume 1, security 18 — all passed.
 Not run (by instruction): the full repository PG suite, the release gate, protected validation, the live cohort.
+
+## 11. Correction (2026-10-08, added after independent review; sections 6 and 8 above are retained as history)
+
+1. **Misclassification.** Section 6 treated the A/B digest mismatch as evidence "not independent of physical identity"
+   and fixed it in the benchmark runtime by relabelling. Independent review rejected that: the five episode aliases name
+   *different semantic text*, so the relabel reported episodes E5 had not returned and violated actual alias resolution.
+2. **Invalid evidence.** The section 8 digest `e5f45a99680b94207dbc6a2f9b1517a4730f38edb4eb25437e402c0e956fe401`
+   is invalid as protected reproducibility evidence. It documents the workaround only.
+3. **Product fix.** The final tie in E5 ended in the physical `memory_key`. `176.e5.v4` (see
+   `EXPERIENCE-INTELLIGENCE-E7-E5-V4-DETERMINISTIC-TIE-ADDENDUM-2026-10-08.md`) orders equal-ranked items by a digest of
+   public semantics before the key. v1/v2/v3 digests are unchanged; migration 045 admits the v4 identity; the relabel code
+   and its tests are deleted; `hybrid_view` now reports the actual aliases of the returned runtime keys.
+4. **Result of the new two-clean-DB proof: NOT reproducible.** Three runs (A ascending, B reversed, new DBs and writer
+   roles each time) matched on the 16 PASS / 0 FAIL / 1 N/A / 3 OWNER_GAP matrix, invariants, leak scan (empty), cleanup
+   (PASS) and physical-key difference, but **every run's schema-2 digest differed**, only in
+   `adv_recurrence` `hybrid`/`packs.candidate_hybrid` (which three of the five tied episodes are returned).
+   No relabel or normalization was added to hide this.
+5. **Measured cause (probe, not committed).** The five observed sources are registered ~0.3-0.4 s apart
+   (e.g. `ingested_at` 47.07, 47.44, 47.85, 48.19, 48.48 s), so they land in different wall-clock seconds. Two E5 inputs are
+   derived from that clock: `recency_epoch` (whole seconds of `observed_at` = source `ingested_at`) and the lexical
+   candidate position used for `fusion_rank_score` (SQL `ORDER BY rank DESC, e.observed_at DESC, e.episode_key`). Returned
+   scores differed per episode (0.016393 / 0.016129 / 0.015873). Both rank dimensions precede the v4 semantic digest, so the
+   digest tie-break is not reached. The addendum declared `recency_epoch` as a residual limit; the fusion-position
+   dependency was not declared and is a second, equal-grade source.
+6. **Status.** Boundary 3 reproducibility is still RED. Fixing it needs a decision outside the frozen v4 contract (for
+   example, a v5 rule that breaks lexical-tie positions and recency among equal-text observed items by the semantic digest, or a
+   benchmark-controlled clock). Not applied; the corpus, expected evidence, thresholds, security scorers and low-trust budget
+   are unchanged. The live cohort and Chunk 6 are not started.
