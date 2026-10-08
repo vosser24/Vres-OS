@@ -1353,3 +1353,134 @@ Final E6 acceptance requires:
 
 Do not begin E7/E8 during E6.
 
+
+
+---
+
+### 20. 2026-10-08 #176 E7 through Boundary 4A accepted / Boundary 4B next
+
+Status: **E7 CHUNKS 0–5 + AUTHORITY CLOSURE B2/B3/B4A ACCEPTED — B4B NEXT**
+
+This section supersedes section 19 for current execution state.
+
+Authoritative accepted product main remains:
+9a8acc5d464b96432a93cb95daa9581412fb07ee
+
+E7 branch:
+issue-176-e7-benchmark-security
+
+Accepted E7 branch HEAD after live development authority closure:
+**7aac85ac4917bfd3b178978183082debdd6333ca**
+
+Boundary 3 accepted predecessor:
+3ceae86aedfabaf949f231a5c956803e7d66cadd
+
+Canonical E7 Vres task:
+TASK-20261006-6cd9d80a92
+
+Newest detailed execution handoff:
+docs/handoffs/PREPRODUCTION-E7-B4B-RESUME-HANDOFF-2026-10-08.md
+
+#### Accepted E7 state
+
+Accepted:
+- Chunk 0 loader/canonical/digest
+- Chunk 1 corpus/splits/scoring
+- Chunk 2 baseline adapters/retrieval/determinism
+- Chunk 3 operation faithfulness
+- Chunk 4 outcome/negative-transfer/streaming
+- Chunk 5 security hardening
+- Authority Closure Boundary 2
+- Authority Closure Boundary 3 deterministic observed/reproducibility closure
+- Authority Closure Boundary 4A live participated DEVELOPMENT cohort
+
+Boundary 4A commit:
+7aac85ac4917bfd3b178978183082debdd6333ca
+
+Boundary 4A artifact:
+benchmarks/experience_e7/results/authority_closure_development_live.json
+
+Boundary 4A artifact SHA-256:
+03b3c9e2c798ccdcabf53a7d1c6fe63e176662e796bae84c0fab146a2edfb661
+
+Boundary 4A live evidence:
+- 9 E1-v1 participated/trusted captures
+- 9 real host-observed Fable routes
+- 6 real host-observed Sonnet workers
+- 6 passed work units
+- 3 failed work units
+- dev_seen remains E1-v2 observed / external_untrusted_observation
+- capability precedent exactly cap_forecasting and cap_leadtime
+- recurrence consolidation remains quarantined because recurrence threshold calibration is intentionally not started
+
+No product code changed in Boundary 4A.
+
+#### Exact current gate
+
+Boundary 4B has NOT started.
+
+Before any B4B live work:
+1. verify/finish cleanup of the accepted B4A disposable fixture;
+2. return to the normal/control Vres environment;
+3. require E7 branch HEAD/origin = 7aac85ac4917bfd3b178978183082debdd6333ca and clean tracked tree;
+4. resume TASK-20261006-6cd9d80a92;
+5. record one canonical checkpoint sealing Boundary 4A acceptance;
+6. do not complete the task;
+7. prepare a fresh B4B-specific ignored launcher/helper;
+8. run B4B DryRun and require production-shaped split-role fixture checks plus complete cleanup;
+9. only then launch a fresh top-level B4B Claude fixture.
+
+#### Boundary 4B scope
+
+Live adversarial participated-authority closure only:
+
+adv_secret_episode:
+- 1 real failed work-unit authority path;
+- frozen assertion no_secret_persistence;
+- adv_e must_not_persist;
+- never put the raw canary in committed output.
+
+adv_flood_burst:
+- 25 real failed work-unit authority paths;
+- 25 frozen E2 consolidations;
+- required security includes burst_fails_closed and frequency_is_not_trust;
+- flood transitions must not promote/retrieve.
+
+adv_varied_poison:
+- 6 real failed work-unit authority paths;
+- 6 frozen E2 consolidations;
+- required security includes varied_poison_single_lineage;
+- varied poison transitions must not promote.
+
+Totals:
+- 32 real Fable-routed failed work-unit authority paths
+- 0 expected Sonnet workers
+- 31 frozen E2 consolidations
+
+Keep the accepted deterministic adversarial matrix separate:
+16 PASS / 0 FAIL / 1 not_applicable / 3 not_run_owner_gap.
+
+Boundary 4B creates a separate host-attested live overlay.
+
+A genuine B4B scorer/security failure is evidence.
+Do not patch E1/E2/E5/scoring/migrations/thresholds inside the same B4B run.
+Stop, preserve normalized RED evidence, and freeze a separate hardening addendum before implementation.
+
+#### Still pending after Boundary 4B
+
+Only after independent B4B acceptance:
+- Chunk 6 development replay across memory_disabled / raw_refind / current_vres / candidate_hybrid
+- representative baseline measurement
+- development threshold calibration/freeze
+- held-out final gate, without tuning on held-out
+- one coherent final fresh PostgreSQL suite
+- release gate
+- installed-runtime smoke only if packaging/MCP/plugin changed
+- exact-head CI
+- protected Fable/high final review
+- guarded merge
+- exact post-main CI
+- complete E7 task exactly once
+- E8 only after E7 closure
+
+Do not call E7 complete and do not call Vres production-ready at this boundary.
