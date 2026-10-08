@@ -550,32 +550,30 @@ def test_unknown_assertion_still_fails_closed():
     assert eb  # imported for symmetry with the sibling security tests
 
 
-# ---- tie-peer canonicalization (A/B reproducibility) ---
-
-
-def _surfaced(kept_keys, classes):
+def test_hybrid_view_reports_the_actual_aliases_of_the_returned_runtime_keys():
     from vres_os import experience_benchmark_security_runtime as srt
 
     aliases = [f"e{i}" for i in range(1, 6)]
     amap = eb.AliasMap(aliases)
     for a in aliases:
         amap.bind(a, f"K{a[1:]}")
-    items = [{"memory_class": "episodic", "memory_key": k} for k in kept_keys]
-    result = {s: [] for s in srt.er.SECTIONS} | {"low_trust_observations": items}
-    return srt.surfaced_aliases(result, amap, classes)
-
-
-_SAME = dict.fromkeys((f"e{i}" for i in range(1, 6)), ("p", "v", "obs", "ext", "ok", "x", True))
-
-
-def test_truncated_same_class_peers_get_canonical_labels_independent_of_which_survived():
-    assert _surfaced(["K5", "K1", "K4"], _SAME) == ["e1", "e2", "e3"]
-    assert _surfaced(["K2", "K3", "K1"], _SAME) == ["e1", "e2", "e3"]
-
-
-def test_untruncated_or_distinct_class_aliases_are_never_relabelled():
-    three = {a: c for a, c in _SAME.items() if a in ("e1", "e4", "e5")}
-    assert _surfaced(["K5", "K1", "K4"], three) == ["e5", "e1", "e4"]
-    mixed = _SAME | {"e1": ("p", "v", "obs", "ext", "revoked", "x", False)}
-    assert _surfaced(["K1", "K4", "K5"], mixed)[0] == "e1"
-    assert _surfaced(["K5"], {}) == ["e5"]
+    item = {
+        "memory_class": "episodic",
+        "role": "low_trust_observation",
+        "authority_class": "none",
+        "trust_class": "external_untrusted_observation",
+        "signals": {
+            "authority_tier": 0,
+            "scope_rank": 0,
+            "task_family_match": False,
+            "capability_match": False,
+            "fusion_rank_score": 0.0,
+            "recency_epoch": 0,
+        },
+    }
+    result = {s: [] for s in srt.er.SECTIONS} | {
+        "low_trust_observations": [{**item, "memory_key": k} for k in ("K5", "K1", "K4")]
+    }
+    rows = srt.hybrid_view(result, amap)
+    assert sorted(r["alias"] for r in rows) == ["e1", "e4", "e5"]  # never relabelled to e1..e3
+    assert not hasattr(srt, "surfaced_aliases") and not hasattr(srt, "interchangeable_episodes")

@@ -91,3 +91,19 @@ def test_gap_and_na_rows_make_zero_owner_and_retrieval_calls(runtime, monkeypatc
     sec.validate_security_run(run)
     assert sec.deterministic_digest(run) == run["result_digest"]
     assert not any(k in eb.canonical_bytes(run).decode() for k in runtime.physical)
+
+
+def test_recurrence_hybrid_reports_the_actual_aliases_E5_returned(runtime, monkeypatch):
+    """No relabel: three of the five tied episodes surface, each under its own alias."""
+    seen = []
+    real = sec.score_case
+    monkeypatch.setattr(sr.sec, "score_case", lambda c, e, ev: seen.append(ev) or real(c, e, ev))
+    result = sr.run_case(runtime, CASES["adv_recurrence"], BUNDLE["expected"]["adv_recurrence"])
+    assert result["status"] == sec.PASS
+    (evidence,) = seen
+    low = [r["alias"] for r in evidence["hybrid"] if r["section"] == "low_trust_observations"]
+    assert len(low) == 3 and len(set(low)) == 3
+    assert set(low) <= {"adv_e1", "adv_e2", "adv_e3", "adv_e4", "adv_e5"}
+    assert sorted(i for i in evidence["packs"]["candidate_hybrid"]) == sorted(
+        r["alias"] for r in evidence["hybrid"]
+    )

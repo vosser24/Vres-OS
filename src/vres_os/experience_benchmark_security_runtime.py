@@ -197,58 +197,15 @@ def procedure_state(conn, case: dict, amap) -> dict:
     return out
 
 
-def interchangeable_episodes(conn, case: dict, amap) -> dict[str, tuple]:
-    """Episode alias -> its security-relevant state class (internal grouping only, never emitted).
+def hybrid_view(result: dict, amap) -> list[dict]:
+    """Closed security view of the PUBLIC E5 result of the same call (flattened).
 
-    Episodes of one class are interchangeable for every security assertion, so which of
-    several exactly-tied, cap-truncated peers E5 surfaced (its final physical-key
-    tie-break) must not change the benchmark evidence.
+    Aliases are the ACTUAL case-local aliases of the runtime keys E5 returned; never substituted.
     """
-    classes = {}
-    for alias, row in episode_state(conn, None, case, amap).items():
-        project = conn.execute(
-            "SELECT project_id FROM vres.experience_episodes WHERE episode_key=%s",
-            (amap.runtime_key_for(alias),),
-        ).fetchone()["project_id"]
-        classes[alias] = (
-            project,
-            row["policy_version"],
-            row["participation_class"],
-            row["trust_class"],
-            row["outcome_status"],
-            row["lifecycle_state"],
-            row["current_usable"],
-        )
-    return classes
-
-
-def surfaced_aliases(result: dict, amap, classes: dict[str, tuple]) -> list[str]:
-    """Flat surfaced aliases in E5 section order, with truncated same-class peers canonicalized.
-
-    When E5 kept fewer episodes of one class than exist, which peers it kept is decided by
-    timing and physical keys. The j-th kept peer of that class is then labelled with the j-th
-    alias of the class, so the evidence depends only on the structure E5 actually returned.
-    """
-    flat = [rt._alias_of(i, amap) for s in er.SECTIONS for i in result[s]]
-    out = list(flat)
-    for cls in {classes[a] for a in flat if a in classes}:
-        pool = sorted(a for a, c in classes.items() if c == cls)
-        kept = [i for i, a in enumerate(flat) if classes.get(a) == cls]
-        if len(pool) > len(set(flat[i] for i in kept)):
-            for rank, i in enumerate(kept):
-                out[i] = pool[rank]
-    return out
-
-
-def hybrid_view(result: dict, amap, labels: list[str] | None = None) -> list[dict]:
-    """Closed security view of the PUBLIC E5 result of the same call (flattened)."""
-    labels = iter(labels) if labels is not None else None
     rows: list[dict] = []
     for section in er.SECTIONS:
         items = result[section]
-        aliases = [
-            next(labels) if labels is not None else rt._alias_of(item, amap) for item in items
-        ]
+        aliases = [rt._alias_of(item, amap) for item in items]
         for item, alias in rt._alias_tie_order(items, aliases):
             rows.append(
                 {
@@ -348,11 +305,9 @@ def run_case(runtime: rt.BenchmarkRuntime, case: dict, expected: dict) -> dict:
         got = runtime.adapters["candidate_hybrid"].retrieve(shared, amap, runtime.scoring)
         packs["candidate_hybrid"] = [i["alias"] for i in got["pack"]]
         result = runtime.adapters["candidate_hybrid"].last_result
-        labels = surfaced_aliases(result, amap, interchangeable_episodes(conn, case, amap))
-        hybrid = hybrid_view(result, amap, labels)
-        if len(hybrid) != len(packs["candidate_hybrid"]):
+        hybrid = hybrid_view(result, amap)
+        if sorted(r["alias"] for r in hybrid) != sorted(packs["candidate_hybrid"]):
             raise eb.BenchmarkError("candidate_hybrid pack and hybrid view disagree")
-        packs["candidate_hybrid"] = [r["alias"] for r in hybrid]
         snap_after = _knowledge_snapshots(runtime, case, amap)
         fp_after = table_fingerprints(conn) if track_rewrite else None
         canaries = sec.canaries(case, security.get("must_not_persist", []))
