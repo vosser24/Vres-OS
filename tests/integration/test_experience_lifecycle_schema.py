@@ -15,6 +15,8 @@ from vres_os import db
 from vres_os.db import connect
 from vres_os.repository import Repository
 
+pytestmark = pytest.mark.usefixtures("provenance_writer")
+
 MIGRATION = "039_experience_lifecycle_ledger.sql"
 M041 = "041_experience_retrieval_observability.sql"  # separate E6 migration, excluded from the 040 addendum step
 M040 = "040_context_refresh_attestation.sql"  # the approved 2026-10-02 addendum migration (protected attestations)
@@ -35,19 +37,22 @@ CAUSE_FOR.update({"expire_observed": "time", "invalidate_derived": "source",
 
 
 def _approval(pid):
-    repo = Repository()
-    task_key = repo.begin_task(pid, "E4A schema", "schema test", "experience-test", "chairman")
-    repo.record_event(task_key, "USER_INSTRUCTION", "user", {"text": "Approved"})
-    with connect() as conn, conn.transaction():
-        row = conn.execute(
-            "SELECT t.id AS tid, e.id AS eid FROM vres.task_events e JOIN vres.tasks t ON t.id=e.task_id "
-            "WHERE t.task_key=%s ORDER BY e.id DESC LIMIT 1", (task_key,)).fetchone()
+    from trusted_provenance_writer import seed_test_user_instruction
+
+    from vres_os.approvals import ApprovalService
+
+    task_key = Repository().begin_task(
+        pid, "E4A schema", "schema test", "experience-test", "chairman")
+    seed_test_user_instruction(pid, task_key, "Approved")
+    key = ApprovalService().record_latest_user_approval(
+        task_key=task_key, approval_type="e4_lifecycle", statement="approve",
+        subject_key=uuid.uuid4().hex)
+    with connect() as conn:
+        tid = conn.execute(
+            "SELECT id FROM vres.tasks WHERE task_key=%s", (task_key,)).fetchone()["id"]
         aid = conn.execute(
-            """INSERT INTO vres.approval_events(approval_key,project_id,source_event_id,approval_type,subject_key,
-               statement,user_text) VALUES (%s,%s,%s,'company_knowledge_publish',%s,'approve','Approved') RETURNING id""",
-            (f"APR-{uuid.uuid4().hex[:10]}", pid, row["eid"], uuid.uuid4().hex),
-        ).fetchone()["id"]
-    return row["tid"], aid
+            "SELECT id FROM vres.approval_events WHERE approval_key=%s", (key,)).fetchone()["id"]
+    return tid, aid
 
 
 def _row(pid, base, aid=None, **over):

@@ -29,6 +29,7 @@ WRITER_FUNCTIONS = (
     "vres.record_experience_retrieval_observation(bigint,text,text,text,text,jsonb,jsonb)",
     "vres.record_experience_retrieval_references(bigint,text,text,text,text,text,text,text[])",
     "vres.record_experience_retrieval_replay(bigint,bigint,jsonb)",
+    "vres.issue_context_refresh_attestation(text,text,text,text)",
 )
 
 

@@ -21,8 +21,9 @@ def _boundary_signatures() -> dict[str, str]:
     return {m.group(1): m.group(0) for m in SIGNATURE.finditer(BOUNDARY)}
 
 
-def test_writer_function_grants_are_exactly_the_six_writer_functions():
-    assert len(twp.WRITER_FUNCTIONS) == 6 and len(set(twp.WRITER_FUNCTIONS)) == 6
+def test_writer_function_grants_are_exactly_the_approved_restricted_test_writer_set():
+    """The least-privilege subset these tests need, not the whole production writer grant set."""
+    assert len(twp.WRITER_FUNCTIONS) == 7 and len(set(twp.WRITER_FUNCTIONS)) == 7
     assert sorted(twp.WRITER_FUNCTIONS) == sorted(
         [
             "vres.stage_user_input(bigint,text,text,text,text,text,text,timestamptz)",
@@ -31,6 +32,7 @@ def test_writer_function_grants_are_exactly_the_six_writer_functions():
             "vres.record_experience_retrieval_observation(bigint,text,text,text,text,jsonb,jsonb)",
             "vres.record_experience_retrieval_references(bigint,text,text,text,text,text,text,text[])",
             "vres.record_experience_retrieval_replay(bigint,bigint,jsonb)",
+            "vres.issue_context_refresh_attestation(text,text,text,text)",
         ]
     )
 
@@ -40,6 +42,10 @@ def test_writer_function_signatures_match_database_boundary_source():
     for signature in twp.WRITER_FUNCTIONS:
         name = SIGNATURE.fullmatch(signature).group(1)
         assert declared.get(name) == signature, f"{name} drifted from database_boundary.py"
+
+
+def test_consume_attestation_is_never_a_test_writer_grant():
+    assert not any("consume_context_refresh_attestation" in s for s in twp.WRITER_FUNCTIONS)
 
 
 def test_e7_module_is_a_thin_reexport_of_the_generic_fixture():

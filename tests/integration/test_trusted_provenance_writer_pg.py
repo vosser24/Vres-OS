@@ -1,4 +1,4 @@
-"""#176 E7 hygiene: the temporary writer holds EXECUTE on six functions, no table DML.
+"""#176 E7 hygiene: the temporary writer holds EXECUTE on the approved function set only, no DML.
 
 Opt-in PostgreSQL test.
 """
@@ -56,6 +56,9 @@ def test_writer_has_only_function_execute_and_no_table_dml(provenance_writer):
             for sig in WRITER_FUNCTIONS
         }
     assert executable == declared
+    assert len(declared) == 7
+    assert "vres.issue_context_refresh_attestation(text,text,text,text)" in declared
+    assert not any("consume_context_refresh_attestation" in s for s in executable)
     assert flags == {
         "rolsuper": False,
         "rolcreatedb": False,

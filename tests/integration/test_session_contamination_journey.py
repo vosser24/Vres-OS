@@ -94,10 +94,11 @@ def test_revocation_marks_every_open_session_of_the_project_and_nothing_else(pg_
     sid_c, key_c = _open(pg_project)
     Repository().close_session(pg_project, sid_c, "test closed")
     _, key_d = _open(other_project)
-    before = _sessions(pg_project, other_project)
     s, k = _poisoned(pg_project)
+    apr = approve(pg_project, f"revoke_source:{s}")  # protected ingress seeds its own session first
+    before = _sessions(pg_project, other_project)
 
-    out = revoke(pg_project, s)
+    out = revoke(pg_project, s, apr=apr)
 
     assert out["counts"]["sessions_marked"] == 2 and out["revoked_knowledge"] == [k]
     marks = _session_events(pg_project, "context_contaminated")
