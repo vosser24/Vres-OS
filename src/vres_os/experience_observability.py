@@ -22,6 +22,10 @@ from .experience_retrieval import (
     E5_V1_SCHEMA_VERSION,
     E5_V2_POLICY,
     E5_V2_SCHEMA_VERSION,
+    E5_V3_POLICY,
+    E5_V3_SCHEMA_VERSION,
+    LOW_TRUST_ONLY_DIAGNOSTIC,
+    LOW_TRUST_ONLY_REASON,
     MAX_ITEMS,
     MAX_PACK_BYTES,
     SECTIONS,
@@ -46,12 +50,14 @@ E6_POLICY_DIGEST = _sha256(E6_POLICY)
 FROZEN_E6_POLICY_DIGEST = "d61f60d31182085748bb613ef3c160274f1a1a5a2384854f36e52b4cdfecc5e5"
 FROZEN_E5_V1_POLICY_DIGEST = "7572cafc632d4f56571adbe5f59baceedf15c56a07d5a3ca35e4b05448a982e9"
 FROZEN_E5_V2_POLICY_DIGEST = "0cd0f10d24e37dd7a9872eced6c18e4962d4740a2d6a8c03a38cea1d8a73d6b5"
+FROZEN_E5_V3_POLICY_DIGEST = "272b10b6042a77bb79812ec637ec9296e28867628285165775c5aeee4af1a4ad"
 # Closed registry of legitimate frozen E5 identities. The digest is always computed from the in-code
 # policy and
 # never taken from a pack.
 SUPPORTED_RETRIEVAL_POLICIES: dict[str, tuple[dict[str, Any], str]] = {
     E5_V1_SCHEMA_VERSION: (E5_V1_POLICY, _sha256(E5_V1_POLICY)),
     E5_V2_SCHEMA_VERSION: (E5_V2_POLICY, _sha256(E5_V2_POLICY)),
+    E5_V3_SCHEMA_VERSION: (E5_V3_POLICY, _sha256(E5_V3_POLICY)),
 }
 
 MAX_DURATION_MS = 86_400_000
@@ -93,6 +99,12 @@ _CLASS_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 _WHY = re.compile(r"^[a-z0-9_]{1,80}$")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 _ABSTAIN_REASON = "no_eligible_experience"
+# an empty pack's permitted reasons, per frozen E5 version
+_ABSTAIN_REASONS = {
+    E5_V1_SCHEMA_VERSION: frozenset({_ABSTAIN_REASON}),
+    E5_V2_SCHEMA_VERSION: frozenset({_ABSTAIN_REASON}),
+    E5_V3_SCHEMA_VERSION: frozenset({_ABSTAIN_REASON, LOW_TRUST_ONLY_REASON}),
+}
 
 
 class ObservationRejected(ValueError):
@@ -104,10 +116,11 @@ class ObservationRejected(ValueError):
 
 
 def assert_policy_identity() -> None:
-    """Fail closed if either frozen policy digest no longer matches its in-code definition."""
+    """Fail closed if any frozen policy digest no longer matches its in-code definition."""
     frozen = {
         E5_V1_SCHEMA_VERSION: FROZEN_E5_V1_POLICY_DIGEST,
         E5_V2_SCHEMA_VERSION: FROZEN_E5_V2_POLICY_DIGEST,
+        E5_V3_SCHEMA_VERSION: FROZEN_E5_V3_POLICY_DIGEST,
     }
     if (
         E6_POLICY_DIGEST != FROZEN_E6_POLICY_DIGEST
@@ -179,12 +192,16 @@ def unwrap_tool_response(response: Any) -> dict[str, Any]:
 
 # ---------------------------------------------------------------- closed E5 pack validation (never repairs)
 
-def _validate_diagnostics(diag: Any) -> dict[str, Any]:
+def _validate_diagnostics(diag: Any, version: str) -> dict[str, Any]:
     if not isinstance(diag, dict):
         raise _reject("invalid_diagnostics")
+    v3 = version == E5_V3_SCHEMA_VERSION
+    if v3 and LOW_TRUST_ONLY_DIAGNOSTIC not in diag:
+        raise _reject("diagnostics_not_allow_listed")  # v3 packs always carry the suppression count
     out: dict[str, Any] = {}
     for key, value in diag.items():
-        if key in _DIAG_INTS and _is_int(value) and value >= 0:
+        allowed = key in _DIAG_INTS or (v3 and key == LOW_TRUST_ONLY_DIAGNOSTIC)
+        if allowed and _is_int(value) and value >= 0:
             out[key] = value
         elif key in _DIAG_ENUMS and value in _DIAG_ENUMS[key]:
             out[key] = value
@@ -283,8 +300,12 @@ def validate_pack(pack: Any, project_id: int) -> tuple[dict[str, Any], list[dict
     if len(items) > MAX_ITEMS:
         raise _reject("too_many_items")
     abstained, reason = pack["abstained"], pack["reason"]
-    if not isinstance(abstained, bool) or abstained != (not items) or (abstained and reason != _ABSTAIN_REASON) \
-            or (not abstained and reason is not None):
+    allowed_reasons = tuple(_ABSTAIN_REASONS[version])
+    bad_reason = (reason not in allowed_reasons) if abstained else (reason is not None)
+    if not isinstance(abstained, bool) or abstained != (not items) or bad_reason:
+        raise _reject("abstention")
+    diagnostics = _validate_diagnostics(pack["diagnostics"], version)
+    if (reason == LOW_TRUST_ONLY_REASON) != (diagnostics.get(LOW_TRUST_ONLY_DIAGNOSTIC, 0) > 0):
         raise _reject("abstention")
     tokens = pack["estimated_tokens"]
     if not _is_int(tokens) or tokens < 0:
@@ -302,7 +323,7 @@ def validate_pack(pack: Any, project_id: int) -> tuple[dict[str, Any], list[dict
         "item_count": len(items),
         "abstained": abstained,
         "reason": reason,
-        "diagnostics": _validate_diagnostics(pack["diagnostics"]),
+        "diagnostics": diagnostics,
         "evidence_keys": evidence,
     }, items
 

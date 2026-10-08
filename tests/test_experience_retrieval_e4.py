@@ -273,8 +273,8 @@ def test_episode_grounded_only_in_inactive_sources_is_excluded():
 # ---------------------------------------------------------------- pack schema, diagnostics, conflicts
 
 def test_schema_version_and_policy_bump():
-    assert er.SCHEMA_VERSION == "176.e5.v2"
-    assert er.POLICY["version"] == "176.e5.v2"
+    assert er.SCHEMA_VERSION == "176.e5.v3"
+    assert er.POLICY["version"] == "176.e5.v3"
     assert er.POLICY["chunk"] == "E5"
 
 

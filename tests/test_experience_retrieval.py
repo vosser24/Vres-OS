@@ -279,7 +279,7 @@ def test_dedupe_by_key_and_text_digest():
 def test_abstention_and_no_leak():
     pack = er.compose([], _req(), {"excluded_unapproved_company": 2})
     assert pack["abstained"] is True and pack["reason"] == "no_eligible_experience"
-    assert pack["schema_version"] == "176.e5.v2" and pack["policy"]["version"] == "176.e5.v2"
+    assert pack["schema_version"] == "176.e5.v3" and pack["policy"]["version"] == "176.e5.v3"
     assert pack["policy"]["chunk"] == "E5" and all(pack[s] == [] for s in er.SECTIONS)
     assert "other_project" not in _canonical(pack["diagnostics"])
 
@@ -292,7 +292,7 @@ def test_premises_passed_through_unverified_and_deterministic_json():
     assert _canonical(a) == _canonical(b)
     assert "premises" not in a and "request" not in a
     assert all(i["applicability"]["premise_status"] == "unverified" for i in a["validated_lessons"])
-    assert "_section" not in _canonical(a)
+    assert '"_section"' not in _canonical(a)
 
 
 # ---- read-time trust policy: benign authority vocabulary is evidence, command-shaped text is not
@@ -1092,7 +1092,8 @@ def test_every_representative_pack_matches_the_closed_contract_schema(name):
         "excluded_unapproved_company", "rejected_corrupt", "quarantined_injection", "embedding", "embedding_truncated",
         "truncated", "embedding_error", "deduplicated", "deduplicated_cited_episode", "raw_fallback",
         "raw_fallback_error", "raw_possibly_truncated", "excluded_retired", "excluded_superseded", "excluded_expired",
-        "excluded_revoked", "excluded_revoked_episode", "excluded_revoked_source"}
+        "excluded_revoked", "excluded_revoked_episode", "excluded_revoked_source",
+        "suppressed_low_trust_only"}
 
 
 def test_mixed_scenario_exercises_every_extension_and_class():

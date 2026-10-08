@@ -348,7 +348,7 @@ def test_e3f_24_output_schema_locked_to_frozen_contract(pg_project, raw_rows):
     task, _ = _seed_basic(pg_project, mk)
     _knowledge(f"K-L-{mk}", pg_project, mk, status="proposed", statement=f"{mk} lesson", source_owner=E2_SOURCE_OWNER)
     pack = _surface(pg_project, mk, task_key=task)  # _surface runs assert_pack_schema (item/nested keys) on the surface pack
-    assert set(pack) == PACK_KEYS and pack["schema_version"] == "176.e5.v2"
+    assert set(pack) == PACK_KEYS and pack["schema_version"] == "176.e5.v3"
     raw = _mk()
     _chunk(raw_rows, f"C-{raw}", source_id=_source(raw_rows, f"S-{raw}", pg_project), content=f"{raw} archive")
     assert set(_surface(pg_project, raw)) == PACK_KEYS

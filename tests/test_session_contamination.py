@@ -279,7 +279,7 @@ def test_e4_migrations_add_no_sessions_column_or_retrieval_observation_table():
     # The current package ends at 042 (E6 observability + E5 v2 identity); E4 (039/040) must stay
     # clean.
     names = sorted(p.name for p in MIGRATIONS.glob("*.sql"))
-    assert names[-1] == "043_experience_observed_episode.sql"
+    assert names[-1] == "044_experience_retrieval_policy_v3.sql"
     for path in [*MIGRATIONS.glob("039_*.sql"), *MIGRATIONS.glob("040_*.sql")]:  # E4 migrations add no sessions column
         assert not re.search(r"ALTER\s+TABLE\s+(IF\s+EXISTS\s+)?vres\.sessions", path.read_text(encoding="utf-8"),
                              re.I), path.name

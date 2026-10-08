@@ -37,7 +37,7 @@ def test_retrieval_identity_is_closed_and_hashes_the_released_policy():
         "result_schema_version",
         "evidence_pack_schema",
     }
-    assert ident["experience_retrieval_schema"] == er.SCHEMA_VERSION == "176.e5.v2"
+    assert ident["experience_retrieval_schema"] == er.SCHEMA_VERSION == "176.e5.v3"
     assert ident["e5_policy_digest"] == eb.sha256_hex(eb.canonical_bytes(er.POLICY))
     assert ident["evidence_pack_schema"] == eb.SCHEMA_VERSIONS["evidence_pack"]
 

@@ -245,8 +245,8 @@ def test_own_project_items_retrieved_and_pack_shape(pg_project):
     _procedure(f"P-{mk}", pg_project, mk)
     ep = _episode(pg_project, mk)
     pack = _retrieve(pg_project, mk, task_key=task)
-    assert pack["schema_version"] == "176.e5.v2"
-    assert pack["policy"] == {**pack["policy"], "version": "176.e5.v2", "chunk": "E5"}
+    assert pack["schema_version"] == "176.e5.v3"
+    assert pack["policy"] == {**pack["policy"], "version": "176.e5.v3", "chunk": "E5"}
     assert not pack["abstained"]
     assert _keys(pack, "current_decisions") == [f"D-{mk}"]
     assert pack["current_decisions"][0]["role"] == "instruction"
@@ -342,10 +342,15 @@ def test_low_trust_and_corrupt_episodes(pg_project):
     mk = _mk()
     low = _episode(pg_project, mk, trust="external_untrusted_observation")
     _episode(pg_project, mk, tamper=True)
-    pack = _retrieve(pg_project, mk)
+    pack = _v2(pg_project, mk)  # frozen v2 still returns the lone low-trust item (v3 suppresses it)
     assert _keys(pack, "low_trust_observations") == [low]
     assert pack["low_trust_observations"][0]["role"] == "low_trust_observation"
     assert pack["precedent_episodes"] == [] and pack["diagnostics"]["rejected_corrupt"] == 1
+    v3 = _retrieve(pg_project, mk)
+    assert v3["abstained"] is True and v3["reason"] == "only_low_trust_observations"
+    assert v3["low_trust_observations"] == []
+    assert v3["diagnostics"]["suppressed_low_trust_only"] == 1
+    assert v3["diagnostics"]["rejected_corrupt"] == 1 and low not in repr(v3)
 
 
 def test_procedure_eligibility(pg_project):
@@ -1477,6 +1482,10 @@ def _v1(pid, query):
     return ExperienceRetrievalService()._retrieve_frozen_v1({"project_id": pid, "query": query})
 
 
+def _v2(pid, query):
+    return ExperienceRetrievalService()._retrieve_frozen_v2({"project_id": pid, "query": query})
+
+
 @pytest.mark.parametrize(
     "authority,v1_eligible",
     [
@@ -1493,8 +1502,10 @@ def test_v2_raw_source_authority_allow_list_vs_frozen_v1(
     mk = _mk()
     sid = _source(raw_rows, f"S-{mk}", pg_project, authority=authority)
     _chunk(raw_rows, f"C-{mk}", source_id=sid, content=f"{mk} archive evidence")
-    v1, v2 = _v1(pg_project, mk), _retrieve(pg_project, mk)
-    assert v1["schema_version"] == "176.e5.v1" and v2["schema_version"] == "176.e5.v2"
+    v1, v2, v3 = _v1(pg_project, mk), _v2(pg_project, mk), _retrieve(pg_project, mk)
+    versions = (v1["schema_version"], v2["schema_version"], v3["schema_version"])
+    assert versions == ("176.e5.v1", "176.e5.v2", "176.e5.v3")
+    assert _raw_keys(v3) == _raw_keys(v2)
     assert (_raw_keys(v1) == [f"C-{mk}"]) is v1_eligible
     assert (_raw_keys(v2) == [f"C-{mk}"]) is (authority == "trusted_project_source")
     assert "raw_source_authority" in v2["policy"] and "raw_source_authority" not in v1["policy"]

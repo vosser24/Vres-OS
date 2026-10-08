@@ -38,8 +38,12 @@ from .sensitive_policy import SENSITIVE_SANITIZED, sanitize_extracted_text
 
 E5_V1_SCHEMA_VERSION = "176.e5.v1"
 E5_V2_SCHEMA_VERSION = "176.e5.v2"
-# the product default; v1 stays available only as an explicit replay baseline
-SCHEMA_VERSION = E5_V2_SCHEMA_VERSION
+E5_V3_SCHEMA_VERSION = "176.e5.v3"
+# the product default; v1 and v2 stay available only as explicit frozen replay/compatibility paths
+SCHEMA_VERSION = E5_V3_SCHEMA_VERSION
+LOW_TRUST_SECTION = "low_trust_observations"
+LOW_TRUST_ONLY_REASON = "only_low_trust_observations"
+LOW_TRUST_ONLY_DIAGNOSTIC = "suppressed_low_trust_only"
 # v2 raw-source authority boundary: a FAIL-CLOSED allow-list (sources.authority_level is free text,
 # so a deny-list
 # would trust unknown values). NULL, empty, external_untrusted_observation and any other value are
@@ -100,7 +104,18 @@ E5_V2_POLICY = {
         "values": list(RAW_SOURCE_AUTHORITY_ALLOWLIST_V2),
     },
 }
-POLICY = E5_V2_POLICY
+# v3: a pack whose FINAL selection is only low-trust observations is suppressed and abstains.
+E5_V3_POLICY = {
+    **E5_V2_POLICY,
+    "version": E5_V3_SCHEMA_VERSION,
+    "low_trust_only_abstention": {
+        "mode": "suppress_if_only_section",
+        "section": LOW_TRUST_SECTION,
+        "reason": LOW_TRUST_ONLY_REASON,
+        "diagnostic": LOW_TRUST_ONLY_DIAGNOSTIC,
+    },
+}
+POLICY = E5_V3_POLICY
 # Read-time trust handling is separate from E2's write-time quarantine (_INJECTION there is deliberately broad:
 # it holds a *proposal* back for review). At read time, ordinary words such as "policy"/"approved" must not hide
 # otherwise eligible evidence; authority is structural (role/tier), never derived from text. This narrow heuristic
@@ -155,7 +170,7 @@ E5_PARAMS = CompositionParams(dict(BUDGETS), MAX_ITEMS, MAX_PACK_BYTES, RRF_K)
 
 
 def _policy_for(params: CompositionParams, base: dict[str, Any] | None = None) -> dict[str, Any]:
-    """The E5 policy object of `base` (default: product v2) for E5 params;
+    """The E5 policy object of `base` (default: product v3) for E5 params;
     otherwise a truthful replay-only copy.
     """
     base = POLICY if base is None else base
@@ -1033,6 +1048,10 @@ def compose(
         **diagnostics, "deduplicated": 0, "deduplicated_cited_episode": 0,
         "truncated": {"section_budget": 0, "total_items": 0, "pack_bytes": 0, "conflict_sets": 0},
     }
+    policy = _policy_for(params, base_policy)
+    low_trust_rule = policy.get("low_trust_only_abstention")
+    if low_trust_rule:
+        diag[low_trust_rule["diagnostic"]] = 0
     items, conflict_list = evaluate(copy.deepcopy(list(items)), req, list(edges))
     if params.rrf_k != RRF_K:  # only the fusion score is recomputed; tier/scope/eligibility stay frozen
         for item in items:
@@ -1125,7 +1144,7 @@ def compose(
             diag["raw_fallback"] = "used" if used else "no_results"
             cap_total()
 
-    policy = _policy_for(params, base_policy)
+    suppressed = False
 
     def build(selected: list[dict[str, Any]], tokens: int) -> dict[str, Any]:
         # Frozen top-level keys only (contract "Experience pack"): conflict sets are carried by their member items.
@@ -1136,7 +1155,11 @@ def compose(
             "policy": policy,
             **sections,
             "abstained": empty,
-            "reason": "no_eligible_experience" if empty else None,
+            "reason": (
+                (low_trust_rule["reason"] if suppressed else "no_eligible_experience")
+                if empty
+                else None
+            ),
             "diagnostics": diag,
             "evidence_keys": sorted({e for i in selected for e in i["evidence"]}),
             "estimated_tokens": tokens,
@@ -1146,6 +1169,10 @@ def compose(
         kept.pop()  # lowest priority item is last; never cut inside an item
         diag["truncated"]["pack_bytes"] += 1
         _settle(kept, sets, diag)
+    if low_trust_rule and kept and all(i["_section"] == low_trust_rule["section"] for i in kept):
+        diag[low_trust_rule["diagnostic"]] = len(kept)
+        kept.clear()
+        suppressed = True
     pack = build(kept, 9999)
     return build(kept, len(_canonical(pack).encode("utf-8")) // 4)
 
@@ -1232,6 +1259,15 @@ class ExperienceRetrievalService:
         with self._open() as conn:
             return self.compose_universe(self.collect_universe(conn, req, policy=E5_V1_POLICY))
 
+    def _retrieve_frozen_v2(self, request: dict[str, Any] | RetrievalRequest) -> dict[str, Any]:
+        """Internal compatibility/replay path: the exact E5 v2 behavior (no low-trust abstention).
+
+        Never a product surface.
+        """
+        req = normalize_request(request)
+        with self._open() as conn:
+            return self.compose_universe(self.collect_universe(conn, req, policy=E5_V2_POLICY))
+
     def paired_compose(self, request: dict[str, Any] | RetrievalRequest, candidate: CompositionParams) -> dict[str, Any]:
         """Baseline (exact E5) and candidate composed from copies of ONE universe inside ONE snapshot."""
         req = normalize_request(request)
@@ -1263,7 +1299,7 @@ class ExperienceRetrievalService:
         policy: dict[str, Any] | None = None,
     ) -> RetrievalUniverse:
         policy = POLICY if policy is None else policy
-        if policy is not E5_V1_POLICY and policy is not E5_V2_POLICY:
+        if not any(policy is p for p in (E5_V1_POLICY, E5_V2_POLICY, E5_V3_POLICY)):
             raise ValueError("Unsupported E5 retrieval policy")
         req = dict(req)
         tokens = list(dict.fromkeys(t.casefold() for t in _TOKEN.findall(req["query"])))[:8]
