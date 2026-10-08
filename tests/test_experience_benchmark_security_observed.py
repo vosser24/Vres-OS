@@ -548,3 +548,34 @@ def test_unknown_assertion_still_fails_closed():
     with pytest.raises(BenchmarkError):
         _score(POISON_CASE, exp, _poison_ev())
     assert eb  # imported for symmetry with the sibling security tests
+
+
+# ---- tie-peer canonicalization (A/B reproducibility) ---
+
+
+def _surfaced(kept_keys, classes):
+    from vres_os import experience_benchmark_security_runtime as srt
+
+    aliases = [f"e{i}" for i in range(1, 6)]
+    amap = eb.AliasMap(aliases)
+    for a in aliases:
+        amap.bind(a, f"K{a[1:]}")
+    items = [{"memory_class": "episodic", "memory_key": k} for k in kept_keys]
+    result = {s: [] for s in srt.er.SECTIONS} | {"low_trust_observations": items}
+    return srt.surfaced_aliases(result, amap, classes)
+
+
+_SAME = dict.fromkeys((f"e{i}" for i in range(1, 6)), ("p", "v", "obs", "ext", "ok", "x", True))
+
+
+def test_truncated_same_class_peers_get_canonical_labels_independent_of_which_survived():
+    assert _surfaced(["K5", "K1", "K4"], _SAME) == ["e1", "e2", "e3"]
+    assert _surfaced(["K2", "K3", "K1"], _SAME) == ["e1", "e2", "e3"]
+
+
+def test_untruncated_or_distinct_class_aliases_are_never_relabelled():
+    three = {a: c for a, c in _SAME.items() if a in ("e1", "e4", "e5")}
+    assert _surfaced(["K5", "K1", "K4"], three) == ["e5", "e1", "e4"]
+    mixed = _SAME | {"e1": ("p", "v", "obs", "ext", "revoked", "x", False)}
+    assert _surfaced(["K1", "K4", "K5"], mixed)[0] == "e1"
+    assert _surfaced(["K5"], {}) == ["e5"]
