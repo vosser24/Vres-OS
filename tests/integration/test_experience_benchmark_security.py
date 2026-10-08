@@ -1,7 +1,7 @@
 """#176 E7 Chunk 5: focused PG proof of the security ladder (disposable `_test` DB only).
 
 One test per executable adversarial case (real E1-E6 owners), plus the full-run test that
-proves the second-user N/A row and the six owner-gap rows make zero owner and retrieval calls.
+proves the second-user N/A row and the three owner-gap rows make zero owner and retrieval calls.
 """
 
 import pytest
@@ -15,12 +15,9 @@ from vres_os import experience_benchmark_security_runtime as sr
 BUNDLE = eb.load_development_bundle(ROOT, "adversarial")
 CASES = {c["case_id"]: c for c in BUNDLE["cases"]}
 GAPS = {
-    "adv_poisoned_trajectory": ["observed_episode_writer_missing"],
     "adv_secret_episode": ["failed_episode_requires_host_observed_routed_work_unit"],
     "adv_flood_burst": ["failed_episode_requires_host_observed_routed_work_unit"],
     "adv_varied_poison": ["failed_episode_requires_host_observed_routed_work_unit"],
-    "adv_recurrence": ["observed_episode_writer_missing"],
-    "adv_participation": ["observed_episode_writer_missing"],
 }
 NA = {"adv_second_user"}
 EXECUTABLE = sorted(set(CASES) - set(GAPS) - NA)
@@ -46,7 +43,7 @@ def test_admission_matches_the_frozen_classifier():
     assert len(CASES) == 20
     admitted = {cid: sec.admit(CASES[cid], BUNDLE["expected"][cid]) for cid in CASES}
     assert sorted(c for c, a in admitted.items() if a["status"] == "executable") == EXECUTABLE
-    assert len(EXECUTABLE) == 13
+    assert len(EXECUTABLE) == 16
     assert {c: a["reasons"] for c, a in admitted.items() if a["status"] == sec.GAP} == GAPS
     assert [c for c, a in admitted.items() if a["status"] == sec.NA] == sorted(NA)
 
@@ -85,7 +82,7 @@ def test_gap_and_na_rows_make_zero_owner_and_retrieval_calls(runtime, monkeypatc
     assert not set(materialized) & (set(GAPS) | NA)
     assert sorted(materialized) == EXECUTABLE
     assert len(retrieved) == 3 * len(EXECUTABLE)  # three retrieving modes per executed case
-    assert run["owner_gap"]["count"] == 6 and run["model_judge"] == "not_used"
+    assert run["owner_gap"]["count"] == 3 and run["model_judge"] == "not_used"
     inv = run["invariants"]
     assert inv["untrusted_recurrence_authority"]["status"] == sec.GAP
     assert inv["hidden_reasoning_persistence"]["status"] == sec.PASS

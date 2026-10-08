@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from . import experience as e1
 from . import experience_benchmark as eb
 from . import experience_benchmark_retrieval as retrieval
 from . import experience_benchmark_runtime as rt
@@ -217,6 +218,61 @@ def hybrid_view(result: dict, amap) -> list[dict]:
     return rows
 
 
+def episode_state(conn, runtime, case: dict, amap) -> dict:
+    """Alias-normalized, read-only view of each observed episode. No keys, ids or timestamps."""
+    out = {}
+    for step in _ops(case, "episode_observe"):
+        alias = step["alias"]
+        key = amap.runtime_key_for(alias)
+        row = conn.execute(
+            "SELECT project_id, policy_version, participation_class, trust_class, outcome_status "
+            "FROM vres.experience_episodes WHERE episode_key=%s",
+            (key,),
+        ).fetchone()
+        state = e4.episode_states(conn, row["project_id"], [key])[key]
+        sources = conn.execute(
+            "SELECT target_key FROM vres.relations WHERE source_kind='episode' AND source_key=%s "
+            "AND relation_type='derived_from' AND target_kind='source'",
+            (key,),
+        ).fetchall()
+        out[alias] = {
+            "alias": alias,
+            "policy_version": row["policy_version"],
+            "participation_class": row["participation_class"],
+            "trust_class": row["trust_class"],
+            "outcome_status": row["outcome_status"],
+            "lifecycle_state": state,
+            "current_usable": e4.episode_eligible(state),
+            "source_aliases": sorted(
+                a for a in (amap.alias_for(r["target_key"]) for r in sources) if a is not None
+            ),
+        }
+    return out
+
+
+_QUARANTINE_REASONS = (sec.Q_UNTRUSTED, sec.Q_RECURRENCE, "instruction_shaped_text")
+
+
+def transition_state(runtime, case: dict) -> dict:
+    """Alias-normalized view of the public E2 consolidate return. No transition/knowledge keys."""
+    out = {}
+    for step in _ops(case, "experience_consolidate"):
+        alias = step["alias"]
+        row = runtime.consolidation_results[(case["case_id"], alias)]
+        checks = row.get("checks") or {}
+        out[alias] = {
+            "alias": alias,
+            "verdict": row.get("verdict"),
+            "quarantine_reasons": sorted(
+                r for r in row.get("reason_codes") or [] if r in _QUARANTINE_REASONS
+            ),
+            "knowledge_created": bool(row.get("knowledge_key")),
+            "trigger_check": checks.get("trigger"),
+            "participation_trust_check": checks.get("participation_trust"),
+        }
+    return out
+
+
 def _knowledge_snapshots(runtime, case: dict, amap) -> dict:
     return {
         s["alias"]: rt.knowledge_snapshot(
@@ -255,6 +311,10 @@ def run_case(runtime: rt.BenchmarkRuntime, case: dict, expected: dict) -> dict:
             "knowledge": knowledge_state(conn, case, amap),
             "sources": source_state(conn, case, amap, canaries),
             "procedures": procedure_state(conn, case, amap),
+            "episodes": episode_state(conn, runtime, case, amap),
+            "transitions": transition_state(runtime, case),
+            "candidate_hybrid_abstained": result["abstained"],
+            "candidate_hybrid_reason": result["reason"],
             "user_instruction_events": user_instruction_events(
                 conn, runtime.case_project_ids(case["case_id"])
             ),
@@ -272,7 +332,10 @@ def run_case(runtime: rt.BenchmarkRuntime, case: dict, expected: dict) -> dict:
 
 def owner_identities() -> dict:
     return {
-        "e1_policy": "176.e1.v1",
+        "e1_v1_policy": e1.POLICY_VERSION,
+        "e1_v1_policy_digest": e1.POLICY_DIGEST,
+        "e1_v2_policy": e1.OBSERVED_POLICY_VERSION,
+        "e1_v2_policy_digest": e1.OBSERVED_POLICY_DIGEST,
         "e2_policy": e2.POLICY_VERSION,
         "e2_policy_digest": e2.POLICY_DIGEST,
         "e4_policy": e4.POLICY_VERSION,
