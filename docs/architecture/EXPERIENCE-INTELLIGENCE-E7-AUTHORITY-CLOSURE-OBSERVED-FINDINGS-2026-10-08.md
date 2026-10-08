@@ -142,3 +142,31 @@ Not run (by instruction): the full repository PG suite, the release gate, protec
    example, a v5 rule that breaks lexical-tie positions and recency among equal-text observed items by the semantic digest, or a
    benchmark-controlled clock). Not applied; the corpus, expected evidence, thresholds, security scorers and low-trust budget
    are unchanged. The live cohort and Chunk 6 are not started.
+
+## 12. Correction (2026-10-08, E5 v5 outcome; sections 6, 8 and 11 are retained as history)
+
+1. **What v4 fixed.** `176.e5.v4` fixed only the final sort tie (semantic digest before the physical key). The A/B proof
+   kept failing because two earlier inputs were physical-identity dependent: (A) `_positions(rows, "episode_key")` gave
+   tied lexical scores *ordinal* positions in physical-key order, so equal text scored different RRF fusion; (B) whole-second
+   `recency_epoch` over database ingestion time crossed second boundaries differently per database.
+2. **Rejected.** Quantizing recency was rejected; the exact `observed_at` is used internally and never serialized.
+3. **v5 (`176.e5.v5`, digest `7b5422cf9201bb195b12e9b08ae2f7048b9fbb075951ab598e0e486cfba0dcbf`, migration 046).** For
+   low-trust observed episodes only: equal lexical scores share a competition rank; recency is the exact instant (private
+   `_recency_instant`); then the semantic digest; `memory_key` last. The SQL pre-limit orders by `observed_at` and bounded stable
+   semantics before `episode_key`. Frozen v4 stays replayable through the internal `_retrieve_frozen_v4`; v1-v4 digests are
+   unchanged; E6 stays `176.e6.v1`.
+4. **Unit RED/GREEN.** Lexical tie (v4 `[1,2,3,4,5]` vs `[2,1,4,3,5]`; v5 `[1,1,3,3,5]` for every key permutation), second-boundary recency
+   (offsets A/B give different v4 selections, identical v5 selection) and the combined three-most-recent selection pass.
+5. **Real two-DB result (repetition 1): NOT reproducible.** Matrix 16 PASS / 0 FAIL / 1 NA / 3 OWNER_GAP, invariants, leak scan (empty),
+   cleanup PASS and differing physical fingerprints held, but the schema-2 digests differed, only in `adv_recurrence`
+   `hybrid` and `packs.candidate_hybrid` (A `e4,e5,e3` vs B `e5,e3,e4`). Repetition 2 was not run.
+6. **Measured next dependency (probe, not committed).** A spy on `compose` in two fresh databases showed that E5 v5 itself IS
+   deterministic here: all five episodes have equal fusion (0.016393) and E5 selects `e5,e4,e3` in both. The remaining difference is
+   the benchmark's display re-sort `experience_benchmark_runtime._alias_tie_order`, called by
+   `experience_benchmark_security_runtime.hybrid_view`. It treats items with an identical public `_tie_prefix` (which includes the
+   whole-second `recency_epoch`) as interchangeable and sorts them by alias, so the reported order depends on which database seconds
+   the episodes were ingested in. It is a pre-existing normalization of pack order, not an E5 output.
+7. **Status.** Boundary 3 reproducibility remains RED. Applying the obvious fix (report E5's actual pack order in `hybrid_view`
+   without `_alias_tie_order`) needs your authorization because it changes the benchmark evidence semantics; it was NOT applied. No
+   relabel or normalization was added. The corpus, expected evidence, thresholds, security scorers and low-trust budget are unchanged; the live
+   cohort, Chunk 6, held-out reads, threshold calibration and E8 are not started.
