@@ -31,7 +31,7 @@ def _low(key="E-L1", task_id=7, **kw):
 
 
 def _pack(items, *, base=None, req=None, **kw):
-    return er.compose(items, req or _req(), {}, base_policy=base, **kw)
+    return er.compose(items, req or _req(), {}, base_policy=base or er.E5_V3_POLICY, **kw)
 
 
 def _empty_sections(pack):
@@ -41,7 +41,7 @@ def _empty_sections(pack):
 def test_policy_identities_are_exact():
     assert _sha256(er.E5_V1_POLICY) == V1 and _sha256(er.E5_V2_POLICY) == V2
     assert er.E5_V3_SCHEMA_VERSION == "176.e5.v3" and _sha256(er.E5_V3_POLICY) == V3
-    assert er.SCHEMA_VERSION == "176.e5.v3" and er.POLICY is er.E5_V3_POLICY
+    assert er.SCHEMA_VERSION == "176.e5.v4" and er.POLICY is er.E5_V4_POLICY  # v3: base_policy
     assert er.E5_V3_POLICY["low_trust_only_abstention"] == {
         "mode": "suppress_if_only_section",
         "section": "low_trust_observations",
@@ -186,8 +186,8 @@ def _vpack(version, items=None, *, reason=None, diag_extra=None):
     return pack
 
 
-def test_registry_has_three_versions_with_exact_digests():
-    assert set(eo.SUPPORTED_RETRIEVAL_POLICIES) == {"176.e5.v1", "176.e5.v2", "176.e5.v3"}
+def test_registry_keeps_v3_with_exact_digest():
+    assert {"176.e5.v1", "176.e5.v2", "176.e5.v3"} <= set(eo.SUPPORTED_RETRIEVAL_POLICIES)
     assert (
         eo.FROZEN_E5_V3_POLICY_DIGEST == V3
         and eo.SUPPORTED_RETRIEVAL_POLICIES["176.e5.v3"][1] == V3

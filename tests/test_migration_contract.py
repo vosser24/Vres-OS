@@ -420,7 +420,7 @@ def test_migration_041_replay_ledger_and_writer_contract():
         assert refuse in flat
     assert "GRANT " not in code and "DELETE FROM" not in code and "ALTER TABLE" not in code
     assert not any(
-        n.name.startswith("045")
+        n.name.startswith("046")
         for n in resources.files("vres_os").joinpath("migrations").iterdir()
     )
 
@@ -431,7 +431,7 @@ def test_migration_042_only_replaces_the_two_041_identity_checks():
         for n in resources.files("vres_os").joinpath("migrations").iterdir()
         if n.name.endswith(".sql")
     )
-    assert names[-1] == "044_experience_retrieval_policy_v3.sql"
+    assert names[-1] == "045_experience_retrieval_policy_v4.sql"
     assert "042_experience_retrieval_policy_v2.sql" in names
     sql = _migration("042_experience_retrieval_policy_v2.sql")
     code = "\n".join(line for line in sql.splitlines() if not line.lstrip().startswith("--"))
@@ -475,3 +475,20 @@ def test_migration_044_only_extends_the_pair_check_to_three_identities():
         assert digest in code
     old = _migration("042_experience_retrieval_policy_v2.sql")  # immutable two-pair check
     assert "176.e5.v3" not in old
+
+
+def test_migration_045_only_extends_the_pair_check_to_four_identities():
+    sql = _migration("045_experience_retrieval_policy_v4.sql")
+    code = "\n".join(line for line in sql.splitlines() if not line.lstrip().startswith("--"))
+    assert code.count("DROP CONSTRAINT") == 1 and code.count("ADD CONSTRAINT") == 1
+    assert "experience_retrieval_observations_e5_identity_pair_check" in code
+    for forbidden in ("CREATE TABLE", "ADD COLUMN", "UPDATE ", "INSERT ", "DELETE ", "TRIGGER",
+                      "GRANT", "REVOKE", "CREATE OR REPLACE FUNCTION", " IN ("):
+        assert forbidden not in code, forbidden
+    assert code.count("(retrieval_schema_version = '176.e5.v") == 4 and code.count(" OR ") == 3
+    for digest in ("7572cafc632d4f56571adbe5f59baceedf15c56a07d5a3ca35e4b05448a982e9",
+                   "0cd0f10d24e37dd7a9872eced6c18e4962d4740a2d6a8c03a38cea1d8a73d6b5",
+                   "272b10b6042a77bb79812ec637ec9296e28867628285165775c5aeee4af1a4ad",
+                   "4e468f39ee775aebe33c0b2774c61b6fb7c3531ffb16be9dafa209b765717b41"):
+        assert digest in code
+    assert "176.e5.v4" not in _migration("044_experience_retrieval_policy_v3.sql")  # 044 immutable

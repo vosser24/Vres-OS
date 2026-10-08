@@ -20,7 +20,7 @@ from typing import Any
 import psycopg
 
 from .embeddings import EmbeddingUnavailable
-from .experience import _HIDDEN_REASONING_KEYS, _canonical, _normalize_key
+from .experience import _HIDDEN_REASONING_KEYS, _canonical, _normalize_key, _sha256
 from .experience_consolidation import episode_payload_digest, statement_digest
 from .experience_lifecycle import episode_eligible
 from .knowledge_status import (
@@ -39,8 +39,9 @@ from .sensitive_policy import SENSITIVE_SANITIZED, sanitize_extracted_text
 E5_V1_SCHEMA_VERSION = "176.e5.v1"
 E5_V2_SCHEMA_VERSION = "176.e5.v2"
 E5_V3_SCHEMA_VERSION = "176.e5.v3"
-# the product default; v1 and v2 stay available only as explicit frozen replay/compatibility paths
-SCHEMA_VERSION = E5_V3_SCHEMA_VERSION
+E5_V4_SCHEMA_VERSION = "176.e5.v4"
+# the product default; v1-v3 stay available only as explicit frozen replay/compatibility paths
+SCHEMA_VERSION = E5_V4_SCHEMA_VERSION
 LOW_TRUST_SECTION = "low_trust_observations"
 LOW_TRUST_ONLY_REASON = "only_low_trust_observations"
 LOW_TRUST_ONLY_DIAGNOSTIC = "suppressed_low_trust_only"
@@ -115,7 +116,18 @@ E5_V3_POLICY = {
         "diagnostic": LOW_TRUST_ONLY_DIAGNOSTIC,
     },
 }
-POLICY = E5_V3_POLICY
+# v4: v3 plus a semantic tie-break (public-semantics digest) ahead of memory_key.
+E5_V4_POLICY = {
+    **E5_V3_POLICY,
+    "version": E5_V4_SCHEMA_VERSION,
+    "rank_order": [*E5_V3_POLICY["rank_order"][:-1], "semantic_tie_digest", "memory_key"],
+    "stable_tie_break": {
+        "mode": "semantic_digest_before_physical_key",
+        "digest": "sha256_canonical",
+        "identity": "public_semantics_v1",
+    },
+}
+POLICY = E5_V4_POLICY
 # Read-time trust handling is separate from E2's write-time quarantine (_INJECTION there is deliberately broad:
 # it holds a *proposal* back for review). At read time, ordinary words such as "policy"/"approved" must not hide
 # otherwise eligible evidence; authority is structural (role/tier), never derived from text. This narrow heuristic
@@ -170,7 +182,7 @@ E5_PARAMS = CompositionParams(dict(BUDGETS), MAX_ITEMS, MAX_PACK_BYTES, RRF_K)
 
 
 def _policy_for(params: CompositionParams, base: dict[str, Any] | None = None) -> dict[str, Any]:
-    """The E5 policy object of `base` (default: product v3) for E5 params;
+    """The E5 policy object of `base` (default: product v4) for E5 params;
     otherwise a truthful replay-only copy.
     """
     base = POLICY if base is None else base
@@ -882,6 +894,40 @@ def _sort_key(item: dict[str, Any]):
     )
 
 
+def _semantic_tie_object(item: dict[str, Any]) -> dict[str, Any]:
+    """Closed `public_semantics_v1` object: no physical identity, time or score.
+
+    An item's own memory_key is masked inside its text (revoked tombstones name it).
+    """
+    key = item["memory_key"]
+    return {
+        "section": item["_section"],
+        "memory_class": item["memory_class"],
+        "authority_class": item["authority_class"],
+        "status": item["status"],
+        "trust_class": item["trust_class"],
+        "role": item["role"],
+        "text": item["text"].replace(key, "<key>") if key else item["text"],
+        "why_retrieved": sorted(item["why_retrieved"]),
+        "flags": sorted(item["flags"]),
+        "applicability": item["applicability"],
+    }
+
+
+def _semantic_tie_object_json(item: dict[str, Any]) -> str:
+    return _canonical(_semantic_tie_object(item))
+
+
+def semantic_tie_digest(item: dict[str, Any]) -> str:
+    return _sha256(_semantic_tie_object_json(item))
+
+
+def _sort_key_v4(item: dict[str, Any]):
+    """v4 ranking tuple: v1-v3 dimensions, then the semantic digest, then the physical key."""
+    *head, key = _sort_key(item)
+    return (*head, semantic_tie_digest(item), key)
+
+
 def _public(item: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in item.items() if not k.startswith("_")}
 
@@ -1056,6 +1102,7 @@ def compose(
     if params.rrf_k != RRF_K:  # only the fusion score is recomputed; tier/scope/eligibility stay frozen
         for item in items:
             item["signals"]["fusion_rank_score"] = _fusion_at(item, params.rrf_k)
+    sort_key = _sort_key_v4 if policy.get("stable_tie_break") else _sort_key
     sets = {c["conflict_key"]: c for c in conflict_list}
     in_conflict = {m["memory_key"] for c in conflict_list for m in c["members"]}
     cited: dict[str, set[str]] = {}
@@ -1089,7 +1136,7 @@ def compose(
         for member in members:
             admit(member)
     _settle(kept, sets, diag)
-    for item in sorted(items, key=_sort_key):
+    for item in sorted(items, key=sort_key):
         if item["memory_key"] in in_conflict:
             continue
         digest = statement_digest(item["text"])
@@ -1115,7 +1162,7 @@ def compose(
             groups.add(item["_group"])
         kept.append(item)
     def cap_total() -> None:
-        kept.sort(key=_sort_key)
+        kept.sort(key=sort_key)
         if len(kept) > params.max_items:
             diag["truncated"]["total_items"] += len(kept) - params.max_items
             del kept[params.max_items:]
@@ -1268,6 +1315,15 @@ class ExperienceRetrievalService:
         with self._open() as conn:
             return self.compose_universe(self.collect_universe(conn, req, policy=E5_V2_POLICY))
 
+    def _retrieve_frozen_v3(self, request: dict[str, Any] | RetrievalRequest) -> dict[str, Any]:
+        """Internal compatibility/replay path: the exact E5 v3 behavior (physical-key tie-break).
+
+        Never a product surface.
+        """
+        req = normalize_request(request)
+        with self._open() as conn:
+            return self.compose_universe(self.collect_universe(conn, req, policy=E5_V3_POLICY))
+
     def paired_compose(self, request: dict[str, Any] | RetrievalRequest, candidate: CompositionParams) -> dict[str, Any]:
         """Baseline (exact E5) and candidate composed from copies of ONE universe inside ONE snapshot."""
         req = normalize_request(request)
@@ -1299,7 +1355,7 @@ class ExperienceRetrievalService:
         policy: dict[str, Any] | None = None,
     ) -> RetrievalUniverse:
         policy = POLICY if policy is None else policy
-        if not any(policy is p for p in (E5_V1_POLICY, E5_V2_POLICY, E5_V3_POLICY)):
+        if not any(policy is p for p in (E5_V1_POLICY, E5_V2_POLICY, E5_V3_POLICY, E5_V4_POLICY)):
             raise ValueError("Unsupported E5 retrieval policy")
         req = dict(req)
         tokens = list(dict.fromkeys(t.casefold() for t in _TOKEN.findall(req["query"])))[:8]

@@ -245,8 +245,8 @@ def test_own_project_items_retrieved_and_pack_shape(pg_project):
     _procedure(f"P-{mk}", pg_project, mk)
     ep = _episode(pg_project, mk)
     pack = _retrieve(pg_project, mk, task_key=task)
-    assert pack["schema_version"] == "176.e5.v3"
-    assert pack["policy"] == {**pack["policy"], "version": "176.e5.v3", "chunk": "E5"}
+    assert pack["schema_version"] == "176.e5.v4"
+    assert pack["policy"] == {**pack["policy"], "version": "176.e5.v4", "chunk": "E5"}
     assert not pack["abstained"]
     assert _keys(pack, "current_decisions") == [f"D-{mk}"]
     assert pack["current_decisions"][0]["role"] == "instruction"
@@ -1504,7 +1504,7 @@ def test_v2_raw_source_authority_allow_list_vs_frozen_v1(
     _chunk(raw_rows, f"C-{mk}", source_id=sid, content=f"{mk} archive evidence")
     v1, v2, v3 = _v1(pg_project, mk), _v2(pg_project, mk), _retrieve(pg_project, mk)
     versions = (v1["schema_version"], v2["schema_version"], v3["schema_version"])
-    assert versions == ("176.e5.v1", "176.e5.v2", "176.e5.v3")
+    assert versions == ("176.e5.v1", "176.e5.v2", "176.e5.v4")
     assert _raw_keys(v3) == _raw_keys(v2)
     assert (_raw_keys(v1) == [f"C-{mk}"]) is v1_eligible
     assert (_raw_keys(v2) == [f"C-{mk}"]) is (authority == "trusted_project_source")

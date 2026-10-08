@@ -250,7 +250,8 @@ def _v2_pack(items=None):
 
 
 def test_registry_is_closed_and_digests_are_exact():
-    assert set(eo.SUPPORTED_RETRIEVAL_POLICIES) == {"176.e5.v1", "176.e5.v2", "176.e5.v3"}
+    versions = {"176.e5.v1", "176.e5.v2", "176.e5.v3", "176.e5.v4"}
+    assert set(eo.SUPPORTED_RETRIEVAL_POLICIES) == versions
     for version, (policy, digest) in eo.SUPPORTED_RETRIEVAL_POLICIES.items():
         assert policy["version"] == version and digest == _sha256(policy)
 
