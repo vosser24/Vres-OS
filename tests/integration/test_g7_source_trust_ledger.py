@@ -24,6 +24,7 @@ from psycopg import sql  # noqa: E402
 from psycopg.conninfo import conninfo_to_dict, make_conninfo  # noqa: E402
 from psycopg.rows import dict_row  # noqa: E402
 
+from pg_fixture_safety import FixtureRefused, verify_target  # noqa: E402
 from vres_os import db  # noqa: E402
 from vres_os.config import VresConfig  # noqa: E402
 from vres_os.database_boundary import activate_boundary, default_boundary_roles, provision_boundary  # noqa: E402
@@ -42,10 +43,25 @@ def _dsn(base, *, database=None, user=None, secret=None):
     return make_conninfo(**parts)
 
 
-def _cleanup(admin_dsn, database, roles):
-    with psycopg.connect(admin_dsn, autocommit=True) as admin:
-        admin.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(database)))
-        for role in roles:
+def _admin(server_dsn):
+    try:
+        return psycopg.connect(server_dsn, autocommit=True)
+    except psycopg.Error as exc:  # value-free: never echo the DSN or server message
+        raise FixtureRefused(f"cannot reach the approved disposable cluster ({type(exc).__name__})") from None
+
+
+def _cleanup(server_dsn, database, roles, created, environ=None):
+    """Drop ONLY the exact resources this verified run created (`created` = {"database": bool, "roles": [...]}).
+    The cluster identity is re-proved first; any doubt leaves the resources in place and fails loudly."""
+    if not created["database"] and not created["roles"]:
+        return
+    with _admin(server_dsn) as admin:
+        verify_target(admin, os.environ if environ is None else environ, database, roles, fresh=False)
+        if created["database"]:
+            admin.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(database)))
+        for role in created["roles"]:
+            if role not in roles:
+                raise FixtureRefused("cleanup refuses a role this run did not declare")
             admin.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(role)))
 
 
@@ -69,19 +85,25 @@ def env():
     if not base:
         pytest.skip("PostgreSQL integration DSN is required")
     suffix = uuid.uuid4().hex[:10]
-    database = f"vres_g7_{suffix}"
+    database = f"vres_g7_{suffix}_test"
     runtime_user, secret = f"vres_rt_{suffix}", uuid.uuid4().hex
     writer_user, migrator_user = default_boundary_roles(runtime_user)
     server_dsn, target_dsn = _dsn(base, database="postgres"), _dsn(base, database=database)
     roles = [writer_user, migrator_user, runtime_user]
-    _cleanup(server_dsn, database, roles)
+    created = {"database": False, "roles": []}
     mp = pytest.MonkeyPatch()
     try:
-        with psycopg.connect(server_dsn, autocommit=True) as admin:
-            admin.execute(sql.SQL("CREATE ROLE {} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD {}")
-                          .format(sql.Identifier(runtime_user), sql.Literal(secret)))
-            admin.execute(sql.SQL("CREATE DATABASE {} OWNER {}").format(sql.Identifier(database),
-                                                                       sql.Identifier(runtime_user)))
+        try:  # safety gate FIRST: identity, confirmation, names; no DDL and no pre-cleanup before it passes
+            with _admin(server_dsn) as admin:
+                verify_target(admin, os.environ, database, roles, fresh=True)
+                admin.execute(sql.SQL("CREATE ROLE {} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD {}")
+                              .format(sql.Identifier(runtime_user), sql.Literal(secret)))
+                created["roles"].append(runtime_user)
+                admin.execute(sql.SQL("CREATE DATABASE {} OWNER {}").format(sql.Identifier(database),
+                                                                           sql.Identifier(runtime_user)))
+                created["database"] = True
+        except FixtureRefused as exc:
+            pytest.fail(f"G7 fixture refused to start: {exc}", pytrace=False)
         runtime_dsn = _dsn(target_dsn, user=runtime_user, secret=secret)
         root = resources.files("vres_os").joinpath("migrations")
         with psycopg.connect(runtime_dsn, autocommit=True) as runtime:
@@ -96,6 +118,7 @@ def env():
                                     (m.name, db._digest(text)))
         cfg = VresConfig(configured=True)
         cfg.database.database, cfg.database.user = database, runtime_user
+        created["roles"] += [writer_user, migrator_user]  # declared before provisioning creates them
         creds = provision_boundary(cfg, admin_dsn=target_dsn)
         cfg.database.provenance_writer_user = creds.writer_user
         cfg.database.migration_user = creds.migration_user
@@ -115,7 +138,7 @@ def env():
                               writer=writer_user, migrator=migrator_user, cfg=cfg)
     finally:
         mp.undo()
-        _cleanup(server_dsn, database, roles)
+        _cleanup(server_dsn, database, roles, created)
 
 
 def _connect(dsn):
