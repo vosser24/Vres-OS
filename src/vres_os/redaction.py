@@ -5,23 +5,23 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any
 
-# Normalised (letters only) key-name endings. A structured key such as DATABASE_PASSWORD or
-# STRIPE_API_KEY is secret when it ENDS with one of these, not only when it equals one.
-_SECRET_KEY_SUFFIXES = (
-    "password",
-    "passwd",
-    "pwd",
-    "apikey",
-    "accesstoken",
-    "refreshtoken",
-    "token",
-    "secret",
-    "clientsecret",
-    "privatekey",
-)
+# One closed vocabulary of key qualifiers (E7 B4B contract). "session", "auth", "root", "ci", "cd" and
+# "pipeline" are deliberately excluded: they name benign identifiers more often than credentials.
+_QUALIFIER_WORDS = ("service", "deployment", "deploy", "webhook", "license", "licence", "ssh", "admin",
+                    "integration", "bot", "automation", "api", "private", "signing", "encryption",
+                    "master", "client", "access", "secret")
+# A qualifier is a whole word: it starts the text, follows a non-letter ("MY_APP_BOT_KEY"), or starts a
+# camelCase word ("myBotKey"). "robot_key" therefore does not contain the qualifier "bot".
+_WORD_START = r"(?:(?<![A-Za-z])|(?-i:(?<=[a-z0-9])(?=[A-Z])))"
+_QUALIFIER = _WORD_START + r"(?:" + "|".join(_QUALIFIER_WORDS) + r")"
+_QUALIFIED_NOUN = _QUALIFIER + r"[_ -]?(?:key|secret|token|credential)"
+# Released suffix semantics (kept as-is): DATABASE_PASSWORD, STRIPE_API_KEY, "dbtoken" end with these.
+_LEGACY_SUFFIXES = ("password", "passwd", "pwd", "apikey", "accesstoken", "refreshtoken", "token", "secret",
+                    "clientsecret", "privatekey")
+_KEY_TOKENS = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+")
+_QUALIFIED_KEY_TOKENS = frozenset(_QUALIFIER_WORDS)
 _KEYWORD = (
-    r"(?:password|passwd|pwd|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|"
-    r"client[_ -]?secret|private[_ -]?key|token|secret)"
+    r"(?:password|passwd|pwd|refresh[_ -]?token|" + _QUALIFIED_NOUN + r"|token|secret)"
 )
 _VALUE = r'''(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;]+)'''
 # The key may carry an arbitrary (bounded) prefix: MY_APP_CLIENT_SECRET, github_access_token.
@@ -31,8 +31,8 @@ _KV = re.compile(
 # A stated credential with no separator ("the database password <value>"). Only a value that looks
 # like a secret (carries a digit or symbol) is redacted, so prose such as "password policy" is kept.
 _PHRASE = re.compile(
-    r"(?i)(?P<head>\b(?:password|passwd|pwd|passphrase|api[_ -]?key|access[_ -]?token|"
-    r"client[_ -]?secret|(?:service|secret|signing|encryption|master)[_ -]?key)\s+(?:(?:is|was)\s+)?)(?P<value>(?=[^\s,;]*[\d<>_!@#$%^&*])[^\s,;]{4,})"
+    r"(?i)(?P<head>\b(?:password|passwd|pwd|passphrase|" + _QUALIFIED_NOUN + r")\s+(?:(?:is|was)\s+)?)"
+    r"(?P<value>(?=[^\s,;]*[\d<>_!@#$%^&*])[^\s,;]{4,})"
 )
 _URI = re.compile(r"(?i)([a-z][a-z0-9+.-]{0,31}://[^\s/:@]+:)[^\s@]*@")
 _BEARER = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/-]+=*")
@@ -51,7 +51,7 @@ _PRIVATE_KEY_BLOCK = re.compile(
 _RESIDUAL_KEY_MARKER = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY|PuTTY-User-Key-File")
 _RESIDUAL_ASSIGNMENT = re.compile(
     r"(?i)\b[\w.-]{0,64}(?:password|passwd|pwd|secret|token|passphrase|credential|auth(?![a-z])|"
-    r"(?:api|private|signing|encryption|master|client|access)[_ -]?key|key-data|\.key)"
+    + _QUALIFIER + r"[_ -]?key|key-data|\.key)"
     r"[\w.-]{0,32}[\"']?\s*[:=]\s*[\"']?(?!\[REDACTED(?:_SECRET)?\](?![^\s\"',;}\])]))[^\s\"',;]{8,}"
 )
 _RESIDUAL_PROVIDER = re.compile(
@@ -60,6 +60,8 @@ _RESIDUAL_PROVIDER = re.compile(
 )
 _MAX_FIELD_NAMES = 20
 _PLACEHOLDERS = {"[REDACTED]", "[REDACTED_SECRET]"}
+# A placeholder, optionally followed only by structural closers ("}" "]"), is already sanitized.
+_PLACEHOLDER_VALUE = re.compile(r"\[REDACTED(?:_SECRET)?\][}\]]*")
 
 
 @dataclass(slots=True)
@@ -90,7 +92,7 @@ def _sanitize(value: str) -> SanitizeResult:
         result.rule_counts[rule] = result.rule_counts.get(rule, 0) + 1
 
     def kv(match: re.Match) -> str:
-        if match.group("value").strip("\"'") in _PLACEHOLDERS:
+        if _PLACEHOLDER_VALUE.fullmatch(match.group("value").strip("\"'")):
             return match.group(0)  # already sanitized: idempotent, not a new finding
         count("kv_credential")
         names.add(_key_family(match.group("key")))
@@ -142,9 +144,16 @@ def sanitize_text(value: str) -> SanitizeResult:
     return result
 
 
-def _is_secret_key(key: Any) -> bool:
-    normalised = re.sub(r"[^a-z]", "", str(key).lower())
-    return normalised == "authorization" or normalised.endswith(_SECRET_KEY_SUFFIXES)
+def is_secret_key(key: Any) -> bool:
+    """Canonical structured-key test shared by redaction and the E1 ledger (one owner, whole-word qualifiers)."""
+    text = str(key)
+    flat = re.sub(r"[^a-z]", "", text.lower())
+    if flat == "authorization" or flat.endswith(_LEGACY_SUFFIXES):
+        return True
+    tokens = [t.lower() for t in _KEY_TOKENS.findall(text)]
+    if tokens and tokens[-1] in {q + "key" for q in _QUALIFIED_KEY_TOKENS}:
+        return True
+    return len(tokens) >= 2 and tokens[-1] == "key" and tokens[-2] in _QUALIFIED_KEY_TOKENS
 
 
 def redact(value: Any, _depth: int = 0) -> Any:
@@ -157,5 +166,5 @@ def redact(value: Any, _depth: int = 0) -> Any:
     if isinstance(value, (list, tuple)):
         return [redact(x, _depth + 1) for x in value]
     if isinstance(value, dict):
-        return {k: ("[REDACTED]" if _is_secret_key(k) else redact(v, _depth + 1)) for k, v in value.items()}
+        return {k: ("[REDACTED]" if is_secret_key(k) else redact(v, _depth + 1)) for k, v in value.items()}
     return value

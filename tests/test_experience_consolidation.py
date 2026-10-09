@@ -116,7 +116,7 @@ def test_sanitizer_redacts_safe_secrets_and_blocks_residual_credentials():
     assert sanitized is True
     assert "synthetic-value-1" not in str(normalized)
     with pytest.raises(ValueError, match="requires review"):
-        normalize_candidate(_candidate(statement='secret_key = "synthetic-ambiguous-value"'))
+        normalize_candidate(_candidate(statement='service_key_id = "synthetic-ambiguous-value"'))
     with pytest.raises(ValueError, match="requires review"):
         normalize_candidate(_candidate(title="AKIAABCDEFGHIJKLMNOP leaked"))
 

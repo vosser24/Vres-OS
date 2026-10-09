@@ -60,7 +60,7 @@ def test_dict_keys_ending_in_secret_words_redact_their_values():
 
 
 def test_residual_postcondition_flags_unreduced_shapes():
-    ambiguous = sanitize_text('secret_key = "synthetic-ambiguous-value"')
+    ambiguous = sanitize_text('service_key_id = "synthetic-ambiguous-value"')
     assert ambiguous.residual.get("residual_credential_assignment") == 1
     unterminated = sanitize_text("-----BEGIN PRIVATE KEY-----\nsynthetic-truncated-body")
     assert unterminated.residual.get("residual_private_key_marker") == 1
@@ -99,7 +99,7 @@ def test_idempotence_shortcut_does_not_let_crafted_tails_through(text):
 @pytest.mark.parametrize("text", [
     '{"auth": "c3ludGhldGljLWRvY2tlcg=="}',
     "client-key-data: LS0tsyntheticLS0tsynthetic",
-    "JWT_SIGNING_KEY=synthetic-signing-e1",
+    "JWT_SIGNING_KEY_ID=synthetic-signing-e1",
     "passphrase = synthetic-pass-e2",
     "url: https://hooks.slack.com/services/TSYNTH123/BSYNTH123/synthetic",
 ])
@@ -174,3 +174,112 @@ def test_key_phrase_prose_without_secret_shaped_value_is_kept(line):
 ])
 def test_plain_prose_around_credential_words_is_unchanged(line):
     assert redact_text(line) == line
+
+
+# ---- #176 E7 B4B: complete qualifier-family contract (canonical addendum a8346f7) ----------------
+# Closed vocabulary frozen by the addendum: the new families plus the pre-existing key qualifiers.
+NEW_QUALIFIERS = ["service", "deploy", "deployment", "webhook", "license", "licence",
+                  "ssh", "admin", "integration", "bot", "automation"]
+OLD_QUALIFIERS = ["api", "private", "signing", "encryption", "master", "client", "access"]
+ALL_QUALIFIERS = NEW_QUALIFIERS + OLD_QUALIFIERS
+SYNTH = "Zq8!x7Lm2Pq4Rt"  # synthetic, nonfunctional, secret-shaped (digit + symbol)
+
+
+@pytest.mark.parametrize("q", ALL_QUALIFIERS)
+@pytest.mark.parametrize("form", [
+    "the {q} key {v} was printed",       # separator-less phrase
+    "{q}_key={v}",                        # assignment
+    "{q}-key: {v}",                       # colon form
+    "{q} key = {v}",
+    '{{"{q}_key": "{v}"}}',               # JSON-ish text
+])
+def test_every_qualifier_family_is_redacted_in_every_text_form(q, form):
+    text = form.format(q=q, v=SYNTH)
+    out = sanitize_text(text)
+    assert SYNTH not in out.text, text
+    assert not out.residual
+    assert sanitize_text(out.text).text == out.text  # idempotent
+
+
+@pytest.mark.parametrize("q", NEW_QUALIFIERS + ["secret"])
+@pytest.mark.parametrize("noun", ["credential", "secret", "token"])
+def test_qualified_credential_nouns_phrase_and_assignment(q, noun):
+    for text in (f"the {q} {noun} {SYNTH} leaked", f"{q}_{noun}={SYNTH}", f"{q} {noun}: {SYNTH}"):
+        out = sanitize_text(text)
+        assert SYNTH not in out.text, text
+        assert not out.residual
+
+
+@pytest.mark.parametrize("q", ALL_QUALIFIERS)
+def test_structured_keys_for_every_family_are_redacted(q):
+    for key in (f"{q}_key", f"{q.upper()}_KEY", f"prod-{q}-key", f"{q}Key"):
+        assert redact({key: SYNTH, "keep": "ok"}) == {key: "[REDACTED]", "keep": "ok"}, key
+    nested = redact({"cfg": [{f"{q}_key": SYNTH}]})
+    assert nested == {"cfg": [{f"{q}_key": "[REDACTED]"}]}
+
+
+@pytest.mark.parametrize("q", ALL_QUALIFIERS)
+def test_quoted_and_multiline_credential_values(q):
+    quoted = sanitize_text(f'{q}_key: "{SYNTH} with spaces"')
+    assert SYNTH not in quoted.text and "with spaces" not in quoted.text
+    multi = sanitize_text(f"step one done\n{q}_key = {SYNTH}\nstep two done")
+    assert SYNTH not in multi.text
+    assert "step one done" in multi.text and "step two done" in multi.text
+
+
+@pytest.mark.parametrize("q", ALL_QUALIFIERS)
+def test_surviving_credential_assignment_shape_fails_closed(q):
+    # '<q>_key_id=<value>' is not redactable by the KV rule; it must not pass silently.
+    out = sanitize_text(f"{q}_key_id={SYNTH}")
+    assert out.residual, "a surviving credential-assignment shape must be flagged for rejection"
+
+
+@pytest.mark.parametrize("line", [
+    "service key rotation policy",
+    "The service key rotation policy is quarterly.",
+    "master key ceremony",
+    "primary key", "foreign key", "sort key", "source_key", "session_key",
+    "session_key = abc12345", "source_key: customer_id", "primary key (id, tenant)",
+    "the deploy key policy was reviewed", "webhook secret rotation is documented",
+    "admin key holders meet on Friday", "bot key naming convention",
+])
+def test_benign_prose_and_identifiers_are_unchanged(line):
+    out = sanitize_text(line)
+    assert out.text == line
+    assert not out.rule_counts and not out.residual
+
+
+def test_ambiguous_short_phrase_values_are_kept_but_assignments_are_redacted():
+    assert sanitize_text("service key abc").text == "service key abc"  # phrase gate: not secret-shaped
+    assert SYNTH not in sanitize_text(f"service_key={SYNTH}").text    # assignment: always redacted
+
+
+def test_frozen_adversarial_sentence_with_every_family_is_redacted():
+    for q in ALL_QUALIFIERS:
+        s = f"Aborted the deployment; the pipeline printed the {q} key <<CANARY_1>> in its log before failing."
+        out = sanitize_text(s)
+        assert "CANARY_1" not in out.text
+        assert "in its log before failing." in out.text
+
+
+@pytest.mark.parametrize("text", ['secret_key = "synthetic-ambiguous-value"', "JWT_SIGNING_KEY=synthetic-signing-e1"])
+def test_formerly_residual_key_assignments_are_now_redacted_not_rejected(text):
+    out = sanitize_text(text)
+    assert "synthetic" not in out.text and not out.residual
+
+
+# ---- whole-word qualifiers: 'robot_key' is not 'bot_key' -------------------------------------------
+@pytest.mark.parametrize("key", ["MY_APP_BOT_KEY", "myBotKey", "prod-bot-key", "BOT_KEY", "botkey", "APP_SSH_KEY",
+                                 "sshKey", "STRIPE_API_KEY", "apikey", "DATABASE_PASSWORD", "dbtoken"])
+def test_prefixed_and_camelcase_credential_keys_are_secret(key):
+    assert redact({key: SYNTH}) == {key: "[REDACTED]"}
+    assert SYNTH not in sanitize_text(f"{key}={SYNTH}").text
+
+
+@pytest.mark.parametrize("key", ["robot_key", "robotKey", "ROBOT_KEY", "sysadmin_key", "lipsum_key", "cabot_key",
+                                 "session_key", "source_key", "sort_key", "primary_key", "monkey", "hotkey"])
+def test_substring_lookalike_keys_are_not_credentials(key):
+    assert redact({key: "customer_id"}) == {key: "customer_id"}
+    for text in (f"{key}=customer_id", f"{key}: customer_id", f"the {key.replace('_', ' ')} customer_id"):
+        out = sanitize_text(text)
+        assert out.text == text and not out.rule_counts and not out.residual, text

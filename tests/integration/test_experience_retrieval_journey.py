@@ -1315,7 +1315,7 @@ def test_c3h_16_sanitizable_credential_content_is_emitted_sanitized_only(pg_proj
 def test_c3h_17_review_required_content_is_excluded_and_counted_without_values(pg_project, raw_rows):
     mk = _mk()
     sid = _source(raw_rows, f"S-{mk}", pg_project)
-    _chunk(raw_rows, f"C-BAD-{mk}", source_id=sid, content=f'{mk} notes\nsecret_key = "{C3H_AMBIGUOUS}"\n')
+    _chunk(raw_rows, f"C-BAD-{mk}", source_id=sid, content=f'{mk} notes\nservice_key_id = "{C3H_AMBIGUOUS}"\n')
     _chunk(raw_rows, f"C-OK-{mk}", source_id=sid, content=f"{mk} plain notes")
     pack = _retrieve(pg_project, mk)
     assert _raw_keys(pack) == [f"C-OK-{mk}"] and pack["diagnostics"]["excluded_sensitive_content"] == 1
@@ -1343,7 +1343,7 @@ def test_c3h_20_repeated_retrieval_is_byte_identical_and_secret_free(pg_project,
     mk = _mk()
     sid = _source(raw_rows, f"S-{mk}", pg_project)
     _chunk(raw_rows, f"C-1-{mk}", source_id=sid, content=f"{mk} one\nDATABASE_PASSWORD={C3H_SECRET}")
-    _chunk(raw_rows, f"C-2-{mk}", source_id=sid, content=f'{mk} two\nsecret_key = "{C3H_AMBIGUOUS}"')
+    _chunk(raw_rows, f"C-2-{mk}", source_id=sid, content=f'{mk} two\nservice_key_id = "{C3H_AMBIGUOUS}"')
     _owner(f"K-{mk}", pg_project, valid_from=_ago(50))
     _kchunk(raw_rows, mk, "k", f"K-{mk}")
     packs = [_retrieve(pg_project, mk) for _ in range(3)]
@@ -1359,7 +1359,7 @@ def test_c3h_no_write_proof_covers_hardening_scenarios(pg_project, raw_rows):
     mk = _mk()
     sid = _source(raw_rows, f"S-{mk}", pg_project)
     _chunk(raw_rows, f"C-S-{mk}", source_id=sid, content=f"{mk} a\nDATABASE_PASSWORD={C3H_SECRET}")
-    _chunk(raw_rows, f"C-R-{mk}", source_id=sid, content=f'{mk} b\nsecret_key = "{C3H_AMBIGUOUS}"')
+    _chunk(raw_rows, f"C-R-{mk}", source_id=sid, content=f'{mk} b\nservice_key_id = "{C3H_AMBIGUOUS}"')
     _chunk(raw_rows, f"C-O-{mk}", content=f"{mk} orphan")
     _owner(f"K-{mk}", pg_project, valid_from=_ago(50))
     _kchunk(raw_rows, mk, "k", f"K-{mk}")

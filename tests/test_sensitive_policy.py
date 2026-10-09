@@ -52,7 +52,7 @@ def test_disposition_sanitized_keeps_useful_text_and_only_safe_metadata():
 
 
 def test_disposition_review_required_retains_no_text():
-    d = sanitize_extracted_text('Billing process\nsecret_key = "synthetic-ambiguous-value"\n')
+    d = sanitize_extracted_text('Billing process\nservice_key_id = "synthetic-ambiguous-value"\n')
     assert d.status == SENSITIVE_REVIEW_REQUIRED
     assert d.text == "" and "synthetic" not in (d.reason + str(d.metadata))
 

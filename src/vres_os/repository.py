@@ -9,7 +9,7 @@ from typing import Any
 from .db import connect
 from .experience_lifecycle import _lock_project
 from .project import ProjectIdentity
-from .redaction import redact
+from .redaction import redact, sanitize_text
 from .session_contamination import contamination_notice
 from .validation import STATE_FIELDS
 
@@ -36,6 +36,14 @@ def _clip(value: Any, *, max_text: int = _MAX_TEXT, max_list: int = _MAX_LIST) -
     if isinstance(value, dict):
         return {str(k): _clip(v, max_text=max_text, max_list=max_list) for k, v in list(value.items())[:50]}
     return value
+
+
+def _sanitize_task_text(value: str) -> str:
+    """Canonical sanitizer; fail closed (value-free) before any database access."""
+    result = sanitize_text(str(value))
+    if result.residual:
+        raise ValueError("Task text could not be reliably sanitized; remove the credential and retry")
+    return result.text
 
 
 class PendingValidationError(ValueError):
@@ -101,8 +109,7 @@ class Repository:
     ) -> str:
         task_key = _key("TASK")
         cp_key = _key("CP")
-        safe_title = str(redact(title))
-        safe_objective = str(redact(objective))
+        safe_title, safe_objective = _sanitize_task_text(title), _sanitize_task_text(objective)
         seed_summary = str(_clip(f"Task initialized for objective: {safe_objective}"))
         seed_step = "intake"
         seed_next = "Translate the persisted objective into the next concrete action and checkpoint it before material work."

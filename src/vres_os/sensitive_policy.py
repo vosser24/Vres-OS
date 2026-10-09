@@ -19,7 +19,7 @@ from pathlib import Path
 from .redaction import sanitize_text
 
 POLICY_VERSION = "164.1"
-SANITIZER_VERSION = "164.1"
+SANITIZER_VERSION = "164.2"
 
 SENSITIVE_EXCLUDED = "sensitive_excluded"
 SENSITIVE_SANITIZED = "sensitive_sanitized"

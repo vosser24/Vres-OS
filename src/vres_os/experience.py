@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .db import connect
+from .redaction import is_secret_key
 from .relations import relate_in_conn
 from .sources import require_active_source
 from .sensitive_policy import (
@@ -63,18 +64,6 @@ _HIDDEN_REASONING_KEYS = {
     "internalreasoning",
     "thoughtprocess",
 }
-_SECRET_KEY_SUFFIXES = (
-    "password",
-    "passwd",
-    "pwd",
-    "apikey",
-    "accesstoken",
-    "refreshtoken",
-    "token",
-    "secret",
-    "clientsecret",
-    "privatekey",
-)
 _KEY_NORMALIZER = re.compile(r"[^a-z0-9]+")
 
 
@@ -131,7 +120,7 @@ def _prepare_source_evidence(
             normalized = _normalize_key(key)
             if normalized in _HIDDEN_REASONING_KEYS:
                 raise ValueError(f"Experience source evidence contains prohibited private-reasoning field {key!r}")
-            if normalized == "authorization" or normalized.endswith(_SECRET_KEY_SUFFIXES):
+            if is_secret_key(key):
                 sensitive[0] = True
                 out[str(key)] = "[REDACTED]"
                 continue
@@ -180,7 +169,7 @@ def _prepare_payload(value: Any, *, _depth: int = 0, _sensitive: list[bool] | No
             normalized = _normalize_key(key)
             if normalized in _HIDDEN_REASONING_KEYS:
                 raise ValueError(f"Experience payload contains prohibited private-reasoning field {key!r}")
-            if normalized == "authorization" or normalized.endswith(_SECRET_KEY_SUFFIXES):
+            if is_secret_key(key):
                 sensitive[0] = True
                 out[str(key)] = "[REDACTED]"
                 continue

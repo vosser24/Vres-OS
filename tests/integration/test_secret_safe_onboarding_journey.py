@@ -60,7 +60,7 @@ def _fixtures() -> dict[str, str]:
         "docs/safe.md": "# Refund process runbook\nApprove refunds in the finance procedure.\n",
         "docs/safe-copy.md": "# Refund process runbook\nApprove refunds in the finance procedure.\n",
         # --- ambiguous secret shape: must fail closed ---
-        "docs/ambiguous.md": f'Billing process runbook\nsecret_key = "{_m("AMBIGUOUS")}"\n',
+        "docs/ambiguous.md": f'Billing process runbook\nservice_key_id = "{_m("AMBIGUOUS")}"\n',
         # --- generated/dependency pruning ---
         "node_modules/pkg/index.txt": f"process runbook {_m('NODEMODULES')}\n",
         "NODE_MODULES/pkg/index.txt": f"process runbook {_m('NODEMODULESUPPER')}\n",

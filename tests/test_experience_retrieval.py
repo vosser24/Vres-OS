@@ -1179,7 +1179,7 @@ def test_c3h_16_sanitizer_also_covers_section_text():
 
 
 def test_c3h_17_review_required_content_is_excluded_and_counted_without_values():
-    rows = [_raw("C-BAD", content=f'cache notes\nsecret_key = "{AMBIGUOUS}"\n'),
+    rows = [_raw("C-BAD", content=f'cache notes\nservice_key_id = "{AMBIGUOUS}"\n'),
             _raw("C-OK", source="S-2", content="cache invalidation ok")]
     pack = _c3h_pack(rows)
     assert [i["memory_key"] for i in pack["raw_evidence_refs"]] == ["C-OK"]
@@ -1191,7 +1191,7 @@ def test_c3h_17_review_required_content_is_excluded_and_counted_without_values()
 
 
 def test_c3h_17_review_required_section_is_excluded_too():
-    pack = _c3h_pack([_raw("C-BAD", section=f'secret_key = "{AMBIGUOUS}"', content="cache notes")])
+    pack = _c3h_pack([_raw("C-BAD", section=f'service_key_id = "{AMBIGUOUS}"', content="cache notes")])
     assert pack["raw_evidence_refs"] == [] and pack["diagnostics"]["excluded_sensitive_content"] == 1
     assert AMBIGUOUS not in _canonical(pack)
 

@@ -11,7 +11,7 @@ from .db import connect
 from .knowledge import KnowledgeService
 from .procedures import ProcedureService
 from .project_agents import ProjectAgentService
-from .redaction import redact, redact_text
+from .redaction import redact, redact_text, sanitize_text
 
 
 ROUTABLE_ROLES = {
@@ -82,6 +82,11 @@ def _acceptance_criteria(values: list[dict[str, Any]] | None) -> list[dict[str, 
             raise ValueError(
                 "acceptance criterion statement is required and must be <= 1000 characters"
             )
+        # Persisted raw into orchestration_work_units: canonical sanitizer, fail closed (value-free) on residual.
+        safe_key, safe_statement = sanitize_text(key), sanitize_text(statement)
+        if safe_key.residual or safe_statement.residual or safe_key.text != key:
+            raise ValueError("Acceptance criterion could not be reliably sanitized; remove the credential and retry")
+        statement = safe_statement.text
         if verification not in {"deterministic", "judgmental"}:
             raise ValueError(
                 "acceptance criterion verification must be deterministic or judgmental"
@@ -1459,7 +1464,10 @@ class OrchestrationService:
         work_unit_key: str,
         error: str,
     ) -> dict[str, Any]:
-        message = redact_text(str(error or "").strip())
+        sanitized = sanitize_text(str(error or "").strip())
+        if sanitized.residual:  # canonical fail-closed: reject before any write; the message is value-free
+            raise ValueError("Work unit error could not be reliably sanitized; remove the credential and retry")
+        message = sanitized.text
         if not message:
             raise ValueError("Failed work unit requires an error")
         with connect() as conn, conn.transaction():

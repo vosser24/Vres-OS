@@ -26,7 +26,7 @@ def test_episode_payload_sanitizes_secret_values_without_persisting_raw_value():
 
 def test_episode_payload_fails_closed_on_residual_sensitive_shape():
     with pytest.raises(ValueError, match="requires review"):
-        _prepare_payload({"objective": 'secret_key = "synthetic-ambiguous-value"'})
+        _prepare_payload({"objective": 'service_key_id = "synthetic-ambiguous-value"'})
 
 
 @pytest.mark.parametrize(
@@ -76,3 +76,36 @@ def test_source_evidence_digest_keeps_material_beyond_payload_projection_window(
 
     assert payload_a == payload_b
     assert _sha256(source_a) != _sha256(source_b)
+
+
+@pytest.mark.parametrize("key", ["service_key", "deploy_key", "webhook_key", "license_key", "ssh_key",
+                                 "admin_key", "integration_key", "bot_key", "automation_key"])
+def test_episode_payload_redacts_new_family_structured_keys(key):
+    payload, disposition = _prepare_payload({key: "Zq8!x7Lm2Pq4Rt", "note": "kept"})
+    assert payload == {key: "[REDACTED]", "note": "kept"}
+    assert disposition == "sensitive_sanitized"
+
+
+def test_episode_payload_rejects_surviving_service_key_assignment_shape():
+    with pytest.raises(ValueError, match="requires review"):
+        _prepare_payload({"objective": "service_key_id=Zq8!x7Lm2Pq4Rt"})
+
+
+def test_episode_secret_key_test_has_one_owner():
+    from vres_os import experience, redaction
+    assert experience.is_secret_key is redaction.is_secret_key
+
+
+def test_released_e1_policy_digests_are_unchanged_by_sanitizer_hardening():
+    # Sanitizer hardening must not change released E1 policy identity (v1 and v2 digests are frozen).
+    from vres_os import experience
+    assert experience.POLICY_DIGEST == "49e5d6eb17940baf5e1d9c239f9355dd8a65bab60e62e30c81787334ddda519a"
+    assert experience.OBSERVED_POLICY_DIGEST == "66e11e1319dd85b6d01fc74e4ad3f2fa4a7ee9857ab5d72fe5016e781b88efa0"
+
+
+def test_source_evidence_digest_input_is_unchanged_for_ordinary_evidence():
+    from vres_os.experience import _prepare_source_evidence
+    evidence = {"summary": "Deploy finished; the service key rotation policy applies", "robot_key": "r-1",
+                "source_key": "SRC-1", "session_key": "s-9", "count": 3}
+    prepared, disposition = _prepare_source_evidence(evidence)
+    assert prepared == evidence and disposition == "sanitized"

@@ -296,7 +296,7 @@ def test_structural_and_integrity_failures_persist_nothing(pg_project):
         _candidate(pg_project, [good], evidence=[{"episode_key": good, "pointer": "/work_units/0/last_error", "quote": "nope"}]),
         _candidate(pg_project, [good], polarity="positive", trigger="recurrence"),
         _candidate(pg_project, ["EXP-MISSING"]),
-        _candidate(pg_project, [good], statement='secret_key = "synthetic-ambiguous-value"'),
+        _candidate(pg_project, [good], statement='service_key_id = "synthetic-ambiguous-value"'),
         {**_candidate(pg_project, [good]), "chain_of_thought": "private"},
     ]:
         with pytest.raises((ValueError, KeyError)):

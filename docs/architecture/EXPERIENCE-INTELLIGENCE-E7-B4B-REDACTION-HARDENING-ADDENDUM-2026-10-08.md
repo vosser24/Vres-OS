@@ -1,3 +1,6 @@
+> **STATUS (2026-10-09):** historical record of the first, narrow step; the current description is in `EXPERIENCE-INTELLIGENCE-E7-B4B-E1-SECURITY-HARDENING-FINDINGS-2026-10-08.md`. The original RED remains historically valid. Acceptance is recorded only in the Vres validation ledger.
+> **SUPERSEDED (2026-10-08):** superseded by `EXPERIENCE-INTELLIGENCE-E7-B4B-E1-SECURITY-HARDENING-FINDINGS-2026-10-08.md`. History retained below.
+
 # E7 Boundary 4B — redaction hardening addendum (2026-10-08)
 
 Trigger: live adversarial RED `no_secret_persistence` at `c3a7f23` (see the LIVE-ADVERSARIAL-FINDINGS doc).
