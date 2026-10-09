@@ -420,7 +420,7 @@ def test_migration_041_replay_ledger_and_writer_contract():
         assert refuse in flat
     assert "GRANT " not in code and "DELETE FROM" not in code and "ALTER TABLE" not in code
     assert not any(
-        n.name.startswith("047")
+        n.name.startswith("048")
         for n in resources.files("vres_os").joinpath("migrations").iterdir()
     )
 
@@ -431,7 +431,7 @@ def test_migration_042_only_replaces_the_two_041_identity_checks():
         for n in resources.files("vres_os").joinpath("migrations").iterdir()
         if n.name.endswith(".sql")
     )
-    assert names[-1] == "046_experience_retrieval_policy_v5.sql"
+    assert names[-1] == "047_source_trust_ledger.sql"
     assert "042_experience_retrieval_policy_v2.sql" in names
     sql = _migration("042_experience_retrieval_policy_v2.sql")
     code = "\n".join(line for line in sql.splitlines() if not line.lstrip().startswith("--"))

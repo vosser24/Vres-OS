@@ -359,6 +359,31 @@ def activate_boundary(conn, cfg: VresConfig) -> None:
     conn.execute(sql.SQL("GRANT USAGE ON SCHEMA vres TO {}").format(sql.Identifier(writer)))
     _activate_context_refresh_attestations(conn, runtime, writer)
     _activate_experience_observability(conn, runtime, writer)
+    _activate_source_trust(conn, runtime, writer)
+
+
+def _activate_source_trust(conn, runtime: str, writer: str) -> None:
+    """Migration 047: runtime may only read the ledger; nobody but the owner may write or execute (G7 Chunk 1).
+
+    Positive issuance is deliberately not exposed to the runtime or writer role while G8 (host ingress) is open.
+    """
+    from psycopg import sql
+
+    row = conn.execute("SELECT to_regclass('vres.source_trust_events') IS NOT NULL AS present").fetchone()
+    present = row["present"] if isinstance(row, dict) else row[0]
+    if not present:
+        return  # a package/database before migration 047
+    roles = [sql.SQL("PUBLIC"), sql.Identifier(runtime), sql.Identifier(writer)]
+    table = sql.SQL("TABLE vres.source_trust_events")
+    others = [sql.SQL("SEQUENCE vres.source_trust_events_id_seq"),
+              sql.SQL("FUNCTION vres.protect_source_trust_immutability()"),
+              sql.SQL("FUNCTION vres.require_source_trust_owner_insert()"),
+              sql.SQL("FUNCTION vres.source_trust_digests(bigint)"),
+              sql.SQL("FUNCTION vres.record_source_trust_decision(text,bigint,text,text,bigint,text,text)")]
+    for obj in [table, *others]:
+        for role in roles:
+            conn.execute(sql.SQL("REVOKE ALL ON {} FROM {}").format(obj, role))
+    conn.execute(sql.SQL("GRANT SELECT ON {} TO {}").format(table, sql.Identifier(runtime)))
 
 
 def _activate_context_refresh_attestations(conn, runtime: str, writer: str) -> None:

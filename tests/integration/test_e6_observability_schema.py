@@ -56,10 +56,10 @@ def test_policy_row_and_frozen_digests(db_ready):
 
 
 def test_migration_count_and_latest(db_ready):
-    assert _scalar("SELECT count(*) FROM vres.schema_migrations") == 46
+    assert _scalar("SELECT count(*) FROM vres.schema_migrations") == 47
     assert (
         _scalar("SELECT max(version) FROM vres.schema_migrations")
-        == "046_experience_retrieval_policy_v5.sql"
+        == "047_source_trust_ledger.sql"
     )
 
 
@@ -341,12 +341,13 @@ def test_k_real_040_to_041_upgrade_preserves_seeded_state(disposable_040):
         "044_experience_retrieval_policy_v3.sql",
         "045_experience_retrieval_policy_v4.sql",
         "046_experience_retrieval_policy_v5.sql",
+        "047_source_trust_ledger.sql",
     ]
     with connect() as conn:
         count = conn.execute("SELECT count(*) AS n FROM vres.schema_migrations").fetchone()
-        assert count["n"] == 46
+        assert count["n"] == 47
         latest = conn.execute("SELECT max(version) AS v FROM vres.schema_migrations").fetchone()
-        assert latest["v"] == "046_experience_retrieval_policy_v5.sql"
+        assert latest["v"] == "047_source_trust_ledger.sql"
         tables_after = {r["table_name"] for r in conn.execute(
             "SELECT table_name FROM information_schema.tables WHERE table_schema='vres'")}
         assert tables_after - tables_before == {"experience_retrieval_observations", "experience_retrieval_items",
