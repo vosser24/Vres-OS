@@ -3997,3 +3997,25 @@ Boundary 4B live scope:
 - expected Sonnet workers 0
 
 For exact security assertions, fixture methodology, RED discipline, artifact requirements and the fresh-chat prompt, read the newest detailed handoff first.
+
+---
+
+# 37. 2026-10-12 #176 E7 / G7 Chunk 3A — NEWEST AUTHORITATIVE RESUME POINTER
+
+**This section supersedes the preceding #36 E7 B4B pointer as the current execution boundary.** Earlier E7/B4B artifacts, rules and security obligations remain historically valid, but DO NOT resume from their older next-action commands.
+
+**Newest complete handoff:**
+docs/handoffs/PREPRODUCTION-E7-G7-CHUNK3A-RESUME-HANDOFF-2026-10-12.md
+
+**Verified accepted product branch:** issue-176-e7-g7-chunk2 at ac45967f63690b76d41b7303ad43248afed8751f (tree 7a95990fb4413ddf387e90e9cfad5266f266c643). Original E7 security branch issue-176-e7-benchmark-security remains at 0b4d5cdd79ec1e14366f9edce06575fbb8429294. Product main remains 9a8acc5d464b96432a93cb95daa9581412fb07ee.
+
+**New current task:** TASK-20261012-3201f6f610 (G7 Chunk 3A design).
+**Current stopped validation:** VAL-397fb4037e9546df — host-recorded FAILED / REQUIRES_CHANGES, 9/11 design checks passed, 2 blockers.
+**Blockers:** Incorrect single-active-grant recovery model in proposed Section 5; incomplete test matrix in proposed Section 8. No 3A code, commit or remote branch exists. Original local failed-review bundle is ignored and MUST be verified, not fabricated or overwritten.
+
+**Immediate new-chat action:** read newest handoff FIRST, verify Git/GitHub and Vres task/validator evidence, inspect original local ignored contract, report state, then WAIT for the user's separately provided 3A instruction. Do not automatically edit the failed design, launch a review or implementation.
+
+**Security:** G8 host-ingress OPEN; positive production trust issuance DISABLED; migrations 047 and 048 and policy 176.g7.v1 frozen; deferred e6 observability and user-event-writer journeys still merge-blocking. G7 Chunk 4 E5 v6, Chunk 5 legacy audit, G1/G2, B4B physical acceptance, Chunk 6, held-out, E8 and production go-live are NOT complete.
+
+This pointer was appended without changing any earlier section or previously accepted handoff bytes.
+
