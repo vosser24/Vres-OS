@@ -178,3 +178,38 @@ def test_fixture_refuses_without_confirmation_and_creates_nothing(base):
     with psycopg.connect(server, autocommit=True) as c:
         after = {r[0] for r in c.execute("SELECT datname FROM pg_database WHERE datname LIKE 'vres_g7_%'")}
     assert after == before
+
+
+# ---- Chunk 2 pre-work: an invalid inventory refuses the ENTIRE cleanup before any DROP ---------------------
+@pytest.mark.parametrize("roles,created", [
+    (["r_ok"], {"database": True, "roles": ["someone_else"]}),
+    (["r_ok"], {"database": True, "roles": ["r_ok", "r_ok"]}),
+    (["r_ok", "r_ok"], {"database": True, "roles": ["r_ok"]}),
+    (["r_ok"], {"database": True}),
+    (["r_ok"], {"database": "yes", "roles": []}),
+])
+def test_invalid_inventory_refused_before_any_connection_or_ddl(monkeypatch, roles, created):
+    import test_g7_source_trust_ledger as g7
+
+    def boom(*_a, **_k):
+        raise AssertionError("cleanup connected (and could DROP) before validating the inventory")
+    monkeypatch.setattr(g7, "_admin", boom)
+    with pytest.raises(FixtureRefused):
+        g7._cleanup("unused", GOOD, roles, created, environ=OK_ENV)
+
+
+def test_invalid_role_mixed_with_created_database_drops_nothing(base):
+    server = _dsn(base, database="postgres")
+    name = f"vres_g7s_{uuid.uuid4().hex[:8]}_test"
+    created = {"database": False, "roles": []}
+    try:
+        with _admin(server) as admin:
+            verify_target(admin, os.environ, name, [], fresh=True)
+            admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
+            created["database"] = True
+        with pytest.raises(FixtureRefused):  # valid created database + undeclared role: ENTIRE cleanup refused
+            _cleanup(server, name, [], {"database": True, "roles": ["someone_else"]})
+        assert _exists(server, database=name)  # the database was NOT dropped first
+    finally:
+        _cleanup(server, name, [], created)
+    assert not _exists(server, database=name)

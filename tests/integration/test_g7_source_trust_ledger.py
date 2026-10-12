@@ -50,9 +50,24 @@ def _admin(server_dsn):
         raise FixtureRefused(f"cannot reach the approved disposable cluster ({type(exc).__name__})") from None
 
 
+def _check_inventory(roles, created):
+    """Pure inventory validation: an inconsistent request refuses the ENTIRE cleanup before any DDL."""
+    if set(created) != {"database", "roles"} or not isinstance(created["database"], bool) \
+            or not isinstance(created["roles"], list):
+        raise FixtureRefused("cleanup inventory is malformed")
+    if len(set(created["roles"])) != len(created["roles"]):
+        raise FixtureRefused("cleanup inventory lists a role more than once")
+    if len(set(roles)) != len(roles):
+        raise FixtureRefused("declared role list contains duplicates")
+    if any(role not in roles for role in created["roles"]):
+        raise FixtureRefused("cleanup refuses a role this run did not declare")
+
+
 def _cleanup(server_dsn, database, roles, created, environ=None):
     """Drop ONLY the exact resources this verified run created (`created` = {"database": bool, "roles": [...]}).
-    The cluster identity is re-proved first; any doubt leaves the resources in place and fails loudly."""
+    Names, inventory and the cluster identity are all proved BEFORE the first DROP; any doubt leaves every
+    resource in place and fails loudly."""
+    _check_inventory(roles, created)
     if not created["database"] and not created["roles"]:
         return
     with _admin(server_dsn) as admin:
@@ -60,8 +75,6 @@ def _cleanup(server_dsn, database, roles, created, environ=None):
         if created["database"]:
             admin.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(database)))
         for role in created["roles"]:
-            if role not in roles:
-                raise FixtureRefused("cleanup refuses a role this run did not declare")
             admin.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(role)))
 
 
@@ -132,7 +145,7 @@ def env():
         mp.setenv("VRES_PROVENANCE_WRITER_DATABASE_URL", writer_dsn)
         mp.setattr(db, "ConfigStore", lambda: SimpleNamespace(load=lambda: cfg))
         applied = db.migrate()
-        assert applied[-1] == "047_source_trust_ledger.sql"
+        assert applied[-1] == "048_source_effective_trust.sql"
         yield SimpleNamespace(suffix=suffix, runtime_dsn=runtime_dsn, migrator_dsn=migrator_dsn,
                               writer_dsn=writer_dsn, target_dsn=target_dsn, runtime=runtime_user,
                               writer=writer_user, migrator=migrator_user, cfg=cfg)

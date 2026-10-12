@@ -384,6 +384,21 @@ def _activate_source_trust(conn, runtime: str, writer: str) -> None:
         for role in roles:
             conn.execute(sql.SQL("REVOKE ALL ON {} FROM {}").format(obj, role))
     conn.execute(sql.SQL("GRANT SELECT ON {} TO {}").format(table, sql.Identifier(runtime)))
+    _activate_source_effective_trust(conn, runtime, writer)
+
+
+def _activate_source_effective_trust(conn, runtime: str, writer: str) -> None:
+    """Migration 048: the runtime may EXECUTE the read-only effective-trust reader and nothing else of G7."""
+    from psycopg import sql
+
+    row = conn.execute("SELECT to_regprocedure('vres.source_effective_trust(bigint)') IS NOT NULL AS present").fetchone()
+    present = row["present"] if isinstance(row, dict) else row[0]
+    if not present:
+        return  # a package/database before migration 048
+    reader = sql.SQL("FUNCTION vres.source_effective_trust(bigint)")
+    for role in (sql.SQL("PUBLIC"), sql.Identifier(runtime), sql.Identifier(writer)):
+        conn.execute(sql.SQL("REVOKE ALL ON {} FROM {}").format(reader, role))
+    conn.execute(sql.SQL("GRANT EXECUTE ON {} TO {}").format(reader, sql.Identifier(runtime)))
 
 
 def _activate_context_refresh_attestations(conn, runtime: str, writer: str) -> None:
