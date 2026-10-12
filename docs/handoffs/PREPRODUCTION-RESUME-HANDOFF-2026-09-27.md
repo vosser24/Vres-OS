@@ -4019,3 +4019,7 @@ docs/handoffs/PREPRODUCTION-E7-G7-CHUNK3A-RESUME-HANDOFF-2026-10-12.md
 
 This pointer was appended without changing any earlier section or previously accepted handoff bytes.
 
+
+## Superseding pointer (appended 2026-10-12, after Chunk 3A implementation checkpoint)
+
+Chunk 3A implementation was independently validated (`VAL-52ec36f2f6624300`, claude-fable-5-1, 17/17) and committed and pushed as product commit `752d5e9c4cf02735e3ed2582c93080e2748e949f` (tree `28440eea8ee886992335fa6ff4e8d6eda46dc63f`, parent `ac45967f63690b76d41b7303ad43248afed8751f`) on `issue-176-e7-g7-chunk3`. NOT merged, no PR. Authoritative current state: `docs/handoffs/PREPRODUCTION-E7-G7-CHUNK3A-IMPLEMENTATION-CHECKPOINT-HANDOFF-2026-10-12.md`. D2 pre-merge evidence is OPEN; G8 host ingress OPEN; positive production issuance DISABLED. No earlier section above was changed.
