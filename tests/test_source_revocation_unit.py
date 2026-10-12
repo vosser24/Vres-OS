@@ -252,6 +252,7 @@ def test_only_source_revocation_writes_the_revoked_status():
     # E7: the benchmark modules only name the lifecycle state in cases/oracles/scoring (readers;
     # writers are
     # rejected above, and no module here writes status='revoked').
+    # G7 Chunk 3A: source_trust_read.py is a read-only reporter; its only use is the ledger `grant_state` value.
     assert sorted(r[0] for r in readers) == [
         "experience_benchmark.py",
         "experience_benchmark_faithfulness.py",
@@ -260,5 +261,6 @@ def test_only_source_revocation_writes_the_revoked_status():
         "experience_utility.py",
         "knowledge_status.py",
         "session_contamination.py",
+        "source_trust_read.py",
     ]
     assert [r for r in readers if r[0] == "knowledge_status.py"] == [("knowledge_status.py", ["revoked"])]

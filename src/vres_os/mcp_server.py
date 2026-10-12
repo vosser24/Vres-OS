@@ -32,6 +32,7 @@ from .review import ReviewQueueService
 from .repository import Repository
 from .session_contamination import ContextRefreshService, valid_event_key
 from .source_revocation import SourceRevocationService, bound_public_result
+from .source_trust_read import SourceTrustReadService
 from .sources import SourceService
 from .redaction import redact_text
 from .metrics import validate_metrics
@@ -297,6 +298,30 @@ def source_revoke(request: dict[str, Any]) -> dict:
         r["source_key"], project_id=_trusted_project_id(), approval_key=r["approval_key"], reason=r["reason"],
         task_key=r.get("task_key"))
     return bound_public_result(result)
+
+
+@mcp.tool()
+def source_trust_status(request: dict[str, Any]) -> dict:
+    """Read-only trust status of one source in the current project (policy 176.g7.v1). Request: source_key.
+    Reports the effective trust decided by the database reader plus the newest ledger event. Declared labels are not
+    evidence; G8 host-authenticated ingress is open, so no mutation is available. A trust-ledger revoke (an event
+    in the source's trust ledger) is distinct from source-lifecycle revocation (a separate approval-bound operation
+    on the source itself); neither changes the other and this tool performs neither."""
+    r = _closed_request("source_trust_status", request, {"source_key"}, set())
+    key = SourceTrustReadService.validate_source_key(r["source_key"])
+    return SourceTrustReadService().status(_trusted_project_id(), key)
+
+
+@mcp.tool()
+def source_trust_inspect(request: dict[str, Any]) -> dict:
+    """Read-only bounded inspection of one source's trust ledger in the current project. Request: source_key,
+    limit (optional integer 1-50, default 20). Returns the newest-first event inventory and an observational
+    explanation; it executes nothing and offers no mutation (G8 open). A "trust revoke" ledger event is distinct from
+    source-lifecycle revocation (a separate approval-bound operation); this tool performs neither."""
+    r = _closed_request("source_trust_inspect", request, {"source_key"}, {"limit"})
+    key = SourceTrustReadService.validate_source_key(r["source_key"])
+    limit = SourceTrustReadService.validate_limit(r["limit"]) if "limit" in r else 20
+    return SourceTrustReadService().inspect(_trusted_project_id(), key, limit)
 
 
 @mcp.tool()

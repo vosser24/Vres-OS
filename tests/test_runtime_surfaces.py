@@ -6,6 +6,7 @@ Vres functions with isolated service doubles, so failures expose wiring/authorit
 from __future__ import annotations
 
 import importlib
+import re
 import sys
 from contextlib import nullcontext
 from pathlib import Path
@@ -40,8 +41,70 @@ def surface(monkeypatch, tmp_path):
     sys.modules.pop('vres_os.mcp_server', None)
 
 
+G7_CHUNK3A_TOOLS = {'source_trust_status', 'source_trust_inspect'}
+
+
+def test_g7_chunk3a_registers_exactly_two_read_only_source_trust_tools(surface):
+    names = set(surface.mcp.registered)
+    assert len(names) == 54
+    assert G7_CHUNK3A_TOOLS <= names
+    assert {n for n in names if n.startswith('source_trust')} == G7_CHUNK3A_TOOLS
+    assert not any(re.fullmatch(r'source_trust_(grant|revoke|preview|authorize|issue|bind|enable|mutate)', n)
+                   for n in names)
+
+
+@pytest.mark.parametrize('tool,bad', [
+    ('source_trust_status', [None, 'k', [], {}, {'project_id': 1, 'source_key': 'k'}, {'source_key': 'k', 'x': 1},
+                            {'source_key': ''}, {'source_key': 'k', 'limit': 5}, {'source_key': 5}]),
+    ('source_trust_inspect', [None, {'source_key': 'k', 'project_id': 1}, {'source_key': 'k', 'limit': 0},
+                             {'source_key': 'k', 'limit': True}, {'source_key': 'k', 'limit': 51},
+                             {'source_key': 'k', 'user_event_id': 1}, {'limit': 3}]),
+])
+def test_g7_chunk3a_validation_precedes_project_lookup_and_connection(surface, monkeypatch, tool, bad):
+    calls = []
+    monkeypatch.setattr(surface, '_trusted_project_id', lambda: calls.append('project') or 7)
+    import vres_os.db as db
+
+    def no_connect(**kw):
+        calls.append('connect')
+        raise AssertionError('no connection may open before validation')
+    monkeypatch.setattr(db, 'connect', no_connect)
+    for request in bad:
+        with pytest.raises(ValueError):
+            surface.mcp.registered[tool](request)
+    assert calls == []
+
+
+def test_g7_chunk3a_adapters_bind_trusted_project_and_forward_only_validated_fields(surface, monkeypatch):
+    seen = []
+
+    class Svc:
+        def status(self, pid, key):
+            seen.append(('status', pid, key))
+            return {'ok': 'status'}
+
+        def inspect(self, pid, key, limit=20):
+            seen.append(('inspect', pid, key, limit))
+            return {'ok': 'inspect'}
+
+        @staticmethod
+        def validate_source_key(v):
+            return v
+
+        @staticmethod
+        def validate_limit(v):
+            return v
+
+    monkeypatch.setattr(surface, '_trusted_project_id', lambda: 42)
+    monkeypatch.setattr(surface, 'SourceTrustReadService', Svc)
+    assert surface.mcp.registered['source_trust_status']({'source_key': 'k'}) == {'ok': 'status'}
+    assert surface.mcp.registered['source_trust_inspect']({'source_key': 'k'}) == {'ok': 'inspect'}
+    assert surface.mcp.registered['source_trust_inspect']({'source_key': 'k', 'limit': 3}) == {'ok': 'inspect'}
+    assert seen == [('status', 42, 'k'), ('inspect', 42, 'k', 20), ('inspect', 42, 'k', 3)]
+
+
 def test_mcp_registration_has_full_contract_and_no_pass_setter(surface):
-    assert len(surface.mcp.registered) == 52
+    assert len(surface.mcp.registered) == 54
     assert 'experience_utility_evidence' in surface.mcp.registered  # E6: the one added non-mutating tool
     assert 'procedure_get' in surface.mcp.registered
     assert 'experience_retrieve' in surface.mcp.registered
