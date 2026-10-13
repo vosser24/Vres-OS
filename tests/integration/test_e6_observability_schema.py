@@ -21,6 +21,7 @@ from vres_os.project import ProjectIdentity  # noqa: E402
 from vres_os.repository import Repository  # noqa: E402
 
 from test_experience_lifecycle_schema import _dsn_for, _Root, _seed_episode, _table_defs  # noqa: E402
+from pg_run_guard import guarded_ledger  # noqa: E402,F401  (identity gate + run ledger; precedes every migrating fixture)
 
 HEX = "a" * 64
 RECORD_ARGS = "(bigint,text,text,text,text,jsonb,jsonb)"
@@ -29,7 +30,7 @@ REF_FN = "vres.record_experience_retrieval_references" + REF_ARGS
 
 
 @pytest.fixture
-def db_ready(monkeypatch):
+def db_ready(guarded_ledger, monkeypatch):
     dsn = os.environ.get("VRES_TEST_DATABASE_URL")
     if not dsn:
         pytest.skip("VRES_TEST_DATABASE_URL is not set")
@@ -156,19 +157,19 @@ def test_restrict_foreign_keys_protect_the_ledger_from_cascades(db_ready, pid):
             conn.execute("DELETE FROM vres.sessions WHERE id=%s", (session_id,))
 
 
-def test_boundary_runtime_reads_but_cannot_write_or_record(db_ready):
+def test_boundary_runtime_reads_but_cannot_write_or_record(guarded_ledger, db_ready):
     """Statement-level privilege proof with a real unprivileged role (not the full split-role topology)."""
     base = os.environ["VRES_TEST_DATABASE_URL"]
     role, secret = f"vres_e6_ro_{uuid.uuid4().hex[:8]}", uuid.uuid4().hex
-    with psycopg.connect(base, autocommit=True, row_factory=dict_row) as admin:
-        admin.execute(sql.SQL("CREATE ROLE {} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD {}")
-                      .format(sql.Identifier(role), sql.Literal(secret)))
-        admin.execute(sql.SQL("GRANT USAGE ON SCHEMA vres TO {}").format(sql.Identifier(role)))
-        writer = admin.execute("SELECT session_user AS u").fetchone()["u"]
-        _activate_experience_observability(admin, role, writer)
     parts = conninfo_to_dict(base)
     ro_dsn = make_conninfo(**{**parts, "user": role, "password": secret})
-    try:
+    try:  # cleanup responsibility begins before the first privileged statement
+        with psycopg.connect(base, autocommit=True, row_factory=dict_row) as admin:
+            guarded_ledger.create_role(admin, role, sql.SQL("CREATE ROLE {} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD {}")
+                                       .format(sql.Identifier(role), sql.Literal(secret)))
+            admin.execute(sql.SQL("GRANT USAGE ON SCHEMA vres TO {}").format(sql.Identifier(role)))
+            writer = admin.execute("SELECT session_user AS u").fetchone()["u"]
+            _activate_experience_observability(admin, role, writer)
         with psycopg.connect(ro_dsn, autocommit=True, row_factory=dict_row) as ro:
             ro.execute("SELECT count(*) FROM vres.experience_retrieval_observations").fetchone()
             ro.execute("SELECT count(*) FROM vres.experience_retrieval_items").fetchone()
@@ -211,9 +212,7 @@ def test_boundary_runtime_reads_but_cannot_write_or_record(db_ready):
                 (RECORD_ARGS,)).fetchone()["p"]
             assert writer_only is False
     finally:
-        with psycopg.connect(base, autocommit=True) as admin:
-            admin.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role)))
-            admin.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(role)))
+        guarded_ledger.finish()
 
 
 _ACL_SQL = """
@@ -236,14 +235,14 @@ SELECT format('%%s|%%s|%%s', p.oid::regprocedure, pg_get_userbyid(a.grantee), a.
 """
 
 
-def test_n_boundary_activation_is_repeatable_without_broadening_grants(db_ready):
+def test_n_boundary_activation_is_repeatable_without_broadening_grants(guarded_ledger, db_ready):
     base = os.environ["VRES_TEST_DATABASE_URL"]
     runtime, writer = f"vres_e6_rt_{uuid.uuid4().hex[:8]}", f"vres_e6_wr_{uuid.uuid4().hex[:8]}"
     with psycopg.connect(base, autocommit=True, row_factory=dict_row) as admin:
-        for role in (runtime, writer):
-            admin.execute(sql.SQL("CREATE ROLE {} NOLOGIN").format(sql.Identifier(role)))
-            admin.execute(sql.SQL("GRANT USAGE ON SCHEMA vres TO {}").format(sql.Identifier(role)))
         try:
+            for role in (runtime, writer):
+                guarded_ledger.create_role(admin, role, sql.SQL("CREATE ROLE {} NOLOGIN").format(sql.Identifier(role)))
+                admin.execute(sql.SQL("GRANT USAGE ON SCHEMA vres TO {}").format(sql.Identifier(role)))
             snapshots = []
             for _ in range(3):
                 _activate_experience_observability(admin, runtime, writer)
@@ -266,13 +265,11 @@ def test_n_boundary_activation_is_repeatable_without_broadening_grants(db_ready)
             assert not [a for a in others if a.split("|")[1].startswith("unknown")], others
             assert all(a.split("|")[2] in ("SELECT", "EXECUTE") for a in others), others
         finally:
-            for role in (runtime, writer):
-                admin.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role)))
-                admin.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(role)))
+            guarded_ledger.finish()
 
 
 @pytest.fixture
-def disposable_040(monkeypatch, tmp_path):
+def disposable_040(guarded_ledger, monkeypatch, tmp_path):
     """A uniquely named disposable database migrated to exactly 040, independent of any other test or database."""
     if not os.environ.get("VRES_TEST_DATABASE_URL"):
         pytest.skip("VRES_TEST_DATABASE_URL is not set")
@@ -288,10 +285,8 @@ def disposable_040(monkeypatch, tmp_path):
         if p.name.endswith(".sql") and p.name < "041_":
             (staged / p.name).write_bytes(p.read_bytes())
     assert len(list(staged.iterdir())) == 40
-    with psycopg.connect(_dsn_for("postgres"), autocommit=True) as admin:
-        assert admin.execute("SELECT 1 FROM pg_database WHERE datname=%s", (name,)).fetchone() is None
-        admin.execute(f'CREATE DATABASE "{name}"')
-    try:
+    try:  # gate + manifest-first creation (identity re-proved against the maintenance DB, fresh name required)
+        guarded_ledger.create_database(name, f'CREATE DATABASE "{name}"')
         monkeypatch.setenv("VRES_DATABASE_URL", _dsn_for(name))
         monkeypatch.setattr(db, "resources", _Root(tmp_path / "pkg040"))
         assert len(db.migrate()) == 40
@@ -299,12 +294,11 @@ def disposable_040(monkeypatch, tmp_path):
         yield name
     finally:
         monkeypatch.undo()
-        with psycopg.connect(_dsn_for("postgres"), autocommit=True) as admin:
-            admin.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname=%s", (name,))
-            admin.execute(f'DROP DATABASE IF EXISTS "{name}"')
-            dropped = admin.execute("SELECT count(*) FROM pg_database WHERE datname=%s", (name,)).fetchone()[0] == 0
-        print(f"DB {name} DROPPED={dropped}")
-        assert dropped is True
+        guarded_ledger.finish()
+    item = guarded_ledger.manifest.resource("database", name)
+    dropped = item is not None and item["state"] == "dropped"
+    print(f"DB {name} DROPPED={dropped}")
+    assert dropped is True
 
 
 _SEED_WATCH = ["sessions", "tasks", "knowledge_items", "experience_episodes", "experience_policy_versions"]
@@ -351,8 +345,10 @@ def test_k_real_040_to_041_upgrade_preserves_seeded_state(disposable_040):
         assert latest["v"] == "048_source_effective_trust.sql"
         tables_after = {r["table_name"] for r in conn.execute(
             "SELECT table_name FROM information_schema.tables WHERE table_schema='vres'")}
+        # 041 adds the four retrieval ledgers; migration 047 (source trust ledger) adds source_trust_events.
         assert tables_after - tables_before == {"experience_retrieval_observations", "experience_retrieval_items",
-                                                    "experience_retrieval_references", "experience_retrieval_replays"}
+                                                    "experience_retrieval_references", "experience_retrieval_replays",
+                                                    "source_trust_events"}
         assert tables_before - tables_after == set()
         state_after = {t: conn.execute(q).fetchall() for t, q in _SEED_SELECT.items()}
         policies_after = state_after.pop("experience_policy_versions")
@@ -458,18 +454,19 @@ def test_reference_ledger_is_append_only_and_restricts_cascades(db_ready, pid):
     assert _scalar("SELECT count(*) FROM vres.experience_retrieval_references WHERE reference_key=%s", (ref,)) == 1
 
 
-def test_writer_role_may_execute_the_reference_recorder_only(db_ready):
+def test_writer_role_may_execute_the_reference_recorder_only(guarded_ledger, db_ready):
     """A real login role granted by activation: EXECUTE on the reference function, no table access of any kind."""
     base = os.environ["VRES_TEST_DATABASE_URL"]
     runtime, writer, secret = f"vres_e6_rt_{uuid.uuid4().hex[:8]}", f"vres_e6_wr_{uuid.uuid4().hex[:8]}", uuid.uuid4().hex
-    with psycopg.connect(base, autocommit=True, row_factory=dict_row) as admin:
-        admin.execute(sql.SQL("CREATE ROLE {} NOLOGIN").format(sql.Identifier(runtime)))
-        admin.execute(sql.SQL("CREATE ROLE {} LOGIN NOSUPERUSER PASSWORD {}").format(sql.Identifier(writer), sql.Literal(secret)))
-        for role in (runtime, writer):
-            admin.execute(sql.SQL("GRANT USAGE ON SCHEMA vres TO {}").format(sql.Identifier(role)))
-        _activate_experience_observability(admin, runtime, writer)
     wr_dsn = make_conninfo(**{**conninfo_to_dict(base), "user": writer, "password": secret})
-    try:
+    try:  # cleanup responsibility begins before the first privileged statement
+        with psycopg.connect(base, autocommit=True, row_factory=dict_row) as admin:
+            guarded_ledger.create_role(admin, runtime, sql.SQL("CREATE ROLE {} NOLOGIN").format(sql.Identifier(runtime)))
+            guarded_ledger.create_role(admin, writer, sql.SQL("CREATE ROLE {} LOGIN NOSUPERUSER PASSWORD {}")
+                                       .format(sql.Identifier(writer), sql.Literal(secret)))
+            for role in (runtime, writer):
+                admin.execute(sql.SQL("GRANT USAGE ON SCHEMA vres TO {}").format(sql.Identifier(role)))
+            _activate_experience_observability(admin, runtime, writer)
         with psycopg.connect(wr_dsn, autocommit=True, row_factory=dict_row) as w:
             for stmt in ("SELECT count(*) FROM vres.experience_retrieval_references",
                          "INSERT INTO vres.experience_retrieval_references(reference_key) VALUES ('x')",
@@ -488,10 +485,7 @@ def test_writer_role_may_execute_the_reference_recorder_only(db_ready):
             assert admin.execute("SELECT has_function_privilege(%s, %s, 'EXECUTE') AS p", (runtime, REF_FN)).fetchone()["p"] is False
             assert admin.execute("SELECT has_function_privilege(%s, %s, 'EXECUTE') AS p", (writer, REF_FN)).fetchone()["p"] is True
     finally:
-        with psycopg.connect(base, autocommit=True) as admin:
-            for role in (runtime, writer):
-                admin.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role)))
-                admin.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(role)))
+        guarded_ledger.finish()
 
 
 REPLAY_FN = "vres.record_experience_retrieval_replay(bigint,bigint,jsonb)"

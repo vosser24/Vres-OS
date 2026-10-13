@@ -11,6 +11,7 @@ from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 from psycopg.rows import dict_row
 
+from pg_run_guard import guarded_ledger  # noqa: F401  (fixture; must precede pg_project in the signature)
 from vres_os.db import connect
 from vres_os.repository import Repository
 
@@ -22,40 +23,16 @@ def _dsn_as(base: str, user: str, password: str) -> str:
     return make_conninfo(**parts)
 
 
-def test_runtime_sql_cannot_forge_user_authority_but_writer_can(pg_project):
+def _provision_roles(ledger, admin_dsn, runtime_user, writer_user, runtime_password, writer_password):
     import psycopg
-
-    admin_dsn = os.environ["VRES_TEST_DATABASE_URL"]
-    suffix = uuid.uuid4().hex[:10]
-    runtime_user = f"vres_rt_{suffix}"
-    writer_user = f"vres_wr_{suffix}"
-    runtime_password = uuid.uuid4().hex
-    writer_password = uuid.uuid4().hex
-
-    repo = Repository()
-    task_key = repo.begin_task(
-        pg_project,
-        "Writer boundary",
-        "Prove runtime SQL cannot manufacture user-authority provenance.",
-        "test",
-        "chairman",
-    )
-    sid = f"writer-boundary-{suffix}"
-    repo.open_session(pg_project, sid)
-    repo.bind_session(pg_project, sid, task_key)
-    with connect() as conn:
-        task_id = int(
-            conn.execute("SELECT id FROM vres.tasks WHERE task_key=%s", (task_key,)).fetchone()["id"]
-        )
-        original_writer = conn.execute(
-            "SELECT writer_role FROM vres.provenance_authority WHERE authority_key='user_event_writer'"
-        ).fetchone()["writer_role"]
 
     with psycopg.connect(admin_dsn, autocommit=True, row_factory=dict_row) as admin:
         for role, password in ((runtime_user, runtime_password), (writer_user, writer_password)):
-            admin.execute(
+            ledger.create_role(
+                admin,
+                role,
                 sql.SQL("CREATE ROLE {} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT PASSWORD {}")
-                .format(sql.Identifier(role), sql.Literal(password))
+                .format(sql.Identifier(role), sql.Literal(password)),
             )
         admin.execute(sql.SQL("GRANT USAGE ON SCHEMA vres TO {}").format(sql.Identifier(runtime_user)))
         admin.execute(sql.SQL("GRANT USAGE ON SCHEMA vres TO {}").format(sql.Identifier(writer_user)))
@@ -84,15 +61,41 @@ def test_runtime_sql_cannot_forge_user_authority_but_writer_can(pg_project):
                     sql.SQL(signature), sql.Identifier(runtime_user)
                 )
             )
-        admin.execute(
-            "UPDATE vres.provenance_authority SET writer_role=%s,configured_at=now() "
-            "WHERE authority_key='user_event_writer'",
-            (writer_user,),
+        ledger.rebind_writer(admin, writer_user)
+
+
+def test_runtime_sql_cannot_forge_user_authority_but_writer_can(guarded_ledger, pg_project):
+    import psycopg
+
+    admin_dsn = os.environ["VRES_TEST_DATABASE_URL"]
+    suffix = uuid.uuid4().hex[:10]
+    runtime_user = f"vres_rt_{suffix}"
+    writer_user = f"vres_wr_{suffix}"
+    runtime_password = uuid.uuid4().hex
+    writer_password = uuid.uuid4().hex
+
+    repo = Repository()
+    task_key = repo.begin_task(
+        pg_project,
+        "Writer boundary",
+        "Prove runtime SQL cannot manufacture user-authority provenance.",
+        "test",
+        "chairman",
+    )
+    sid = f"writer-boundary-{suffix}"
+    repo.open_session(pg_project, sid)
+    repo.bind_session(pg_project, sid, task_key)
+    with connect() as conn:
+        task_id = int(
+            conn.execute("SELECT id FROM vres.tasks WHERE task_key=%s", (task_key,)).fetchone()["id"]
         )
 
     runtime_dsn = _dsn_as(admin_dsn, runtime_user, runtime_password)
     writer_dsn = _dsn_as(admin_dsn, writer_user, writer_password)
+    # Cleanup responsibility starts before the first privileged statement: every creation and the writer_role
+    # rebinding are recorded in the run manifest first, and restored/dropped by the ledger even on failure.
     try:
+        _provision_roles(guarded_ledger, admin_dsn, runtime_user, writer_user, runtime_password, writer_password)
         with psycopg.connect(runtime_dsn, autocommit=True, row_factory=dict_row) as runtime:
             with pytest.raises(psycopg.Error) as forged:
                 runtime.execute(
@@ -185,12 +188,4 @@ def test_runtime_sql_cannot_forge_user_authority_but_writer_can(pg_project):
         assert state["latest_user_instruction"] == "Genuine host-observed instruction."
         assert observations["n"] == 1
     finally:
-        with psycopg.connect(admin_dsn, autocommit=True, row_factory=dict_row) as admin:
-            admin.execute(
-                "UPDATE vres.provenance_authority SET writer_role=%s,configured_at=now() "
-                "WHERE authority_key='user_event_writer'",
-                (original_writer,),
-            )
-            for role in (runtime_user, writer_user):
-                admin.execute(sql.SQL("DROP OWNED BY {} CASCADE").format(sql.Identifier(role)))
-                admin.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(role)))
+        guarded_ledger.finish()
