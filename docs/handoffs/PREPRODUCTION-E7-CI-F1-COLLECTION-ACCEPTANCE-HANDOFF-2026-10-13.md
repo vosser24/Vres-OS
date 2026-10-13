@@ -85,3 +85,7 @@ F2 PostgreSQL 16 CI provisioning (guard-compatible driver, server-confirmed clus
 ## K. Next controlled step
 
 Recommend, without starting it: a bounded F2 design-then-implementation task for PG16 CI provisioning. It would add a CI driver that reads `pg_control_system()` from the throwaway service, refuses control id `7685334034094099024`, calls the existing provisioning/teardown, and leaves every guard refusal intact. Needs separate authorization, RED-first tests, and one protected validation before any exact-head CI observation.
+
+## Superseding pointer (appended 2026-10-13, control incident / C2A continuity)
+
+Newest incident and offline-candidate state: see **PREPRODUCTION-E7-C2A-C2B-CONTROL-INCIDENT-RESUME-HANDOFF-2026-10-13.md** in this handoffs directory. The live Vres control database was inadvertently migrated from 041 to 048 by F2 migration-credential fallback; its installed runtime still supports only 041. A post-incident backup was successfully restored in isolation, but there is no pre-incident rollback. C2A built a 13-file offline schema-048 compatibility candidate with 17 focused and 1,749 unit PASS / 3 SKIP, but the candidate remains UNVALIDATED and Windows-local; the distinct F2 three-file CI driver is unsafe, BLOCKED and uncommitted. Published product head d930adfa89617067115d9538e9692945230d9630; F1/R2/D2 protected history preserved. No C2B run, C2C protected review, live runtime update, PR or merge. G8 OPEN; positive issuance DISABLED; E7 NOT release ready. All preceding historical sections are unchanged.
