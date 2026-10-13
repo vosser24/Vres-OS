@@ -7,6 +7,7 @@ is NOT solved here: ledger rows are user-authored events in the database, not ho
 from __future__ import annotations
 
 import contextlib
+import copy
 import json
 import threading
 
@@ -291,19 +292,71 @@ def test_concurrent_appends_never_produce_an_inconsistent_view(env):
 
 
 # G. zero writes, privileges, reachability, determinism, leakage ----------------------------------------------------------
+D2_TABLES = ("source_trust_events", "sources", "knowledge_chunks", "task_events", "approval_events", "tasks")
+
+
+def _d2_snapshot(env):
+    """R3 D2 measurement: six named row counts, the ledger watermark and every `sources` row, serialized by to_jsonb.
+
+    One statement on a FRESH autocommit owner connection is one new snapshot, so the AFTER measurement can never reuse
+    the BEFORE view. The result holds no value that is ever printed: only labels appear in assertion messages.
+    """
+    counts = ", ".join(f"(SELECT count(*) FROM vres.{t}) AS {t}" for t in D2_TABLES)
+    with _connect(env.migrator_dsn) as m:
+        row = m.execute(f"SELECT {counts}, (SELECT max(id) FROM vres.source_trust_events) AS ledger_max_id, "
+                        "(SELECT coalesce(array_agg(to_jsonb(s)::text ORDER BY s.id), ARRAY[]::text[]) "
+                        "FROM vres.sources s) AS source_rows").fetchone()
+    return {"counts": {t: row[t] for t in D2_TABLES}, "ledger_max_id": row["ledger_max_id"],
+            "source_rows": tuple(r.encode("utf-8") for r in row["source_rows"])}
+
+
+def _d2_diff(before, after):
+    """Labels (never values) of every D2 element that differs between two snapshots."""
+    out = [f"count:{t}" for t in D2_TABLES if before["counts"][t] != after["counts"][t]]
+    if before["ledger_max_id"] != after["ledger_max_id"]:
+        out.append("ledger_max_id")
+    if before["source_rows"] != after["source_rows"]:
+        out.append("source_rows")
+    return out
+
+
 def test_reads_write_nothing(env):
     fx = granted(env)
-    with _connect(env.migrator_dsn) as m:
-        before = m.execute("SELECT (SELECT count(*) FROM vres.source_trust_events) AS e, "
-                           "(SELECT count(*) FROM vres.sources) AS s, (SELECT count(*) FROM vres.knowledge_chunks) AS c"
-                           ).fetchone()
-        wal = m.execute("SELECT pg_current_wal_lsn()::text AS l").fetchone()["l"]
-    status(fx), inspect(fx), status(fx)
-    with _connect(env.migrator_dsn) as m:
-        after = m.execute("SELECT (SELECT count(*) FROM vres.source_trust_events) AS e, "
-                          "(SELECT count(*) FROM vres.sources) AS s, (SELECT count(*) FROM vres.knowledge_chunks) AS c"
-                          ).fetchone()
-    assert before == after and wal  # row counts are unchanged
+    revoke(fx)  # owner-side setup finishes BEFORE the first snapshot: two ledger events, so a limit=1 inspect truncates
+    before = _d2_snapshot(env)
+    # Counts only (value-free); shown by `pytest -rA`. An empty table proves no row creation, not unchanged row contents.
+    print("D2 counts before:", before["counts"], "empty:", [t for t in D2_TABLES if before["counts"][t] == 0] or "none")
+    assert before["ledger_max_id"] is not None and len(before["source_rows"]) >= 1
+    for t, minimum in (("source_trust_events", 2), ("sources", 1), ("knowledge_chunks", 2), ("tasks", 2), ("task_events", 1)):
+        assert before["counts"][t] >= minimum, f"D2 fixture precondition: {t} must be non-empty"
+
+    s1, i1, t1 = status(fx), inspect(fx), inspect(fx, 1)  # the real public service calls, nothing else in between
+    s2, i2 = status(fx), inspect(fx)
+    with pytest.raises(ValueError) as exc:
+        SVC().status(fx.pid, f"SRC-absent-{fx.tag}")
+    assert str(exc.value) == "source not found in the current project"
+    assert s1 == s2 and i1 == i2 and len(t1["inventory"]["events"]) == 1 and t1["inventory"]["inventory_complete"] is False
+
+    after = _d2_snapshot(env)
+    assert _d2_diff(before, after) == [], "D2 violated: the public reads changed the labelled elements"
+    # The old pg_current_wal_lsn() truthiness check was removed: it never compared two LSNs, so it proved no absence of writes.
+
+
+def test_d2_comparator_detects_every_kind_of_change():
+    """Negative control (pure, no database): the D2 comparison must reject each relevant difference, with labels only."""
+    base = {"counts": {t: i for i, t in enumerate(D2_TABLES, 1)}, "ledger_max_id": 7,
+            "source_rows": (b'{"id": 1, "title": "a"}', b'{"id": 2, "title": "b"}')}
+    assert _d2_diff(base, copy.deepcopy(base)) == []
+    for t in D2_TABLES:  # each of the six counts is checked individually
+        changed = copy.deepcopy(base)
+        changed["counts"][t] += 1
+        assert _d2_diff(base, changed) == [f"count:{t}"]
+    for rows in ((base["source_rows"][0], b'{"id": 2, "title": "c"}'),  # one serialized value differs
+                 base["source_rows"][:1],  # a row disappeared
+                 base["source_rows"] + (b'{"id": 3}',)):  # a row appeared
+        assert _d2_diff(base, {**base, "source_rows": rows}) == ["source_rows"]
+    for watermark in (8, None):
+        assert _d2_diff(base, {**base, "ledger_max_id": watermark}) == ["ledger_max_id"]
 
 
 def test_runtime_role_cannot_reach_the_issuer_or_digest_helper(env):
