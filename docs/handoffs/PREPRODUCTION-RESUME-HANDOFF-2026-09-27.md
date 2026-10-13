@@ -4023,3 +4023,7 @@ This pointer was appended without changing any earlier section or previously acc
 ## Superseding pointer (appended 2026-10-12, after Chunk 3A implementation checkpoint)
 
 Chunk 3A implementation was independently validated (`VAL-52ec36f2f6624300`, claude-fable-5-1, 17/17) and committed and pushed as product commit `752d5e9c4cf02735e3ed2582c93080e2748e949f` (tree `28440eea8ee886992335fa6ff4e8d6eda46dc63f`, parent `ac45967f63690b76d41b7303ad43248afed8751f`) on `issue-176-e7-g7-chunk3`. NOT merged, no PR. Authoritative current state: `docs/handoffs/PREPRODUCTION-E7-G7-CHUNK3A-IMPLEMENTATION-CHECKPOINT-HANDOFF-2026-10-12.md`. D2 pre-merge evidence is OPEN; G8 host ingress OPEN; positive production issuance DISABLED. No earlier section above was changed.
+
+## Superseding pointer (appended 2026-10-13, after D2 acceptance)
+
+Newest authoritative Chunk 3A state is the D2 acceptance handoff: `docs/handoffs/PREPRODUCTION-E7-G7-CHUNK3A-D2-ACCEPTANCE-HANDOFF-2026-10-13.md`. Product branch `issue-176-e7-g7-chunk3` is at `4a929e01839d20c690509fb06092147a1bf41361` (tree `e1407b8068fbd9eca84b0c4be120ba10a2a1b82f`; D2 test-only commit accepted by `VAL-b2d40c623c3143bb`, PASSED 9/9). NOT merged, no PR; G8 OPEN; positive issuance DISABLED; remaining merge obligations are listed in that handoff. Earlier sections above are unchanged.

@@ -118,3 +118,7 @@ Totals: 1557 insertions, 1 deletion.
 ## G. Exact next controlled step
 
 The next session must verify the committed feature checkpoint (local and remote 752d5e9, tree 28440eea, parent ac45967; docs HEAD) and Vres task/validation evidence, report state, then WAIT for a separate governed instruction to address the outstanding acceptance obligations (starting with D2 closure) . It must not automatically begin G8, E5 v6, B4B, a PR or a merge, and must not treat Chunk 3A as merge-ready.
+
+## Superseding pointer (appended 2026-10-13, after D2 acceptance)
+
+The D2 pre-merge evidence gap recorded above as OPEN was closed by a test-only commit `4a929e01839d20c690509fb06092147a1bf41361` (tree `e1407b8068fbd9eca84b0c4be120ba10a2a1b82f`, parent `752d5e9c4cf02735e3ed2582c93080e2748e949f`) on `issue-176-e7-g7-chunk3`, accepted by protected review `VAL-b2d40c623c3143bb` (PASSED 9/9, claude-fable-5-1). NOT merged, no PR; G8 OPEN; positive issuance DISABLED. Authoritative current state: `docs/handoffs/PREPRODUCTION-E7-G7-CHUNK3A-D2-ACCEPTANCE-HANDOFF-2026-10-13.md`. The text above is preserved unchanged as the record at the implementation checkpoint.
