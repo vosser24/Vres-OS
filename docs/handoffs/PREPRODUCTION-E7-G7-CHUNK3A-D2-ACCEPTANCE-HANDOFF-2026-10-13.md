@@ -108,3 +108,7 @@ Isolated cluster 127.0.0.1:55432, system id 7694553000872930884 (never the contr
 ## I. Exact next controlled step
 
 The next session must first verify the committed Git identities (product remote 4a929e0 / tree e1407b8 / parent 752d5e9; docs HEAD) and the host Vres validation evidence, report state, then STOP and wait for a separately authorized instruction for the remaining merge-gate work. It must not automatically start G8, E5 v6, G1/G2, B4B, Chunk 6, a PR or a merge, and must not treat Chunk 3A as merge-ready.
+
+## Superseding pointer (appended 2026-10-13, after deferred-integration R2 acceptance)
+
+This handoff is superseded for the two deferred PostgreSQL integration journeys is `docs/handoffs/PREPRODUCTION-E7-DEFERRED-INTEGRATION-R2-ACCEPTANCE-HANDOFF-2026-10-13.md`. Product branch `issue-176-e7-g7-chunk3` is at `e18269e8d18cd58f3dae061de8d3bb01758cd82a` (tree `0456965510a984c248318a3f40598a5c86709923`, parent `4a929e01839d20c690509fb06092147a1bf41361`); test-only four-file commit accepted by `VAL-e61c7405f22c42c7` (PASSED 9/9); the earlier review `VAL-773140a7956346c8` stays REJECTED. Passed on an isolated PG 18.6 single-admin-role cluster only: PG16 CI parity, true split-role acceptance and exact-head CI remain OPEN; NOT merged, no PR; G8 OPEN; positive issuance DISABLED; E7 not release-ready. Earlier sections above are unchanged.

@@ -4027,3 +4027,7 @@ Chunk 3A implementation was independently validated (`VAL-52ec36f2f6624300`, cla
 ## Superseding pointer (appended 2026-10-13, after D2 acceptance)
 
 Newest authoritative Chunk 3A state is the D2 acceptance handoff: `docs/handoffs/PREPRODUCTION-E7-G7-CHUNK3A-D2-ACCEPTANCE-HANDOFF-2026-10-13.md`. Product branch `issue-176-e7-g7-chunk3` is at `4a929e01839d20c690509fb06092147a1bf41361` (tree `e1407b8068fbd9eca84b0c4be120ba10a2a1b82f`; D2 test-only commit accepted by `VAL-b2d40c623c3143bb`, PASSED 9/9). NOT merged, no PR; G8 OPEN; positive issuance DISABLED; remaining merge obligations are listed in that handoff. Earlier sections above are unchanged.
+
+## Superseding pointer (appended 2026-10-13, after deferred-integration R2 acceptance)
+
+Newest authoritative state for the two deferred PostgreSQL integration journeys is `docs/handoffs/PREPRODUCTION-E7-DEFERRED-INTEGRATION-R2-ACCEPTANCE-HANDOFF-2026-10-13.md`. Product branch `issue-176-e7-g7-chunk3` is at `e18269e8d18cd58f3dae061de8d3bb01758cd82a` (tree `0456965510a984c248318a3f40598a5c86709923`, parent `4a929e01839d20c690509fb06092147a1bf41361`); test-only four-file commit accepted by `VAL-e61c7405f22c42c7` (PASSED 9/9); the earlier review `VAL-773140a7956346c8` stays REJECTED. Passed on an isolated PG 18.6 single-admin-role cluster only: PG16 CI parity, true split-role acceptance and exact-head CI remain OPEN; NOT merged, no PR; G8 OPEN; positive issuance DISABLED; E7 not release-ready. Earlier sections above are unchanged.
