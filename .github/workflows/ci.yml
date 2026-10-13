@@ -90,8 +90,13 @@ jobs:
           tests/integration/test_model_experiment_journey.py
           --ignore E501,I001
 
-      - name: Full test suite with PostgreSQL integration
-        run: python -m pytest -o addopts= -q -ra
+      # Separate pytest processes: tests/ and tests/integration/ share five test
+      # basenames and have no __init__.py, so one process cannot import both.
+      - name: Unit tests
+        run: python -m pytest -o addopts= -q -ra --ignore=tests/integration tests
+
+      - name: PostgreSQL integration tests
+        run: python -m pytest -o addopts= -q -ra tests/integration
 
       - name: Installed runtime import smoke
         run: >-
