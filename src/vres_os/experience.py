@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .db import connect
+from .redaction import redact_text
 from .relations import relate_in_conn
 from .sensitive_policy import SENSITIVE_REVIEW_REQUIRED, SENSITIVE_SANITIZED, sanitize_extracted_text
 
@@ -179,7 +180,19 @@ def _episode_key() -> str:
 class ExperienceEpisodeService:
     """E1 immutable episodic ledger. No consolidation, retrieval or authority promotion."""
 
-    def capture(self, task_key: str, *, work_unit_key: str | None = None) -> dict[str, Any]:
+    def capture(
+        self,
+        task_key: str,
+        *,
+        work_unit_key: str | None = None,
+        project_id: int | None = None,
+        expected_status: str | None = None,
+    ) -> dict[str, Any]:
+        """Capture (or idempotently re-read) the immutable E1 episode for a terminal task or work unit.
+
+        project_id and expected_status are optional expectations checked under the task row lock
+        before anything is written; a mismatch refuses the capture.
+        """
         task_key = task_key.strip()
         work_unit_key = work_unit_key.strip() if work_unit_key else None
         if not task_key:
@@ -216,6 +229,10 @@ class ExperienceEpisodeService:
             ).fetchone()
             if not task:
                 raise KeyError(f"Unknown task {task_key}")
+            if project_id is not None and task["project_id"] != project_id:
+                raise PermissionError("Experience capture refused: the task belongs to a different project")
+            if expected_status is not None and task["status"] != expected_status:
+                raise ValueError(f"Experience capture requires a {expected_status} task")
 
             work_unit = None
             if work_unit_key:
@@ -480,3 +497,37 @@ class ExperienceEpisodeService:
             return read(conn)
         with connect() as active_conn:
             return read(active_conn)
+
+
+_CONFLICT = "Immutable experience episode conflicts"
+
+
+def capture_completed_task(task_key: str, *, project_id: int) -> dict[str, Any]:
+    """Post-commit E1 capture for a task whose completion has already committed.
+
+    Never raises: the completion stands whatever happens here, and the result states
+    plainly whether an episode was captured. Nothing is claimed unless the episode was
+    written or read back. Retrying runs the same immutable, idempotent capture: it returns
+    the existing episode for unchanged evidence, and a changed-evidence conflict is
+    reported for review rather than overwritten. Capture never promotes memory into
+    knowledge, procedures or instructions.
+    """
+    try:
+        episode = ExperienceEpisodeService().capture(task_key, project_id=project_id, expected_status="completed")
+    except Exception as exc:  # the completion already committed; report, never mask it
+        conflict = isinstance(exc, ValueError) and _CONFLICT in str(exc)
+        refused = isinstance(exc, PermissionError)
+        return {
+            "status": "conflict" if conflict else "refused" if refused else "failed",
+            "episode_key": None,
+            "retry_safe": not (conflict or refused),
+            "error": f"{type(exc).__name__}: {redact_text(str(exc))[:300]}",
+            "authority": "no_promotion",
+        }
+    return {
+        "status": "captured",
+        "episode_key": str(episode["episode_key"]),
+        "outcome_status": episode["outcome_status"],
+        "trust_class": episode["trust_class"],
+        "authority": "no_promotion",
+    }

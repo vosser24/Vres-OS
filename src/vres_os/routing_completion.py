@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from .db import connect
+from .experience import capture_completed_task
 from .routing import RoutingService
 
 
@@ -51,10 +52,14 @@ def complete_routed_task(
                     "UPDATE vres.task_state SET validation_status='not_required',updated_at=now() WHERE task_id=%s",
                     (row["id"],),
                 )
-    return service.complete(
+    result = service.complete(
         project_id=project_id,
         task_key=task_key,
         root=root,
         summary=summary,
         session_id=session_id,
     )
+    if result.get("completed") is True:
+        # After the committed completion only; a capture problem is reported, never raised.
+        result["experience"] = capture_completed_task(task_key, project_id=project_id)
+    return result

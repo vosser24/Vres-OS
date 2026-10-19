@@ -18,6 +18,7 @@ from .config import ConfigStore
 from .control_preflight import allowed_while_unconfigured, unconfigured_refusal, vres_configured
 from .db import migrate
 from .embeddings import EmbeddingService
+from .experience import capture_completed_task
 from .experience_lifecycle import ExperienceLifecycleService
 from .experience_retrieval import ExperienceRetrievalService
 from .experience_utility import ExperienceUtilityEvidenceService
@@ -265,7 +266,8 @@ def task_complete(task_key: str, summary: str) -> dict:
     pid, project = _project()
     ValidationService().assert_current(task_key, pid, project.root)
     Repository().complete_task(task_key, summary)
-    return {"completed": True}
+    # The completion is committed; the episode capture result is reported, never allowed to undo it.
+    return {"completed": True, "experience": capture_completed_task(task_key, project_id=pid)}
 
 
 @mcp.tool()
@@ -296,6 +298,17 @@ def experience_retrieve(request: dict[str, Any]) -> dict:
     if not isinstance(request, dict) or "project_id" in request:
         raise ValueError("experience_retrieve takes a request object without project_id")
     return ExperienceRetrievalService().retrieve({**request, "project_id": _trusted_project_id()})
+
+
+@mcp.tool()
+def experience_capture_retry(task_key: str) -> dict:
+    """Retry the immutable experience-episode capture of a completed task in the current project, after a
+    completion reported experience.status='failed' with retry_safe=true. Idempotent: an existing episode for
+    unchanged evidence is returned, never duplicated; a conflict is reported, never overwritten. It never
+    completes, validates or promotes anything and grants no authority."""
+    pid, _ = _project()
+    _require_node("task", task_key, write=True)
+    return capture_completed_task(task_key, project_id=pid)
 
 
 @mcp.tool()
