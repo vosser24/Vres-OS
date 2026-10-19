@@ -210,10 +210,11 @@ When you say `start vres` in a project:
   - Everything else is snapshotted in `%LOCALAPPDATA%\VresOS\projects\`.
   - Legacy instructions remain untrusted project context; Vres never adopts them as its own rules.
 - **What each item allows.** Each numbered item is classified by what Claude would do with it:
-  - **Executable:** hooks, settings that run commands, start MCP servers or loosen tool permissions, MCP server files, and scripts or shell-running commands under `.claude\`. These can only be dropped, because keeping them would leave them active.
+  - **Executable:** hooks, settings that run commands, start MCP servers or loosen tool permissions, MCP server files, scripts under `.claude\`, and skills or commands that run shell commands (``!`...` `` or ```` ```! ```` blocks) or grant tools through `allowed-tools`. These can only be dropped, because keeping them would leave them active.
+  - **Active settings:** any other project settings Claude Code applies, such as `env` values or the model. These can also only be dropped.
   - **Conflicting:** instructions with wording that overrides or bypasses governance. These can also only be dropped.
   - **Instructions:** other instruction, agent, command and skill text. These can be kept, but a kept file stays active and Claude keeps reading it next to the Vres rules. Vres does not make it safe.
-  - **Manual review:** a file Vres cannot safely deactivate. Examples are executable configuration mixed with secrets, a link, an unreadable file or an oversized file. These block activation and are never deleted to force it; fix them by hand, then run `vres project inventory` again.
+  - **Manual review:** a file Vres cannot safely deactivate. That includes any settings, MCP, hook, instruction, agent, command or skill file containing secrets or with a secret-looking name, because dropping it would mean copying the secret into the Vres snapshot. It also includes a link and an oversized file. These block activation and are left untouched; fix them by hand, for example by moving the secret out, then run `vres project inventory` again. An unrelated secret file such as `.claude\.env` is never opened and can only be kept. A folder that can't be read refuses the whole inventory.
 - **Deciding and activating:** in a local terminal inside the project, run `vres project status`, decide each item with `vres project decide <number> keep|drop` (you type a confirmation), then run `vres project activate`.
   - Activation needs no blockers and a decision for every other item of the current inventory. If the configuration changes afterwards, earlier decisions are void.
   - It only removes dropped items, and writes a Vres `CLAUDE.md` only if no root `CLAUDE.md` remains.

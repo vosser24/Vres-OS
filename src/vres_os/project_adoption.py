@@ -13,17 +13,23 @@ the project. Vres never copies legacy content into its own instructions or promo
 Claude Code acts on these files at their original paths, so a label cannot make them inert.
 Each item is classified by its effect, and the classification limits what can be decided:
 - executable: hooks, settings that run commands, load MCP servers or loosen tool
-  permissions, MCP server definitions, and scripts or shell-running commands under .claude/.
-  These can only be deactivated (DROP removes them from the project; their exact bytes stay
-  in the snapshot and rollback can restore them).
+  permissions, MCP server definitions, scripts under .claude/, and skills or commands that
+  run shell commands (inline !`...` or fenced ```! blocks) or grant tools through
+  allowed-tools frontmatter. These can only be deactivated (DROP removes them from the
+  project; their exact bytes stay in the snapshot and rollback can restore them).
+- active: any other project settings Claude Code applies, such as env values or model
+  choice. These can also only be deactivated.
 - conflicting: instructions with override wording. These can also only be deactivated.
 - instructions: other CLAUDE.md, AGENTS.md, agent, command and skill text. KEEP leaves it
   active, so Claude still reads it next to the Vres rules; Vres does not vouch for it.
 - inert: anything else under .claude/, which can be kept or dropped.
-An item Vres cannot safely deactivate is never deleted to force adoption. That covers
-executable content in a file that also holds secrets, an unreadable or oversized surface,
-and a link. Such an item becomes a manual-review blocker, and activation is refused until
-the operator fixes it by hand and runs start again.
+An item Vres cannot safely deactivate is never deleted to force adoption. That covers any
+settings, MCP, hook, instruction, agent, command or skill file that holds secrets or has a
+secret-looking name, an unreadable or oversized surface, and a link. Deactivating such a
+file would mean copying its secrets into the snapshot. It becomes a manual-review blocker:
+the file is left untouched and activation is refused until the operator fixes it by hand
+and runs start again. A traversal error also refuses, since a partial scan is never an
+inventory.
 
 Launching Claude Code inside a legacy project loads its configuration before Vres can review
 it, so review first from a local terminal with `vres project inventory <path>`.
@@ -80,6 +86,10 @@ _INJECTION = re.compile(
 _COMMAND_SETTINGS = {"hooks", "statusLine", "apiKeyHelper", "awsAuthRefresh", "awsCredentialExport",
                      "otelHeadersHelper", "enableAllProjectMcpServers", "enabledMcpjsonServers"}
 _SCRIPT_SUFFIXES = {".ps1", ".psm1", ".sh", ".bash", ".py", ".js", ".mjs", ".cjs", ".ts", ".bat", ".cmd", ".exe"}
+# Skill/command mechanisms that execute or authorize: inline !`cmd`, fenced ```! blocks, allowed-tools frontmatter.
+_DYNAMIC_COMMAND = re.compile(r"!`[^`\n]+`|^\s*(```|~~~)!", re.M)
+_ALLOWED_TOOLS = re.compile(r"^allowed[-_]tools\s*:\s*\S", re.M | re.I)
+_INERT_SETTINGS = {"$schema"}
 Authority = Callable[[str], dict[str, Any]]
 
 
@@ -200,6 +210,10 @@ def _surface_paths(root: Path) -> list[str]:
     found: set[str] = {name for name in _ROOT_SURFACES if _lstat(root / name) is not None}
     dirs = 0
 
+    def unreadable(_exc: OSError | None = None) -> None:
+        raise AdoptionError("A project directory could not be read completely, so the inventory would be "
+                            "incomplete; adoption is refused. Check folder permissions and run start again")
+
     def over_limit() -> None:
         if dirs > _MAX_DIRS or len(found) > _MAX_ITEMS:
             raise AdoptionError("The project is too large to inventory completely within the safety limits; "
@@ -214,7 +228,11 @@ def _surface_paths(root: Path) -> list[str]:
             pending = [claude]
             while pending:
                 dirs += 1
-                for child in sorted(pending.pop().iterdir()):
+                try:
+                    children = sorted(pending.pop().iterdir())
+                except OSError:
+                    unreadable()
+                for child in children:
                     child_info = _lstat(child)
                     rel = child.relative_to(root).as_posix()
                     if child_info is not None and stat.S_ISDIR(child_info.st_mode) and not _is_link(child_info):
@@ -222,12 +240,20 @@ def _surface_paths(root: Path) -> list[str]:
                     else:
                         found.add(rel)
                 over_limit()
-    for current, subdirs, files in os.walk(root):  # nested CLAUDE.md files; links/junctions are not followed
+    # Nested CLAUDE.md files. Links/junctions are not followed; any enumeration error refuses.
+    for current, subdirs, files in os.walk(root, onerror=unreadable):
         dirs += 1
-        subdirs[:] = sorted(
-            d for d in subdirs
-            if d not in _IGNORE_DIRS and d != ".claude" and not _is_link(os.lstat(Path(current) / d))
-        )
+        kept = []
+        for d in sorted(subdirs):
+            if d in _IGNORE_DIRS or d == ".claude":
+                continue
+            try:
+                link = _is_link(os.lstat(Path(current) / d))
+            except OSError:
+                unreadable()
+            if not link:
+                kept.append(d)
+        subdirs[:] = kept
         if "CLAUDE.md" in files:
             found.add((Path(current) / "CLAUDE.md").relative_to(root).as_posix())
         over_limit()
@@ -275,6 +301,14 @@ def _parse(text: str | None) -> Any:
         return None
 
 
+def _frontmatter(text: str) -> str:
+    body = text.lstrip("\ufeff")
+    if not body.startswith("---"):
+        return ""
+    end = body.find("\n---", 3)
+    return body[3:end] if end >= 0 else body[3:]
+
+
 def _risk(rel: str, kind: str, text: str | None, parsed: Any) -> str:
     """executable, conflicting, instructions or inert, by what Claude would do with the file."""
     suffix = PurePosixPath(rel).suffix.lower()
@@ -288,11 +322,15 @@ def _risk(rel: str, kind: str, text: str | None, parsed: Any) -> str:
         )
         if not isinstance(parsed, dict) or _COMMAND_SETTINGS & set(parsed) or loosened:
             return "executable"  # unparseable settings are not assumed harmless
+        if set(parsed) - _INERT_SETTINGS:
+            return "active"  # env, model and other keys Claude Code applies to every session
         return "inert"
     if kind == "mcp":
         return "executable"
-    if kind == "command" and text is not None and "!`" in text:
-        return "executable"  # runs shell commands when invoked
+    if kind in {"command", "skill"} and text is not None and (
+        _DYNAMIC_COMMAND.search(text) or _ALLOWED_TOOLS.search(_frontmatter(text))
+    ):
+        return "executable"  # runs shell commands when invoked, or grants tools (detected, never run)
     if text is not None and _INJECTION.search(text):
         return "conflicting"
     return "instructions" if kind in {"instructions", "agent", "command", "skill"} else "inert"
@@ -331,19 +369,21 @@ def inventory(root: Path) -> dict[str, Any]:
                 status, data = "contains_secrets", None  # no snapshot copy of secret material
         kind, description = _describe(rel, parsed)
         risk = _risk(rel, kind, text, parsed) if status in {"ok", "contains_secrets"} else "unknown"
-        if status == "sensitive_path" and kind in {"settings", "mcp", "hook"}:
-            blocker = "an unopened secret-looking file in an active configuration location"
-        if status == "contains_secrets" and risk in {"executable", "conflicting"}:
-            blocker = "it contains secrets and active configuration; Vres will not copy or delete it"
+        if status == "sensitive_path" and kind != "other":
+            blocker = "an unopened secret-looking file in a location Claude Code acts on"
+        if status == "contains_secrets" and kind != "other":
+            blocker = ("it contains secrets in a file Claude Code applies or reads; Vres will not copy or delete "
+                       "it, so move the secret out by hand")
         if blocker:
             options: dict[str, str] = {}
         elif status != "ok":
             options = {"KEEP": "leave it untouched (it may hold secrets; Vres never copies or deletes it)"}
-        elif risk in {"executable", "conflicting"}:
+        elif risk in {"executable", "conflicting", "active"}:
             options = {"DROP": _DROP_TEXT}  # never kept active as if a label made it safe
         else:
             options = {"KEEP": _KEEP_TEXT[risk], "DROP": _DROP_TEXT}
-        note = {"executable": "; can run commands, start servers or loosen tool approval",
+        note = {"executable": "; can run commands, start servers or grant/loosen tool approval",
+                "active": "; applied by Claude Code to every session in this project (for example env values)",
                 "conflicting": "; contains wording that conflicts with Vres governance"}.get(risk, "")
         items.append({
             "path": rel, "kind": kind, "status": status, "risk": risk, "blocker": blocker,
