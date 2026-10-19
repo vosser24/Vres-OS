@@ -18,6 +18,12 @@ from .db import DatabaseUnavailable, migrate
 from .hooks import compact, experience_observe, post_compact, session_end, session_start, stop, user_prompt, validator_stop
 from .local_secrets import LocalSecretError, LocalSecretManager
 from .onboarding import OnboardingService
+from .personal_profile import (
+    LEGACY_SECRET_ALIASES,
+    MODEL_EXPERIMENT_EXECUTION,
+    CapabilityDisabled,
+    require_capability,
+)
 from .project import discover_project
 from .repository import Repository
 from .redaction import redact, redact_text
@@ -34,6 +40,22 @@ model_experiment_app = typer.Typer(
 )
 app.add_typer(model_experiment_app, name="model-experiment")
 console = Console()
+
+
+def _personal_fence(capability: str) -> None:
+    """Stop a CLI entry point the personal release does not approve, before it does anything."""
+    try:
+        require_capability(capability)
+    except CapabilityDisabled as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
+
+
+@secret_app.callback()
+def _legacy_secret_fence() -> None:
+    # Runs before every `vres secret ...` subcommand. Stored values are left untouched;
+    # Credential Broker resources (`vres credential ...`) remain available.
+    _personal_fence(LEGACY_SECRET_ALIASES)
 
 
 @app.command()
@@ -142,6 +164,7 @@ def model_experiment_run(
     Run this from a separate terminal, not from inside Claude Code. The host cost is a
     list-price estimate, not billing truth, and one run never changes model policy.
     """
+    _personal_fence(MODEL_EXPERIMENT_EXECUTION)  # before any project, database or model access
     from .claude_experiment import ClaudeExperimentError, assert_not_nested, run_claude_experiment
     from .model_experiments import (
         CLAUDE_HOST_EFFORTS,

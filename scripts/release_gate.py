@@ -133,6 +133,10 @@ def structure():
             json.loads(path.read_text(encoding='utf-8'))
         if path.suffix == '.py':
             ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
+    sys.path.insert(0, str(ROOT / 'src'))
+    from vres_os.release_inputs import release_input_problems
+    problems = release_input_problems(ROOT)
+    assert not problems, 'Personal-release inputs refused: ' + '; '.join(problems)
     baseline = json.loads((ROOT / 'scripts/migration-baseline.json').read_text())['sha256']
     migrations = sorted((ROOT / 'src/vres_os/migrations').glob('*.sql'))
     numbers = [int(p.name[:3]) for p in migrations]

@@ -7,7 +7,8 @@ from typing import Any
 
 from .approvals import require_approval, require_company_approval
 from .metrics import validate_metrics
-from .optimization import contracts_equivalent, pareto_gate
+from .optimization import OptimizationResult, contracts_equivalent, pareto_gate
+from .personal_profile import PROCEDURE_AUTO_PROMOTION, capability_enabled
 from .redaction import redact, redact_text
 
 
@@ -419,6 +420,10 @@ class ProcedureService:
             protected_regression=protected_regression or behavior_change,
             validation_passed=validation_passed,
         )
+        if gate.auto_promote and not capability_enabled(PROCEDURE_AUTO_PROMOTION):
+            gate = OptimizationResult(
+                False, "automatic procedure promotion is disabled in the Vres personal release"
+            )
         experiment_key = fingerprint(
             {
                 "procedure": procedure_key,

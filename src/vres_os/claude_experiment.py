@@ -33,6 +33,7 @@ from .model_experiments import (
     parse_host_cost,
     project_estimated_cost,
 )
+from .personal_profile import MODEL_EXPERIMENT_EXECUTION, require_capability
 from .processes import MAX_OUTPUT_BYTES, MAX_PROMPT_BYTES, run_bounded
 from .redaction import redact, redact_text
 
@@ -369,6 +370,7 @@ def run_claude_experiment(
     timeout: float = 300,
 ) -> ClaudeExperimentObservation:
     """Run one bounded, isolated, tool-less Claude Code call and return validated host evidence."""
+    require_capability(MODEL_EXPERIMENT_EXECUTION)  # before any executable lookup or model call
     if family not in CLAUDE_HOST_FAMILIES:
         raise ClaudeExperimentError("Claude Code experiments support only the sonnet and opus families")
     contract = claude_host_invocation(family, effort)

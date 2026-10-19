@@ -41,6 +41,9 @@ _SCOPED_FILE_TOOLS = {"Write", "Edit", "MultiEdit", "NotebookEdit"}
 _PARENT_ONLY_VALIDATION_TOOLS = frozenset(
     {"validation_prepare", "validation_invalidate", "validation_abandon"}
 )
+# While Vres is unconfigured, the only mutation-capable governed tool admitted is the explicit,
+# operator-driven secure setup entry point (it opens the local secure setup console).
+_UNCONFIGURED_SETUP_TOOLS = frozenset({"start_vres"})
 # The only non-read-only tool a contaminated parent session may run: its context refresh acknowledgement. It is an
 # exact-name recovery branch (never a _SAFE_VRES_TOOLS member), admitted only after the hook attests this host session.
 _CONTAMINATION_RECOVERY_TOOLS = frozenset({"context_refresh_ack"})
@@ -201,6 +204,26 @@ def evaluate_control_preflight(
     )
 
 
+def evaluate_unconfigured_preflight(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Deny mutation-capable governed Vres tools until secure setup has configured Vres.
+
+    Read-only Vres diagnostics and the secure setup entry point stay available. Host
+    tools and other MCP servers are not Vres-governed and are left to their own controls.
+    """
+    if payload.get("hook_event_name") != "PreToolUse":
+        return None
+    tool_name = str(payload.get("tool_name") or "").strip()
+    if not tool_name.startswith(_VRES_PREFIX) or is_read_only_tool(tool_name):
+        return None
+    if tool_name[len(_VRES_PREFIX):] in _UNCONFIGURED_SETUP_TOOLS:
+        return None
+    return _deny(
+        "Vres is not configured yet, so mutation-capable governed tool "
+        f"'{tool_name}' did not execute. Read-only Vres diagnostics remain available; "
+        "complete secure setup with start_vres or `vres setup` in a local terminal first."
+    )
+
+
 def _recovery_name(tool_name: str) -> str | None:
     """Bare or host-prefixed registered name when it is a recovery tool, else None (exact match only)."""
     bare = tool_name[len(_VRES_PREFIX):] if tool_name.startswith(_VRES_PREFIX) else tool_name
@@ -294,6 +317,10 @@ def main() -> int:
         if not tool_name or is_read_only_tool(tool_name):
             return 0
         if not ConfigStore().load().configured:
+            decision = evaluate_unconfigured_preflight(payload)
+            if decision is not None:
+                json.dump(decision, sys.stdout, separators=(",", ":"))
+                sys.stdout.write("\n")
             return 0
         agent_id = _host_agent_id(payload)
         if agent_id:

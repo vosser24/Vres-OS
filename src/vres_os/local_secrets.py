@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 from .paths import data_dir
+from .personal_profile import LEGACY_SECRET_ALIASES, require_capability
 from .processes import run_bounded
 from .project import ProjectIdentity, discover_project
 from .secrets import SecretStore
@@ -187,6 +188,7 @@ class LocalSecretManager:
             ) from exc
 
     def set(self, alias: str, value: str) -> SecretMetadata:
+        require_capability(LEGACY_SECRET_ALIASES)
         alias = validate_alias(alias)
         if not isinstance(value, str) or not value:
             raise ValueError("Secret value must not be empty")
@@ -217,6 +219,7 @@ class LocalSecretManager:
         return SecretMetadata(alias, str(created_at), now, True)
 
     def get(self, alias: str) -> str:
+        require_capability(LEGACY_SECRET_ALIASES)
         alias = validate_alias(alias)
         value = self._vault_get(alias)
         if not value:
@@ -224,6 +227,7 @@ class LocalSecretManager:
         return value
 
     def delete(self, alias: str) -> bool:
+        require_capability(LEGACY_SECRET_ALIASES)
         alias = validate_alias(alias)
         registry = _read_registry()
         row = _project_row(registry, self.project, create=False)
@@ -251,6 +255,7 @@ class LocalSecretManager:
         return True
 
     def list(self) -> list[SecretMetadata]:
+        require_capability(LEGACY_SECRET_ALIASES)
         registry = _read_registry()
         row = _project_row(registry, self.project, create=False)
         if not row:
@@ -271,6 +276,7 @@ class LocalSecretManager:
         return output
 
     def environment(self, mappings: Iterable[str]) -> tuple[dict[str, str], list[str]]:
+        require_capability(LEGACY_SECRET_ALIASES)
         env: dict[str, str] = {}
         values: list[str] = []
         for mapping in mappings:
@@ -323,6 +329,7 @@ class LocalSecretManager:
         return int(result.returncode)
 
     def run(self, command: list[str], mappings: Iterable[str], *, timeout: float = 3600) -> int:
+        require_capability(LEGACY_SECRET_ALIASES)
         """Run one bounded child process with selected handles only in child env."""
         injected, _secret_values = self.environment(mappings)
         return self._run_with_values(command, injected, timeout=timeout)
@@ -447,6 +454,7 @@ class LocalSecretManager:
 
     def materialize(self, alias: str, path: Path | None = None) -> Path:
         """Materialize a plaintext credential only under the git-excluded secret root."""
+        require_capability(LEGACY_SECRET_ALIASES)
         alias = validate_alias(alias)
         return self._materialize_resolved(lambda: self.get(alias), path=path, default_name=alias)
 

@@ -27,14 +27,12 @@ SERVICE = "Vres-OS"
 class SecretStore:
     """Small adapter around the OS credential store.
 
-    Tests may set VRES_SECRET_<NORMALIZED_KEY> environment variables. Runtime
+    Values come only from the OS credential store: no environment variable can supply
+    or override one. Tests inject an isolated fake store or keyring explicitly. Runtime
     code never writes passwords to config files.
     """
 
     def get(self, key: str) -> str | None:
-        env_key = "VRES_SECRET_" + "".join(c if c.isalnum() else "_" for c in key.upper())
-        if env_key in os.environ:
-            return os.environ[env_key]
         return _secure_keyring().get_password(SERVICE, key)
 
     def set(self, key: str, value: str) -> None:

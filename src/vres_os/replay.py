@@ -8,6 +8,7 @@ from typing import Any
 from .approvals import require_company_approval
 from .metrics import validate_metrics
 from .optimization import contracts_equivalent, pareto_gate
+from .personal_profile import PROCEDURE_AUTO_PROMOTION, require_capability
 from .procedures import fingerprint
 from .redaction import redact
 from .validation import ValidationService
@@ -440,6 +441,7 @@ class ReplayService:
         }
 
     def promote_attested(self, replay_key: str) -> dict[str, Any]:
+        require_capability(PROCEDURE_AUTO_PROMOTION)  # before assessment, locks or any write
         assessment = self.assess(replay_key)
         if not assessment["auto_promote"]:
             raise ValueError(

@@ -69,13 +69,20 @@ def test_windows_secret_store_rejects_insecure_backend_for_every_vault_operation
         store.delete("alias")
 
 
-def test_environment_override_remains_test_only_escape_before_backend_access(monkeypatch):
-    fake_keyring = SimpleNamespace(get_keyring=lambda: pytest.fail("keyring should not be consulted"))
-    monkeypatch.setattr(secrets, "_keyring", lambda: fake_keyring)
-    monkeypatch.setattr(
-        secrets,
-        "os",
-        SimpleNamespace(name="nt", environ={"VRES_SECRET_TEST_ALIAS": "from-test-env"}),
+@pytest.mark.parametrize("variable", ["VRES_SECRET_TEST_ALIAS", "VRES_SECRET_DATABASE_PASSWORD"])
+def test_no_environment_variable_can_supply_or_override_a_stored_credential(monkeypatch, variable):
+    _install_windows_module(monkeypatch)
+    backend = _WinVaultKeyring()
+    reads: list[str] = []
+    fake_keyring = SimpleNamespace(
+        get_keyring=lambda: backend,
+        get_password=lambda _service, key: reads.append(key) or None,
+        errors=SimpleNamespace(PasswordDeleteError=_PasswordDeleteError),
     )
+    monkeypatch.setattr(secrets, "_keyring", lambda: fake_keyring)
+    monkeypatch.setattr(secrets, "os", SimpleNamespace(name="nt", environ={variable: "from-environment"}))
+    monkeypatch.setenv(variable, "from-environment")
 
-    assert secrets.SecretStore().get("test-alias") == "from-test-env"
+    assert secrets.SecretStore().get("test-alias") is None
+    assert secrets.SecretStore().get("database-password") is None
+    assert reads == ["test-alias", "database-password"]  # the credential store alone answered

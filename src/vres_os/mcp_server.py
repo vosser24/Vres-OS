@@ -23,6 +23,7 @@ from .experience_utility import ExperienceUtilityEvidenceService
 from .knowledge import KnowledgeService
 from .model_policy import ModelPolicyService
 from .onboarding import OnboardingService
+from .personal_profile import CODEX_HANDOFF_EXECUTE, CapabilityDisabled, require_capability
 from .preferences import PreferenceService
 from .procedures import ProcedureService
 from .project import discover_project
@@ -893,6 +894,17 @@ def codex_handoff_execute(handoff_key: str, session_id: str) -> dict:
     """Execute a previously prepared Codex handoff (phase 2 of 2): disposable worktree,
     real write preflight, real Codex exec, and a verified locked promotion to the primary
     workspace. Never marks the Vres task complete and never sets validation_status='passed'."""
+    try:
+        require_capability(CODEX_HANDOFF_EXECUTE)
+    except CapabilityDisabled as exc:
+        return {
+            "ok": False,
+            "handoff_key": handoff_key,
+            "reason": "disabled_in_personal_profile",
+            "message": str(exc),
+            "worktree_preserved": False,
+            "task_completed": False,
+        }
     pid, project = _project()
     sid = _current_session(pid, session_id)
     try:

@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any
 
 from .db import connect
+from .personal_profile import CODEX_HANDOFF_EXECUTE, require_capability
 from .processes import MAX_PROMPT_BYTES, MAX_RESULT_CHARS, ProcessResult, run_bounded
 from .redaction import redact
 from .repository import Repository
@@ -1834,6 +1835,7 @@ class CodexHandoffService:
     def _run_execution(
         codex_executable: str, worktree: Path, prompt: str
     ) -> tuple[JsonlParseResult, ProcessResult]:
+        require_capability(CODEX_HANDOFF_EXECUTE)  # the Codex process launch itself
         argv = build_codex_exec_argv(codex_executable)
         result = run_bounded(
             argv, cwd=worktree, prompt=prompt, timeout=EXECUTION_TIMEOUT,
@@ -1882,6 +1884,7 @@ class CodexHandoffService:
            The end state after reaching step 4 is therefore always 'pending'
            and never a resurrected prior value. 'passed' is never written here.
         """
+        require_capability(CODEX_HANDOFF_EXECUTE)  # promotion into the primary workspace
         task_id: int | None = None
         pending_written = False
         primary_touch_started = False
@@ -2016,6 +2019,8 @@ class CodexHandoffService:
     def execute(
         self, *, project_id: int, project_root: Path, handoff_key: str, session_id: str
     ) -> dict[str, Any]:
+        # Before any read, claim, worktree, Codex launch or promotion.
+        require_capability(CODEX_HANDOFF_EXECUTE)
         located = self._locate_prepared_event(project_id, handoff_key)
         if located is None:
             raise HandoffError(

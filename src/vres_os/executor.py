@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .approvals import require_company_approval
+from .personal_profile import PROCEDURE_AUTO_PROMOTION, capability_enabled
 from .procedure_recipe import (
     BUILTIN_JSON_RECIPE_V1,
     canonical_json,
@@ -493,6 +494,13 @@ class ProcedureExecutorService:
             request_key=request_key,
         )
         assessment = ReplayService().assess(replay_key)
+        if assessment["auto_promote"] and not capability_enabled(PROCEDURE_AUTO_PROMOTION):
+            # The read-only assessment is still reported; promotion needs an explicit user decision.
+            assessment = {
+                **assessment,
+                "auto_promote": False,
+                "reason": "automatic procedure promotion is disabled in the Vres personal release",
+            }
         if not assessment["auto_promote"]:
             return {
                 "decision": "not_promoted",

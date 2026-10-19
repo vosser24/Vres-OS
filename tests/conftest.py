@@ -90,6 +90,31 @@ def connection_tripwire(_offline_guarded_installation):
     return _offline_guarded_installation
 
 
+@pytest.fixture(autouse=True)
+def _feature_profile_outside_personal_release(request, monkeypatch):
+    """Unit tests are platform-independent: they run outside the personal feature profile.
+
+    On Windows every real process is in the personal profile, which would fence the
+    features many unit tests exercise. Tests of the fence request `personal_profile`.
+    This is test-only injection of the platform decision, never an environment switch.
+    Integration tests are left untouched.
+    """
+    if "integration" in request.node.path.parts:
+        return
+    from vres_os import personal_profile
+
+    monkeypatch.setattr(personal_profile, "_personal_platform", lambda: False)
+
+
+@pytest.fixture
+def personal_profile(_feature_profile_outside_personal_release, monkeypatch):
+    """Run the test inside the personal feature profile, as every Windows process is."""
+    from vres_os import personal_profile as profile
+
+    monkeypatch.setattr(profile, "_personal_platform", lambda: True)
+    return profile
+
+
 @pytest.fixture
 def approve_database_target():
     """Explicitly approve exact targets in the test's private registry; returns the registry path."""

@@ -147,6 +147,9 @@ if (-not $Python) {
     $Python = Find-Python
     if (-not $Python) { throw 'Open a fresh terminal so Python becomes visible, then rerun.' }
 }
+# Personal-release inputs (pinned migrations 001-041, no C2B/R0/F2 experimental files) are
+# validated from the source tree before any install root, venv or package is created.
+Run $Python @('-I','-X','utf8',(Join-Path $RepoRoot 'src\vres_os\release_inputs.py'),'--root',$RepoRoot)
 # The user-scoped skills-directory plugin facility requires a current Claude version.
 $cv = & claude --version
 if ($LASTEXITCODE -ne 0 -or "$cv" -notmatch '(\d+\.\d+\.\d+)') { throw 'Could not determine Claude Code version.' }
