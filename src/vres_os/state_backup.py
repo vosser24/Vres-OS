@@ -19,6 +19,16 @@ Windows Credential Locker values are never read into, written to or exported by 
 backup. A restore lists the credential references the restored metadata needs and
 reports each one as present or missing; it never creates a value.
 
+Project adoption (P2-D): the records under projects/<project id>/ are backed up too. That
+covers adoption state, decisions, verified legacy snapshots, and activation pre-images and
+results. Only records with the expected names are taken, and only from projects whose
+adoption is settled; an interrupted activation journal, an activating or recovery_required
+state, or an inconsistent snapshot refuses the backup. P2-D never snapshots secret-bearing
+files, and every record is checked again for secret-looking content. A restore writes
+adoption records only for projects that have no adoption state locally. A newer, different
+or interrupted local adoption is kept as it is and reported. Restoring never writes into a
+project folder, so it cannot bring back legacy hooks or configuration that were dropped.
+
 A backup is built in a sibling staging directory and renamed into place only once its
 manifest has been written and verified, so an interrupted backup is never complete. A
 restore verifies the whole backup first. It saves the current files as a recovery point
@@ -28,6 +38,7 @@ until recover_restore() is run.
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -42,8 +53,15 @@ from typing import Any
 FORMAT = "vres-state-backup"
 # Version 2 reclassified database-targets.json as evidence. Version 1 backups remain readable,
 # but their registry copy is evidence too: nothing outside RESTORABLE is ever written back.
-VERSION = 2
-SUPPORTED_VERSIONS = (1, 2)
+# Version 3 adds project-adoption records (category "adoption"); versions 1 and 2 have none.
+VERSION = 3
+SUPPORTED_VERSIONS = (1, 2, 3)
+ADOPTION_ROOT = "projects"
+_ADOPTION_PATH = re.compile(
+    r"projects/[0-9a-f]{24}/(?:state\.json|decisions\.json|snapshots/[0-9a-f]{64}\.json|snapshots/[0-9a-f]{64}/\d{4}"
+    r"|activations/\d{8}T\d{6}Z-[0-9a-f]{8}/(?:result\.json|pre/\d{4}))"
+)
+_TRANSIENT = re.compile(r"\..+\.[0-9a-f]{32}\.tmp")
 MANIFEST = "manifest.json"
 RESTORABLE = ("config.json", "credential-resources.json", "local-secret-handles.json")
 EVIDENCE = ("database-targets.json", "active-install.json", "pending-install.json")
@@ -143,6 +161,117 @@ def _write_atomic(path: Path, data: bytes) -> None:
         tmp.unlink(missing_ok=True)
 
 
+def _walk_files(root: Path, base: Path, *, skip_transient: bool = False) -> dict[str, bytes]:
+    """Every ordinary file under root as {posix path relative to base: bytes}; links/junctions refuse."""
+    found: dict[str, bytes] = {}
+    pending = [root]
+    while pending:
+        current = pending.pop()
+        _require_plain_dir(current, "Directory")
+        for child in sorted(current.iterdir()):
+            info = _lstat(child)
+            if info is not None and stat.S_ISDIR(info.st_mode) and not _is_link(info):
+                pending.append(child)
+            elif skip_transient and _TRANSIENT.fullmatch(child.name) and info is not None and stat.S_ISREG(info.st_mode):
+                continue  # an atomic-write temporary left by an interrupted writer; never state
+            else:
+                data = _read_plain_file(child, "file")
+                found[child.relative_to(base).as_posix()] = data
+    return found
+
+
+def _json(data: bytes | None, label: str) -> Any:
+    try:
+        return json.loads((data or b"").decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        raise StateBackupError(f"Adoption record {label} is missing or unreadable") from None
+
+
+def _verify_adoption(files: dict[str, bytes]) -> list[str]:
+    """Check adoption records for completeness and consistency; return the project ids they cover.
+
+    Any unexpected name, secret-looking content, interrupted or unsettled state, broken
+    project binding, or a snapshot or pre-image that does not match its recorded hash
+    refuses, rather than backing up or restoring partial state.
+    """
+    from .project_adoption import STATES
+    from .project_adoption import VERSION as ADOPTION_VERSION
+    from .sensitive_policy import (
+        SENSITIVE_REVIEW_REQUIRED,
+        SENSITIVE_SANITIZED,
+        sanitize_extracted_text,
+    )
+
+    projects: dict[str, dict[str, bytes]] = {}
+    for rel, data in files.items():
+        parts = rel.split("/")
+        if len(parts) >= 3 and parts[0] == ADOPTION_ROOT and parts[2] == "journal.json":
+            raise StateBackupError(f"Project adoption {parts[1]} has an interrupted activation; run "
+                                   "`vres project recover` in that project before backing up")
+        if not _ADOPTION_PATH.fullmatch(rel):
+            raise StateBackupError(f"Unexpected file among adoption records: {rel[:120]}")
+        if sanitize_extracted_text(data.decode("utf-8", errors="replace")).status in {
+            SENSITIVE_SANITIZED, SENSITIVE_REVIEW_REQUIRED
+        }:
+            raise StateBackupError(f"Adoption record {rel[:120]} contains secret-looking material; refusing to copy it")
+        projects.setdefault(parts[1], {})["/".join(parts[2:])] = data
+    for pid, records in projects.items():
+        state = _json(records.get("state.json"), f"{pid}/state.json")
+        if (
+            not isinstance(state, dict) or state.get("version") != ADOPTION_VERSION
+            or state.get("state") not in STATES or not isinstance(state.get("project_key"), str)
+            or not isinstance(state.get("project_root"), str)
+            or hashlib.sha256(state["project_key"].encode("utf-8")).hexdigest()[:24] != pid
+        ):
+            raise StateBackupError(f"Adoption state for project {pid} is unreadable or not bound to its project")
+        if state["state"] in {"activating", "recovery_required", "legacy_pending"}:
+            raise StateBackupError(f"Project adoption {pid} is {state['state']}; finish or recover it before backing up")
+        # Every snapshot, including those of earlier inventories, must be complete and exact.
+        versions = {rel.split("/")[1].removesuffix(".json") for rel in records if rel.startswith("snapshots/")}
+        if state.get("inventory_version") is not None:
+            versions.add(str(state["inventory_version"]))
+        for version in sorted(versions):
+            inventory = _json(records.get(f"snapshots/{version}.json"), f"{pid} inventory")
+            items = inventory.get("items") if isinstance(inventory, dict) else None
+            if not isinstance(items, list) or not all(isinstance(i, dict) and type(i.get("number")) is int for i in items):
+                raise StateBackupError(f"Adoption inventory for project {pid} is malformed")
+            expected = {f"snapshots/{version}/{i['number']:04d}": i.get("sha256") for i in items if i.get("sha256")}
+            copies = {rel for rel in records if rel.startswith(f"snapshots/{version}/")}
+            if copies != set(expected) or any(_sha256(records[rel]) != sha for rel, sha in expected.items()):
+                raise StateBackupError(f"Adoption snapshot for project {pid} is incomplete or altered")
+        if "decisions.json" in records and not isinstance(_json(records["decisions.json"], f"{pid}/decisions"), dict):
+            raise StateBackupError(f"Adoption decisions for project {pid} are malformed")
+        # Every activation with a result must have its exact pre-images. A pre/ folder without a
+        # result is left by a failed activation that was already rolled back; it is evidence only.
+        activations = {rel.split("/")[1] for rel in records if rel.startswith("activations/")}
+        if state.get("activation") is not None and state["activation"] not in activations:
+            raise StateBackupError(f"Adoption activation record for project {pid} is missing")
+        for activation in sorted(activations):
+            if f"activations/{activation}/result.json" not in records:
+                if activation == state.get("activation"):
+                    raise StateBackupError(f"Adoption activation record for project {pid} is incomplete")
+                continue
+            result = _json(records[f"activations/{activation}/result.json"], f"{pid} activation result")
+            pre = result.get("pre") if isinstance(result, dict) else None
+            if not isinstance(pre, dict) or not all(isinstance(e, dict) for e in pre.values()):
+                raise StateBackupError(f"Adoption activation record for project {pid} is malformed")
+            expected = {f"activations/{activation}/pre/{e.get('copy')}": e.get("sha256") for e in pre.values()
+                        if e.get("existed")}
+            copies = {rel for rel in records if rel.startswith(f"activations/{activation}/pre/")}
+            if copies != set(expected) or any(_sha256(records[rel]) != sha for rel, sha in expected.items()):
+                raise StateBackupError(f"Adoption pre-image for project {pid} is incomplete or altered")
+    return sorted(projects)
+
+
+def _adoption_files(source_root: Path) -> dict[str, bytes]:
+    root = source_root / ADOPTION_ROOT
+    if _lstat(root) is None:
+        return {}
+    files = _walk_files(root, source_root, skip_transient=True)
+    _verify_adoption(files)
+    return files
+
+
 def _default_protect(path: Path) -> None:
     """Owner-only access for the single Windows user that owns this Vres installation."""
     from .local_secrets import _restrict_directory
@@ -176,6 +305,12 @@ def create_backup(
             with open(staging / name, "xb") as handle:
                 handle.write(data)
             files.append({"path": name, "category": category, "bytes": len(data), "sha256": _sha256(data)})
+    for rel, data in sorted(_adoption_files(source_root).items()):
+        target = staging.joinpath(*rel.split("/"))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with open(target, "xb") as handle:
+            handle.write(data)
+        files.append({"path": rel, "category": "adoption", "bytes": len(data), "sha256": _sha256(data)})
     manifest = {
         "format": FORMAT, "version": VERSION, "complete": True, "created_at": _now(),
         "source_root": str(source_root), "files": files, "excluded": list(EXCLUDED),
@@ -214,16 +349,21 @@ def verify_backup(backup: Path) -> dict[str, Any]:
         if not isinstance(entry, dict) or set(entry) != {"path", "category", "bytes", "sha256"}:
             raise StateBackupError("Backup manifest has a malformed file entry")
         name = entry["path"]
-        if name not in allowed or allowed[name] != entry["category"] or name in listed:
+        adoption = (manifest["version"] >= 3 and entry["category"] == "adoption"
+                    and isinstance(name, str) and _ADOPTION_PATH.fullmatch(name))
+        if (not adoption and (name not in allowed or allowed[name] != entry["category"])) or name in listed:
             raise StateBackupError(f"Backup manifest names an unexpected or duplicate path: {str(name)[:80]}")
         listed[name] = entry
-    present = {p.name for p in backup.iterdir()} - {MANIFEST}
+    present = set(_walk_files(backup, backup)) - {MANIFEST}
     if present != set(listed):
         raise StateBackupError("Backup contents do not match its manifest (missing or unexpected files)")
+    contents: dict[str, bytes] = {}
     for name, entry in listed.items():
-        data = _read_plain_file(backup / name, "backup file")
+        data = _read_plain_file(backup.joinpath(*name.split("/")), "backup file")
         if data is None or len(data) != entry["bytes"] or _sha256(data) != entry["sha256"]:
             raise StateBackupError(f"Backup file {name} fails its integrity check")
+        contents[name] = data
+    _verify_adoption({n: d for n, d in contents.items() if listed[n]["category"] == "adoption"})
     return {"verified": True, "files": sorted(listed), "manifest": manifest}
 
 
@@ -283,6 +423,36 @@ def restore_backup(
     current = {name: _read_plain_file(target_root / name, "current state file") for name in incoming}
     changes = [name for name, data in incoming.items() if current[name] != data]
     replaced = [name for name in changes if current[name] is not None]
+    # Adoption records restore only into projects with no local adoption state; anything already
+    # there (newer, different or an interrupted activation) is kept untouched and reported.
+    adoption_in = {e["path"]: (Path(backup).joinpath(*e["path"].split("/"))).read_bytes()
+                   for e in verified["manifest"]["files"] if e["category"] == "adoption"}
+    adoption_restored: list[str] = []
+    adoption_current: list[str] = []
+    adoption_kept: list[dict[str, str]] = []
+    projects_root = target_root / ADOPTION_ROOT
+    if adoption_in:
+        if _lstat(projects_root) is not None:
+            _require_plain_dir(projects_root, "Project adoption directory")
+        for pid in sorted({rel.split("/")[1] for rel in adoption_in}):
+            if _lstat(projects_root / pid) is None:
+                adoption_restored.append(pid)
+                continue
+            _require_plain_dir(projects_root / pid, "Project adoption state")
+            existing = _walk_files(projects_root / pid, target_root, skip_transient=True)
+            if existing == {r: d for r, d in adoption_in.items() if r.split("/")[1] == pid}:
+                adoption_current.append(pid)
+            elif f"{ADOPTION_ROOT}/{pid}/journal.json" in existing:
+                adoption_kept.append({"project": pid, "reason": "an interrupted local activation exists; it was "
+                                      "kept for `vres project recover` and not overwritten by the backup"})
+            else:
+                adoption_kept.append({"project": pid, "reason": "local adoption state exists and differs from the "
+                                      "backup; the local (current) state was kept"})
+        for rel in sorted(adoption_in):
+            if rel.split("/")[1] in adoption_restored:
+                current[rel] = None
+                incoming[rel] = adoption_in[rel]
+                changes.append(rel)
     if replaced and not replace_existing:
         raise StateBackupError(
             "Restoring would replace existing state (" + ", ".join(sorted(replaced)) + "); "
@@ -300,15 +470,22 @@ def restore_backup(
                 with open(point / name, "xb") as handle:
                     handle.write(current[name])
             saved.append({"path": name, "existed": current[name] is not None,
-                          "sha256": _sha256(current[name]) if current[name] is not None else None})
+                          "sha256": _sha256(current[name]) if current[name] is not None else None,
+                          **({"written_sha256": _sha256(incoming[name])} if "/" in name else {})})
         _write_atomic(point / MANIFEST, json.dumps({"files": saved}, indent=2).encode("utf-8"))
         _write_atomic(target_root / _JOURNAL, json.dumps(
             {"version": JOURNAL_VERSION, "state": "applying", "restore_point": point_id, "backup": str(backup),
              "started_at": _now()}
         ).encode("utf-8"))
         try:
+            if adoption_restored:
+                _recovery_dir(projects_root, "Project adoption directory", create=True)
+            for pid in adoption_restored:
+                (projects_root / pid).mkdir()  # fails, and rolls back, if that project appeared meanwhile
             for name in changes:
-                _write_atomic(target_root / name, incoming[name])
+                path = target_root.joinpath(*name.split("/"))
+                path.parent.mkdir(parents=True, exist_ok=True)
+                _write_atomic(path, incoming[name])
         except BaseException as exc:
             try:
                 recover_restore(target_root)
@@ -332,7 +509,9 @@ def restore_backup(
             credentials.append({"reference": key, "status": "present" if found else "missing"})
     return {
         "status": "restored" if changes else "unchanged",
-        "restored": sorted(changes),
+        "restored": sorted(c for c in changes if "/" not in c),
+        "adoption": {"restored_projects": adoption_restored, "already_current_projects": adoption_current,
+                     "kept_current_projects": adoption_kept},
         "recovery_point": str(point) if changes else None,
         "credentials": credentials,
         "credentials_missing": [c["reference"] for c in credentials if c["status"] != "present"],
@@ -365,17 +544,41 @@ def recover_restore(target_root: Path) -> dict[str, Any]:
         raise StateBackupError("Restore recovery point is incomplete; refusing to guess the previous state")
     for entry in entries:
         name = entry.get("path")
-        if name not in RESTORABLE:
+        # Adoption records are only ever created by a restore (never replaced), and carry the hash written.
+        adoption = (isinstance(name, str) and _ADOPTION_PATH.fullmatch(name) and entry.get("existed") is False
+                    and isinstance(entry.get("written_sha256"), str))
+        if name not in RESTORABLE and not adoption:
             raise StateBackupError("Restore recovery point names an unexpected path")
         if entry.get("existed"):
             data = _read_plain_file(point / name, "recovery point file")
             if data is None or _sha256(data) != entry.get("sha256"):
                 raise StateBackupError(f"Recovery point copy of {name} fails its integrity check")
+    project_dirs = {target_root / ADOPTION_ROOT / e["path"].split("/")[1] for e in entries if "/" in e["path"]}
+    for project_dir in project_dirs:
+        if _lstat(project_dir) is not None:
+            _require_plain_dir(project_dir, "Project adoption state")
+    kept: list[str] = []
     for entry in entries:
         name = entry["path"]
         if entry["existed"]:
             _write_atomic(target_root / name, (point / name).read_bytes())
+        elif "/" in name:
+            path = target_root.joinpath(*name.split("/"))
+            data = _read_plain_file(path, "restored adoption record")
+            if data is not None and _sha256(data) != entry["written_sha256"]:
+                kept.append(name)  # not what this restore wrote: someone else's state, never deleted
+            else:
+                path.unlink(missing_ok=True)
         else:
             (target_root / name).unlink(missing_ok=True)
+    for project_dir in project_dirs:  # remove only the folders this restore created, once empty
+        if _lstat(project_dir) is None:
+            continue
+        for directory in sorted((p for p in project_dir.rglob("*") if p.is_dir()), key=lambda p: -len(p.parts)):
+            with contextlib.suppress(OSError):
+                directory.rmdir()
+        with contextlib.suppress(OSError):
+            project_dir.rmdir()
     (target_root / _JOURNAL).unlink()
-    return {"status": "rolled_back", "restore_point": str(point), "files": [e["path"] for e in entries]}
+    return {"status": "rolled_back", "restore_point": str(point), "files": [e["path"] for e in entries],
+            "kept_changed_adoption_records": kept}

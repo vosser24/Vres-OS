@@ -31,6 +31,15 @@ checks are not a SQL parser or a guarantee that PostgreSQL accepts the schema. A
 reported, never counted as passes. Tests using scripted DB connections prove submitted SQL/parameters and
 application branching, not DB semantics.
 
+Test order and environment: test modules must not leak replaced modules into later tests. The
+registration-only MCP fixture in `tests/test_runtime_surfaces.py` restores the real
+`vres_os.mcp_server` module and package attribute after use, so the protected-validation-tool
+registration test passes in either module order. One known environment-dependent failure is not a
+product defect: `tests/test_e6_observability_hook.py::test_launcher_is_bounded_utf8_nobom_and_fail_safe`
+fails on a Windows checkout with `core.autocrlf=true`, because the launcher is checked out with CRLF line
+endings. It passes on an LF checkout. Report it as an environment failure; do not count it as a pass.
+Tests whose optional dependencies are missing are reported as skipped, never as passed.
+
 ## PostgreSQL CI gate
 
 The repository workflow adds a separate runtime gate before the local release gate. It starts a disposable
@@ -141,7 +150,11 @@ installed artifact on the target Windows live-test host before those target capa
 2. Commit the source, tests and docs. Never label uncommitted files a release commit.
 3. Require the PostgreSQL CI workflow to pass on the exact PR/release head.
 4. Re-run the local gate on that clean commit and capture its full SHA/tree ID.
-5. Export source with `git archive`, and full history with `git bundle create ... --all`.
+5. Export source with `git archive`, and full history with `git bundle create ... --all`. Write the
+   personal-release manifest from a clean checkout of that commit whose file bytes are exactly the ZIP members
+   (for example with `core.autocrlf=false`): `python -I src\vres_os\release_artifact.py manifest --root
+   <checkout> --out RELEASE-MANIFEST.json`. Add it to the ZIP root, not to the commit. The installer refuses a
+   ZIP without that manifest, or one whose files differ from it; it never rebuilds from other source.
 6. Restore the bundle into a separate checkout, run `git fsck`, and run the tests there.
 7. Compare every source ZIP member byte-for-byte with the committed Git blob.
 8. Inspect the wheel, including every migration through 014 and the registered executor/worker/model-policy/

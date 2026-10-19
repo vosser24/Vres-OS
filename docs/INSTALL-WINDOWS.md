@@ -30,6 +30,16 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 The process-only execution policy expires when this terminal closes. Vres does not change machine-wide script policy.
 
+**Exact release identity.** The installer installs only one identified source commit:
+
+- The source must be a clean git checkout (the commit is `HEAD`) or a source ZIP that carries `RELEASE-MANIFEST.json`. That file is written when the ZIP is packaged, with `python -I src\vres_os\release_artifact.py manifest --root <clean checkout> --out RELEASE-MANIFEST.json`.
+- To pin the commit you approved, add `-SourceCommit <40-hex commit>`. Any other source is refused.
+- The installer copies the package, plugin, launchers, rules and build metadata into `releases\<id>\source` and records their SHA-256 hashes in `releases\<id>\release-manifest.json`. It validates that copy as a personal-release input (migrations 001-041 pinned, no C2B/R0/F2/C2A files).
+- pip, the plugin, the launchers and the global rules all come from that copy. A change to the source folder after staging cannot reach the installation.
+- Before activation, the installed `vres_os` package (every `.py` and migration `.sql`) and the plugin are compared with the manifest. Any difference stops the installation, with the usual rollback.
+- An uncommitted change in the release scope, an extracted ZIP that differs from its manifest, or a source with no identifiable commit is refused; nothing is rebuilt from other source.
+- Dependencies are not part of this identity; see `resolved-dependencies.txt` below.
+
 The installer first asks permission to install an unverified-live preview. Say yes only in the test environment. For each missing dependency it shows the exact package and asks for consent. WinGet checks the exact package ID before installation. If a package is unavailable, installation stops rather than selecting a similarly named package.
 
 Git: `Git.Git`. Python: `Python.Python.3.12`. Claude: `Anthropic.ClaudeCode`. PostgreSQL: `PostgreSQL.PostgreSQL.17`. PostgreSQL's own installer may request its administrator password: retain it securely, outside Claude.
@@ -223,7 +233,7 @@ When you say `start vres` in a project:
   - `vres project rollback` restores the pre-activation bytes, unless the affected files changed since.
 - **Status in Claude:** until the project is active, `start vres` reports `PROJECT_REVIEW_REQUIRED` or `PROJECT_RECOVERY_REQUIRED`. It does not register the project, run setup or migrate, and never reports it as ready.
 - **Not covered:** adoption does not configure the database or credentials; Vres setup and database approval remain separate.
-- **Backups:** the adoption snapshots, decisions and journals in `%LOCALAPPDATA%\VresOS\projects\` are not yet part of `vres recovery state-backup`.
+- **Backups:** `vres recovery state-backup` includes the adoption records in `%LOCALAPPDATA%\VresOS\projects\` (state, decisions, snapshots, activation pre-images and results). See 9a.
 
 ## 9a. Backup and restore
 
@@ -232,6 +242,12 @@ Close Claude Code and Vres workers first.
 - `vres recovery state-backup <new directory>` copies only the Vres state files into a new directory outside `%LOCALAPPDATA%\VresOS`, with owner-only access and a SHA-256 manifest:
   - restorable: `config.json`, `credential-resources.json` and `local-secret-handles.json`;
   - evidence only: `database-targets.json` and the active/pending install pointers.
+- Project adoption records (`projects\<id>\`) are included too: state, decisions, snapshots, activation pre-images and results.
+  - Every record is checked against its project identity and its recorded hashes. Secret-looking content is refused.
+  - A project with an interrupted activation (`journal.json`), or one that is `activating`, `recovery_required` or `legacy_pending`, refuses the backup. Run `vres project recover` or `start vres` there first.
+  - A restore writes adoption records only for projects that have no adoption state locally. A newer, different or interrupted local adoption is kept as it is and reported under `kept_current_projects`.
+  - A restore never writes into a project folder, so it cannot bring back hooks, MCP servers or settings that an activation dropped.
+  - Backups made before this change (manifest version 1 or 2) have no adoption records and stay restorable.
 - The database approval/hold registry (`database-targets.json`) is never restored or rolled back. That way a newer quarantine hold can't be lost and a withdrawn approval can't come back. After a restore on a fresh installation, every database stays refused until you approve it again in secure setup.
 - Logs, locks, temporary files, releases, launchers, plugin and incident backups, and materialized secret files are excluded. Windows Credential Locker values are never exported.
 - `vres recovery state-verify <backup>` checks the manifest and every byte.

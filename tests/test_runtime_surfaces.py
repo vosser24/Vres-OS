@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import importlib
 import sys
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
@@ -17,27 +17,66 @@ from test_audit_regressions import ScriptedConnection
 from typer.testing import CliRunner
 
 
-@pytest.fixture
-def surface(monkeypatch, tmp_path):
-    class FastMCPRegistrationOnly:
-        def __init__(self, *args, **kwargs):
-            self.registered = {}
-        def tool(self):
-            def register(f):
-                self.registered[f.__name__] = f
-                return f
-            return register
-        def run(self):
-            raise AssertionError('No real MCP transport in this unit test')
+class FastMCPRegistrationOnly:
+    def __init__(self, *args, **kwargs):
+        self.registered = {}
+    def tool(self):
+        def register(f):
+            self.registered[f.__name__] = f
+            return f
+        return register
+    def run(self):
+        raise AssertionError('No real MCP transport in this unit test')
+
+
+@contextmanager
+def _registration_only_mcp_server(monkeypatch):
+    """Import a throwaway vres_os.mcp_server against a registration-only FastMCP, then restore exactly.
+
+    Both the sys.modules entry and the vres_os package attribute are put back as they were (or
+    removed if absent), so neither the stub module nor its fake MCP instance leaks into later tests.
+    """
+    import vres_os
+
+    missing = object()
+    real_module = sys.modules.get('vres_os.mcp_server', missing)
+    real_attr = vres_os.__dict__.get('mcp_server', missing)
     for name in ('mcp', 'mcp.server', 'mcp.server.fastmcp'):
         monkeypatch.setitem(sys.modules, name, ModuleType(name))
     sys.modules['mcp.server.fastmcp'].FastMCP = FastMCPRegistrationOnly
     sys.modules['mcp.server.fastmcp'].Context = type('Context', (), {})
     sys.modules.pop('vres_os.mcp_server', None)
-    module = importlib.import_module('vres_os.mcp_server')
-    monkeypatch.setattr(module, '_project', lambda root='.': (7, SimpleNamespace(root=tmp_path,key='P',name='test')))
-    yield module
-    sys.modules.pop('vres_os.mcp_server', None)
+    try:
+        yield importlib.import_module('vres_os.mcp_server')
+    finally:
+        sys.modules.pop('vres_os.mcp_server', None)
+        if real_module is not missing:
+            sys.modules['vres_os.mcp_server'] = real_module
+        if real_attr is not missing:
+            vres_os.mcp_server = real_attr
+        else:
+            vres_os.__dict__.pop('mcp_server', None)
+
+
+@pytest.fixture
+def surface(monkeypatch, tmp_path):
+    with _registration_only_mcp_server(monkeypatch) as module:
+        monkeypatch.setattr(module, '_project', lambda root='.': (7, SimpleNamespace(root=tmp_path,key='P',name='test')))
+        yield module
+
+
+def test_registration_only_surface_never_leaks_into_later_tests():
+    import vres_os
+    from vres_os import mcp_entrypoint  # noqa: F401 - registers every real tool on the real server
+    from vres_os import mcp_server as real
+
+    with pytest.MonkeyPatch.context() as mp:
+        with _registration_only_mcp_server(mp) as stub:
+            assert stub is not real and isinstance(stub.mcp, FastMCPRegistrationOnly)
+    assert sys.modules['vres_os.mcp_server'] is real and vres_os.mcp_server is real
+    assert sys.modules['mcp.server.fastmcp'].FastMCP is not FastMCPRegistrationOnly
+    from vres_os import mcp_server as again
+    assert again is real and isinstance(again.mcp, again.VresMCP)
 
 
 def test_mcp_registration_has_full_contract_and_no_pass_setter(surface):

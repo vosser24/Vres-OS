@@ -4,7 +4,9 @@ param(
     [switch]$WithEmbeddings,
     [switch]$WithCodex,
     [switch]$UseRemotePostgres,
-    [switch]$Update
+    [switch]$Update,
+    # Optional: the exact 40-hex source commit the operator approved; staging refuses any other source.
+    [string]$SourceCommit
 )
 # Installation is interactive, user-scoped and conservative. No database credentials here.
 $ErrorActionPreference = 'Stop'
@@ -185,17 +187,31 @@ $pluginMoved = $false
 $published = $false
 try {
     New-Item -ItemType Directory -Force -Path $NewRelease,$DistributionRoot | Out-Null
+    # Stage the exact release inputs of one identified source commit (clean git checkout, or a source
+    # ZIP carrying RELEASE-MANIFEST.json) with a SHA-256 manifest. Everything below installs from this
+    # verified copy, never from the source tree, so a later source change cannot reach the install.
+    $StagedSource = Join-Path $NewRelease 'source'
+    $ReleaseManifest = Join-Path $NewRelease 'release-manifest.json'
+    $stageArgs = @('-I','-X','utf8',(Join-Path $RepoRoot 'src\vres_os\release_artifact.py'),'stage','--root',$RepoRoot,'--out',$StagedSource,'--manifest',$ReleaseManifest)
+    if ($SourceCommit) { $stageArgs += @('--source-commit',$SourceCommit) }
+    Run $Python $stageArgs
+    $ArtifactTool = Join-Path $StagedSource 'src\vres_os\release_artifact.py'
     # Build venv at its permanent path: Windows entry points contain absolute paths.
     Run $Python @('-m','venv',(Join-Path $NewRelease 'venv'))
     $NewPython = Join-Path $NewRelease 'venv\Scripts\python.exe'
     $extras = if ($WithEmbeddings) { 'full,embeddings' } else { 'full' }
-    Run $NewPython @('-m','pip','install',"$RepoRoot[$extras]")
+    Run $NewPython @('-m','pip','install',"$StagedSource[$extras]")
     Run $NewPython @('-m','pip','check')
+    # The installed package must be exactly the staged release (every .py and migration .sql).
+    $PackageDir = & $NewPython -I -c 'import pathlib, vres_os; print(pathlib.Path(vres_os.__file__).resolve().parent)'
+    if ($LASTEXITCODE -ne 0) { throw 'Could not locate the installed Vres package.' }
+    Run $Python @('-I','-X','utf8',$ArtifactTool,'verify-installed','--manifest',$ReleaseManifest,'--package-dir',"$($PackageDir | Select-Object -Last 1)")
     Run $NewPython @('-c','from vres_os.cli import app; from vres_os.mcp_server import mcp; from vres_os.db import migrate; from vres_os.autocompact import install_autocompact')
     $freeze = & $NewPython -m pip freeze --all
     if ($LASTEXITCODE -ne 0) { throw 'Dependency inventory failed.' }
     [IO.File]::WriteAllLines((Join-Path $NewRelease 'resolved-dependencies.txt'), [string[]]$freeze, (New-Object System.Text.UTF8Encoding $false))
-    Copy-Item -Recurse -LiteralPath (Join-Path $RepoRoot 'plugins\vres-os') -Destination $StagedPlugin
+    Copy-Item -Recurse -LiteralPath (Join-Path $StagedSource 'plugins\vres-os') -Destination $StagedPlugin
+    Run $Python @('-I','-X','utf8',$ArtifactTool,'verify-tree','--manifest',$ReleaseManifest,'--prefix','plugins/vres-os','--dir',$StagedPlugin)
     [IO.File]::WriteAllText((Join-Path $StagedPlugin '.vres-managed'), 'Vres-OS')
     Run 'claude' @('plugin','validate',$StagedPlugin)
     Run $NewPython @('-m','vres_os.cli','doctor','--allow-unconfigured')
@@ -207,12 +223,13 @@ try {
     # Only now change the selected runtime/plugin. Roll back both on failure.
     if (Test-Path $PluginTarget) { Move-Item -LiteralPath $PluginTarget -Destination $PluginBackup; $pluginMoved=$true }
     Copy-Item -Recurse -LiteralPath $StagedPlugin -Destination $PluginTarget
+    Run $Python @('-I','-X','utf8',$ArtifactTool,'verify-tree','--manifest',$ReleaseManifest,'--prefix','plugins/vres-os','--dir',$PluginTarget,'--allow-extra','.vres-managed')
     Run 'claude' @('plugin','validate',$PluginTarget)
     New-Item -ItemType Directory -Force -Path $Bin | Out-Null
     # Backup launcher scripts too: old runtimes must not depend on a new, incompatible launcher.
     $BinBackup = Join-Path $NewRelease 'previous-bin'
     Copy-Item -Recurse -LiteralPath $Bin -Destination $BinBackup
-    Copy-Item -Force -Path (Join-Path $RepoRoot 'scripts\windows\*.ps1') -Destination $Bin
+    Copy-Item -Force -Path (Join-Path $StagedSource 'scripts\windows\*.ps1') -Destination $Bin
     [IO.File]::WriteAllText((Join-Path $Bin 'vres.cmd'), "@echo off`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File `"%~dp0vres-launch.ps1`" %*`r`n", [Text.Encoding]::ASCII)
     [IO.File]::WriteAllText((Join-Path $Bin 'vres-mcp.cmd'), "@echo off`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File `"%~dp0vres-mcp-launch.ps1`"`r`n", [Text.Encoding]::ASCII)
     $InstalledAt = Get-Date -Format o
@@ -228,7 +245,7 @@ try {
     Run $NewPython @(
         '-m','vres_os.claude_contract','install-global',
         '--claude-home',$ClaudeHome,
-        '--rules-source',(Join-Path $RepoRoot 'rules\vres-rules.md')
+        '--rules-source',(Join-Path $StagedSource 'rules\vres-rules.md')
     )
     Run $NewPython @(
         '-m','vres_os.statusline','install',

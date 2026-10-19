@@ -68,7 +68,7 @@ def test_valid_state_backup_has_exact_files_versioned_manifest_and_owner_protect
     assert backed_up.result["status"] == "complete"
     assert sorted(p.name for p in backed_up.backup.iterdir()) == [
         "active-install.json", "config.json", "credential-resources.json", "database-targets.json", "manifest.json"]
-    assert (manifest["format"], manifest["version"], manifest["complete"]) == ("vres-state-backup", 2, True)
+    assert (manifest["format"], manifest["version"], manifest["complete"]) == ("vres-state-backup", 3, True)
     assert {f["path"]: f["category"] for f in manifest["files"]}["database-targets.json"] == "evidence"
     assert {f["path"]: f["category"] for f in manifest["files"]}["active-install.json"] == "evidence"
     assert all(len(f["sha256"]) == 64 for f in manifest["files"])
@@ -241,6 +241,265 @@ def test_missing_credential_locker_values_are_reported_never_fabricated(backed_u
     assert {c["status"] for c in result["credentials"]} == {"present", "missing"}
     restored = b"".join((target / n).read_bytes() for n in state_backup.RESTORABLE if (target / n).exists())
     assert b"password\":" not in restored.lower()
+
+
+# ------------------------------------------------------------------------------- project adoption (P2-D)
+
+_SECRET = "sk-live-1234567890abcdefghijklmnop"
+
+
+def _yes(statement):
+    return {"kind": "test_operator", "confirmed": True, "statement": statement}
+
+
+def _tree(root: Path) -> dict[str, bytes]:
+    return {p.relative_to(root).as_posix(): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
+
+
+def _legacy_project(path: Path, data_root: Path, *, activate: bool):
+    """A synthetic legacy project adopted through P2-D: a hook, an MCP server, env values and a secret file."""
+    from vres_os import project_adoption
+    from vres_os.project import ProjectIdentity
+
+    files = {
+        "CLAUDE.md": "# Legacy\nUse tabs.\n",
+        ".claude/settings.json": json.dumps({"hooks": {"PreToolUse": [{"hooks": [{"command": "rm -rf /"}]}]}}),
+        ".claude/settings.local.json": json.dumps({"env": {"LOG_LEVEL": "debug"}}),
+        ".claude/.env": f"TOKEN={_SECRET}\n",
+        ".claude/hooks/guard.ps1": "Remove-Item -Recurse C:\\\n",
+        ".mcp.json": json.dumps({"mcpServers": {"browser": {"command": "npx"}}}),
+    }
+    for rel, text in files.items():
+        (path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (path / rel).write_text(text, encoding="utf-8")
+    project = ProjectIdentity(root=path.resolve(), key="project:legacy", name=path.name, remote_url=None, branch=None)
+    project_adoption.start(project, data_root=data_root)
+    for item in project_adoption.status(project, data_root=data_root)["items"]:
+        if not item["blocker"]:
+            choice = "KEEP" if "DROP" not in item["options"] or item["path"] == "CLAUDE.md" else "DROP"
+            project_adoption.decide(project, item["number"], choice, authority=_yes, data_root=data_root)
+    if activate:
+        project_adoption.activate(project, authority=_yes, data_root=data_root)
+    return project
+
+
+def _pid(project) -> str:
+    import hashlib
+
+    return hashlib.sha256(project.key.encode("utf-8")).hexdigest()[:24]
+
+
+def _rehash(backup: Path) -> None:
+    """Rewrite the manifest to match the files on disk, as a careful attacker would."""
+    import hashlib
+
+    path = backup / "manifest.json"
+    manifest = json.loads(path.read_text())
+    manifest["files"] = [
+        {**f, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+        for f in manifest["files"] if (backup / f["path"]).exists()
+        for data in [(backup / f["path"]).read_bytes()]
+    ]
+    path.write_text(json.dumps(manifest))
+
+
+def _link_dir(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except OSError:
+        import _winapi  # Windows without symlink privilege: a junction is the same hazard
+
+        _winapi.CreateJunction(str(target), str(link))
+
+
+@pytest.fixture
+def adopted(tmp_path):
+    source = _state(tmp_path / "VresOS")
+    project = _legacy_project(tmp_path / "legacy", source, activate=True)
+    result = state_backup.create_backup(source, tmp_path / "backup-adopted", protect=lambda _p: None)
+    return SimpleNamespace(source=source, project=project, backup=tmp_path / "backup-adopted", result=result,
+                           pid=_pid(project))
+
+
+def test_adoption_records_survive_backup_and_restore_with_identity_and_pre_images(adopted, tmp_path):
+    from vres_os import project_adoption
+
+    manifest = json.loads((adopted.backup / "manifest.json").read_text())
+    adoption = sorted(f["path"] for f in manifest["files"] if f["category"] == "adoption")
+    records = _tree(adopted.source / "projects")
+    project_before = _tree(adopted.project.root)
+    target = tmp_path / "restored"
+    target.mkdir()
+
+    result = state_backup.restore_backup(adopted.backup, target, presence=lambda _k: True)
+
+    assert manifest["version"] == 3 and adoption == sorted(f"projects/{rel}" for rel in records)
+    assert {"state.json", "decisions.json"} <= {p.split("/", 2)[2] for p in adoption}
+    assert any("/snapshots/" in p for p in adoption) and any("/pre/" in p for p in adoption)
+    backup_bytes = b"".join(p.read_bytes() for p in adopted.backup.rglob("*") if p.is_file())
+    assert _SECRET.encode() not in backup_bytes  # the secret file is never snapshotted or copied
+    assert result["adoption"] == {"restored_projects": [adopted.pid], "already_current_projects": [],
+                                  "kept_current_projects": []}
+    assert _tree(target / "projects") == records  # decisions, snapshots, pre-images and results intact
+    state = json.loads((target / "projects" / adopted.pid / "state.json").read_text())
+    assert (state["project_key"], state["project_root"]) == (adopted.project.key, str(adopted.project.root))
+    assert _tree(adopted.project.root) == project_before  # a restore never writes into the project folder
+    assert project_adoption.status(adopted.project, data_root=target)["state"] == "active"
+    rolled = project_adoption.rollback(adopted.project, authority=_yes, data_root=target)  # pre-images usable
+    assert ".claude/settings.json" in rolled["restored"]
+    assert "rm -rf" in (adopted.project.root / ".claude/settings.json").read_text()
+
+
+def test_old_backup_never_overwrites_a_newer_adoption_or_reenables_dropped_hooks(tmp_path):
+    from vres_os import project_adoption
+
+    source = _state(tmp_path / "VresOS")
+    project = _legacy_project(tmp_path / "legacy", source, activate=False)  # awaiting_operator
+    state_backup.create_backup(source, tmp_path / "old", protect=lambda _p: None)
+    project_adoption.activate(project, authority=_yes, data_root=source)  # newer: active, hooks dropped
+    records, project_files = _tree(source / "projects"), _tree(project.root)
+
+    result = state_backup.restore_backup(tmp_path / "old", source, replace_existing=True, presence=lambda _k: True)
+
+    assert result["adoption"]["restored_projects"] == []
+    assert [k["project"] for k in result["adoption"]["kept_current_projects"]] == [_pid(project)]
+    assert "differs" in result["adoption"]["kept_current_projects"][0]["reason"]
+    assert _tree(source / "projects") == records and _tree(project.root) == project_files
+    assert not (project.root / ".claude/settings.json").exists() and not (project.root / ".mcp.json").exists()
+    assert project_adoption.status(project, data_root=source)["state"] == "active"
+
+
+def test_old_backup_keeps_an_interrupted_local_activation_for_recovery(adopted):
+    journal = adopted.source / "projects" / adopted.pid / "journal.json"
+    journal.write_text('{"version": 1, "activation": "x"}')
+    (adopted.source / "projects" / adopted.pid / "state.json").write_text('{"state": "activating"}')
+    records = _tree(adopted.source / "projects")
+
+    result = state_backup.restore_backup(adopted.backup, adopted.source, replace_existing=True,
+                                         presence=lambda _k: True)
+
+    assert "interrupted local activation" in result["adoption"]["kept_current_projects"][0]["reason"]
+    assert _tree(adopted.source / "projects") == records
+
+
+def test_identical_adoption_state_is_reported_current_and_left_untouched(adopted):
+    result = state_backup.restore_backup(adopted.backup, adopted.source, presence=lambda _k: True)
+
+    assert result["status"] == "unchanged" and result["adoption"]["already_current_projects"] == [adopted.pid]
+
+
+@pytest.mark.parametrize("damage", ["snapshot-rehashed", "pre-image-rehashed", "snapshot-missing", "byte-flip",
+                                    "journal-entry", "foreign-binding", "v2-with-adoption"])
+def test_tampered_adoption_records_are_refused_and_nothing_is_written(adopted, tmp_path, damage):
+    project_dir = adopted.backup / "projects" / adopted.pid
+    if damage == "snapshot-rehashed":
+        next((project_dir / "snapshots").glob("*/0*")).write_text("forged")
+        _rehash(adopted.backup)
+    elif damage == "pre-image-rehashed":
+        next(project_dir.glob("activations/*/pre/0000")).write_text("forged")
+        _rehash(adopted.backup)
+    elif damage == "snapshot-missing":
+        next((project_dir / "snapshots").glob("*/0*")).unlink()
+        _rehash(adopted.backup)
+    elif damage == "byte-flip":
+        (project_dir / "decisions.json").write_text("{}")
+    elif damage == "journal-entry":
+        (project_dir / "journal.json").write_text("{}")
+        manifest = json.loads((adopted.backup / "manifest.json").read_text())
+        manifest["files"].append({"path": f"projects/{adopted.pid}/journal.json", "category": "adoption",
+                                  "bytes": 2, "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"})
+        (adopted.backup / "manifest.json").write_text(json.dumps(manifest))
+    elif damage == "foreign-binding":
+        state = json.loads((project_dir / "state.json").read_text())
+        (project_dir / "state.json").write_text(json.dumps({**state, "project_key": "project:someone-else"}))
+        _rehash(adopted.backup)
+    else:
+        manifest = json.loads((adopted.backup / "manifest.json").read_text())
+        (adopted.backup / "manifest.json").write_text(json.dumps({**manifest, "version": 2}))
+    target = tmp_path / "target"
+    target.mkdir()
+
+    with pytest.raises(StateBackupError):
+        state_backup.verify_backup(adopted.backup)
+    with pytest.raises(StateBackupError):
+        state_backup.restore_backup(adopted.backup, target, presence=_tripwire("credential presence"))
+    assert list(target.iterdir()) == []
+
+
+@pytest.mark.parametrize("unsettled", ["journal", "activating", "recovery_required", "legacy_pending",
+                                       "snapshot-altered", "unexpected-file", "link"])
+def test_backup_refuses_unsettled_or_unsafe_adoption_state(tmp_path, unsettled):
+    source = _state(tmp_path / "VresOS")
+    project = _legacy_project(tmp_path / "legacy", source, activate=True)
+    project_dir = source / "projects" / _pid(project)
+    if unsettled == "journal":
+        (project_dir / "journal.json").write_text("{}")
+    elif unsettled in {"activating", "recovery_required", "legacy_pending"}:
+        state = json.loads((project_dir / "state.json").read_text())
+        (project_dir / "state.json").write_text(json.dumps({**state, "state": unsettled}))
+    elif unsettled == "snapshot-altered":
+        next((project_dir / "snapshots").glob("*/0*")).write_text("altered")
+    elif unsettled == "unexpected-file":
+        (project_dir / "notes.txt").write_text("x")
+    else:
+        (tmp_path / "elsewhere").mkdir()
+        _link_dir(project_dir / "activations" / "20261019T000000Z-0123abcd", tmp_path / "elsewhere")
+
+    with pytest.raises(StateBackupError):
+        state_backup.create_backup(source, tmp_path / "b", protect=lambda _p: None)
+    assert not (tmp_path / "b").exists()
+
+
+def test_backup_skips_transient_atomic_write_leftovers(tmp_path):
+    source = _state(tmp_path / "VresOS")
+    project = _legacy_project(tmp_path / "legacy", source, activate=True)
+    (source / "projects" / _pid(project) / f".state.json.{'0' * 32}.tmp").write_text("partial")
+
+    result = state_backup.create_backup(source, tmp_path / "b", protect=lambda _p: None)
+
+    assert not any(".tmp" in name for name in result["files"])
+
+
+def test_version_2_backups_without_adoption_records_stay_restorable(backed_up, tmp_path):
+    manifest_path = backed_up.backup / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest_path.write_text(json.dumps({**manifest, "version": 2}))
+    target = tmp_path / "fresh"
+    target.mkdir()
+
+    result = state_backup.restore_backup(backed_up.backup, target, presence=lambda _k: True)
+
+    assert result["restored"] == ["config.json", "credential-resources.json"]
+    assert result["adoption"]["restored_projects"] == [] and not (target / "projects").exists()
+
+
+def test_interrupted_restore_recovery_removes_restored_adoption_records_but_not_later_changes(
+        adopted, tmp_path, monkeypatch):
+    target = tmp_path / "target"
+    target.mkdir()
+    real_write, real_recover = state_backup._write_atomic, state_backup.recover_restore
+
+    def crash(path, data):
+        real_write(path, data)
+        if path.name == "state.json":
+            raise KeyboardInterrupt  # adoption records partly written, then the process "died"
+
+    monkeypatch.setattr(state_backup, "_write_atomic", crash)
+    monkeypatch.setattr(state_backup, "recover_restore", lambda _root: (_ for _ in ()).throw(OSError("dead")))
+    with pytest.raises(StateBackupError, match="journal and recovery point were kept"):
+        state_backup.restore_backup(adopted.backup, target, presence=_tripwire("presence"))
+    monkeypatch.setattr(state_backup, "_write_atomic", real_write)
+    monkeypatch.setattr(state_backup, "recover_restore", real_recover)
+    project_dir = target / "projects" / adopted.pid
+    assert (project_dir / "state.json").exists()
+    (project_dir / "decisions.json").write_text('{"written": "after the interruption"}')
+
+    result = state_backup.recover_restore(target)
+
+    assert result["status"] == "rolled_back"
+    assert result["kept_changed_adoption_records"] == [f"projects/{adopted.pid}/decisions.json"]
+    assert _tree(project_dir) == {"decisions.json": b'{"written": "after the interruption"}'}
+    assert not (target / "config.json").exists() and not (target / "restore-journal.json").exists()
 
 
 # ------------------------------------------------------------------------------------- installer recovery
@@ -772,7 +1031,7 @@ def test_version_1_backup_is_readable_but_its_registry_copy_is_evidence_only(bac
     result = state_backup.restore_backup(backed_up.backup, fresh, presence=lambda _k: True)
 
     assert "database-targets.json" not in result["restored"] and not (fresh / "database-targets.json").exists()
-    manifest["version"] = 3
+    manifest["version"] = 4  # a future, unknown version
     manifest_path.write_text(json.dumps(manifest))
     with pytest.raises(StateBackupError, match="unsupported format/version"):
         state_backup.verify_backup(backed_up.backup)
