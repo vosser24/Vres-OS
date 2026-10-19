@@ -46,7 +46,8 @@ def _offline_seams(monkeypatch, tmp_path):
         return fired
 
     for module in _MODULES:
-        for name in ("_project", "_current_session", "Repository", "discover_project", "start_for_project"):
+        for name in ("_project", "_current_session", "Repository", "discover_project", "start_for_project",
+                     "confirm_reply_gate", "observe_reply_activity"):
             if hasattr(module, name):
                 monkeypatch.setattr(module, name, seam(name))
     monkeypatch.setattr("vres_os.secrets._secure_keyring", seam("credential store"))
@@ -140,3 +141,78 @@ def test_configured_server_keeps_its_existing_dispatch(_offline_seams, tool):
 
     assert "not configured" not in _text(result)
     assert _offline_seams and _offline_seams[0] in {"_project", "_current_session"}  # the tool body ran
+
+
+# Final correction: reply/activity bookkeeping is an inspection-hold allowance, not an unconfigured one.
+
+_BOOKKEEPING = {
+    "task_reply_gate": {"task_key": "T-1", "session_id": "S-1", "advances_state": False},
+    "reply_activity_observe": {"session_id": "S-1", "tool_name": "Read"},
+}
+_UNCONFIGURED_ALLOWED = {
+    "routing_evidence", "orchestration_evidence", "validation_evidence", "vres_status", "task_open_list",
+    "capability_resolve", "project_agent_get", "project_agent_search", "orchestration_work_ready",
+    "artifact_get", "start_vres",
+}
+
+
+@pytest.mark.parametrize("tool", sorted(_BOOKKEEPING))
+def test_unconfigured_server_refuses_reply_bookkeeping_before_repository_or_database(_offline_seams, tool):
+    ConfigStore().save(VresConfig(configured=False))
+
+    result = _call(tool, _BOOKKEEPING[tool])
+
+    assert result.isError is True and "not configured" in _text(result)
+    assert _offline_seams == []
+
+
+@pytest.mark.parametrize("tool", sorted(_BOOKKEEPING))
+def test_unreadable_config_refuses_reply_bookkeeping(_offline_seams, monkeypatch, tool):
+    def unreadable(self):
+        raise PermissionError("access denied")
+
+    monkeypatch.setattr(ConfigStore, "load", unreadable)
+
+    assert "not configured" in _text(_call(tool, _BOOKKEEPING[tool]))
+    assert _offline_seams == []
+
+
+@pytest.mark.parametrize("tool", sorted(_BOOKKEEPING))
+def test_configured_session_keeps_reply_bookkeeping_dispatch(_offline_seams, tool):
+    ConfigStore().save(VresConfig(configured=True))
+
+    result = _call(tool, _BOOKKEEPING[tool])
+
+    assert "not configured" not in _text(result)
+    assert _offline_seams[:1] == ["_project"]  # the tool body ran, as before
+
+
+def test_unconfigured_allowlist_is_exact_and_no_registered_tool_is_newly_permitted(_offline_seams):
+    from vres_os import control_preflight
+
+    registered = {tool.name for tool in asyncio.run(mcp_server.mcp.list_tools())}
+    allowed = {name for name in registered if control_preflight.allowed_while_unconfigured(name)}
+    previously_allowed = control_preflight._SAFE_VRES_TOOLS | control_preflight._UNCONFIGURED_SETUP_TOOLS
+
+    assert allowed == _UNCONFIGURED_ALLOWED
+    assert allowed <= previously_allowed and not allowed & set(_BOOKKEEPING)
+    ConfigStore().save(VresConfig(configured=False))
+    for name in sorted(registered - allowed):
+        assert "not configured" in _text(_call(name)), name
+    assert _offline_seams == []
+
+
+def test_inspection_hold_and_hook_policies_stay_distinct_and_consistent():
+    from vres_os import control_preflight
+
+    hold = {"active": True}
+    for tool in _BOOKKEEPING:
+        name = control_preflight._VRES_PREFIX + tool
+        payload = {"hook_event_name": "PreToolUse", "tool_name": name}
+        assert control_preflight.is_read_only_tool(name)  # still admitted during an inspection-only hold
+        assert control_preflight.evaluate_control_preflight(payload, hold) is None
+        decision = control_preflight.evaluate_unconfigured_preflight(payload)  # but not before setup
+        assert decision["hookSpecificOutput"]["permissionDecision"] == "deny"
+    task_begin = {"hook_event_name": "PreToolUse", "tool_name": control_preflight._VRES_PREFIX + "task_begin"}
+    assert control_preflight.evaluate_control_preflight(task_begin, hold)["hookSpecificOutput"][
+        "permissionDecision"] == "deny"

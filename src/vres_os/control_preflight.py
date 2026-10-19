@@ -44,6 +44,11 @@ _PARENT_ONLY_VALIDATION_TOOLS = frozenset(
 # While Vres is unconfigured, the only mutation-capable governed tool admitted is the explicit,
 # operator-driven secure setup entry point (it opens the local secure setup console).
 _UNCONFIGURED_SETUP_TOOLS = frozenset({"start_vres"})
+# Reply/activity bookkeeping records state in database transactions. It is admitted during an
+# established, configured session's inspection-only hold (_SAFE_VRES_TOOLS), never before setup.
+_HOLD_ONLY_BOOKKEEPING_TOOLS = frozenset({"task_reply_gate", "reply_activity_observe"})
+# Before secure setup: the inspection-hold tools without the bookkeeping, plus the setup entry point.
+_UNCONFIGURED_VRES_TOOLS = frozenset(_SAFE_VRES_TOOLS - _HOLD_ONLY_BOOKKEEPING_TOOLS) | _UNCONFIGURED_SETUP_TOOLS
 # The only non-read-only tool a contaminated parent session may run: its context refresh acknowledgement. It is an
 # exact-name recovery branch (never a _SAFE_VRES_TOOLS member), admitted only after the hook attests this host session.
 _CONTAMINATION_RECOVERY_TOOLS = frozenset({"context_refresh_ack"})
@@ -205,8 +210,11 @@ def evaluate_control_preflight(
 
 
 def allowed_while_unconfigured(vres_tool: str) -> bool:
-    """Registered (unprefixed) Vres tool names admitted before secure setup: read-only diagnostics and setup."""
-    return vres_tool in _SAFE_VRES_TOOLS or vres_tool in _UNCONFIGURED_SETUP_TOOLS
+    """Registered (unprefixed) Vres tool names admitted before secure setup: read-only diagnostics and setup.
+
+    Deliberately narrower than the inspection-only hold list: reply/activity bookkeeping is excluded.
+    """
+    return vres_tool in _UNCONFIGURED_VRES_TOOLS
 
 
 def vres_configured() -> bool:
