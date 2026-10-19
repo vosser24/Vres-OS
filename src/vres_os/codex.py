@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+from .personal_profile import CODEX_REVIEW, require_capability
 from .redaction import redact_text
 from .processes import ProcessResult as CodexResult, run_bounded, MAX_PROMPT_BYTES
 
@@ -23,6 +24,7 @@ class CodexAdapter:
         return run_bounded([executable, "--version"], timeout=timeout)
 
     def exec(self, prompt: str, *, cwd: Path, timeout: int = 900, project_root: Path | None = None) -> CodexResult:
+        require_capability(CODEX_REVIEW)  # before any executable lookup or process launch
         if not isinstance(prompt, str) or not prompt.strip():
             raise ValueError("A non-empty Codex review prompt is required")
         if len(prompt.encode("utf-8")) > MAX_PROMPT_BYTES:

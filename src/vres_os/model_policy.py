@@ -6,6 +6,8 @@ from .metrics import validate_metrics
 
 PROTECTED_VALIDATION_PHASE = "validate"
 MIN_COMPARABLE_RUNS = 5
+# Policy rows that name no real model are not a governed choice and are never returned as one.
+UNSPECIFIED_MODELS = frozenset({"", "default", "best", "auto", "any"})
 
 
 def _connect():
@@ -91,12 +93,21 @@ class ModelPolicyService:
                 """,
                 (phase, task_family),
             ).fetchone()
-        if not row:
+        if not row or str(row["model"] or "").strip().lower() in UNSPECIFIED_MODELS:
+            # No silent substitute: say plainly that no governed policy names a model for this phase.
             return {
-                "provider": "claude",
-                "model": "fable" if phase == PROTECTED_VALIDATION_PHASE else "default",
-                "effort": "high" if phase == PROTECTED_VALIDATION_PHASE else "medium",
-                "source": "fallback",
+                "provider": None,
+                "model": None,
+                "effort": None,
+                "phase": phase,
+                "task_family": task_family,
+                "source": "no_policy",
+                "policy_available": False,
+                "reason": (
+                    "No active governed model policy names an explicit model for this phase; Vres does not "
+                    "substitute an unspecified model. Use the governed routing worker contract, or record a "
+                    "reviewed policy for this phase."
+                ),
             }
         baseline = dict(row)
         baseline["source"] = "policy"

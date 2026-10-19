@@ -22,6 +22,7 @@ CODEX_HANDOFF_EXECUTE = "codex_handoff_execute"
 PROCEDURE_AUTO_PROMOTION = "procedure_auto_promotion"
 MODEL_EXPERIMENT_EXECUTION = "model_experiment_execution"
 LEGACY_SECRET_ALIASES = "legacy_secret_aliases"
+CODEX_REVIEW = "codex_review"
 
 # capability -> (approved in the personal profile, why). Only a literal True approves.
 CAPABILITIES: dict[str, tuple[bool, str]] = {
@@ -29,6 +30,7 @@ CAPABILITIES: dict[str, tuple[bool, str]] = {
     PROCEDURE_AUTO_PROMOTION: (False, "unattended project-scoped procedure promotion"),
     MODEL_EXPERIMENT_EXECUTION: (False, "live, paid model-experiment execution"),
     LEGACY_SECRET_ALIASES: (False, "legacy Vres secret-alias commands; use Credential Broker resources"),
+    CODEX_REVIEW: (False, "sending a prompt and the project to the external Codex service for review"),
 }
 
 

@@ -25,7 +25,7 @@ from .experience_utility import ExperienceUtilityEvidenceService
 from .knowledge import KnowledgeService
 from .model_policy import ModelPolicyService
 from .onboarding import OnboardingService
-from .personal_profile import CODEX_HANDOFF_EXECUTE, CapabilityDisabled, require_capability
+from .personal_profile import CODEX_HANDOFF_EXECUTE, CODEX_REVIEW, CapabilityDisabled, require_capability
 from .preferences import PreferenceService
 from .procedures import ProcedureService
 from .project import discover_project
@@ -899,6 +899,10 @@ def review_queue_resolve(
 @mcp.tool()
 def codex_review(prompt: str) -> dict:
     """Delegate an independent engineering review to Codex in the current project. Never include secrets in prompt."""
+    try:
+        require_capability(CODEX_REVIEW)
+    except CapabilityDisabled as exc:
+        return {"ok": False, "reason": "disabled_in_personal_profile", "message": str(exc)}
     _, project = _project()
     result = CodexAdapter().exec(prompt, cwd=project.root)
     return {"ok": result.ok, "returncode": result.returncode, "output": result.output}
