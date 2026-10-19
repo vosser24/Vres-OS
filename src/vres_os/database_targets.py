@@ -14,10 +14,19 @@ guard applies depends only on the running platform, the registry root is resolve
 from the Windows shell rather than LOCALAPPDATA or platformdirs overrides, and the
 registry is read only from that root.
 
-Limitation: an approval names a host, port and database. It is not a cryptographic
+Every change to the registry (an approval or a hold) re-reads, decides and writes it
+while holding an OS byte-range lock on a lock file beside it, so concurrent processes
+are serialized and a hold recorded by one process can never be overwritten by another
+process's approval; an approval re-checks holds under that lock before it is written.
+
+Limitations: an approval names a host, port and database. It is not a cryptographic
 identification of the PostgreSQL cluster that answers there; a different cluster
 later serving the same host, port and database name would not be told apart before
-connecting. Holds are therefore deliberately broader than approvals (a whole server).
+connecting. Holds are therefore deliberately broader than approvals (a whole server),
+but a hold matches only the host spelling it names, after lower-casing. The loopback
+spellings localhost, 127.0.0.1 and ::1 are recognized as one server; any other name or
+address that reaches the same machine (its computer name, a LAN address, a DNS alias,
+another 127.x address) is a different target to the guard and is not covered by the hold.
 """
 from __future__ import annotations
 
@@ -27,20 +36,23 @@ import os
 import stat
 import sys
 import tempfile
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Mapping, NamedTuple
+from typing import Callable, Iterator, Mapping, NamedTuple
 
 from .config import ConfigStore
 from .db import DatabaseTargetRefused
 from .paths import APP_NAME
 
 REGISTRY_NAME = "database-targets.json"
+REGISTRY_LOCK_NAME = "database-targets.lock"
 REGISTRY_VERSION = 1
 REGISTRY_MAX_BYTES = 64 * 1024
 # libpq consults these when a connection string omits a key, so any of them makes the real target ambiguous.
 ROUTING_ENVIRONMENT = ("PGHOST", "PGHOSTADDR", "PGPORT", "PGDATABASE", "PGSERVICE", "PGSERVICEFILE", "PGSYSCONFDIR")
-# Spellings of this machine's loopback interface. A hold on one of them covers all of them.
+# The loopback spellings the guard recognizes as one server. A hold on one of them covers exactly
+# these three; other names or addresses of this machine are not recognized and are not covered.
 _LOOPBACK = frozenset({"localhost", "127.0.0.1", "::1"})
 _FOLDERID_LOCAL_APP_DATA = "{F1B32785-6FBA-4FCF-9D55-7B8E7F157091}"
 _NO_CONTACT = "No connection was attempted."
@@ -253,6 +265,7 @@ def _load_registry(root: Path) -> tuple[list[dict], list[dict]]:
     if (
         not isinstance(raw, dict)
         or set(raw) != {"version", "approved", "held"}
+        or type(raw["version"]) is not int
         or raw["version"] != REGISTRY_VERSION
         or not isinstance(raw["approved"], list)
         or not isinstance(raw["held"], list)
@@ -265,7 +278,58 @@ def _load_registry(root: Path) -> tuple[list[dict], list[dict]]:
     return approved, held
 
 
+def _registry_busy() -> DatabaseTargetRefused:
+    return DatabaseTargetRefused(
+        f"Vres could not lock its database target registry ({REGISTRY_NAME}); nothing was recorded. "
+        f"Retry once no other Vres setup or hold command is running. {_NO_CONTACT}"
+    )
+
+
+@contextmanager
+def _registry_lock(root: Path) -> Iterator[None]:
+    """Hold the cross-process registry lock for a whole read/decide/write sequence.
+
+    Waits for another holder (msvcrt retries for about ten seconds) and refuses
+    rather than proceeding unserialized if the lock cannot be taken.
+    """
+    root.mkdir(parents=True, exist_ok=True)
+    _inspect_path(root, kind="registry root")
+    path = root / REGISTRY_LOCK_NAME
+    _inspect_path(path, kind="registry lock")
+    flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOINHERIT", 0)
+    try:
+        fd = os.open(path, flags, 0o600)
+    except OSError:
+        raise _registry_busy() from None
+    locked = False
+    try:
+        try:
+            if os.fstat(fd).st_size == 0:
+                os.write(fd, b"\0")
+            os.lseek(fd, 0, os.SEEK_SET)
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(fd, fcntl.LOCK_EX)
+            locked = True
+        except OSError:
+            raise _registry_busy() from None
+        yield
+    finally:
+        if locked and os.name == "nt":
+            import msvcrt
+
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        os.close(fd)
+
+
 def _save_registry(root: Path, approved: list[dict], held: list[dict]) -> None:
+    """Replace the registry. Callers hold _registry_lock across their read, decision and this write."""
     root.mkdir(parents=True, exist_ok=True)
     _inspect_path(root, kind="registry root")
     path = root / REGISTRY_NAME
@@ -361,39 +425,54 @@ def confirm_target_for_setup(
     print("cluster answers there. Hold a server instead if it must never be contacted.")
     if ask(f"Type the database name {target.dbname!r} exactly to approve, or press Enter to cancel: ") != target.dbname:
         raise DatabaseTargetRefused(f"{target.describe()} was not approved. {_NO_CONTACT}")
-    approved.append(
-        {
-            "host": target.host,
-            "port": target.port,
-            "dbname": target.dbname,
-            "approved_at": datetime.now(timezone.utc).isoformat(),
-            "approved_by": approved_by,
-        }
-    )
-    _save_registry(root, approved, held)
+    # The prompt ran unlocked. Re-read and decide again under the lock so that a hold
+    # recorded meanwhile, by any process, refuses this approval and is never overwritten.
+    with _registry_lock(root):
+        approved, held = _load_registry(root)
+        if _held(target, held):
+            raise DatabaseTargetRefused(
+                f"{target.describe()} was held for this installation while its approval was pending; "
+                f"it was not approved. {_NO_CONTACT}"
+            )
+        if not _approved(target, approved):
+            approved.append(
+                {
+                    "host": target.host,
+                    "port": target.port,
+                    "dbname": target.dbname,
+                    "approved_at": datetime.now(timezone.utc).isoformat(),
+                    "approved_by": approved_by,
+                }
+            )
+            _save_registry(root, approved, held)
     print(f"Approved {target.describe()} for this installation.")
 
 
 def hold_target(host: str, port: int, *, reason: str, dbname: str | None = None) -> Path:
-    """Hold a whole database server for this installation. Holds are only ever added here, never removed."""
+    """Hold a database server for this installation. Holds are only ever added here, never removed.
+
+    The hold matches the host spelling given (lower-cased); the three loopback spellings
+    count as one server, but other names or addresses of the same machine are not covered.
+    """
     if not reason.strip():
         raise ValueError("A hold needs a reason")
     root = personal_release_root()
     if root is None:
         raise DatabaseTargetRefused("Database server holds apply only to the Windows personal release.")
     target = target_for(host, port, dbname or "-")
-    approved, held = _load_registry(root)
-    if not _held(target, held):
-        held.append(
-            {
-                "host": target.host,
-                "port": target.port,
-                "dbname": dbname,
-                "reason": reason.strip(),
-                "held_at": datetime.now(timezone.utc).isoformat(),
-            }
-        )
-        _save_registry(root, approved, held)
+    with _registry_lock(root):
+        approved, held = _load_registry(root)
+        if not _held(target, held):
+            held.append(
+                {
+                    "host": target.host,
+                    "port": target.port,
+                    "dbname": dbname,
+                    "reason": reason.strip(),
+                    "held_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+            _save_registry(root, approved, held)
     return root / REGISTRY_NAME
 
 
@@ -402,7 +481,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m vres_os.database_targets", description=main.__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("status")
-    hold = commands.add_parser("hold")
+    hold = commands.add_parser(
+        "hold",
+        help="add-only; covers the host spelling given (loopback spellings count as one server), not other aliases",
+    )
     hold.add_argument("--host", required=True)
     hold.add_argument("--port", required=True, type=int)
     hold.add_argument("--dbname")

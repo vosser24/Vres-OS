@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
+import threading
 from contextlib import contextmanager, nullcontext
 from importlib import resources
 from pathlib import Path
@@ -207,6 +209,8 @@ def test_ambiguous_connection_strings_are_refused_without_echoing_them(personal_
     [
         "{not json",
         json.dumps({"version": 2, "approved": [], "held": []}),
+        json.dumps({"version": True, "approved": [], "held": []}),
+        json.dumps({"version": 1.0, "approved": [], "held": []}),
         json.dumps({"version": 1, "approved": [], "held": [], "bypass": True}),
         json.dumps({"version": 1, "approved": [{"host": "localhost", "port": "5432", "dbname": "x",
                                                 "approved_at": "t", "approved_by": "t"}], "held": []}),
@@ -459,9 +463,9 @@ class _Cursor:
 class _LedgerConnection:
     """Scripted server: answers the migration catalog queries and records every statement."""
 
-    def __init__(self, *, schema=True, ledger=True, checksum_column=True, rows=(), objects=0):
+    def __init__(self, *, schema=True, ledger=True, checksum_column=True, rows=(), objects=0, database="vres_personal"):
         self.schema, self.ledger, self.checksum_column = schema, ledger, checksum_column
-        self.rows, self.objects, self.log = list(rows), objects, []
+        self.rows, self.objects, self.database, self.log = list(rows), objects, database, []
 
     def execute(self, sql, params=None):
         text = " ".join(str(sql).split())
@@ -474,6 +478,10 @@ class _LedgerConnection:
             return _Cursor(rows=[{"version": v, "checksum": c} for v, c in self.rows])
         if text.startswith("SELECT (SELECT count(*)"):
             return _Cursor({"n": self.objects})
+        if text.startswith("SELECT current_database()"):
+            return _Cursor({"name": self.database})
+        if text == "SELECT 1 FROM pg_namespace WHERE nspname='vres'":
+            return _Cursor({"present": 1} if self.schema else None)
         if "pg_get_userbyid(nspowner)" in text:
             return _Cursor({"owner": "vres_migrator"})
         if text.startswith("SELECT to_regclass("):
@@ -552,14 +560,27 @@ def test_mismatched_or_ambiguous_ledger_refuses_without_mutation(monkeypatch, ro
     _assert_read_only(preflight)
 
 
-def test_vres_objects_without_a_ledger_are_not_treated_as_empty(monkeypatch):
-    preflight = _LedgerConnection(ledger=False, objects=3)
+@pytest.mark.parametrize("objects", [3, 0], ids=["counted-objects", "no-counted-objects"])
+def test_existing_vres_schema_without_a_ledger_is_never_treated_as_empty(monkeypatch, objects):
+    """Object counts cannot inventory every PostgreSQL object type, so none is taken."""
+    preflight = _LedgerConnection(ledger=False, objects=objects)
     opened = _scripted(monkeypatch, _certified(), preflight)
 
-    with pytest.raises(MigrationDrift, match="no migration ledger"):
+    with pytest.raises(MigrationDrift, match="exists but has no migration ledger"):
         db.migrate()
 
     assert opened == [("migrator", False)]
+    _assert_read_only(preflight)
+    assert not [s for s in preflight.log if "count(*)" in s]
+
+
+def test_single_role_runtime_also_refuses_an_unledgered_schema(monkeypatch):
+    preflight = _LedgerConnection(schema=True, ledger=False)
+    _scripted(monkeypatch, VresConfig(), preflight)
+    monkeypatch.setattr(db, "_test_single_role_dsn", lambda: "approved disposable test target")
+
+    with pytest.raises(MigrationDrift, match="exists but has no migration ledger"):
+        db.migrate()
     _assert_read_only(preflight)
 
 
@@ -614,9 +635,10 @@ class _ScriptedDriver:
 
 
 def test_empty_approved_database_initializes_after_read_only_preflight(personal_root, monkeypatch):
+    """The state secure setup leaves in a new database: the schema with its empty ledger."""
     _configure(database="vres_personal_test")
     _registry(personal_root, approved=[("localhost", 5432, "vres_personal_test")])
-    preflight, locked = _LedgerConnection(ledger=False), _LedgerConnection(ledger=False)
+    preflight, locked = _LedgerConnection(), _LedgerConnection()
     driver = _ScriptedDriver(preflight, locked)
     monkeypatch.setattr(db, "_driver", lambda: driver)
     monkeypatch.setattr(db, "SecretStore", lambda: SimpleNamespace(get=lambda _key: "synthetic-migrator-password"))
@@ -628,10 +650,9 @@ def test_empty_approved_database_initializes_after_read_only_preflight(personal_
     assert all("dbname=vres_personal_test" in info and "user=vres_migrator" in info for info, _ in driver.conninfo)
     _assert_read_only(preflight)
     lock = locked.log.index("SELECT pg_advisory_lock(8675309001)")
-    first_ddl = next(i for i, s in enumerate(locked.log) if s.startswith("CREATE"))
+    first_ddl = next(i for i, s in enumerate(locked.log) if _MUTATION.search(s) and i != lock)
     assert lock == 0 and first_ddl > lock
-    assert locked.log[first_ddl].startswith("CREATE TABLE vres.schema_migrations")
-    assert "CREATE SCHEMA IF NOT EXISTS vres" not in locked.log
+    assert not [s for s in locked.log if s.startswith(("CREATE TABLE vres.schema_migrations", "CREATE SCHEMA"))]
 
 
 def test_single_role_test_database_bootstraps_its_schema_after_the_lock(monkeypatch):
@@ -785,3 +806,223 @@ def test_hold_and_status_never_contact_postgresql(personal_root, monkeypatch, ca
     assert "configured database 'vres_os' at localhost:5432: Vres refused" in out
     assert len(json.loads((personal_root / database_targets.REGISTRY_NAME).read_text())["held"]) == 1
     assert tripwires.secret_reads == []
+
+
+# I. Setup establishes migration compatibility before any provenance mutation
+
+_SCHEMA_048_LEDGER = [*_package_ledger(), ("048_source_effective_trust.sql", "f" * 64)]
+_ADMIN = "host=localhost port=5432 dbname=vres_personal user=postgres"
+
+
+class _AdminDriver:
+    """The administrator connection secure setup opens for the provenance role split."""
+
+    def __init__(self, conn):
+        self.conn, self.opened = conn, []
+
+    def connect(self, conninfo, **kwargs):
+        self.opened.append(kwargs.get("autocommit", False))
+        return self.conn
+
+
+def _mutations(conn: _LedgerConnection) -> list[str]:
+    return [s for s in conn.log if _MUTATION.search(s)]
+
+
+def _provenance_setup(monkeypatch, personal_root, conn, *, configured):
+    """Run secure setup up to the provenance step against a scripted administrator connection."""
+    cfg = _configure(boundary=False)
+    if not configured:
+        cfg.configured = False
+        ConfigStore().save(cfg)
+    _registry(personal_root, approved=[("localhost", 5432, "vres_personal")])
+    driver = _AdminDriver(conn)
+    vault = {cfg.database.password_key: "synthetic-runtime-credential"}
+    results, persisted = [], []
+    monkeypatch.setattr(database_boundary, "_driver", lambda: driver)
+    monkeypatch.setattr(bootstrap, "SecretStore", lambda: SimpleNamespace(
+        get=vault.get, set=vault.__setitem__, delete=lambda k: vault.pop(k, None)))
+    monkeypatch.setattr(bootstrap, "_ask", lambda _prompt, default: default)
+    monkeypatch.setattr(bootstrap, "_yes_no", lambda *_a: False)
+    monkeypatch.setattr(bootstrap.getpass, "getpass", lambda *_a: _SECRET)
+    monkeypatch.setattr(bootstrap, "_test_database", lambda **_kw: None)
+    monkeypatch.setattr(bootstrap, "_write_setup_result", lambda status, **kw: results.append((status, kw)))
+    monkeypatch.setattr(bootstrap, "persist_boundary_credentials", lambda *a, **kw: persisted.append(a))
+    monkeypatch.setattr(bootstrap, "migrate", lambda **_kw: pytest.fail("migrate reached after refusal"))
+    with pytest.raises(SystemExit) as exc:
+        bootstrap._interactive_setup()
+    assert exc.value.code == 2
+    assert persisted == [] and driver.opened == [True]
+    return results[-1]
+
+
+@pytest.mark.parametrize("configured", [True, False], ids=["boundary-upgrade", "existing-database-setup"])
+def test_unknown_schema_048_ledger_prevents_every_provenance_mutation_in_setup(personal_root, monkeypatch, configured):
+    conn = _LedgerConnection(rows=_SCHEMA_048_LEDGER, database="vres_personal")
+
+    status, detail = _provenance_setup(monkeypatch, personal_root, conn, configured=configured)
+
+    assert status == "failed"
+    error = str(detail["error"])
+    assert "absent from this package" in error and "048_source_effective_trust.sql" in error
+    assert conn.log[0] == "SET TRANSACTION READ ONLY"
+    assert _mutations(conn) == [], conn.log
+    assert not [s for s in conn.log if "pg_roles" in s]  # refused before even the role-name inventory
+
+
+def test_unknown_schema_048_ledger_prevents_provision_boundary_mutation(personal_root, monkeypatch):
+    cfg = _configure(boundary=False)
+    _registry(personal_root, approved=[("localhost", 5432, "vres_personal")])
+    conn = _LedgerConnection(rows=_SCHEMA_048_LEDGER, database="vres_personal")
+    monkeypatch.setattr(database_boundary, "_driver", lambda: _AdminDriver(conn))
+
+    with pytest.raises(MigrationDrift, match="absent from this package"):
+        database_boundary.provision_boundary(cfg, admin_dsn=_ADMIN)
+
+    assert conn.log[0] == "SET TRANSACTION READ ONLY"
+    assert _mutations(conn) == [], conn.log
+
+
+@pytest.mark.parametrize(
+    "conn,message",
+    [
+        (_LedgerConnection(database="postgres"), "could not confirm it is connected"),
+        (_LedgerConnection(database=None), "could not confirm it is connected"),
+        (_LedgerConnection(schema=True, ledger=False), "exists but has no migration ledger"),
+        (_LedgerConnection(rows=[("001_initial.sql", "0" * 64)]), "differs from package"),
+        (_LedgerConnection(rows=[("001_initial.sql", None)]), "no recorded checksum"),
+    ],
+    ids=["other-database", "unidentified-database", "unledgered-schema", "rewritten", "unrecorded"],
+)
+def test_setup_refuses_unidentified_or_incompatible_database_before_any_role_change(
+    personal_root, monkeypatch, conn, message
+):
+    cfg = _configure(boundary=False)
+    _registry(personal_root, approved=[("localhost", 5432, "vres_personal")])
+    monkeypatch.setattr(database_boundary, "_driver", lambda: _AdminDriver(conn))
+
+    with pytest.raises(MigrationDrift, match=message):
+        database_boundary.provision_boundary(cfg, admin_dsn=_ADMIN)
+
+    assert _mutations(conn) == [], conn.log
+
+
+def test_current_ledger_passes_the_preflight_and_is_rechecked_inside_the_ownership_transaction(
+    personal_root, monkeypatch
+):
+    cfg = _configure(boundary=False)
+    _registry(personal_root, approved=[("localhost", 5432, "vres_personal")])
+    conn = _LedgerConnection(rows=_package_ledger(22))
+    monkeypatch.setattr(database_boundary, "_driver", lambda: _AdminDriver(conn))
+
+    database_boundary.provision_boundary(cfg, admin_dsn=_ADMIN)
+
+    first_mutation = conn.log.index(_mutations(conn)[0])
+    assert conn.log[0] == "SET TRANSACTION READ ONLY"
+    assert conn.log.index("SELECT current_database() AS name") < first_mutation
+    assert "CREATE ROLE" in conn.log[first_mutation]
+    recheck = conn.log.index("SELECT current_database() AS name", first_mutation)
+    assert recheck < next(i for i, s in enumerate(conn.log) if "OWNER TO" in s or "REVOKE" in s)
+
+
+def test_genuinely_new_database_gets_its_ledger_with_its_schema(personal_root, monkeypatch):
+    cfg = _configure(boundary=False)
+    _registry(personal_root, approved=[("localhost", 5432, "vres_personal")])
+    conn = _LedgerConnection(schema=False, ledger=False)
+    monkeypatch.setattr(database_boundary, "_driver", lambda: _AdminDriver(conn))
+
+    database_boundary.provision_boundary(cfg, admin_dsn=_ADMIN)
+
+    schema = next(i for i, s in enumerate(conn.log) if "CREATE SCHEMA vres AUTHORIZATION" in s)
+    assert conn.log[schema + 1].startswith("CREATE TABLE vres.schema_migrations(")
+    assert "ALTER TABLE vres.schema_migrations OWNER TO" in conn.log[schema + 2]
+    assert "vres_runtime_migrator" in conn.log[schema + 2]
+
+
+# J. Registry changes are serialized; a hold always wins over an approval
+
+
+def test_hold_recorded_while_an_approval_is_pending_refuses_it_and_survives(personal_root, monkeypatch):
+    monkeypatch.setattr(database_targets, "_interactive", lambda: True)
+
+    def operator_types_name_while_another_process_holds_the_server(_prompt):
+        database_targets.hold_target("127.0.0.1", 5432, reason="schema-048 incident")
+        return "vres_personal"
+
+    with pytest.raises(DatabaseTargetRefused, match="held for this installation while its approval was pending"):
+        database_targets.confirm_target_for_setup(
+            "localhost", 5432, "vres_personal", ask=operator_types_name_while_another_process_holds_the_server
+        )
+
+    registry = json.loads((personal_root / database_targets.REGISTRY_NAME).read_text())
+    assert registry["approved"] == []
+    assert [(h["host"], h["port"]) for h in registry["held"]] == [("127.0.0.1", 5432)]
+
+
+def test_completed_approval_never_drops_a_hold_recorded_after_its_first_read(personal_root, monkeypatch):
+    monkeypatch.setattr(database_targets, "_interactive", lambda: True)
+
+    def concurrent_hold_on_another_server(_prompt):
+        database_targets.hold_target("db.example.internal", 5432, reason="schema-048 incident")
+        return "vres_personal"
+
+    database_targets.confirm_target_for_setup("localhost", 5432, "vres_personal", ask=concurrent_hold_on_another_server)
+
+    registry = json.loads((personal_root / database_targets.REGISTRY_NAME).read_text())
+    assert [(a["host"], a["dbname"]) for a in registry["approved"]] == [("localhost", "vres_personal")]
+    assert [h["host"] for h in registry["held"]] == ["db.example.internal"]
+    with pytest.raises(DatabaseTargetRefused, match="held"):
+        database_targets.require_contact("host=db.example.internal port=5432 dbname=anything")
+
+
+def test_registry_lock_serializes_a_hold_behind_another_process(personal_root, monkeypatch):
+    monkeypatch.setenv("PYTHONPATH", str(Path(__file__).parents[1] / "src"))
+    script = (
+        "import sys\nfrom pathlib import Path\nfrom vres_os.database_targets import _registry_lock\n"
+        "with _registry_lock(Path(sys.argv[1])):\n    print('locked', flush=True)\n    sys.stdin.readline()\n"
+    )
+    holder = subprocess.Popen(
+        [sys.executable, "-c", script, str(personal_root)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True
+    )
+    try:
+        assert holder.stdout.readline().strip() == "locked"
+        done = threading.Event()
+        worker = threading.Thread(
+            target=lambda: (database_targets.hold_target("localhost", 5432, reason="incident"), done.set())
+        )
+        worker.start()
+        assert not done.wait(0.5), "the hold was written while another process held the registry lock"
+        holder.stdin.write("\n")
+        holder.stdin.flush()
+        worker.join(15)
+        assert done.is_set()
+    finally:
+        holder.stdin.close()
+        holder.wait(10)
+    held = json.loads((personal_root / database_targets.REGISTRY_NAME).read_text())["held"]
+    assert [(h["host"], h["port"]) for h in held] == [("localhost", 5432)]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="msvcrt byte-range lock")
+def test_unobtainable_registry_lock_records_nothing(personal_root, monkeypatch):
+    import msvcrt
+
+    def busy(_fd, mode, _n):
+        if mode != msvcrt.LK_UNLCK:
+            raise OSError("locked by another process")
+
+    monkeypatch.setattr(msvcrt, "locking", busy)
+
+    with pytest.raises(DatabaseTargetRefused, match="could not lock"):
+        database_targets.hold_target("localhost", 5432, reason="incident")
+    assert not (personal_root / database_targets.REGISTRY_NAME).exists()
+
+
+@pytest.mark.parametrize("host", ["127.0.0.2", "my-workstation", "192.168.1.20"])
+def test_loopback_hold_covers_only_the_recognized_spellings(personal_root, host):
+    """Documented limitation: other names or addresses of this machine are distinct targets to the guard."""
+    _registry(personal_root, approved=[(host, 5432, "vres_personal")], held=[("localhost", 5432)])
+
+    database_targets.require_contact(f"host={host} port=5432 dbname=vres_personal")
+    with pytest.raises(DatabaseTargetRefused, match="held"):
+        database_targets.require_contact("host=::1 port=5432 dbname=vres_personal")

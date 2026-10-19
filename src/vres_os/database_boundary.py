@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from .config import ConfigStore, VresConfig
 from .database_targets import require_admin_contact
-from .db import _driver
+from .db import MIGRATION_LEDGER_DDL, _driver, require_setup_compatibility
 from .secrets import SecretStore
 
 BOUNDARY_VERSION = 1
@@ -93,8 +93,14 @@ def _transfer_vres_ownership(conn, *, new_owner: str) -> None:
 
     schema = conn.execute("SELECT 1 FROM pg_namespace WHERE nspname='vres'").fetchone()
     if not schema:
+        # A new schema gets its (empty) migration ledger at once: a vres schema without a
+        # ledger is never classified as empty by the migration preflight.
         conn.execute(
             sql.SQL("CREATE SCHEMA vres AUTHORIZATION {}").format(sql.Identifier(new_owner))
+        )
+        conn.execute(MIGRATION_LEDGER_DDL)
+        conn.execute(
+            sql.SQL("ALTER TABLE vres.schema_migrations OWNER TO {}").format(sql.Identifier(new_owner))
         )
         return
 
@@ -166,7 +172,12 @@ def provision_boundary(
     admin_password: str | None = None,
     admin_dsn: str | None = None,
 ) -> BoundaryCredentials:
-    """Create isolated writer/migration roles and transfer only Vres-owned objects."""
+    """Create isolated writer/migration roles and transfer only Vres-owned objects.
+
+    The target database must first pass a read-only compatibility preflight on the same
+    administrator connection: an incompatible or unidentifiable database is refused before
+    any role, ownership or grant change.
+    """
     from psycopg import sql
     from psycopg.rows import dict_row
 
@@ -183,6 +194,7 @@ def provision_boundary(
 
     require_admin_contact(admin_dsn, cfg.database.database)
     with _driver().connect(admin_dsn, autocommit=True, row_factory=dict_row) as conn:
+        require_setup_compatibility(conn, database=cfg.database.database)
         existing = conn.execute(
             "SELECT rolname FROM pg_roles WHERE rolname=ANY(%s)",
             ([writer_user, migration_user],),
@@ -202,6 +214,8 @@ def provision_boundary(
         )
         try:
             with conn.transaction():
+                # Repeated inside the ownership transaction: metadata may not change after the preflight.
+                require_setup_compatibility(conn, database=cfg.database.database, within_transaction=True)
                 _transfer_vres_ownership(conn, new_owner=migration_user)
                 conn.execute(sql.SQL("REVOKE CREATE ON SCHEMA vres FROM PUBLIC"))
                 conn.execute(

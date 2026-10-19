@@ -162,13 +162,26 @@ def _ensure_vres_schema_for_migration(conn, cfg, *, purpose: str, schema_present
         )
 
 
+MIGRATION_LEDGER_DDL = """
+CREATE TABLE vres.schema_migrations(
+  version text PRIMARY KEY,
+  checksum text,
+  applied_at timestamptz NOT NULL DEFAULT now()
+)
+"""
+
+
 @dataclass(frozen=True, slots=True)
 class _LedgerState:
     schema_present: bool
     ledger_present: bool
     checksum_column: bool
-    unledgered_objects: int
     applied: dict[str, str | None]
+
+
+def _migration_package():
+    migration_root = resources.files("vres_os").joinpath("migrations")
+    return migration_root, sorted(p.name for p in migration_root.iterdir() if p.name.endswith(".sql"))
 
 
 def _inspect_ledger(conn) -> _LedgerState:
@@ -181,14 +194,7 @@ def _inspect_ledger(conn) -> _LedgerState:
     if type(schema_present) is not bool or type(ledger_present) is not bool:
         raise MigrationDrift("Migration metadata could not be inspected unambiguously; refusing to migrate.")
     if not ledger_present:
-        objects = 0
-        if schema_present:
-            objects = conn.execute(
-                "SELECT (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
-                "WHERE n.nspname='vres') + (SELECT count(*) FROM pg_proc p JOIN pg_namespace n "
-                "ON n.oid=p.pronamespace WHERE n.nspname='vres') AS n"
-            ).fetchone()["n"]
-        return _LedgerState(schema_present, False, False, int(objects), {})
+        return _LedgerState(schema_present, False, False, {})
     checksum_column = conn.execute(
         "SELECT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid='vres.schema_migrations'::regclass "
         "AND attname='checksum' AND NOT attisdropped) AS present"
@@ -204,7 +210,7 @@ def _inspect_ledger(conn) -> _LedgerState:
         if type(version) is not str or not (checksum is None or type(checksum) is str) or version in applied:
             raise MigrationDrift("The migration ledger contains ambiguous rows; refusing to migrate.")
         applied[version] = checksum
-    return _LedgerState(schema_present, True, bool(checksum_column), 0, applied)
+    return _LedgerState(schema_present, True, bool(checksum_column), applied)
 
 
 def _check_ledger(
@@ -215,10 +221,15 @@ def _check_ledger(
     adopt_legacy_checksums: bool,
     boundary_upgrade_required: bool,
 ) -> None:
-    """Refuse a ledger this package cannot account for. A missing ledger is safe only on an empty schema."""
-    if not state.ledger_present and state.unledgered_objects:
+    """Refuse a ledger this package cannot account for. A missing ledger is safe only without a vres schema.
+
+    A catalog object count cannot inventory every PostgreSQL object type a schema can hold,
+    so an existing vres schema without a ledger is never classified as empty. Setup creates
+    the ledger together with the schema, so a genuinely new database never reaches this state.
+    """
+    if state.schema_present and not state.ledger_present:
         raise MigrationDrift(
-            "The vres schema contains objects but no migration ledger; refusing to guess its version. "
+            "The vres schema exists but has no migration ledger; refusing to guess its contents or version. "
             "Restore the matching release or a verified backup."
         )
     done = state.applied
@@ -247,6 +258,31 @@ def _require_unchanged_history(before: _LedgerState, after: _LedgerState) -> Non
         )
 
 
+def require_setup_compatibility(conn, *, database: str, within_transaction: bool = False) -> None:
+    """Fail-closed read-only preflight on an open setup connection, before any role or grant change.
+
+    Confirms that the connection reached the configured database name and that this
+    package can account for its migration metadata, as migrate() would require. A
+    database name is not a PostgreSQL cluster identity; it only rules out a connection
+    that landed in a different database. Anything uncertain raises before mutation.
+    within_transaction repeats the same SELECT-only checks inside a caller's open transaction.
+    """
+    if within_transaction:
+        row = conn.execute("SELECT current_database() AS name").fetchone()
+        state = _inspect_ledger(conn)
+    else:
+        with conn.transaction():
+            conn.execute("SET TRANSACTION READ ONLY")
+            row = conn.execute("SELECT current_database() AS name").fetchone()
+            state = _inspect_ledger(conn)
+    if row is None or type(row["name"]) is not str or row["name"] != database:
+        raise MigrationDrift(
+            f"Setup could not confirm it is connected to database {database!r}; refusing to change roles or grants."
+        )
+    migration_root, names = _migration_package()
+    _check_ledger(state, migration_root, names, adopt_legacy_checksums=False, boundary_upgrade_required=False)
+
+
 def migrate(*, adopt_legacy_checksums: bool = False) -> list[str]:
     """Apply immutable SQL migrations and detect edits to already-applied files.
 
@@ -258,8 +294,7 @@ def migrate(*, adopt_legacy_checksums: bool = False) -> list[str]:
     test_single_role = _test_single_role_dsn() is not None
     has_migrator_identity = bool(cfg.database.migration_user)
     purpose = "migrator" if has_migrator_identity and not test_single_role else "runtime"
-    migration_root = resources.files("vres_os").joinpath("migrations")
-    names = sorted(p.name for p in migration_root.iterdir() if p.name.endswith(".sql"))
+    migration_root, names = _migration_package()
     checks = {
         "adopt_legacy_checksums": adopt_legacy_checksums,
         "boundary_upgrade_required": not has_migrator_identity and not test_single_role,
@@ -276,15 +311,7 @@ def migrate(*, adopt_legacy_checksums: bool = False) -> list[str]:
         _check_ledger(current, migration_root, names, **checks)
         _ensure_vres_schema_for_migration(conn, cfg, purpose=purpose, schema_present=current.schema_present)
         if not current.ledger_present:
-            conn.execute(
-                """
-                CREATE TABLE vres.schema_migrations(
-                  version text PRIMARY KEY,
-                  checksum text,
-                  applied_at timestamptz NOT NULL DEFAULT now()
-                )
-                """
-            )
+            conn.execute(MIGRATION_LEDGER_DDL)
         elif not current.checksum_column:
             conn.execute("ALTER TABLE vres.schema_migrations ADD COLUMN checksum text")
         done = current.applied
