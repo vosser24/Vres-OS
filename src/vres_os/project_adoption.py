@@ -13,9 +13,10 @@ the project. Vres never copies legacy content into its own instructions or promo
 Claude Code acts on these files at their original paths, so a label cannot make them inert.
 Each item is classified by its effect, and the classification limits what can be decided:
 - executable: hooks, settings that run commands, load MCP servers or loosen tool
-  permissions, MCP server definitions, scripts under .claude/, and skills or commands that
-  run shell commands (inline !`...` or fenced ```! blocks) or grant tools through
-  allowed-tools frontmatter. These can only be deactivated (DROP removes them from the
+  permissions, MCP server definitions, scripts under .claude/, skills or commands that run
+  shell commands (inline !`...` or fenced ```! blocks), and skills, commands or subagents
+  whose frontmatter declares hooks, mcpServers, allowed-tools or shell, or a permissionMode
+  other than default/plan. These can only be deactivated (DROP removes them from the
   project; their exact bytes stay in the snapshot and rollback can restore them).
 - active: any other project settings Claude Code applies, such as env values or model
   choice. These can also only be deactivated.
@@ -86,9 +87,14 @@ _INJECTION = re.compile(
 _COMMAND_SETTINGS = {"hooks", "statusLine", "apiKeyHelper", "awsAuthRefresh", "awsCredentialExport",
                      "otelHeadersHelper", "enableAllProjectMcpServers", "enabledMcpjsonServers"}
 _SCRIPT_SUFFIXES = {".ps1", ".psm1", ".sh", ".bash", ".py", ".js", ".mjs", ".cjs", ".ts", ".bat", ".cmd", ".exe"}
-# Skill/command mechanisms that execute or authorize: inline !`cmd`, fenced ```! blocks, allowed-tools frontmatter.
+# Skill/command bodies that run shell commands when invoked: inline !`cmd` and fenced ```! blocks.
 _DYNAMIC_COMMAND = re.compile(r"!`[^`\n]+`|^\s*(```|~~~)!", re.M)
-_ALLOWED_TOOLS = re.compile(r"^allowed[-_]tools\s*:\s*\S", re.M | re.I)
+# Top-level frontmatter keys (column 0), whatever YAML value style follows: scalar, flow or block/list.
+_FRONTMATTER_KEY = re.compile(r"^([A-Za-z_][\w-]*)[ \t]*:(.*)$", re.M)
+# Skill, command and subagent fields that run code, start MCP servers, grant tools or choose a shell.
+# Normalized without '-'/'_' and lower-cased, so allowed-tools, allowed_tools and allowedTools all match.
+_EXECUTING_FIELDS = {"hooks", "allowedtools", "mcpservers", "shell"}
+_SAFE_PERMISSION_MODES = {"default", "plan"}
 _INERT_SETTINGS = {"$schema"}
 Authority = Callable[[str], dict[str, Any]]
 
@@ -309,6 +315,24 @@ def _frontmatter(text: str) -> str:
     return body[3:end] if end >= 0 else body[3:]
 
 
+def _executing_frontmatter(front: str) -> bool:
+    """True when frontmatter would run code, start MCP servers, grant tools or relax permissions.
+
+    A deliberately small check of top-level keys, not a YAML parser: the presence of an
+    executing field counts whatever value follows it, and a permissionMode other than
+    default/plan counts too, including an empty or block value that cannot be read inline.
+    """
+    for match in _FRONTMATTER_KEY.finditer(front):
+        key = re.sub(r"[-_]", "", match.group(1)).lower()
+        if key in _EXECUTING_FIELDS:
+            return True
+        if key == "permissionmode":
+            value = match.group(2).split("#", 1)[0].strip().strip("'\"").lower()
+            if value not in _SAFE_PERMISSION_MODES:
+                return True
+    return False
+
+
 def _risk(rel: str, kind: str, text: str | None, parsed: Any) -> str:
     """executable, conflicting, instructions or inert, by what Claude would do with the file."""
     suffix = PurePosixPath(rel).suffix.lower()
@@ -327,10 +351,10 @@ def _risk(rel: str, kind: str, text: str | None, parsed: Any) -> str:
         return "inert"
     if kind == "mcp":
         return "executable"
-    if kind in {"command", "skill"} and text is not None and (
-        _DYNAMIC_COMMAND.search(text) or _ALLOWED_TOOLS.search(_frontmatter(text))
-    ):
-        return "executable"  # runs shell commands when invoked, or grants tools (detected, never run)
+    if kind in {"command", "skill"} and text is not None and _DYNAMIC_COMMAND.search(text):
+        return "executable"  # runs shell commands when invoked (detected from text, never run)
+    if kind in {"command", "skill", "agent"} and text is not None and _executing_frontmatter(_frontmatter(text)):
+        return "executable"  # hooks, MCP servers, granted tools, shell choice or relaxed permission mode
     if text is not None and _INJECTION.search(text):
         return "conflicting"
     return "instructions" if kind in {"instructions", "agent", "command", "skill"} else "inert"

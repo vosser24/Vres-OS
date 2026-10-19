@@ -657,3 +657,67 @@ def test_unreadable_dot_claude_directory_refuses_the_inventory(tmp_path, data_ro
 
     with pytest.raises(AdoptionError, match="could not be read completely"):
         project_adoption.start(project, data_root=data_root)
+
+
+# Frontmatter closure: hooks, MCP servers and permission modes in skills, commands and subagents
+
+_MARKER = "vres-p2d-hook-ran.txt"
+_FRONTMATTER_CASES = {
+    "skill-hooks": (".claude/skills/lint/SKILL.md",
+                    "---\nname: lint\ndescription: Lint the code\nhooks:\n  PostToolUse:\n    - matcher: Edit\n"
+                    f"      hooks:\n        - type: command\n          command: New-Item {_MARKER}\n---\nRun lint.\n"),
+    "agent-hooks": (".claude/agents/builder.md",
+                    "---\nname: builder\ndescription: Builds things\nhooks:\n  Stop:\n    - hooks:\n"
+                    f"        - type: command\n          command: echo ran > {_MARKER}\n---\nYou build things.\n"),
+    "agent-mcp-servers": (".claude/agents/browser.md",
+                          "---\nname: browser\nmcpServers:\n  - playwright\n---\nBrowse the web.\n"),
+    "agent-inline-mcp": (".claude/agents/db.md", "---\nname: db\nmcp_servers: [postgres]\n---\nQuery data.\n"),
+    "agent-bypass": (".claude/agents/fixer.md",
+                     "---\r\nname: fixer\r\npermissionMode: \"bypassPermissions\"\r\n---\r\nFix everything.\r\n"),
+    "agent-accept-edits": (".claude/agents/editor.md", "---\nname: editor\npermissionMode: acceptEdits\n---\nEdit.\n"),
+    "agent-unreadable-mode": (".claude/agents/odd.md", "---\nname: odd\npermissionMode:\n  - auto\n---\nOdd.\n"),
+    "skill-block-allowed-tools": (".claude/skills/push/SKILL.md",
+                                  "---\nname: push\nallowed-tools:\n  - Bash(git push:*)\n---\nPush.\n"),
+    "command-shell": (".claude/commands/ps.md", "---\nshell: powershell\n---\nRun it.\n"),
+}
+
+
+@pytest.mark.parametrize("case", sorted(_FRONTMATTER_CASES))
+def test_execution_or_permission_frontmatter_is_never_keepable(tmp_path, data_root, case):
+    rel, text = _FRONTMATTER_CASES[case]
+    project = _project(tmp_path / "legacy")
+    (project.root / rel).parent.mkdir(parents=True)
+    (project.root / rel).write_bytes(text.encode("utf-8"))
+    before = _tree(project.root)
+
+    state = project_adoption.start(project, data_root=data_root)
+
+    item = state["items"][0]
+    assert item["risk"] == "executable" and set(item["options"]) == {"DROP"}
+    with pytest.raises(AdoptionError, match="can only be: DROP"):
+        project_adoption.decide(project, item["number"], "KEEP", authority=_yes, data_root=data_root)
+    assert _tree(project.root) == before  # nothing executed, modified or created (no hook marker)
+    assert not (project.root / _MARKER).exists() and not (Path.cwd() / _MARKER).exists()
+
+
+@pytest.mark.parametrize(
+    "rel,text",
+    [
+        (".claude/agents/reviewer.md",
+         "---\nname: reviewer\ndescription: 'Reviews code; never uses hooks: or mcpServers'\ntools: Read, Grep, Glob\n"
+         "model: sonnet\ncolor: blue\npermissionMode: plan\n---\nReview carefully.\n"),
+        (".claude/agents/plain.md", "---\nname: plain\npermissionMode: default # explicit\n---\nHelp.\n"),
+        (".claude/skills/style/SKILL.md",
+         "---\nname: style\ndescription: House style\nwhen_to_use: when writing code\n---\n"
+         "Keep functions short. Mention `hooks:` in prose only.\n"),
+    ],
+    ids=["agent-descriptive", "agent-default-mode", "skill-descriptive"],
+)
+def test_descriptive_skill_and_agent_frontmatter_keeps_keep_or_drop(tmp_path, data_root, rel, text):
+    project = _project(tmp_path / "legacy")
+    (project.root / rel).parent.mkdir(parents=True)
+    (project.root / rel).write_text(text, encoding="utf-8")
+
+    item = project_adoption.start(project, data_root=data_root)["items"][0]
+
+    assert item["risk"] == "instructions" and set(item["options"]) == {"KEEP", "DROP"}
