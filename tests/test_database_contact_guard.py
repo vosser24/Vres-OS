@@ -669,10 +669,17 @@ def test_single_role_test_database_bootstraps_its_schema_after_the_lock(monkeypa
 # G. Startup against a held target
 
 
-def test_start_against_held_target_returns_sanitized_refusal(personal_root, tripwires, monkeypatch):
+def test_start_against_held_target_returns_sanitized_refusal(personal_root, tripwires, monkeypatch, tmp_path):
+    from vres_os.project import ProjectIdentity
+
     _configure(database="vres_os")
     _registry(personal_root, held=[("localhost", 5432)])
-    monkeypatch.setattr(bootstrap, "discover_project", lambda *_a: pytest.fail("project touched after refusal"))
+    # P2-D: file-only project adoption runs before any database step, so an eligible (fresh) project is
+    # discovered first; registration must still never be reached after the database refusal.
+    (tmp_path / "eligible").mkdir()
+    project = ProjectIdentity(tmp_path / "eligible", "project:held-target", "eligible", None, None)
+    monkeypatch.setattr(bootstrap, "discover_project", lambda *_a: project)
+    monkeypatch.setattr(bootstrap, "Repository", lambda: pytest.fail("project registered after refusal"))
 
     result = bootstrap.start_for_project(".")
 

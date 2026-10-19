@@ -205,17 +205,24 @@ This crash-recovery procedure is a live verification gate. It is tested offline 
 When you say `start vres` in a project:
 
 - **Fresh project (no Claude configuration):** Vres writes one root `CLAUDE.md` containing only facts it can verify from the project's files: its type, plus build/test/lint commands found in `package.json` scripts, pytest or ruff configuration, `Cargo.toml`, `go.mod`, a .NET solution or a `Makefile`. Anything else is marked "unknown". No other files or folders are created, and a later start rewrites nothing.
-- **Existing project:** Vres inventories its `CLAUDE.md` files, `CLAUDE.local.md`, `AGENTS.md`, `.mcp.json` and everything under `.claude\` without running anything and without changing the project.
-  - Secret-looking files are never opened.
-  - Files containing secrets are not copied and can only be kept.
+- **Existing project: review it before you launch Claude Code there.** Claude Code loads a project's `.claude\settings.json` (including hooks, permissions and MCP settings), its `.mcp.json` and its `CLAUDE.md` files at launch, before Vres can review them. Opening the project in Claude first may therefore already run its hooks. From a local terminal, run `vres project inventory --path <project folder>` first. It inventories the `CLAUDE.md` files, `CLAUDE.local.md`, `AGENTS.md`, `.mcp.json` and everything under `.claude\` without running anything and without changing the project.
+  - Secret-looking files are never opened, and files containing secrets are never copied.
   - Everything else is snapshotted in `%LOCALAPPDATA%\VresOS\projects\`.
   - Legacy instructions remain untrusted project context; Vres never adopts them as its own rules.
-- **Reviewing and activating:** in a local terminal inside the project, run `vres project status` to see the numbered items, then decide each one with `vres project decide <number> keep|drop` (you type a confirmation). Then run `vres project activate`.
-  - Activation needs a decision for every item of the current inventory. If the configuration changes afterwards, earlier decisions are void.
+- **What each item allows.** Each numbered item is classified by what Claude would do with it:
+  - **Executable:** hooks, settings that run commands, start MCP servers or loosen tool permissions, MCP server files, and scripts or shell-running commands under `.claude\`. These can only be dropped, because keeping them would leave them active.
+  - **Conflicting:** instructions with wording that overrides or bypasses governance. These can also only be dropped.
+  - **Instructions:** other instruction, agent, command and skill text. These can be kept, but a kept file stays active and Claude keeps reading it next to the Vres rules. Vres does not make it safe.
+  - **Manual review:** a file Vres cannot safely deactivate. Examples are executable configuration mixed with secrets, a link, an unreadable file or an oversized file. These block activation and are never deleted to force it; fix them by hand, then run `vres project inventory` again.
+- **Deciding and activating:** in a local terminal inside the project, run `vres project status`, decide each item with `vres project decide <number> keep|drop` (you type a confirmation), then run `vres project activate`.
+  - Activation needs no blockers and a decision for every other item of the current inventory. If the configuration changes afterwards, earlier decisions are void.
   - It only removes dropped items, and writes a Vres `CLAUDE.md` only if no root `CLAUDE.md` remains.
-  - It keeps exact pre-images and a journal. A failure restores the previous bytes, and an interruption shows `recovery_required` until `vres project recover` is run.
+  - It keeps exact pre-images, expected results and a journal. A failure restores the previous bytes.
+  - An interruption shows `recovery_required` until `vres project recover` is run. That command restores a file only if it is still exactly as the activation left it or as it was before; a file you created or edited in the meantime is never overwritten.
   - `vres project rollback` restores the pre-activation bytes, unless the affected files changed since.
+- **Status in Claude:** until the project is active, `start vres` reports `PROJECT_REVIEW_REQUIRED` or `PROJECT_RECOVERY_REQUIRED`. It does not register the project, run setup or migrate, and never reports it as ready.
 - **Not covered:** adoption does not configure the database or credentials; Vres setup and database approval remain separate.
+- **Backups:** the adoption snapshots, decisions and journals in `%LOCALAPPDATA%\VresOS\projects\` are not yet part of `vres recovery state-backup`.
 
 ## 9a. Backup and restore
 

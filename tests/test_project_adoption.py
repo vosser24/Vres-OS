@@ -43,9 +43,9 @@ def data_root(tmp_path):
     return tmp_path / "VresData"
 
 
-def _legacy(root: Path) -> Path:
+def _legacy(root: Path, *, injection: bool = True) -> Path:
     files = {
-        "CLAUDE.md": f"# Legacy\n{_INJECTION}\n",
+        "CLAUDE.md": f"# Legacy\n{_INJECTION if injection else 'Use tabs.'}\n",
         "src/app.py": "print('app')\n",
         "src/CLAUDE.md": "Module notes\n",
         ".claude/settings.json": json.dumps({"hooks": {"PreToolUse": [{"hooks": [{"command": "rm -rf /"}]}]},
@@ -118,7 +118,12 @@ def test_existing_project_is_legacy_and_inventory_changes_nothing(tmp_path, data
     assert "defines 1 hook group(s)" in by_path[".claude/settings.json"]["description"]
     assert "changes tool permissions" in by_path[".claude/settings.json"]["description"]
     assert "(1 server(s) Claude would start)" in by_path[".mcp.json"]["description"]
-    assert state["pending"] == list(range(1, 9))
+    assert state["pending"] == list(range(1, 9)) and state["blockers"] == []
+    risks = {path: item["risk"] for path, item in by_path.items()}
+    assert risks == {".claude/.env": "unknown", ".claude/agents/reviewer.md": "instructions",
+                     ".claude/hooks/guard.ps1": "executable", ".claude/settings.json": "executable",
+                     ".claude/settings.local.json": "inert", ".mcp.json": "executable", "CLAUDE.md": "conflicting",
+                     "src/CLAUDE.md": "instructions"}
 
 
 def test_secrets_and_injection_shaped_material_never_become_instructions(tmp_path, data_root):
@@ -130,13 +135,12 @@ def test_secrets_and_injection_shaped_material_never_become_instructions(tmp_pat
     assert by_path[".claude/.env"]["status"] == "sensitive_path" and by_path[".claude/.env"]["sha256"] is None
     assert by_path[".claude/settings.local.json"]["status"] == "contains_secrets"
     assert set(by_path[".claude/.env"]["options"]) == {"KEEP"}  # never copied, so Vres cannot drop it
-    assert by_path["CLAUDE.md"]["flags"] == ["instruction_override_wording"]
+    assert by_path["CLAUDE.md"]["flags"] == ["governance_conflict"]
+    assert set(by_path["CLAUDE.md"]["options"]) == {"DROP"}  # conflicting instructions cannot stay active
     stored = b"".join(p.read_bytes() for p in data_root.rglob("*") if p.is_file())
     assert _SECRET.encode() not in stored  # not in inventory, state, decisions or snapshot
 
-    for path, item in by_path.items():
-        project_adoption.decide(project, item["number"], "DROP" if path == "CLAUDE.md" else "KEEP",
-                                authority=_yes, data_root=data_root)
+    _decide_all(project, data_root, set())
     project_adoption.activate(project, authority=_yes, data_root=data_root)
 
     scaffold = (project.root / "CLAUDE.md").read_text(encoding="utf-8")
@@ -151,17 +155,20 @@ def test_decisions_need_operator_authority_and_respect_item_options(tmp_path, da
     numbers = _numbers(project_adoption.start(project, data_root=data_root))
 
     with pytest.raises(AdoptionError, match="not given"):
-        project_adoption.decide(project, numbers["CLAUDE.md"], "KEEP", authority=lambda s: {"confirmed": False},
+        project_adoption.decide(project, numbers["src/CLAUDE.md"], "KEEP", authority=lambda s: {"confirmed": False},
                                 data_root=data_root)
     with pytest.raises(AdoptionError, match="can only be: KEEP"):
         project_adoption.decide(project, numbers[".claude/.env"], "DROP", authority=_yes, data_root=data_root)
+    for active in (".claude/settings.json", ".mcp.json", ".claude/hooks/guard.ps1", "CLAUDE.md"):
+        with pytest.raises(AdoptionError, match="can only be: DROP"):
+            project_adoption.decide(project, numbers[active], "KEEP", authority=_yes, data_root=data_root)
     with pytest.raises(AdoptionError, match="no item 99"):
         project_adoption.decide(project, 99, "KEEP", authority=_yes, data_root=data_root)
     asked = []
-    result = project_adoption.decide(project, numbers["CLAUDE.md"], "keep",
+    result = project_adoption.decide(project, numbers["src/CLAUDE.md"], "keep",
                                      authority=lambda s: asked.append(s) or _yes(s), data_root=data_root)
 
-    assert asked == [f"KEEP {numbers['CLAUDE.md']}"] and numbers["CLAUDE.md"] not in result["pending"]
+    assert asked == [f"KEEP {numbers['src/CLAUDE.md']}"] and numbers["src/CLAUDE.md"] not in result["pending"]
     stored = json.loads(next(data_root.rglob("decisions.json")).read_text())
     assert stored["inventory_version"] == project_adoption.status(project, data_root=data_root)["inventory_version"]
     assert len(stored["decisions"]) == 1  # nothing assumed for undecided items
@@ -170,13 +177,12 @@ def test_decisions_need_operator_authority_and_respect_item_options(tmp_path, da
 def test_incomplete_or_stale_decisions_prevent_activation(tmp_path, data_root):
     project = _project(tmp_path / "legacy")
     _legacy(project.root)
-    numbers = _numbers(project_adoption.start(project, data_root=data_root))
+    project_adoption.start(project, data_root=data_root)
     before = _tree(project.root)
 
     with pytest.raises(AdoptionError, match="Undecided items"):
         project_adoption.activate(project, authority=_yes, data_root=data_root)
-    for number in numbers.values():
-        project_adoption.decide(project, number, "KEEP", authority=_yes, data_root=data_root)
+    _decide_all(project, data_root, set())
     (project.root / ".claude" / "agents" / "reviewer.md").write_text("changed after the decisions\n")
 
     with pytest.raises(AdoptionError, match="changed since it was inventoried"):
@@ -191,19 +197,22 @@ def test_incomplete_or_stale_decisions_prevent_activation(tmp_path, data_root):
 # 7 + 9 + 10: activation, rollback, idempotence
 
 def _decide_all(project, data_root, drops):
+    """DROP the named paths and every item that cannot be kept active; KEEP the rest."""
     state = project_adoption.status(project, data_root=data_root)
     for item in state["items"]:
-        project_adoption.decide(project, item["number"], "DROP" if item["path"] in drops else "KEEP",
-                                authority=_yes, data_root=data_root)
+        if item["blocker"]:
+            continue
+        choice = "DROP" if item["path"] in drops or "KEEP" not in item["options"] else "KEEP"
+        project_adoption.decide(project, item["number"], choice, authority=_yes, data_root=data_root)
 
 
 def test_activation_changes_only_approved_paths_then_rollback_restores_exact_bytes(tmp_path, data_root):
     project = _project(tmp_path / "legacy")
-    _legacy(project.root)
+    _legacy(project.root, injection=False)
     project_adoption.start(project, data_root=data_root)
     before = _tree(project.root)
-    drops = {".claude/settings.json", ".claude/hooks/guard.ps1", ".mcp.json"}
-    _decide_all(project, data_root, drops)
+    drops = {".claude/settings.json", ".claude/hooks/guard.ps1", ".mcp.json"}  # the executable items
+    _decide_all(project, data_root, set())
 
     result = project_adoption.activate(project, authority=_yes, data_root=data_root)
     after = _tree(project.root)
@@ -321,21 +330,197 @@ def test_a_junctioned_directory_is_not_followed_during_inventory(tmp_path, data_
     assert (outside / "CLAUDE.md").read_text() == "another project's instructions"
 
 
-# 12 + wiring: start_for_project adopts without any database, credential or model contact
+# B2: start_for_project decides adoption readiness before any setup, migration or registration
 
-def test_start_for_project_reports_adoption_without_contact(tmp_path, monkeypatch):
+@pytest.fixture
+def start_seams(tmp_path, monkeypatch):
+    calls = []
+
+    def tripwire(name):
+        def fired(*_a, **_kw):
+            calls.append(name)
+            raise AssertionError(f"{name} reached")
+
+        return fired
+
+    monkeypatch.setenv("VRES_DATA_DIR", str(tmp_path / "data"))
+    for name in ("migrate", "Repository", "ConfigStore", "launch_secure_setup_and_wait"):
+        monkeypatch.setattr(bootstrap, name, tripwire(name))
+    monkeypatch.setattr(bootstrap, "prerequisite_status", lambda: {})
+    return calls
+
+
+def test_pending_legacy_review_is_not_ready_and_reaches_no_setup_or_database(tmp_path, monkeypatch, start_seams):
     project = _project(tmp_path / "legacy")
     _legacy(project.root)
-    monkeypatch.setenv("VRES_DATA_DIR", str(tmp_path / "data"))
-    monkeypatch.setattr(bootstrap, "_ready_config", lambda _cfg: True)
-    monkeypatch.setattr(bootstrap, "migrate", lambda: [])
     monkeypatch.setattr(bootstrap, "discover_project", lambda _root: project)
-    monkeypatch.setattr(bootstrap, "Repository", lambda: SimpleNamespace(ensure_project=lambda _p: 7))
-    monkeypatch.setattr(bootstrap, "ConfigStore", lambda: SimpleNamespace(load=lambda: SimpleNamespace()))
-    monkeypatch.setattr(bootstrap, "prerequisite_status", lambda: {})
 
     result = bootstrap.start_for_project(str(project.root))
 
-    assert result["status"] == "READY"
+    assert result["status"] == "PROJECT_REVIEW_REQUIRED" and "project_id" not in result
     assert result["project_adoption"]["state"] == "awaiting_operator"
-    assert result["project_adoption"]["pending"] == list(range(1, 9))
+    assert "vres project status" in result["action"] and "may still be loaded" in result["action"]
+    assert start_seams == []
+
+
+def test_interrupted_adoption_is_recovery_required_and_never_operational(tmp_path, data_root, monkeypatch,
+                                                                          start_seams):
+    project = _project(tmp_path / "legacy")
+    _legacy(project.root)
+    monkeypatch.setattr(bootstrap, "discover_project", lambda _root: project)
+    sd = project_adoption._state_dir(project, Path(tmp_path / "data"))
+    (sd / "journal.json").write_text("{}")
+
+    result = bootstrap.start_for_project(str(project.root))
+
+    assert result["status"] == "PROJECT_RECOVERY_REQUIRED" and "vres project recover" in result["action"]
+    assert start_seams == []
+
+
+def test_active_project_keeps_the_normal_secure_setup_path(tmp_path, monkeypatch, start_seams):
+    project = _project(tmp_path / "fresh")
+    monkeypatch.setattr(bootstrap, "discover_project", lambda _root: project)
+    monkeypatch.setattr(bootstrap, "ConfigStore", lambda: SimpleNamespace(load=lambda: SimpleNamespace()))
+    monkeypatch.setattr(bootstrap, "_ready_config", lambda _cfg: False)
+    monkeypatch.setattr(bootstrap, "launch_secure_setup_and_wait", lambda: {"ready": False})
+
+    result = bootstrap.start_for_project(str(project.root))
+
+    assert result["status"] == "SETUP_REQUIRED" and result["project_adoption"]["state"] == "active"
+    monkeypatch.setattr(bootstrap, "_ready_config", lambda _cfg: True)
+    monkeypatch.setattr(bootstrap, "migrate", lambda: [])
+    monkeypatch.setattr(bootstrap, "Repository", lambda: SimpleNamespace(ensure_project=lambda _p: 7))
+    ready = bootstrap.start_for_project(str(project.root))
+    assert ready["status"] == "READY" and ready["project_id"] == 7
+
+
+# B1: manual-review blockers, and the prelaunch inventory route
+
+def test_secret_bearing_active_configuration_is_a_blocker_never_deleted(tmp_path, data_root):
+    project = _project(tmp_path / "legacy")
+    _legacy(project.root, injection=False)
+    local = project.root / ".claude" / "settings.local.json"
+    local.write_text(json.dumps({"env": {"API_KEY": _SECRET}, "hooks": {"Stop": [{"hooks": []}]}}))
+    state = project_adoption.start(project, data_root=data_root)
+    number = _numbers(state)[".claude/settings.local.json"]
+    item = next(i for i in state["items"] if i["number"] == number)
+
+    assert state["blockers"] == [number] and item["options"] == {} and "MANUAL REVIEW REQUIRED" in item["description"]
+    with pytest.raises(AdoptionError, match="needs manual review"):
+        project_adoption.decide(project, number, "DROP", authority=_yes, data_root=data_root)
+    _decide_all(project, data_root, set())
+    with pytest.raises(AdoptionError, match=r"Items \[\d+\] need manual review"):
+        project_adoption.activate(project, authority=_yes, data_root=data_root)
+    assert _SECRET in local.read_text()  # untouched: never deleted to force adoption
+
+    local.write_text(json.dumps({"env": {"API_KEY": _SECRET}}))  # the operator removes the hook by hand
+    again = project_adoption.start(project, data_root=data_root)
+    assert again["blockers"] == [] and set(next(i for i in again["items"] if i["path"] == ".claude/settings.local.json")
+                                           ["options"]) == {"KEEP"}
+
+
+def test_safe_prelaunch_inventory_runs_from_the_operator_terminal(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    from vres_os import cli
+
+    project = _project(tmp_path / "legacy")
+    _legacy(project.root)
+    before = _tree(project.root)
+    monkeypatch.setenv("VRES_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(cli, "discover_project", lambda path: project if Path(path) == project.root else pytest.fail())
+
+    result = CliRunner().invoke(cli.app, ["project", "inventory", "--path", str(project.root)])
+
+    assert result.exit_code == 0, result.output
+    assert '"state": "awaiting_operator"' in result.output and _tree(project.root) == before
+
+
+# B3: recovery never overwrites content created or edited after the interruption
+
+def _interrupt_after_activation(project, data_root, monkeypatch):
+    real_write_json, real_restore = project_adoption._write_json, project_adoption._restore
+
+    def die(path, value):
+        if path.name == "result.json":
+            raise KeyboardInterrupt  # every project change is done, the process stops before completion
+        return real_write_json(path, value)
+
+    monkeypatch.setattr(project_adoption, "_write_json", die)
+    monkeypatch.setattr(project_adoption, "_restore", lambda *_a: (_ for _ in ()).throw(OSError("power lost")))
+    with pytest.raises(AdoptionError, match="rollback failed"):
+        project_adoption.activate(project, authority=_yes, data_root=data_root)
+    monkeypatch.setattr(project_adoption, "_write_json", real_write_json)
+    monkeypatch.setattr(project_adoption, "_restore", real_restore)
+
+
+@pytest.mark.parametrize("edit", ["recreated-dropped-file", "edited-new-scaffold"])
+def test_recovery_refuses_to_overwrite_changes_made_after_the_interruption(tmp_path, data_root, monkeypatch, edit):
+    project = _project(tmp_path / "legacy")
+    _legacy(project.root)
+    project_adoption.start(project, data_root=data_root)
+    _decide_all(project, data_root, set())
+    _interrupt_after_activation(project, data_root, monkeypatch)
+    target = project.root / (".mcp.json" if edit == "recreated-dropped-file" else "CLAUDE.md")
+    target.write_text("the operator's own new content\n")
+
+    with pytest.raises(AdoptionError, match="changed after the activation started"):
+        project_adoption.recover(project, data_root=data_root)
+
+    assert target.read_text() == "the operator's own new content\n"
+    assert list(data_root.rglob("journal.json"))  # kept for a later, reviewed recovery
+    assert project_adoption.start(project, data_root=data_root)["state"] == "recovery_required"
+
+
+def test_recovery_after_an_untouched_interruption_restores_everything(tmp_path, data_root, monkeypatch):
+    project = _project(tmp_path / "legacy")
+    _legacy(project.root)
+    project_adoption.start(project, data_root=data_root)
+    before = _tree(project.root)
+    _decide_all(project, data_root, set())
+    _interrupt_after_activation(project, data_root, monkeypatch)
+
+    assert project_adoption.recover(project, data_root=data_root)["recovered"] is True
+    assert _tree(project.root) == before
+
+
+# B4: inventory limits fail closed
+
+@pytest.mark.parametrize("limit", ["directories", "items"])
+def test_inventory_limits_refuse_instead_of_returning_a_partial_inventory(tmp_path, data_root, monkeypatch, limit):
+    project = _project(tmp_path / "big")
+    if limit == "directories":
+        monkeypatch.setattr(project_adoption, "_MAX_DIRS", 3)
+        for name in "abcde":
+            (project.root / name / "deeper").mkdir(parents=True)
+        (project.root / "e" / "deeper" / "CLAUDE.md").write_text("late instructions")
+    else:
+        monkeypatch.setattr(project_adoption, "_MAX_ITEMS", 3)
+        (project.root / ".claude" / "agents").mkdir(parents=True)
+        for index in range(5):
+            (project.root / ".claude" / "agents" / f"a{index}.md").write_text("agent")
+
+    with pytest.raises(AdoptionError, match="too large to inventory completely"):
+        project_adoption.start(project, data_root=data_root)
+    assert not (project.root / "CLAUDE.md").exists()  # never treated as a complete (fresh) inventory
+    assert project_adoption.status(project, data_root=data_root)["state"] is None
+
+
+def test_a_junction_inside_dot_claude_is_a_manual_review_blocker(tmp_path, data_root):
+    winapi = pytest.importorskip("_winapi")
+    if not hasattr(winapi, "CreateJunction"):
+        pytest.skip("Windows directory junction")
+    elsewhere = tmp_path / "shared-agents"
+    elsewhere.mkdir()
+    (elsewhere / "agent.md").write_text("shared agent")
+    project = _project(tmp_path / "legacy")
+    (project.root / ".claude").mkdir()
+    winapi.CreateJunction(str(elsewhere), str(project.root / ".claude" / "agents"))
+
+    state = project_adoption.start(project, data_root=data_root)
+
+    item = next(i for i in state["items"] if i["path"] == ".claude/agents")
+    assert item["status"] == "link_or_special" and item["options"] == {} and state["blockers"] == [item["number"]]
+    with pytest.raises(AdoptionError, match="need manual review"):
+        project_adoption.activate(project, authority=_yes, data_root=data_root)
+    assert (elsewhere / "agent.md").read_text() == "shared agent"

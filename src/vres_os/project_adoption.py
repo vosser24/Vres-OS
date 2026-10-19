@@ -8,17 +8,34 @@ A project with existing Claude configuration (CLAUDE.md files, AGENTS.md, .mcp.j
 under .claude/) is legacy. Start inventories those surfaces read-only: nothing is executed,
 and secret-looking paths are never opened. The other files go through the existing
 sensitive-content policy and get a verified byte snapshot in the Vres data directory, not in
-the project. The operator then decides KEEP or DROP for each numbered item from the local
-console; every decision is bound to the exact inventory version and item hash. Legacy
-content stays untrusted project data. Vres never copies it into its own instructions or
-promotes it.
+the project. Vres never copies legacy content into its own instructions or promotes it.
 
-Activation runs only once every item of the current inventory is decided. It touches only
-two kinds of path: DROP items are removed from the project (their exact bytes stay in the
-snapshot), and a Vres scaffold CLAUDE.md is written only when no root CLAUDE.md remains.
-The pre-images of exactly those paths and a journal are written first. A caught failure
-restores the pre-images. An interruption leaves the journal, so the next start reports
-recovery_required instead of a half-active project. Once active, start rewrites nothing.
+Claude Code acts on these files at their original paths, so a label cannot make them inert.
+Each item is classified by its effect, and the classification limits what can be decided:
+- executable: hooks, settings that run commands, load MCP servers or loosen tool
+  permissions, MCP server definitions, and scripts or shell-running commands under .claude/.
+  These can only be deactivated (DROP removes them from the project; their exact bytes stay
+  in the snapshot and rollback can restore them).
+- conflicting: instructions with override wording. These can also only be deactivated.
+- instructions: other CLAUDE.md, AGENTS.md, agent, command and skill text. KEEP leaves it
+  active, so Claude still reads it next to the Vres rules; Vres does not vouch for it.
+- inert: anything else under .claude/, which can be kept or dropped.
+An item Vres cannot safely deactivate is never deleted to force adoption. That covers
+executable content in a file that also holds secrets, an unreadable or oversized surface,
+and a link. Such an item becomes a manual-review blocker, and activation is refused until
+the operator fixes it by hand and runs start again.
+
+Launching Claude Code inside a legacy project loads its configuration before Vres can review
+it, so review first from a local terminal with `vres project inventory <path>`.
+
+Activation runs only when no blocker remains and every other item of the current inventory is
+decided. It removes DROP items, and writes a Vres scaffold CLAUDE.md only when no root
+CLAUDE.md remains. The pre-images and the expected post-state of exactly those paths, plus a
+journal, are written first. A caught failure restores the pre-images. An interruption leaves
+the journal, so the next start reports recovery_required instead of a half-active project.
+Recovery and rollback restore a path only if it is still exactly in its pre-activation or
+activation state; content created or edited by anyone in between is never overwritten. Once
+active, start rewrites nothing.
 
 States: fresh, legacy_pending, awaiting_operator, activating, active, recovery_required.
 Adoption never contacts PostgreSQL, the credential store or any model. Being adopted does
@@ -55,9 +72,14 @@ _IGNORE_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".pytest
 _MAX_ITEMS, _MAX_BYTES, _MAX_DIRS = 300, 1024 * 1024, 5000
 _INJECTION = re.compile(
     r"ignore (all |any )?(previous|prior|above) instructions|disregard (the |all )?(previous|prior|system)"
-    r"|you are now\b|new system prompt|override (the )?(system|vres)|bypass (the )?(guard|validation|approval)",
+    r"|you are now\b|new system prompt|override (the )?(system|vres)|bypass (the )?(guard|validation|approval)"
+    r"|--no-verify|dangerously-skip-permissions|bypasspermissions|skip (the )?(tests|validation|review|checkpoint)",
     re.I,
 )
+# Settings that make Claude run commands, load MCP servers or loosen tool approval.
+_COMMAND_SETTINGS = {"hooks", "statusLine", "apiKeyHelper", "awsAuthRefresh", "awsCredentialExport",
+                     "otelHeadersHelper", "enableAllProjectMcpServers", "enabledMcpjsonServers"}
+_SCRIPT_SUFFIXES = {".ps1", ".psm1", ".sh", ".bash", ".py", ".js", ".mjs", ".cjs", ".ts", ".bat", ".cmd", ".exe"}
 Authority = Callable[[str], dict[str, Any]]
 
 
@@ -174,7 +196,15 @@ def _is_link(info: os.stat_result) -> bool:
 
 
 def _surface_paths(root: Path) -> list[str]:
+    """Every Claude/agent configuration surface, or a refusal: an incomplete scan is never an inventory."""
     found: set[str] = {name for name in _ROOT_SURFACES if _lstat(root / name) is not None}
+    dirs = 0
+
+    def over_limit() -> None:
+        if dirs > _MAX_DIRS or len(found) > _MAX_ITEMS:
+            raise AdoptionError("The project is too large to inventory completely within the safety limits; "
+                                "adoption needs manual review")
+
     claude = root / ".claude"
     info = _lstat(claude)
     if info is not None:
@@ -182,7 +212,8 @@ def _surface_paths(root: Path) -> list[str]:
             found.add(".claude")
         else:
             pending = [claude]
-            while pending and len(found) <= _MAX_ITEMS:
+            while pending:
+                dirs += 1
                 for child in sorted(pending.pop().iterdir()):
                     child_info = _lstat(child)
                     rel = child.relative_to(root).as_posix()
@@ -190,8 +221,8 @@ def _surface_paths(root: Path) -> list[str]:
                         pending.append(child)
                     else:
                         found.add(rel)
-    dirs = 0
-    for current, subdirs, files in os.walk(root):  # nested CLAUDE.md files; links are not followed
+                over_limit()
+    for current, subdirs, files in os.walk(root):  # nested CLAUDE.md files; links/junctions are not followed
         dirs += 1
         subdirs[:] = sorted(
             d for d in subdirs
@@ -199,20 +230,16 @@ def _surface_paths(root: Path) -> list[str]:
         )
         if "CLAUDE.md" in files:
             found.add((Path(current) / "CLAUDE.md").relative_to(root).as_posix())
-        if dirs > _MAX_DIRS or len(found) > _MAX_ITEMS:
-            break
-    if len(found) > _MAX_ITEMS:
-        raise AdoptionError("Too many Claude configuration files to review safely; adoption needs manual review")
+        over_limit()
     return sorted(found)
 
 
-def _describe(rel: str, data: bytes | None) -> tuple[str, str]:
+def _describe(rel: str, parsed: Any) -> tuple[str, str]:
     name = PurePosixPath(rel)
     if rel == ".claude" or rel.endswith("CLAUDE.md") or rel in {"CLAUDE.local.md", "AGENTS.md"}:
         kind, text = "instructions", "Instruction file that Claude or another agent reads as project context"
     elif rel in {".claude/settings.json", ".claude/settings.local.json"}:
         kind, text = "settings", "Claude project settings"
-        parsed = _parse(data)
         if isinstance(parsed, dict):
             hooks = parsed.get("hooks") if isinstance(parsed.get("hooks"), dict) else {}
             count = sum(len(v) for v in hooks.values() if isinstance(v, list))
@@ -220,9 +247,11 @@ def _describe(rel: str, data: bytes | None) -> tuple[str, str]:
                 text += f"; defines {count} hook group(s) that Claude would run automatically"
             if parsed.get("permissions"):
                 text += "; changes tool permissions"
+            other = sorted(_COMMAND_SETTINGS & set(parsed) - {"hooks"})
+            if other:
+                text += f"; sets {', '.join(other)}"
     elif rel == ".mcp.json":
         kind, text = "mcp", "Project MCP server configuration"
-        parsed = _parse(data)
         servers = parsed.get("mcpServers") if isinstance(parsed, dict) else None
         if isinstance(servers, dict):
             text += f" ({len(servers)} server(s) Claude would start)"
@@ -239,52 +268,93 @@ def _describe(rel: str, data: bytes | None) -> tuple[str, str]:
     return kind, text
 
 
-def _parse(data: bytes | None) -> Any:
+def _parse(text: str | None) -> Any:
     try:
-        return json.loads(data.decode("utf-8-sig")) if data is not None else None
-    except (UnicodeDecodeError, ValueError):
+        return json.loads(text) if text is not None else None
+    except ValueError:
         return None
+
+
+def _risk(rel: str, kind: str, text: str | None, parsed: Any) -> str:
+    """executable, conflicting, instructions or inert, by what Claude would do with the file."""
+    suffix = PurePosixPath(rel).suffix.lower()
+    if kind == "hook" or (kind != "instructions" and suffix in _SCRIPT_SUFFIXES):
+        return "executable"
+    if kind == "settings":
+        permissions = parsed.get("permissions") if isinstance(parsed, dict) else None
+        loosened = isinstance(permissions, dict) and (
+            permissions.get("allow") or permissions.get("defaultMode") in {"bypassPermissions", "acceptEdits"}
+            or permissions.get("additionalDirectories")
+        )
+        if not isinstance(parsed, dict) or _COMMAND_SETTINGS & set(parsed) or loosened:
+            return "executable"  # unparseable settings are not assumed harmless
+        return "inert"
+    if kind == "mcp":
+        return "executable"
+    if kind == "command" and text is not None and "!`" in text:
+        return "executable"  # runs shell commands when invoked
+    if text is not None and _INJECTION.search(text):
+        return "conflicting"
+    return "instructions" if kind in {"instructions", "agent", "command", "skill"} else "inert"
+
+
+_KEEP_TEXT = {
+    "instructions": "leave it active: Claude keeps reading it as project context next to the Vres rules; "
+                    "Vres does not vouch for its content",
+    "inert": "leave it unchanged",
+}
+_DROP_TEXT = "remove it from the active project; its exact bytes stay in the Vres snapshot (rollback restores them)"
 
 
 def inventory(root: Path) -> dict[str, Any]:
     """Read-only inventory of existing Claude/agent configuration; never executes or rewrites anything."""
     root = Path(root).resolve(strict=True)
     items = []
-    for number, rel in enumerate(_surface_paths(root), start=1):
+    for rel in _surface_paths(root):
         path = root / rel
         info = _lstat(path)
-        status, data, flags = "ok", None, []
         if info is None:
             continue
+        status, data, text, parsed, blocker = "ok", None, None, None, None
         if _is_link(info) or not stat.S_ISREG(info.st_mode):
-            status = "link_or_special"
+            status, blocker = "link_or_special", "a link or special file cannot be inspected safely"
         elif sensitive_path_reason(path):
             status = "sensitive_path"  # never opened
         elif info.st_size > _MAX_BYTES:
-            status = "too_large"
+            status, blocker = "too_large", "too large to inspect safely"
         else:
             data = path.read_bytes()
-            disposition = sanitize_extracted_text(data.decode("utf-8", errors="replace"))
+            text = data.decode("utf-8", errors="replace")
+            parsed = _parse(text.lstrip("\ufeff")) if rel.endswith(".json") else None
+            disposition = sanitize_extracted_text(text)
             if disposition.status in {SENSITIVE_SANITIZED, SENSITIVE_REVIEW_REQUIRED}:
                 status, data = "contains_secrets", None  # no snapshot copy of secret material
-            elif _INJECTION.search(data.decode("utf-8", errors="replace")):
-                flags.append("instruction_override_wording")
-        kind, description = _describe(rel, data)
-        droppable = status == "ok"
+        kind, description = _describe(rel, parsed)
+        risk = _risk(rel, kind, text, parsed) if status in {"ok", "contains_secrets"} else "unknown"
+        if status == "sensitive_path" and kind in {"settings", "mcp", "hook"}:
+            blocker = "an unopened secret-looking file in an active configuration location"
+        if status == "contains_secrets" and risk in {"executable", "conflicting"}:
+            blocker = "it contains secrets and active configuration; Vres will not copy or delete it"
+        if blocker:
+            options: dict[str, str] = {}
+        elif status != "ok":
+            options = {"KEEP": "leave it untouched (it may hold secrets; Vres never copies or deletes it)"}
+        elif risk in {"executable", "conflicting"}:
+            options = {"DROP": _DROP_TEXT}  # never kept active as if a label made it safe
+        else:
+            options = {"KEEP": _KEEP_TEXT[risk], "DROP": _DROP_TEXT}
+        note = {"executable": "; can run commands, start servers or loosen tool approval",
+                "conflicting": "; contains wording that conflicts with Vres governance"}.get(risk, "")
         items.append({
-            "number": number, "path": rel, "kind": kind, "status": status, "flags": flags,
+            "path": rel, "kind": kind, "status": status, "risk": risk, "blocker": blocker,
+            "flags": ["governance_conflict"] if risk == "conflicting" else [],
             "bytes": info.st_size, "sha256": hashlib.sha256(data).hexdigest() if data is not None else None,
-            "description": description + ("; contains instruction-override wording (treated as untrusted data)"
-                                          if flags else ""),
-            "options": {
-                "KEEP": "leave it in place unchanged as untrusted project context, never Vres governance",
-                **({"DROP": "remove it from the project; its exact bytes stay in the Vres snapshot for recovery"}
-                   if droppable else {}),
-            },
+            "description": description + note + (f"; MANUAL REVIEW REQUIRED: {blocker}" if blocker else ""),
+            "options": options,
         })
     for index, item in enumerate(items, start=1):
         item["number"] = index
-    material = [(i["path"], i["sha256"], i["status"], i["bytes"]) for i in items]
+    material = [(i["path"], i["sha256"], i["status"], i["bytes"], i["risk"]) for i in items]
     version = hashlib.sha256(json.dumps(material, sort_keys=True).encode("utf-8")).hexdigest()
     return {"version": version, "items": items}
 
@@ -392,11 +462,11 @@ def start(project, *, data_root: Path | None = None) -> dict[str, Any]:
         _write_new(root / "CLAUDE.md", text)
         return _set_state(sd, project, "active", created=["CLAUDE.md"]) | {"changed": True}
     if record and record["state"] == "awaiting_operator" and record.get("inventory_version") == inv["version"]:
-        return record | {"changed": False, "pending": _pending(sd, inv)}
+        return record | {"changed": False, "pending": _pending(sd, inv), "blockers": _blockers(inv)}
     _set_state(sd, project, "legacy_pending", inventory_version=inv["version"])
     _snapshot(sd, root, inv)
     return _set_state(sd, project, "awaiting_operator", inventory_version=inv["version"]) | {
-        "changed": True, "items": inv["items"], "pending": _pending(sd, inv)}
+        "changed": True, "items": inv["items"], "pending": _pending(sd, inv), "blockers": _blockers(inv)}
 
 
 def _current_inventory(sd: Path, project) -> dict[str, Any]:
@@ -421,7 +491,11 @@ def _decisions(sd: Path, inv: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 def _pending(sd: Path, inv: dict[str, Any]) -> list[int]:
     decided = _decisions(sd, inv)
-    return [i["number"] for i in inv["items"] if str(i["number"]) not in decided]
+    return [i["number"] for i in inv["items"] if not i.get("blocker") and str(i["number"]) not in decided]
+
+
+def _blockers(inv: dict[str, Any]) -> list[int]:
+    return [i["number"] for i in inv["items"] if i.get("blocker")]
 
 
 def _evidence(authority: Authority, statement: str) -> dict[str, Any]:
@@ -438,6 +512,8 @@ def decide(project, number: int, decision: str, *, authority: Authority, data_ro
     item = next((i for i in inv["items"] if i["number"] == number), None)
     if item is None:
         raise AdoptionError(f"There is no item {number} in the current inventory")
+    if item.get("blocker"):
+        raise AdoptionError(f"Item {number} needs manual review first: {item['blocker']}")
     if decision not in item["options"]:
         raise AdoptionError(f"Item {number} can only be: {', '.join(item['options'])}")
     evidence = _evidence(authority, f"{decision} {number}")
@@ -460,9 +536,36 @@ def console_authority(statement: str) -> dict[str, Any]:
             "at": datetime.now(UTC).isoformat()}
 
 
-def _restore(root: Path, pre_dir: Path, pre: dict[str, Any]) -> None:
+def _sha_or_none(path: Path) -> str | None:
+    info = _lstat(path)
+    if info is None:
+        return None
+    if _is_link(info) or not stat.S_ISREG(info.st_mode):
+        return "not-an-ordinary-file"
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _restore(root: Path, pre_dir: Path, pre: dict[str, Any], post: dict[str, str | None]) -> list[str]:
+    """Restore pre-images only where a path is still in a state the activation itself produced.
+
+    Every path is checked before anything is written. A path already in its pre-activation
+    state is left alone. A path in its expected activation state, or absent (dropped and not
+    yet recreated, which holds nobody's content), is restored. Any other content was created or
+    edited by someone after the activation started, so it is never overwritten or deleted and
+    the whole restore refuses.
+    """
+    todo = []
     for rel, entry in pre.items():
-        path = _within(root, rel)
+        current = _sha_or_none(_within(root, rel))
+        before = entry["sha256"] if entry["existed"] else None
+        if current == before:
+            continue
+        if current is not None and current != post.get(rel, "missing-expected-state"):
+            raise AdoptionError(f"{rel} was changed after the activation started; it is not overwritten. "
+                                "Resolve it by hand, then run recover again")
+        todo.append(rel)
+    for rel in todo:
+        entry, path = pre[rel], _within(root, rel)
         if entry["existed"]:
             data = (pre_dir / entry["copy"]).read_bytes()
             if hashlib.sha256(data).hexdigest() != entry["sha256"]:
@@ -471,14 +574,19 @@ def _restore(root: Path, pre_dir: Path, pre: dict[str, Any]) -> None:
             tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
             tmp.write_bytes(data)
             os.replace(tmp, path)
-        elif _lstat(path) is not None:
+        else:
             path.unlink()
+    return sorted(todo)
 
 
 def activate(project, *, authority: Authority, data_root: Path | None = None) -> dict[str, Any]:
     root = Path(project.root).resolve(strict=True)
     sd = _state_dir(project, data_root)
     inv = _current_inventory(sd, project)
+    blockers = _blockers(inv)
+    if blockers:
+        raise AdoptionError(f"Items {blockers} need manual review (Vres will not delete or keep them active as "
+                            "they are); fix them by hand and run start again. Nothing was activated")
     pending = _pending(sd, inv)
     if pending:
         raise AdoptionError(f"Undecided items {pending}; nothing was activated")
@@ -487,6 +595,8 @@ def activate(project, *, authority: Authority, data_root: Path | None = None) ->
     keeps_root = any(i["path"] == "CLAUDE.md" and i["path"] not in remove for i in inv["items"])
     create = [] if keeps_root else ["CLAUDE.md"]
     evidence = _evidence(authority, "ACTIVATE")
+    scaffold = scaffold_text(project.name, detect_facts(root)).encode("utf-8")
+    post = {**{rel: None for rel in remove}, **{rel: hashlib.sha256(scaffold).hexdigest() for rel in create}}
     activation = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
     pre_dir = sd / "activations" / activation / "pre"
     pre_dir.mkdir(parents=True)
@@ -502,22 +612,19 @@ def activate(project, *, authority: Authority, data_root: Path | None = None) ->
             data = path.read_bytes()
             _write_new(pre_dir / f"{index:04d}", data)
             pre[rel] = {"existed": True, "copy": f"{index:04d}", "sha256": hashlib.sha256(data).hexdigest()}
-    scaffold = scaffold_text(project.name, detect_facts(root)).encode("utf-8")
     _write_json(sd / "journal.json", {"version": VERSION, "activation": activation, "inventory_version": inv["version"],
-                                      "remove": remove, "create": create, "pre": pre})
+                                      "remove": remove, "create": create, "pre": pre, "post": post})
     _set_state(sd, project, "activating", inventory_version=inv["version"], activation=activation)
     try:
         for rel in remove:
             _within(root, rel).unlink()
         for rel in create:
             _write_new(_within(root, rel), scaffold)
-        post = {rel: (hashlib.sha256(_within(root, rel).read_bytes()).hexdigest() if rel in create else None)
-                for rel in remove + create}
         _write_json(sd / "activations" / activation / "result.json",
                     {"pre": pre, "post": post, "authority": evidence, "inventory_version": inv["version"]})
     except BaseException as exc:
         try:
-            _restore(root, pre_dir, pre)
+            _restore(root, pre_dir, pre, post)
             (sd / "journal.json").unlink()
             _set_state(sd, project, "awaiting_operator", inventory_version=inv["version"])
         except Exception:
@@ -532,18 +639,18 @@ def activate(project, *, authority: Authority, data_root: Path | None = None) ->
 
 
 def recover(project, *, data_root: Path | None = None) -> dict[str, Any]:
-    """Undo an interrupted activation from its journal and exact pre-images."""
+    """Undo an interrupted activation, but only where nothing was changed after the interruption."""
     root = Path(project.root).resolve(strict=True)
     sd = _state_dir(project, data_root)
     journal = _read_json(sd / "journal.json")
     if journal is None:
         return {"state": (_state(sd, project) or {}).get("state"), "recovered": False}
-    if journal.get("version") != VERSION:
+    if journal.get("version") != VERSION or not isinstance(journal.get("post"), dict):
         raise AdoptionError("Adoption journal has an unsupported format; recover manually")
-    _restore(root, sd / "activations" / journal["activation"] / "pre", journal["pre"])
+    restored = _restore(root, sd / "activations" / journal["activation"] / "pre", journal["pre"], journal["post"])
     (sd / "journal.json").unlink()
     _set_state(sd, project, "awaiting_operator", inventory_version=journal["inventory_version"])
-    return {"state": "awaiting_operator", "recovered": True, "restored": sorted(journal["pre"])}
+    return {"state": "awaiting_operator", "recovered": True, "restored": restored}
 
 
 def rollback(project, *, authority: Authority, data_root: Path | None = None) -> dict[str, Any]:
@@ -555,12 +662,10 @@ def rollback(project, *, authority: Authority, data_root: Path | None = None) ->
         raise AdoptionError("Only an activated legacy adoption can be rolled back")
     result = _read_json(sd / "activations" / record["activation"] / "result.json")
     for rel, sha in result["post"].items():
-        path = _within(root, rel)
-        current = hashlib.sha256(path.read_bytes()).hexdigest() if _lstat(path) is not None else None
-        if current != sha:
+        if _sha_or_none(_within(root, rel)) != sha:
             raise AdoptionError(f"{rel} changed after activation; rollback refused to avoid losing those changes")
     _evidence(authority, "ROLLBACK")
-    _restore(root, sd / "activations" / record["activation"] / "pre", result["pre"])
+    _restore(root, sd / "activations" / record["activation"] / "pre", result["pre"], result["post"])
     _set_state(sd, project, "awaiting_operator", inventory_version=record["inventory_version"])
     return {"state": "awaiting_operator", "restored": sorted(result["pre"])}
 
@@ -571,5 +676,5 @@ def status(project, *, data_root: Path | None = None) -> dict[str, Any]:
     out = dict(record)
     if record.get("state") == "awaiting_operator":
         inv = _read_json(sd / "snapshots" / f"{record['inventory_version']}.json")
-        out["items"], out["pending"] = inv["items"], _pending(sd, inv)
+        out["items"], out["pending"], out["blockers"] = inv["items"], _pending(sd, inv), _blockers(inv)
     return out

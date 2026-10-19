@@ -566,7 +566,39 @@ def launch_secure_setup_and_wait(timeout_seconds: int = 2) -> dict:
     }
 
 
+def _project_adoption(project) -> dict:
+    """File-only adoption step; no database, credential or model contact."""
+    from .project_adoption import AdoptionError
+    from .project_adoption import start as adopt_project
+
+    try:
+        return adopt_project(project)
+    except (AdoptionError, OSError) as exc:
+        from .redaction import redact_text
+
+        return {"state": "recovery_required", "error": redact_text(str(exc))[:500]}
+
+
 def start_for_project(project_root: str = ".") -> dict:
+    # Adoption readiness comes first: a project still under review, or with an interrupted
+    # adoption, never reaches secure setup, migration or registration and is never READY.
+    project = discover_project(project_root)
+    adoption = _project_adoption(project)
+    summary = {k: adoption[k] for k in ("state", "changed", "pending", "blockers", "created", "error") if k in adoption}
+    if adoption.get("state") != "active":
+        recovery = adoption.get("state") == "recovery_required"
+        return {
+            "status": "PROJECT_RECOVERY_REQUIRED" if recovery else "PROJECT_REVIEW_REQUIRED",
+            "project_adoption": summary,
+            "action": (
+                "Vres is not active in this project. In a local terminal inside the project run "
+                + ("`vres project recover`." if recovery else
+                   "`vres project status`, decide each item with `vres project decide <number> keep|drop`, "
+                   "resolve any manual-review blockers by hand, then `vres project activate`.")
+                + " Existing project hooks, MCP servers and settings may still be loaded by Claude Code until then."
+            ),
+            "prerequisites": prerequisite_status(),
+        }
     cfg = ConfigStore().load()
     if not _ready_config(cfg):
         setup = launch_secure_setup_and_wait()
@@ -575,6 +607,7 @@ def start_for_project(project_root: str = ".") -> dict:
                 "status": "SETUP_IN_PROGRESS" if setup.get("in_progress") else "SETUP_REQUIRED",
                 "setup": setup,
                 "prerequisites": prerequisite_status(),
+                "project_adoption": summary,
             }
     try:
         applied = migrate()
@@ -589,17 +622,8 @@ def start_for_project(project_root: str = ".") -> dict:
                 "the exact intended database, or configure a different approved database."
             ),
             "prerequisites": prerequisite_status(),
+            "project_adoption": summary,
         }
-    project = discover_project(project_root)
-    from .project_adoption import AdoptionError
-    from .project_adoption import start as adopt_project
-
-    try:
-        adoption = adopt_project(project)  # files only: no database, credential or model contact
-    except (AdoptionError, OSError) as exc:
-        from .redaction import redact_text
-
-        adoption = {"state": "recovery_required", "error": redact_text(str(exc))[:500]}
     project_id = Repository().ensure_project(project)
     return {
         "status": "READY",
@@ -607,5 +631,5 @@ def start_for_project(project_root: str = ".") -> dict:
         "project": asdict(project) | {"root": str(project.root)},
         "migrations": applied,
         "prerequisites": prerequisite_status(),
-        "project_adoption": {k: adoption[k] for k in ("state", "changed", "pending", "created", "error") if k in adoption},
+        "project_adoption": summary,
     }

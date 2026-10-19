@@ -738,13 +738,24 @@ def recovery_db_restore(
         raise typer.Exit(1)
 
 
-def _adoption(action):
+def _adoption(action, path: Path = Path(".")):
     from .project_adoption import AdoptionError
 
     try:
-        console.print_json(data=action(discover_project(".")))
+        console.print_json(data=action(discover_project(path)))
     except (AdoptionError, OSError, ValueError) as exc:
         raise _recovery_exit(exc) from exc
+
+
+@project_app.command("inventory")
+def project_inventory(path: Path = Path(".")) -> None:
+    """Safe prelaunch review: inventory a project's Claude configuration BEFORE launching Claude Code there.
+
+    Nothing in the project is executed and no database, credential or model is contacted.
+    """
+    from .project_adoption import start
+
+    _adoption(start, path)
 
 
 @project_app.command("status")
