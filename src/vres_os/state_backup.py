@@ -343,6 +343,7 @@ def restore_backup(
 def recover_restore(target_root: Path) -> dict[str, Any]:
     """Roll an interrupted restore back to its recovery point, then clear the journal."""
     target_root = Path(target_root)
+    _require_plain_dir(target_root, "Vres data directory")  # before touching its journal or recovery files
     raw = _read_plain_file(target_root / _JOURNAL, "restore journal")
     if raw is None:
         return {"status": "nothing_to_recover"}

@@ -345,7 +345,7 @@ def test_interruption_right_after_the_journal_only_clears_the_journal(tmp_path):
     root, home = tmp_path / "VresOS", tmp_path / "claude"
     root.mkdir()
     (root / "backups").mkdir()
-    home.mkdir()
+    (home / "skills").mkdir(parents=True)  # the installer creates both parents before writing the journal
     (home / "settings.json").write_bytes(b"{}")
     install_recovery.snapshot(root, home, "R1")
     (root / "pending-install.json").write_text(json.dumps({
@@ -454,7 +454,9 @@ def test_verified_backup_writes_protected_archive_and_manifest_without_exposing_
     assert result["status"] == "verified_archive" and result["toc"] == {"entries": 4, "vres_tables": 2, "ledger": 1}
     manifest = json.loads((tmp_path / "vres.dump.manifest.json").read_text())
     assert manifest["sha256"] == pg_recovery._sha256_file(tmp_path / "vres.dump")
-    assert protected[0].name.startswith(".vres.dump.partial-") and protected[1].name == "vres.dump.manifest.json"
+    assert protected[0].name.startswith(".vres.dump.partial-")
+    assert protected[1].name.startswith(".vres.dump.manifest.json.partial-")  # protected before publication
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["vres.dump", "vres.dump.manifest.json"]
     assert client.calls[0][0][0] == str(_BIN["bin"] / "pg_dump.exe")  # the verified absolute client
     for argv, env in client.calls:
         assert not any("synthetic-pw" in a for a in argv)
@@ -492,7 +494,7 @@ def test_unverifiable_partial_cleanup_reports_the_residue_and_never_succeeds(tmp
 
     monkeypatch.setattr(Path, "unlink", stuck)
 
-    with pytest.raises(DatabaseRecoveryError, match="could not be removed; delete it manually. No backup was produced"):
+    with pytest.raises(DatabaseRecoveryError, match="Residual files could not be removed; delete them manually"):
         _backup(tmp_path, _Client(dump_rc=1, partial_on_failure=True))
     assert not (tmp_path / "vres.dump").exists() and not (tmp_path / "vres.dump.manifest.json").exists()
 
@@ -895,3 +897,99 @@ def test_redirected_recovery_parents_make_inspect_refuse(journaled, tmp_path, re
     assert plan["recoverable"] is False
     with pytest.raises(InstallRecoveryError, match="refused"):
         install_recovery.recover(journaled.root, confirm=True)
+
+
+# ------------------------------------------- B6: missing recovery parents refuse; state root validated first
+
+@pytest.mark.parametrize("missing", ["skills", "backups"])
+def test_missing_plugin_recovery_parent_refuses_before_any_change(interrupted_install, missing):
+    env = interrupted_install
+    if missing == "skills":
+        shutil.rmtree(env.home / "skills")  # the plugin backup still exists in backups/
+    else:
+        shutil.rmtree(env.root / "backups")
+    before = {p: p.read_bytes() for p in env.base.rglob("*") if p.is_file()}
+
+    plan = install_recovery.inspect(env.root)
+
+    assert plan["recoverable"] is False
+    assert any("required plugin recovery directories are missing" in r for r in plan["refusals"])
+    with pytest.raises(InstallRecoveryError, match="refused"):
+        install_recovery.recover(env.root, confirm=True)
+    assert {p: p.read_bytes() for p in env.base.rglob("*") if p.is_file()} == before
+
+
+def test_redirected_state_root_is_refused_before_its_journal_is_touched(tmp_path):
+    real = tmp_path / "real-state"
+    real.mkdir()
+    journal = b'{"version": 2, "state": "applying", "restore_point": "20261019T000000Z-0123abcd"}'
+    (real / "restore-journal.json").write_bytes(journal)
+    _junction(real, tmp_path / "VresOS")
+
+    with pytest.raises(StateBackupError, match="link or junction"):
+        state_backup.recover_restore(tmp_path / "VresOS")
+    assert (real / "restore-journal.json").read_bytes() == journal
+
+
+# ------------------------------------- B7: archive and manifest are published together or not at all
+
+def _failing_rename(monkeypatch, *, fail_on: str):
+    real = __import__("os").rename
+
+    def rename(src, dst):
+        if Path(dst).name == fail_on:
+            raise PermissionError("simulated publication failure")
+        return real(src, dst)
+
+    monkeypatch.setattr(pg_recovery.os, "rename", rename)
+
+
+@pytest.mark.parametrize("failure", ["manifest-write", "manifest-acl", "archive-acl", "manifest-publication"])
+def test_failed_manifest_or_publication_leaves_no_backup_artifacts(tmp_path, approve_database_target, monkeypatch,
+                                                                   failure):
+    approve_database_target(("localhost", 5432, "vres_os"))
+    protect_calls = []
+
+    def protect(path):
+        protect_calls.append(path)
+        if (failure == "manifest-acl" and len(protect_calls) == 2) or (failure == "archive-acl" and len(protect_calls) == 1):
+            raise OSError("simulated ACL failure")
+
+    if failure == "manifest-write":
+        monkeypatch.setattr(pg_recovery.json, "dump", lambda *_a, **_kw: (_ for _ in ()).throw(OSError("disk full")))
+    if failure == "manifest-publication":
+        _failing_rename(monkeypatch, fail_on="vres.dump.manifest.json")
+    client = _tripwire("client process") if failure == "archive-acl" else _Client()
+
+    with pytest.raises(DatabaseRecoveryError, match="Backup failed before the archive and its manifest were both published"):
+        _backup(tmp_path, client, protect=protect)
+    assert list(tmp_path.iterdir()) == []  # neither final names nor staged files remain
+
+
+def test_unremovable_published_archive_is_reported_exactly_and_never_succeeds(tmp_path, approve_database_target,
+                                                                            monkeypatch):
+    approve_database_target(("localhost", 5432, "vres_os"))
+    _failing_rename(monkeypatch, fail_on="vres.dump.manifest.json")
+    real_unlink = Path.unlink
+
+    def stuck(self, *args, **kwargs):
+        if self.name == "vres.dump":
+            raise PermissionError("file in use")
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", stuck)
+
+    with pytest.raises(DatabaseRecoveryError) as exc:
+        _backup(tmp_path, _Client())
+    assert f"delete them manually: {tmp_path / 'vres.dump'}." in str(exc.value)
+    assert "No backup was produced" in str(exc.value)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["vres.dump"]  # no manifest: never a usable-looking backup
+
+
+def test_existing_manifest_is_never_overwritten(tmp_path, approve_database_target):
+    approve_database_target(("localhost", 5432, "vres_os"))
+    (tmp_path / "vres.dump.manifest.json").write_text("operator file")
+
+    with pytest.raises(DatabaseRecoveryError, match="nothing is overwritten"):
+        _backup(tmp_path, _tripwire("client process"), password_provider=_tripwire("credential"))
+    assert (tmp_path / "vres.dump.manifest.json").read_text() == "operator file"

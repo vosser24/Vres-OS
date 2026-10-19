@@ -272,9 +272,12 @@ def inspect(install_root: Path) -> dict[str, Any]:
         if claude_home is not None:
             plugin = Path(str(journal.get("plugin_path") or ""))
             backup = Path(str(journal.get("plugin_backup") or ""))
-            _plain_dir(claude_home / "skills")  # a redirected skills or backups parent is refused
-            _plain_dir(install_root / "backups")
-            if plugin.resolve() != (claude_home / "skills" / "vres-os").resolve():
+            # Both plugin recovery parents must exist as ordinary directories before any plan is made;
+            # a missing parent refuses here, and a redirected one raises (also a refusal).
+            missing = [str(d) for d in (claude_home / "skills", install_root / "backups") if not _plain_dir(d)]
+            if missing:
+                refusals.append("required plugin recovery directories are missing: " + ", ".join(missing))
+            elif plugin.resolve() != (claude_home / "skills" / "vres-os").resolve():
                 refusals.append("journal plugin path is not the Vres plugin in this Claude home")
             elif backup.resolve().parent != (install_root / "backups").resolve():
                 refusals.append("journal plugin backup is outside the installer's backup directory")

@@ -15,9 +15,12 @@ never consulted. The executables are verified before any credential is read.
 
 Backup: pg_dump custom format into a new, owner-only archive created exclusively for this
 attempt. The archive counts only after `pg_restore --list` reads it back and it contains
-the Vres migration ledger; then a SHA-256 manifest is written beside it. A failed, timed-out
-or unverifiable attempt deletes only its own partial archive. If that removal cannot be
-verified, the residual file is reported and no backup is produced.
+the Vres migration ledger. A SHA-256 manifest is then written to its own attempt-owned
+staging file and protected. Only after that are the archive and finally the manifest
+renamed to their final names, without replacing anything, so the manifest marks completion.
+Any failure, timeout or failed verification, including manifest writing, ACL application or
+either rename, deletes only the files this attempt created, final names included. If that
+removal cannot be verified, the exact residual paths are reported and no backup is produced.
 
 Restore: only into an approved, explicitly named disposable recovery database
 (vres_restore_*). The target may be neither the configured Vres database nor the backed-up
@@ -186,15 +189,18 @@ def _failure(step: str, result: Any) -> DatabaseRecoveryError:
     return DatabaseRecoveryError(f"{step} failed (exit {getattr(result, 'returncode', '?')}): {detail}".strip())
 
 
-def _discard(partial: Path, error: DatabaseRecoveryError) -> DatabaseRecoveryError:
-    """Remove this attempt's own partial archive; if that cannot be verified, say where the residue is."""
-    try:
-        partial.unlink(missing_ok=True)
-    except OSError:
-        pass
-    if os.path.lexists(partial):
+def _discard(owned: list[Path], error: DatabaseRecoveryError) -> DatabaseRecoveryError:
+    """Remove only the files this attempt created; if that cannot be verified, name every residue."""
+    for path in owned:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+    residue = [str(path) for path in owned if os.path.lexists(path)]
+    if residue:
         return DatabaseRecoveryError(
-            f"{error} The partial archive {partial} could not be removed; delete it manually. No backup was produced."
+            f"{error} Residual files could not be removed; delete them manually: {', '.join(residue)}. "
+            "No backup was produced."
         )
     return error
 
@@ -237,9 +243,12 @@ def backup_database(
         raise DatabaseRecoveryError("Backup output must be a new file in an existing directory; nothing is overwritten")
     pg_dump, pg_restore = _clients(client_dir)  # verified before any credential is read
     run, protect = runner or _default_runner, protect or _default_protect
-    partial = output.with_name(f".{output.name}.partial-{uuid.uuid4().hex[:8]}")
+    attempt = uuid.uuid4().hex[:8]
+    partial = output.with_name(f".{output.name}.partial-{attempt}")
+    staged_manifest = output.with_name(f".{manifest_path.name}.partial-{attempt}")
     with open(partial, "xb"):
-        pass  # created exclusively for this attempt, so cleanup can only ever remove our own file
+        pass  # created exclusively for this attempt, so cleanup can only ever remove our own files
+    owned = [partial]  # every path this attempt created and therefore may remove on failure
     try:
         protect(partial)
         dumped = _run(run, [pg_dump, "--format=custom", "--no-password", f"--file={partial}", f"--dbname={target}"],
@@ -252,20 +261,29 @@ def backup_database(
         toc = _toc(str(listed.stdout or ""))
         if toc["entries"] == 0 or toc["ledger"] != 1:
             raise DatabaseRecoveryError("Archive verification failed: it does not contain the Vres migration ledger")
-        os.rename(partial, output)  # refuses to replace a file that appeared meanwhile
+        manifest = {
+            "format": FORMAT, "version": VERSION, "created_at": datetime.now(UTC).isoformat(),
+            "source": {"host": target_for(host, port, dbname).host, "port": port, "dbname": dbname, "user": user},
+            "archive": output.name, "bytes": partial.stat().st_size, "sha256": _sha256_file(partial),
+            "toc": toc, "limitations": list(LIMITATIONS),
+        }
+        with open(staged_manifest, "x", encoding="utf-8") as handle:
+            owned.append(staged_manifest)
+            json.dump(manifest, handle, indent=2, sort_keys=True)
+        protect(staged_manifest)
+        # Publish only now, archive first and manifest last, never replacing an existing file.
+        if os.path.lexists(output) or os.path.lexists(manifest_path):
+            raise DatabaseRecoveryError("Backup output appeared during the backup; nothing is overwritten")
+        os.rename(partial, output)
+        owned[owned.index(partial)] = output
+        os.rename(staged_manifest, manifest_path)
+        owned.remove(staged_manifest)
     except DatabaseRecoveryError as exc:
-        raise _discard(partial, exc) from None
-    except Exception as exc:  # credential provider, ACL or filesystem failure: same cleanup, never success
-        raise _discard(partial, DatabaseRecoveryError(f"Backup failed ({type(exc).__name__})")) from None
-    manifest = {
-        "format": FORMAT, "version": VERSION, "created_at": datetime.now(UTC).isoformat(),
-        "source": {"host": target_for(host, port, dbname).host, "port": port, "dbname": dbname, "user": user},
-        "archive": output.name, "bytes": output.stat().st_size, "sha256": _sha256_file(output),
-        "toc": toc, "limitations": list(LIMITATIONS),
-    }
-    with open(manifest_path, "x", encoding="utf-8") as handle:
-        json.dump(manifest, handle, indent=2, sort_keys=True)
-    protect(manifest_path)
+        raise _discard(owned, exc) from None
+    except Exception as exc:  # credential, manifest, ACL or publication failure: same cleanup, never success
+        raise _discard(owned, DatabaseRecoveryError(
+            f"Backup failed before the archive and its manifest were both published ({type(exc).__name__})."
+        )) from None
     return {"status": "verified_archive", "archive": str(output), "manifest": str(manifest_path), **manifest}
 
 
