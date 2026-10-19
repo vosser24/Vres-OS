@@ -4,6 +4,7 @@ import secrets
 from dataclasses import dataclass
 
 from .config import ConfigStore, VresConfig
+from .database_targets import require_admin_contact
 from .db import _driver
 from .secrets import SecretStore
 
@@ -180,6 +181,7 @@ def provision_boundary(
             raise RuntimeError("PostgreSQL administrator credentials are required for provenance boundary setup")
         admin_dsn = _runtime_dsn(cfg, user=admin_user, password=admin_password)
 
+    require_admin_contact(admin_dsn, cfg.database.database)
     with _driver().connect(admin_dsn, autocommit=True, row_factory=dict_row) as conn:
         existing = conn.execute(
             "SELECT rolname FROM pg_roles WHERE rolname=ANY(%s)",
@@ -264,6 +266,7 @@ def rollback_boundary_provision(cfg: VresConfig, credentials: BoundaryCredential
     from psycopg import sql
     from psycopg.rows import dict_row
 
+    require_admin_contact(admin_dsn, cfg.database.database)
     with _driver().connect(admin_dsn, autocommit=True, row_factory=dict_row) as conn:
         with conn.transaction():
             _transfer_vres_ownership(conn, new_owner=cfg.database.user)

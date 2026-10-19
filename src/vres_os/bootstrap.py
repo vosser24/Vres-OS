@@ -13,9 +13,10 @@ import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 
-from .db import _driver
+from .db import DatabaseTargetRefused, _driver
 
 from .config import ConfigStore
+from .database_targets import confirm_target_for_setup, require_admin_contact, require_contact
 from .database_boundary import (
     boundary_credentials_present,
     boundary_ready,
@@ -136,16 +137,16 @@ def _runtime_dsn(*, host: str, port: int, database: str, user: str, password: st
 
 
 def _test_database(*, host: str, port: int, database: str, user: str, password: str, sslmode: str) -> None:
-    with _driver().connect(
-        _runtime_dsn(
-            host=host,
-            port=port,
-            database=database,
-            user=user,
-            password=password,
-            sslmode=sslmode,
-        )
-    ) as conn:
+    dsn = _runtime_dsn(
+        host=host,
+        port=port,
+        database=database,
+        user=user,
+        password=password,
+        sslmode=sslmode,
+    )
+    require_contact(dsn)
+    with _driver().connect(dsn) as conn:
         conn.execute("SELECT 1")
 
 
@@ -154,6 +155,7 @@ def _cleanup_provisioned_local_database(provisioned: _ProvisionedLocalDatabase) 
     from psycopg import sql
 
     writer_user, migration_user = default_boundary_roles(provisioned.runtime_user)
+    require_admin_contact(provisioned.admin_dsn, provisioned.database)
     with _driver().connect(provisioned.admin_dsn, autocommit=True) as conn:
         conn.execute(
             sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(
@@ -183,6 +185,7 @@ def _provision_local_database(
     from psycopg.rows import dict_row
 
     runtime_password = secrets.token_urlsafe(32)
+    require_admin_contact(admin_dsn, database)
     with _driver().connect(admin_dsn, autocommit=True, row_factory=dict_row) as conn:
         role = conn.execute(
             "SELECT rolsuper,rolcanlogin FROM pg_roles WHERE rolname=%s", (runtime_user,)
@@ -309,6 +312,7 @@ def _upgrade_existing_boundary(store: ConfigStore, cfg, *, secret_store: SecretS
     print("This installation needs a one-time PostgreSQL role split before user authority can continue.")
     print("No administrator credential is persisted or sent through Claude/MCP.")
     try:
+        confirm_target_for_setup(cfg.database.host, cfg.database.port, cfg.database.database)
         _configure_provenance_boundary(cfg, store=store, secret_store=secret_store)
         applied = migrate()
         print(f"Applied migrations: {applied or 'none (already current)'}")
@@ -375,6 +379,7 @@ def _interactive_setup() -> None:
     )
     runtime_password: str | None = None
     try:
+        confirm_target_for_setup(cfg.database.host, cfg.database.port, cfg.database.database)
         if auto_provision:
             print("\nVres needs the PostgreSQL administrator password once to provision its isolated account.")
             print("That administrator password is never persisted.")
@@ -571,7 +576,20 @@ def start_for_project(project_root: str = ".") -> dict:
                 "setup": setup,
                 "prerequisites": prerequisite_status(),
             }
-    applied = migrate()
+    try:
+        applied = migrate()
+    except DatabaseTargetRefused as exc:
+        from .redaction import redact_text
+
+        return {
+            "status": "DATABASE_TARGET_REFUSED",
+            "message": redact_text(str(exc)),
+            "action": (
+                "Vres made no database connection. Run `vres setup` in a local terminal and approve "
+                "the exact intended database, or configure a different approved database."
+            ),
+            "prerequisites": prerequisite_status(),
+        }
     project = discover_project(project_root)
     from .claude_contract import ensure_project_claude
 
