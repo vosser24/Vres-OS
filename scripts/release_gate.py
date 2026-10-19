@@ -77,6 +77,19 @@ def _tool_names(path: Path) -> list[str]:
                           and d.func.attr == 'tool' for d in n.decorator_list))
 
 
+def require_personal_release_inputs(root: Path) -> None:
+    """Refuse an invalid personal-release input tree (pins 001-041, no experimental files).
+
+    An explicit raise, not assert: the refusal must hold even under python -O.
+    """
+    if str(ROOT / 'src') not in sys.path:
+        sys.path.insert(0, str(ROOT / 'src'))
+    from vres_os.release_inputs import release_input_problems
+    problems = release_input_problems(root)
+    if problems:
+        raise ValueError('Personal-release inputs refused: ' + '; '.join(problems))
+
+
 def structure():
     import yaml
     from packaging.version import Version
@@ -133,10 +146,7 @@ def structure():
             json.loads(path.read_text(encoding='utf-8'))
         if path.suffix == '.py':
             ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
-    sys.path.insert(0, str(ROOT / 'src'))
-    from vres_os.release_inputs import release_input_problems
-    problems = release_input_problems(ROOT)
-    assert not problems, 'Personal-release inputs refused: ' + '; '.join(problems)
+    require_personal_release_inputs(ROOT)
     baseline = json.loads((ROOT / 'scripts/migration-baseline.json').read_text())['sha256']
     migrations = sorted((ROOT / 'src/vres_os/migrations').glob('*.sql'))
     numbers = [int(p.name[:3]) for p in migrations]

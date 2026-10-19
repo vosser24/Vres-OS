@@ -9,6 +9,7 @@ from __future__ import annotations
 import io
 import json
 import shutil
+import subprocess
 import sys
 from importlib import resources
 from pathlib import Path
@@ -398,4 +399,33 @@ def test_installer_validates_release_inputs_before_creating_anything():
     assert check < installer.index("New-Item -ItemType Directory -Force -Path $InstallRoot")
     assert check < installer.index("'-m','pip','install'")
     gate = (_ROOT / "scripts/release_gate.py").read_text(encoding="utf-8")
-    assert gate.index("release_input_problems(ROOT)") < gate.index("migration-baseline.json")
+    assert gate.index("    require_personal_release_inputs(ROOT)") < gate.index("migration-baseline.json")
+
+
+@pytest.mark.parametrize("valid", [True, False], ids=["valid-tree", "migration-048"])
+def test_release_gate_refuses_invalid_inputs_even_under_python_optimization(tmp_path, valid):
+    root = _release_tree(tmp_path)
+    if not valid:
+        (root / release_inputs.MIGRATIONS_DIR / "048_source_effective_trust.sql").write_text("SELECT 1;")
+    script = (
+        "import runpy, sys\n"
+        "from pathlib import Path\n"
+        "assert False, 'asserts must be stripped in this child'\n"
+        "print('optimize', sys.flags.optimize, flush=True)\n"
+        "gate = runpy.run_path(sys.argv[1])\n"
+        "gate['require_personal_release_inputs'](Path(sys.argv[2]))\n"
+        "print('accepted')\n"
+    )
+
+    child = subprocess.run(
+        [sys.executable, "-O", "-c", script, str(_ROOT / "scripts/release_gate.py"), str(root)],
+        capture_output=True, text=True, timeout=60,
+    )
+
+    assert "optimize 1" in child.stdout
+    if valid:
+        assert child.returncode == 0 and "accepted" in child.stdout, child.stderr
+    else:
+        assert child.returncode != 0 and "accepted" not in child.stdout
+        assert "ValueError: Personal-release inputs refused" in child.stderr
+        assert "048_source_effective_trust.sql is above 041" in child.stderr

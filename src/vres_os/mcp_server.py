@@ -15,6 +15,7 @@ from .capabilities import CapabilityService
 from .codex import CodexAdapter
 from .codex_handoff import CodexHandoffService, HandoffError
 from .config import ConfigStore
+from .control_preflight import allowed_while_unconfigured, unconfigured_refusal, vres_configured
 from .db import migrate
 from .embeddings import EmbeddingService
 from .experience_lifecycle import ExperienceLifecycleService
@@ -37,7 +38,23 @@ from .sources import SourceService
 from .redaction import redact_text
 from .metrics import validate_metrics
 
-mcp = FastMCP(
+class VresMCP(FastMCP):
+    """The single Vres MCP server; every registration module adds its tools to this instance.
+
+    call_tool is FastMCP's dispatch for every tools/call request, so the unconfigured-state
+    policy is enforced here once, before any tool body runs, whether or not the Claude
+    PreToolUse hook is installed. It reads only the local configuration, never a database.
+    """
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+        if not allowed_while_unconfigured(name) and not vres_configured():
+            from mcp.server.fastmcp.exceptions import ToolError
+
+            raise ToolError(unconfigured_refusal(name))
+        return await super().call_tool(name, arguments)
+
+
+mcp = VresMCP(
     "Vres-OS",
     instructions=(
         "Persistent executive operating tools. Restore task state, retrieve documented knowledge, reuse accepted "

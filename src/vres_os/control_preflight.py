@@ -204,24 +204,40 @@ def evaluate_control_preflight(
     )
 
 
+def allowed_while_unconfigured(vres_tool: str) -> bool:
+    """Registered (unprefixed) Vres tool names admitted before secure setup: read-only diagnostics and setup."""
+    return vres_tool in _SAFE_VRES_TOOLS or vres_tool in _UNCONFIGURED_SETUP_TOOLS
+
+
+def vres_configured() -> bool:
+    """Local configuration only, never a database: a missing or unreadable config counts as unconfigured."""
+    try:
+        return ConfigStore().load().configured is True
+    except Exception:
+        return False
+
+
+def unconfigured_refusal(tool_name: str) -> str:
+    return (
+        "Vres is not configured yet, so mutation-capable governed tool "
+        f"'{tool_name}' did not execute. Read-only Vres diagnostics remain available; "
+        "complete secure setup with start_vres or `vres setup` in a local terminal first."
+    )
+
+
 def evaluate_unconfigured_preflight(payload: dict[str, Any]) -> dict[str, Any] | None:
     """Deny mutation-capable governed Vres tools until secure setup has configured Vres.
 
     Read-only Vres diagnostics and the secure setup entry point stay available. Host
     tools and other MCP servers are not Vres-governed and are left to their own controls.
+    The MCP server enforces the same policy at its own dispatch, without this hook.
     """
     if payload.get("hook_event_name") != "PreToolUse":
         return None
     tool_name = str(payload.get("tool_name") or "").strip()
-    if not tool_name.startswith(_VRES_PREFIX) or is_read_only_tool(tool_name):
+    if not tool_name.startswith(_VRES_PREFIX) or allowed_while_unconfigured(tool_name[len(_VRES_PREFIX):]):
         return None
-    if tool_name[len(_VRES_PREFIX):] in _UNCONFIGURED_SETUP_TOOLS:
-        return None
-    return _deny(
-        "Vres is not configured yet, so mutation-capable governed tool "
-        f"'{tool_name}' did not execute. Read-only Vres diagnostics remain available; "
-        "complete secure setup with start_vres or `vres setup` in a local terminal first."
-    )
+    return _deny(unconfigured_refusal(tool_name))
 
 
 def _recovery_name(tool_name: str) -> str | None:
