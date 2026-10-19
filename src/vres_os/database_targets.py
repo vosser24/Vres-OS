@@ -1,20 +1,30 @@
 """Personal-release database contact boundary.
 
-A managed personal-release installation opens no PostgreSQL connection until the
-operator has explicitly approved that exact target for this installation. The
-decision is taken from the final connection string, before any credential is read
-and before any network contact, so configured targets and environment-provided
+Every Vres process on Windows, the only platform the personal release supports,
+opens no PostgreSQL connection until the operator has explicitly approved that
+exact target for this user's installation. This holds whether or not the managed
+installer has run: a source checkout, a missing or unreadable installation marker,
+or a half-finished installation never counts as permission to contact a database.
+The decision is taken from the final connection string, before any credential is
+read and before any network contact, so configured targets and environment-provided
 DSNs are judged by one rule. Unknown, ambiguous and held targets are refused.
 
-Nothing here can be satisfied or disabled by an environment variable: the
-installation root is resolved from the Windows shell, not from LOCALAPPDATA or
-platformdirs overrides, and the approval registry lives only in that root.
+Nothing here can be satisfied or disabled by an environment variable: whether the
+guard applies depends only on the running platform, the registry root is resolved
+from the Windows shell rather than LOCALAPPDATA or platformdirs overrides, and the
+registry is read only from that root.
+
+Limitation: an approval names a host, port and database. It is not a cryptographic
+identification of the PostgreSQL cluster that answers there; a different cluster
+later serving the same host, port and database name would not be told apart before
+connecting. Holds are therefore deliberately broader than approvals (a whole server).
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import stat
 import sys
 import tempfile
 from datetime import datetime, timezone
@@ -28,8 +38,6 @@ from .paths import APP_NAME
 REGISTRY_NAME = "database-targets.json"
 REGISTRY_VERSION = 1
 REGISTRY_MAX_BYTES = 64 * 1024
-# The managed Windows installer writes these; either one makes this a personal-release installation.
-INSTALL_MARKERS = ("active-install.json", "pending-install.json")
 # libpq consults these when a connection string omits a key, so any of them makes the real target ambiguous.
 ROUTING_ENVIRONMENT = ("PGHOST", "PGHOSTADDR", "PGPORT", "PGDATABASE", "PGSERVICE", "PGSERVICEFILE", "PGSYSCONFDIR")
 # Spellings of this machine's loopback interface. A hold on one of them covers all of them.
@@ -50,7 +58,7 @@ class DatabaseTarget(NamedTuple):
         return ("loopback" if self.host in _LOOPBACK else self.host), self.port
 
 
-def _known_local_app_data() -> str:
+def _shell_local_app_data() -> str:
     """Resolve FOLDERID_LocalAppData from the Windows shell, never from environment variables."""
     import ctypes
     import uuid
@@ -90,30 +98,56 @@ def _known_local_app_data() -> str:
             ole32.CoTaskMemFree(buffer)
 
 
-def _managed_root(known_local_app_data: str, environ: Mapping[str, str]) -> Path | None:
-    """Return the canonical registry root when an installer marker exists, else None.
+def _known_local_app_data() -> str:
+    return _shell_local_app_data()
 
-    LOCALAPPDATA is consulted only as an additional place a marker may live (the
-    installer itself uses it), so the environment can enable the guard but never
-    disable it or relocate the registry.
+
+def _guarded_platform() -> bool:
+    """The personal release is Windows-only, so every Windows process is guarded."""
+    return sys.platform == "win32"
+
+
+_lstat = os.lstat
+
+
+def _inspect_path(path: Path, *, kind: str) -> os.stat_result | None:
+    """lstat without following links. Only a genuinely missing path counts as absent.
+
+    Permission, enumeration and other OS errors, reparse points (symbolic links and
+    junctions) and an unexpected file type are refused rather than read as absence.
     """
-    canonical = Path(known_local_app_data) / APP_NAME
-    candidates = [canonical]
-    if environ.get("LOCALAPPDATA"):
-        candidates.append(Path(environ["LOCALAPPDATA"]) / APP_NAME)
     try:
-        managed = any((root / name).exists() for root in candidates for name in INSTALL_MARKERS)
+        info = _lstat(path)
+    except FileNotFoundError:
+        return None
     except OSError:
         raise DatabaseTargetRefused(
-            f"Vres could not inspect its installation markers, so database contact is refused. {_NO_CONTACT}"
+            f"Vres could not inspect its database target {kind}; database contact is refused. {_NO_CONTACT}"
         ) from None
-    return canonical if managed else None
+    reparse = getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+    expected = stat.S_ISDIR if kind == "registry root" else stat.S_ISREG
+    if stat.S_ISLNK(info.st_mode) or reparse or not expected(info.st_mode):
+        raise DatabaseTargetRefused(
+            f"Vres refused a database target {kind} that is a link, junction or unexpected file type. {_NO_CONTACT}"
+        )
+    return info
+
+
+def _canonical_root() -> Path:
+    root = Path(_known_local_app_data()) / APP_NAME
+    _inspect_path(root, kind="registry root")
+    return root
 
 
 def personal_release_root() -> Path | None:
-    if sys.platform != "win32":
+    """Return the approval-registry root for a guarded process, or None outside the guard.
+
+    Only non-Windows processes (such as Linux CI, which cannot host the personal
+    release) are outside the guard. Installation markers are deliberately not consulted.
+    """
+    if not _guarded_platform():
         return None
-    return _managed_root(_known_local_app_data(), os.environ)
+    return _canonical_root()
 
 
 def _refuse_ambiguous_environment() -> None:
@@ -189,15 +223,32 @@ _APPROVED_FIELDS = {"host": str, "port": int, "dbname": str, "approved_at": str,
 _HELD_FIELDS = {"host": str, "port": int, "reason": str, "held_at": str}
 
 
-def _load_registry(root: Path) -> tuple[list[dict], list[dict]]:
-    path = root / REGISTRY_NAME
+def _read_registry_bytes(path: Path) -> bytes | None:
+    """Read the registry only if it is the same plain file that lstat inspected."""
+    info = _inspect_path(path, kind="registry")
+    if info is None:
+        return None
+    if info.st_size > REGISTRY_MAX_BYTES:
+        raise _registry_unreadable()
     try:
-        if not path.exists():
-            return [], []
-        if path.stat().st_size > REGISTRY_MAX_BYTES:
-            raise _registry_unreadable()
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        with open(path, "rb") as handle:
+            opened = os.fstat(handle.fileno())
+            data = handle.read(REGISTRY_MAX_BYTES + 1)
+    except OSError:
+        raise _registry_unreadable() from None
+    if (opened.st_ino, opened.st_dev) != (info.st_ino, info.st_dev) or len(data) > REGISTRY_MAX_BYTES:
+        raise _registry_unreadable()
+    return data
+
+
+def _load_registry(root: Path) -> tuple[list[dict], list[dict]]:
+    """A missing registry approves nothing. Anything unreadable or malformed refuses everything."""
+    data = _read_registry_bytes(root / REGISTRY_NAME)
+    if data is None:
+        return [], []
+    try:
+        raw = json.loads(data.decode("utf-8"))
+    except ValueError:
         raise _registry_unreadable() from None
     if (
         not isinstance(raw, dict)
@@ -216,7 +267,9 @@ def _load_registry(root: Path) -> tuple[list[dict], list[dict]]:
 
 def _save_registry(root: Path, approved: list[dict], held: list[dict]) -> None:
     root.mkdir(parents=True, exist_ok=True)
+    _inspect_path(root, kind="registry root")
     path = root / REGISTRY_NAME
+    _inspect_path(path, kind="registry")
     fd, name = tempfile.mkstemp(prefix=".database-targets-", suffix=".tmp", dir=root)
     tmp = Path(name)
     try:
@@ -274,8 +327,16 @@ def _interactive() -> bool:
     return bool(sys.stdin) and sys.stdin.isatty()
 
 
-def confirm_target_for_setup(host: str, port: int, dbname: str, *, ask: Callable[[str], str] = input) -> None:
-    """Record an operator approval of one exact target from the interactive secure setup console."""
+def confirm_target_for_setup(
+    host: str,
+    port: int,
+    dbname: str,
+    *,
+    ask: Callable[[str], str] | None = None,
+    approved_by: str = "secure-setup",
+) -> None:
+    """Record an operator approval of one exact target from an interactive console."""
+    ask = ask or input
     root = personal_release_root()
     if root is None:
         return
@@ -296,6 +357,8 @@ def confirm_target_for_setup(host: str, port: int, dbname: str, *, ask: Callable
     print(f"\nVres has not been approved to contact {target.describe()}.")
     print("Approve it only if it is the intended Vres database for this installation.")
     print("Never approve a database that is part of an open incident or holds data you have not backed up.")
+    print("An approval names this host, port and database only; it does not prove which PostgreSQL")
+    print("cluster answers there. Hold a server instead if it must never be contacted.")
     if ask(f"Type the database name {target.dbname!r} exactly to approve, or press Enter to cancel: ") != target.dbname:
         raise DatabaseTargetRefused(f"{target.describe()} was not approved. {_NO_CONTACT}")
     approved.append(
@@ -304,24 +367,20 @@ def confirm_target_for_setup(host: str, port: int, dbname: str, *, ask: Callable
             "port": target.port,
             "dbname": target.dbname,
             "approved_at": datetime.now(timezone.utc).isoformat(),
-            "approved_by": "secure-setup",
+            "approved_by": approved_by,
         }
     )
     _save_registry(root, approved, held)
     print(f"Approved {target.describe()} for this installation.")
 
 
-def _canonical_root() -> Path:
-    if sys.platform != "win32":
-        raise DatabaseTargetRefused("Database server holds apply only to a managed Windows installation.")
-    return Path(_known_local_app_data()) / APP_NAME
-
-
 def hold_target(host: str, port: int, *, reason: str, dbname: str | None = None) -> Path:
     """Hold a whole database server for this installation. Holds are only ever added here, never removed."""
     if not reason.strip():
         raise ValueError("A hold needs a reason")
-    root = _canonical_root()
+    root = personal_release_root()
+    if root is None:
+        raise DatabaseTargetRefused("Database server holds apply only to the Windows personal release.")
     target = target_for(host, port, dbname or "-")
     approved, held = _load_registry(root)
     if not _held(target, held):
@@ -339,7 +398,7 @@ def hold_target(host: str, port: int, *, reason: str, dbname: str | None = None)
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Read-only status and hold recording. Never opens PostgreSQL and never reads a credential."""
+    """Status, add-only server holds and interactive approval. Never opens PostgreSQL or reads a credential."""
     parser = argparse.ArgumentParser(prog="python -m vres_os.database_targets", description=main.__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("status")
@@ -348,17 +407,28 @@ def main(argv: list[str] | None = None) -> int:
     hold.add_argument("--port", required=True, type=int)
     hold.add_argument("--dbname")
     hold.add_argument("--reason", required=True)
+    approve = commands.add_parser("approve", help="interactive only, e.g. a disposable test database")
+    approve.add_argument("--host", required=True)
+    approve.add_argument("--port", required=True, type=int)
+    approve.add_argument("--dbname", required=True)
     args = parser.parse_args(argv)
     try:
         if args.command == "hold":
-            print(f"Held {args.host}:{args.port} in {hold_target(args.host, args.port, reason=args.reason, dbname=args.dbname)}")
+            path = hold_target(args.host, args.port, reason=args.reason, dbname=args.dbname)
+            print(f"Held {args.host}:{args.port} in {path}")
+            return 0
+        if args.command == "approve":
+            if personal_release_root() is None:
+                raise DatabaseTargetRefused("Database target approval applies only to the Windows personal release.")
+            confirm_target_for_setup(args.host, args.port, args.dbname, approved_by="operator-console")
             return 0
         root = personal_release_root()
         if root is None:
-            print("Personal-release database contact guard: inactive (no managed installation marker).")
+            print("Personal-release database contact guard: not applicable on this platform (non-Windows).")
             return 0
         approved, held = _load_registry(root)
         print(f"Personal-release database contact guard: active; registry {root / REGISTRY_NAME}")
+        print("  (approvals name host, port and database; they do not prove PostgreSQL cluster identity)")
         for item in approved:
             print(f"  approved: {target_for(item['host'], item['port'], item['dbname']).describe()}")
         for item in held:

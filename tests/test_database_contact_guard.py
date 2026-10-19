@@ -22,6 +22,8 @@ from vres_os.config import ConfigStore, VresConfig
 from vres_os.database_boundary import BoundaryCredentials
 from vres_os.db import DatabaseTargetRefused, MigrationDrift
 
+# Captured at import, before conftest forces the guard on for each unit test.
+_REAL_GUARDED_PLATFORM = database_targets._guarded_platform
 _MUTATION = re.compile(r"\b(CREATE|ALTER|DROP|INSERT|UPDATE|DELETE|GRANT|REVOKE|TRUNCATE)\b|pg_advisory_lock")
 _SECRET = "SuperSecret-Example-Value"
 _DSN_ENV = (
@@ -70,10 +72,10 @@ def tripwires(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def personal_root(monkeypatch, tmp_path):
-    root = tmp_path / "installation" / "VresOS"
-    root.mkdir(parents=True)
-    monkeypatch.setattr(database_targets, "personal_release_root", lambda: root)
+def personal_root():
+    """The real registry root decision, over the private LocalAppData that conftest provides."""
+    root = database_targets.personal_release_root()
+    root.mkdir(parents=True, exist_ok=True)
     return root
 
 
@@ -267,18 +269,58 @@ def test_data_dir_override_cannot_supply_an_approval(personal_root, tmp_path):
         db.build_dsn("runtime")
 
 
-def test_environment_can_enable_but_never_disable_or_relocate_the_guard(tmp_path):
-    known, other = tmp_path / "known", tmp_path / "env"
-    (known / "VresOS").mkdir(parents=True)
-    (other / "VresOS").mkdir(parents=True)
+# B1. No installation state, marker or environment variable authorizes contact on Windows
 
-    assert database_targets._managed_root(str(known), {"LOCALAPPDATA": str(other)}) is None
-    (other / "VresOS" / "pending-install.json").write_text("{}", encoding="utf-8")
-    assert database_targets._managed_root(str(known), {"LOCALAPPDATA": str(other)}) == known / "VresOS"
-    (other / "VresOS" / "pending-install.json").unlink()
-    (known / "VresOS" / "active-install.json").write_text("{}", encoding="utf-8")
-    assert database_targets._managed_root(str(known), {}) == known / "VresOS"
-    assert database_targets._managed_root(str(known), {"LOCALAPPDATA": str(other)}) == known / "VresOS"
+
+@pytest.mark.parametrize(
+    "markers",
+    [(), ("active-install.json",), ("pending-install.json",), ("active-install.json", "pending-install.json")],
+    ids=["source-checkout-no-markers", "installed", "interrupted-install", "both-markers"],
+)
+def test_every_windows_process_is_guarded_whatever_the_installation_state(personal_root, tripwires, markers):
+    for name in markers:
+        (personal_root / name).write_text("{}", encoding="utf-8")
+    _configure()
+
+    assert database_targets.personal_release_root() == personal_root
+    with pytest.raises(DatabaseTargetRefused, match="has not been approved"):
+        db.build_dsn("runtime")
+    with pytest.raises(DatabaseTargetRefused, match="has not been approved"):
+        database_targets.require_admin_contact("host=localhost port=5432 dbname=postgres", "vres_personal")
+    assert tripwires.secret_reads == []
+
+
+def test_missing_registry_root_is_a_guarded_installation_that_approves_nothing(tmp_path, monkeypatch):
+    monkeypatch.setattr(database_targets, "_known_local_app_data", lambda: str(tmp_path / "never-created"))
+    _configure()
+
+    assert database_targets.personal_release_root() == tmp_path / "never-created" / "VresOS"
+    with pytest.raises(DatabaseTargetRefused, match="has not been approved"):
+        db.build_dsn("runtime")
+
+
+@pytest.mark.parametrize(
+    "variable", ["LOCALAPPDATA", "WIN_PD_OVERRIDE_LOCAL_APPDATA", "VRES_DATA_DIR", "VRES_ALLOW_TEST_DB", "OS"]
+)
+def test_environment_variables_cannot_disable_or_relocate_the_guard(personal_root, monkeypatch, tmp_path, variable):
+    elsewhere = tmp_path / "elsewhere"
+    _registry_dir = elsewhere / "VresOS"
+    _registry_dir.mkdir(parents=True)
+    _registry(_registry_dir, approved=[("localhost", 5432, "vres_personal")])
+    _configure()
+    monkeypatch.setenv(variable, str(elsewhere) if variable != "VRES_ALLOW_TEST_DB" else "1")
+
+    assert database_targets.personal_release_root() == personal_root
+    with pytest.raises(DatabaseTargetRefused, match="has not been approved"):
+        db.build_dsn("runtime")
+
+
+def test_guarded_platform_follows_the_interpreter_platform_only(monkeypatch):
+    # conftest forces the guard on for unit tests; this checks the real rule captured at import.
+    assert _REAL_GUARDED_PLATFORM() is (sys.platform == "win32")
+    for name in ("OS", "LOCALAPPDATA", "WIN_PD_OVERRIDE_LOCAL_APPDATA", "VRES_DATA_DIR", "VRES_ALLOW_TEST_DB"):
+        monkeypatch.setenv(name, "Linux")
+    assert _REAL_GUARDED_PLATFORM() is (sys.platform == "win32")
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows known-folder resolution")
@@ -286,16 +328,115 @@ def test_installation_root_is_resolved_from_the_shell_not_environment(monkeypatc
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     monkeypatch.setenv("WIN_PD_OVERRIDE_LOCAL_APPDATA", str(tmp_path))
 
-    resolved = Path(database_targets._known_local_app_data())
+    resolved = Path(database_targets._shell_local_app_data())
 
     assert resolved.is_absolute() and resolved != tmp_path
 
 
-def test_non_managed_installation_keeps_legacy_dsn_behaviour(monkeypatch):
+def test_non_windows_process_is_outside_the_guard_and_keeps_legacy_dsn_behaviour(monkeypatch):
+    """Explicit boundary: the personal release cannot run off Windows (Linux CI is outside it)."""
+    monkeypatch.setattr(database_targets, "_guarded_platform", lambda: False)
     monkeypatch.setenv("VRES_DATABASE_URL", "legacy opaque test value")
 
     assert database_targets.personal_release_root() is None
     assert db.build_dsn("runtime") == "legacy opaque test value"
+
+
+# B2. Marker/registry ambiguity is refusal, never absence
+
+
+def _fake_lstat(real, path_suffix, outcome):
+    def fake(path):
+        if str(path).endswith(path_suffix):
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return outcome
+        return real(path)
+
+    return fake
+
+
+@pytest.mark.parametrize(
+    "suffix,outcome,message",
+    [
+        ("VresOS", PermissionError(13, "denied"), "could not inspect its database target registry root"),
+        ("VresOS", OSError(1921, "cannot resolve"), "could not inspect its database target registry root"),
+        (database_targets.REGISTRY_NAME, PermissionError(13, "denied"), "could not inspect its database target registry"),
+        (database_targets.REGISTRY_NAME, NotADirectoryError(20, "not a dir"), "could not inspect"),
+        (database_targets.REGISTRY_NAME, OSError(5, "access denied"), "could not inspect"),
+    ],
+)
+def test_inaccessible_root_or_registry_is_refused_not_treated_as_absent(
+    personal_root, monkeypatch, suffix, outcome, message
+):
+    _configure()
+    _registry(personal_root, approved=[("localhost", 5432, "vres_personal")])
+    monkeypatch.setattr(database_targets, "_lstat", _fake_lstat(database_targets._lstat, suffix, outcome))
+
+    with pytest.raises(DatabaseTargetRefused, match=message):
+        db.build_dsn("runtime")
+
+
+def test_reparse_point_or_wrong_type_is_refused(personal_root, monkeypatch):
+    _configure()
+    registry = personal_root / database_targets.REGISTRY_NAME
+    _registry(personal_root, approved=[("localhost", 5432, "vres_personal")])
+    real = database_targets._lstat
+    plain = real(registry)
+    reparse = SimpleNamespace(
+        st_mode=plain.st_mode, st_size=plain.st_size, st_ino=plain.st_ino, st_dev=plain.st_dev,
+        st_file_attributes=database_targets.stat.FILE_ATTRIBUTE_REPARSE_POINT,
+    )
+    for suffix, outcome in (
+        (database_targets.REGISTRY_NAME, reparse),
+        ("VresOS", SimpleNamespace(st_mode=plain.st_mode, st_file_attributes=0)),  # root is a file
+        (database_targets.REGISTRY_NAME, real(personal_root)),  # registry is a directory
+    ):
+        monkeypatch.setattr(database_targets, "_lstat", _fake_lstat(real, suffix, outcome))
+        with pytest.raises(DatabaseTargetRefused, match="link, junction or unexpected file type"):
+            db.build_dsn("runtime")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows directory junction")
+def test_real_junction_as_registry_root_is_refused(monkeypatch, tmp_path):
+    import _winapi
+
+    target = tmp_path / "target" / "VresOS"
+    target.mkdir(parents=True)
+    _registry(target, approved=[("localhost", 5432, "vres_personal")])
+    local = tmp_path / "local"
+    local.mkdir()
+    _winapi.CreateJunction(str(target), str(local / "VresOS"))
+    monkeypatch.setattr(database_targets, "_known_local_app_data", lambda: str(local))
+    _configure()
+
+    with pytest.raises(DatabaseTargetRefused, match="link, junction"):
+        db.build_dsn("runtime")
+
+
+def test_registry_swapped_between_inspection_and_read_is_refused(personal_root, monkeypatch):
+    _configure()
+    _registry(personal_root, approved=[("localhost", 5432, "vres_personal")])
+    registry = personal_root / database_targets.REGISTRY_NAME
+    inspected = database_targets._lstat(registry)
+    swapped = SimpleNamespace(
+        st_mode=inspected.st_mode, st_size=inspected.st_size, st_ino=inspected.st_ino + 1,
+        st_dev=inspected.st_dev, st_file_attributes=0,
+    )
+    monkeypatch.setattr(
+        database_targets, "_lstat", _fake_lstat(database_targets._lstat, database_targets.REGISTRY_NAME, swapped)
+    )
+
+    with pytest.raises(DatabaseTargetRefused, match="could not read its database target registry"):
+        db.build_dsn("runtime")
+
+
+def test_installer_markers_are_never_created_or_changed_by_the_guard(personal_root):
+    _configure()
+    with pytest.raises(DatabaseTargetRefused):
+        db.build_dsn("runtime")
+
+    assert sorted(p.name for p in personal_root.iterdir()) == []
 
 
 # D/E. Migration metadata is inspected read-only before any lock or DDL
@@ -614,8 +755,25 @@ def test_setup_approval_needs_the_interactive_console_and_the_exact_name(persona
     database_targets.confirm_target_for_setup("localhost", 5432, "vres_personal", ask=pytest.fail)
 
 
+def test_console_approval_is_interactive_only_and_refuses_held_servers(personal_root, monkeypatch, capsys):
+    path = personal_root / database_targets.REGISTRY_NAME
+    argv = ["approve", "--host", "localhost", "--port", "5432", "--dbname", "vres_disposable_test"]
+    monkeypatch.setattr("builtins.input", lambda _prompt: "vres_disposable_test")
+
+    monkeypatch.setattr(database_targets, "_interactive", lambda: False)
+    assert database_targets.main(argv) == 2 and not path.exists()
+
+    monkeypatch.setattr(database_targets, "_interactive", lambda: True)
+    assert database_targets.main(argv) == 0
+    assert json.loads(path.read_text())["approved"][0]["approved_by"] == "operator-console"
+    assert "does not prove which PostgreSQL" in capsys.readouterr().out
+
+    _registry(personal_root, held=[("localhost", 5432)])
+    assert database_targets.main([*argv[:-1], "another_test"]) == 2
+    assert json.loads(path.read_text())["approved"] == []
+
+
 def test_hold_and_status_never_contact_postgresql(personal_root, monkeypatch, capsys, tripwires):
-    monkeypatch.setattr(database_targets, "_canonical_root", lambda: personal_root)
     _configure(database="vres_os")
 
     assert database_targets.main(["hold", "--host", "localhost", "--port", "5432", "--reason", "schema-048"]) == 0

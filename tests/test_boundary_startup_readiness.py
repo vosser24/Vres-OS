@@ -59,7 +59,8 @@ def test_migrate_uses_migrator_identity_even_if_secret_visibility_is_unknown(mon
     assert calls == ["migrator"]
 
 
-def test_missing_migrator_credential_fails_closed_instead_of_runtime_fallback(monkeypatch):
+def test_missing_migrator_credential_fails_closed_instead_of_runtime_fallback(monkeypatch, approve_database_target):
+    approve_database_target(("localhost", 5432, "vres_os"))
     cfg = _certified_config()
     missing = SimpleNamespace(get=lambda _key: None)
 

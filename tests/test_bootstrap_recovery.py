@@ -35,7 +35,10 @@ class _Secrets:
         self.values.pop(key, None)
 
 
-def test_failed_auto_provisioned_setup_cleans_only_its_created_resources(monkeypatch):
+def test_failed_auto_provisioned_setup_cleans_only_its_created_resources(monkeypatch, approve_database_target):
+    approve_database_target(("localhost", 5432, "vres_os"))
+    # Reach the intended migration failure without any administrator connection attempt.
+    monkeypatch.setattr(bootstrap, "_configure_provenance_boundary", lambda *a, **kw: None)
     store = _Store()
     secrets = _Secrets()
     provisioned = bootstrap._ProvisionedLocalDatabase(
@@ -135,7 +138,8 @@ def test_mcp_launched_setup_console_pauses_before_process_exit(monkeypatch):
     assert prompts and "Press Enter" in prompts[0]
 
 
-def test_existing_role_conflict_names_the_exact_object(monkeypatch):
+def test_existing_role_conflict_names_the_exact_object(monkeypatch, approve_database_target):
+    approve_database_target(("localhost", 5432, "vres_os"))
     class _Cursor:
         def __init__(self, row):
             self.row = row

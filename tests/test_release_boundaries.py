@@ -35,11 +35,12 @@ def test_windows_data_path_has_no_second_vendor_directory(monkeypatch, tmp_path)
 
 
 @pytest.mark.parametrize('role,db', [(True, False), (False, True), (True, True)])
-def test_provisioning_never_alters_existing_account_or_database(monkeypatch, role, db):
+def test_provisioning_never_alters_existing_account_or_database(monkeypatch, role, db, approve_database_target):
     conn = ScriptedConnection([('FROM pg_roles', role), ('FROM pg_database', db)])
+    approve_database_target(('localhost', 5432, 'already'))
     monkeypatch.setattr(bootstrap, '_ask', lambda *x: 'postgres')
     monkeypatch.setattr(bootstrap.getpass, 'getpass', lambda *x: 'ephemeral-test-value')
-    monkeypatch.setattr(bootstrap, '_runtime_dsn', lambda **x: 'test-dsn')
+    monkeypatch.setattr(bootstrap, '_runtime_dsn', lambda **x: 'host=localhost port=5432 dbname=postgres user=postgres')
     monkeypatch.setattr(bootstrap, '_driver', lambda: SimpleNamespace(connect=lambda *a, **kw: conn))
     monkeypatch.setitem(sys.modules, 'psycopg', SimpleNamespace(sql=object()))
     with pytest.raises(RuntimeError, match='never|will not'):
@@ -47,7 +48,10 @@ def test_provisioning_never_alters_existing_account_or_database(monkeypatch, rol
     assert len(conn.calls) == 2 and not any('ALTER' in q or 'CREATE' in q for q, _ in conn.calls)
 
 
-def test_failed_setup_restores_previous_config_and_secret(monkeypatch, tmp_path):
+def test_failed_setup_restores_previous_config_and_secret(monkeypatch, tmp_path, approve_database_target):
+    approve_database_target(('localhost', 5432, 'vres_os'))
+    # Reach the intended migration failure without any administrator connection attempt.
+    monkeypatch.setattr(bootstrap, '_configure_provenance_boundary', lambda *a, **kw: None)
     store = ConfigStore(tmp_path / 'config.json')
     cfg = VresConfig(configured=True)
     store.save(cfg)
