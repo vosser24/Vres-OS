@@ -43,6 +43,8 @@ recovery_app = typer.Typer(
     help="Operator backup/restore of Vres state and of an approved PostgreSQL database. Never exports credentials."
 )
 app.add_typer(recovery_app, name="recovery")
+project_app = typer.Typer(help="Review and adopt this project's existing Claude configuration (operator console).")
+app.add_typer(project_app, name="project")
 console = Console()
 
 
@@ -734,6 +736,55 @@ def recovery_db_restore(
     console.print_json(data=result)
     if result["status"] != "restored_verified":
         raise typer.Exit(1)
+
+
+def _adoption(action):
+    from .project_adoption import AdoptionError
+
+    try:
+        console.print_json(data=action(discover_project(".")))
+    except (AdoptionError, OSError, ValueError) as exc:
+        raise _recovery_exit(exc) from exc
+
+
+@project_app.command("status")
+def project_status() -> None:
+    """Show the adoption state and every numbered inventory item with its KEEP/DROP options."""
+    from .project_adoption import status
+
+    _adoption(status)
+
+
+@project_app.command("decide")
+def project_decide(number: int, decision: str) -> None:
+    """Record KEEP or DROP for one numbered item (typed confirmation in this console)."""
+    from .project_adoption import console_authority, decide
+
+    _adoption(lambda project: decide(project, number, decision, authority=console_authority))
+
+
+@project_app.command("activate")
+def project_activate() -> None:
+    """Apply all decisions of the current inventory (journaled; exact pre-images kept)."""
+    from .project_adoption import activate, console_authority
+
+    _adoption(lambda project: activate(project, authority=console_authority))
+
+
+@project_app.command("recover")
+def project_recover() -> None:
+    """Undo an interrupted activation from its journal and exact pre-images."""
+    from .project_adoption import recover
+
+    _adoption(recover)
+
+
+@project_app.command("rollback")
+def project_rollback() -> None:
+    """Restore the exact pre-activation bytes of an activated adoption."""
+    from .project_adoption import console_authority, rollback
+
+    _adoption(lambda project: rollback(project, authority=console_authority))
 
 
 if __name__ == "__main__":

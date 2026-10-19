@@ -200,6 +200,23 @@ If no previous installation existed, remove only the failed managed plugin and a
 
 This crash-recovery procedure is a live verification gate. It is tested offline against a synthetic Claude home but has not been executed against a real installation. A junior user should stop and provide the journal/error **without credentials**, rather than improvise destructive cleanup.
 
+## 8a. Project onboarding
+
+When you say `start vres` in a project:
+
+- **Fresh project (no Claude configuration):** Vres writes one root `CLAUDE.md` containing only facts it can verify from the project's files: its type, plus build/test/lint commands found in `package.json` scripts, pytest or ruff configuration, `Cargo.toml`, `go.mod`, a .NET solution or a `Makefile`. Anything else is marked "unknown". No other files or folders are created, and a later start rewrites nothing.
+- **Existing project:** Vres inventories its `CLAUDE.md` files, `CLAUDE.local.md`, `AGENTS.md`, `.mcp.json` and everything under `.claude\` without running anything and without changing the project.
+  - Secret-looking files are never opened.
+  - Files containing secrets are not copied and can only be kept.
+  - Everything else is snapshotted in `%LOCALAPPDATA%\VresOS\projects\`.
+  - Legacy instructions remain untrusted project context; Vres never adopts them as its own rules.
+- **Reviewing and activating:** in a local terminal inside the project, run `vres project status` to see the numbered items, then decide each one with `vres project decide <number> keep|drop` (you type a confirmation). Then run `vres project activate`.
+  - Activation needs a decision for every item of the current inventory. If the configuration changes afterwards, earlier decisions are void.
+  - It only removes dropped items, and writes a Vres `CLAUDE.md` only if no root `CLAUDE.md` remains.
+  - It keeps exact pre-images and a journal. A failure restores the previous bytes, and an interruption shows `recovery_required` until `vres project recover` is run.
+  - `vres project rollback` restores the pre-activation bytes, unless the affected files changed since.
+- **Not covered:** adoption does not configure the database or credentials; Vres setup and database approval remain separate.
+
 ## 9a. Backup and restore
 
 Close Claude Code and Vres workers first.

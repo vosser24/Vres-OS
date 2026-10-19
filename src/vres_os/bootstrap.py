@@ -591,9 +591,15 @@ def start_for_project(project_root: str = ".") -> dict:
             "prerequisites": prerequisite_status(),
         }
     project = discover_project(project_root)
-    from .claude_contract import ensure_project_claude
+    from .project_adoption import AdoptionError
+    from .project_adoption import start as adopt_project
 
-    claude_contract = ensure_project_claude(project.root, project.name)
+    try:
+        adoption = adopt_project(project)  # files only: no database, credential or model contact
+    except (AdoptionError, OSError) as exc:
+        from .redaction import redact_text
+
+        adoption = {"state": "recovery_required", "error": redact_text(str(exc))[:500]}
     project_id = Repository().ensure_project(project)
     return {
         "status": "READY",
@@ -601,5 +607,5 @@ def start_for_project(project_root: str = ".") -> dict:
         "project": asdict(project) | {"root": str(project.root)},
         "migrations": applied,
         "prerequisites": prerequisite_status(),
-        "claude_contract": claude_contract,
+        "project_adoption": {k: adoption[k] for k in ("state", "changed", "pending", "created", "error") if k in adoption},
     }

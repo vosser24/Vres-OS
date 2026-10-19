@@ -121,27 +121,13 @@ def remove_global_contract(claude_home: Path) -> dict[str, object]:
     return {"global_claude_changed": changed, "rules_removed": not rules_target.exists()}
 
 
-def project_scaffold_text(name: str) -> str:
-    title = str(name or "Project").strip() or "Project"
-    return (
-        f"# {title}\n\n"
-        "Project-specific Claude instructions. Machine-wide Vres rules are inherited from "
-        "~/.claude/CLAUDE.md; do not duplicate them here.\n\n"
-        "## Build / Test / Lint\n"
-        "- Install: TODO\n"
-        "- Test (all): TODO\n"
-        "- Test (single file): TODO\n"
-        "- Lint / format: TODO\n"
-        "- Run the app: TODO\n\n"
-        "## Architecture / project scope\n"
-        "- The Vres Engineering Architecture Constitution is inherited through the global Vres rules.\n"
-        "- Keep this file specific to this project's identity, tooling, boundaries and exceptions.\n"
-        "- Do not create empty architecture layers; use the smallest profile appropriate to real responsibilities.\n"
-        "- Established-project adoption requires a codebase architecture audit, incremental alignment plan, and protected Fable/high validation before architecture-changing activation.\n"
-        "- Put large generated maps/specifications in .claude/references/ and load them on demand.\n"
-        "- Add nested CLAUDE.md files only for substantive modules/subdomains with local ownership/API/dependency/test rules.\n"
-        "- Keep new specialist agents project-local under .claude/agents/ until cross-project reuse is proven.\n"
-    )
+def project_scaffold_text(name: str, root: Path | None = None) -> str:
+    """Project CLAUDE.md with only facts detected from the project's files; the rest is labelled unknown."""
+    from .project_adoption import detect_facts, scaffold_text
+
+    facts = detect_facts(root) if root is not None else {"types": ["unknown"], "commands": [],
+                                                           "unknown": ["build", "test", "lint"]}
+    return scaffold_text(name, facts)
 
 
 def ensure_project_claude(root: Path, name: str) -> dict[str, object]:
@@ -149,7 +135,7 @@ def ensure_project_claude(root: Path, name: str) -> dict[str, object]:
     path = root / "CLAUDE.md"
     if path.exists():
         return {"path": str(path), "created": False}
-    _atomic_write_bytes(path, project_scaffold_text(name).encode("utf-8"))
+    _atomic_write_bytes(path, project_scaffold_text(name, root).encode("utf-8"))
     return {"path": str(path), "created": True}
 
 
