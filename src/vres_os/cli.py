@@ -39,6 +39,10 @@ model_experiment_app = typer.Typer(
     help="Local model-calibration evidence commands. Not exposed through MCP; a single run is not policy authority."
 )
 app.add_typer(model_experiment_app, name="model-experiment")
+recovery_app = typer.Typer(
+    help="Operator backup/restore of Vres state and of an approved PostgreSQL database. Never exports credentials."
+)
+app.add_typer(recovery_app, name="recovery")
 console = Console()
 
 
@@ -623,6 +627,113 @@ def hook_validator_stop() -> None:
 @hook_app.command("experience-observe")
 def hook_experience_observe() -> None:
     experience_observe()
+
+
+def _recovery_exit(exc: Exception) -> typer.Exit:
+    typer.echo(redact_text(str(exc))[:800], err=True)
+    return typer.Exit(2)
+
+
+@recovery_app.command("state-backup")
+def recovery_state_backup(destination: Path) -> None:
+    """Back up Vres state files into a NEW directory outside the Vres data directory."""
+    from .paths import data_dir
+    from .state_backup import StateBackupError, create_backup
+
+    try:
+        result = create_backup(data_dir(), destination)
+    except (StateBackupError, OSError) as exc:
+        raise _recovery_exit(exc) from exc
+    console.print_json(data={k: result[k] for k in ("status", "path", "files")})
+
+
+@recovery_app.command("state-verify")
+def recovery_state_verify(backup: Path) -> None:
+    """Verify a Vres state backup's manifest and every SHA-256 without restoring anything."""
+    from .state_backup import StateBackupError, verify_backup
+
+    try:
+        result = verify_backup(backup)
+    except (StateBackupError, OSError) as exc:
+        raise _recovery_exit(exc) from exc
+    console.print_json(data={"verified": True, "files": result["files"]})
+
+
+@recovery_app.command("state-restore")
+def recovery_state_restore(
+    backup: Path,
+    replace: bool = typer.Option(False, "--replace", help="Explicitly allow replacing existing state files."),
+) -> None:
+    """Verify, then restore Vres state files (journaled; current files kept as a recovery point)."""
+    from .paths import data_dir
+    from .state_backup import StateBackupError, restore_backup
+
+    try:
+        result = restore_backup(backup, data_dir(), replace_existing=replace)
+    except (StateBackupError, OSError) as exc:
+        raise _recovery_exit(exc) from exc
+    console.print_json(data=result)
+
+
+@recovery_app.command("state-restore-recover")
+def recovery_state_restore_recover() -> None:
+    """Roll an interrupted state restore back to its recovery point."""
+    from .paths import data_dir
+    from .state_backup import StateBackupError, recover_restore
+
+    try:
+        result = recover_restore(data_dir())
+    except (StateBackupError, OSError, ValueError) as exc:
+        raise _recovery_exit(exc) from exc
+    console.print_json(data=result)
+
+
+def _migration_credential() -> str | None:
+    from .secrets import SecretStore
+
+    cfg = ConfigStore().load()
+    return SecretStore().get(cfg.database.migration_password_key if cfg.database.migration_user else cfg.database.password_key)
+
+
+@recovery_app.command("db-backup")
+def recovery_db_backup(output: Path) -> None:
+    """pg_dump the configured, APPROVED Vres database into a new verified archive with a manifest."""
+    from .db import DatabaseTargetRefused
+    from .pg_recovery import DatabaseRecoveryError, backup_database
+
+    cfg = ConfigStore().load().database
+    try:
+        result = backup_database(
+            host=cfg.host, port=cfg.port, dbname=cfg.database, sslmode=cfg.sslmode, output=output,
+            user=cfg.migration_user or cfg.user, password_provider=_migration_credential,
+        )
+    except (DatabaseRecoveryError, DatabaseTargetRefused, OSError) as exc:
+        raise _recovery_exit(exc) from exc
+    console.print_json(data={k: result[k] for k in ("status", "archive", "manifest", "sha256", "toc")})
+
+
+@recovery_app.command("db-restore")
+def recovery_db_restore(
+    archive: Path,
+    target_db: str = typer.Option(..., "--target-db", help="New, empty, approved vres_restore_* database."),
+) -> None:
+    """Restore a verified archive into a disposable recovery database; asks for typed confirmation."""
+    from .db import DatabaseTargetRefused
+    from .pg_recovery import DatabaseRecoveryError, restore_database
+
+    cfg = ConfigStore().load().database
+    confirmation = typer.prompt(f"Type RESTORE {target_db} to restore into {cfg.host}:{cfg.port}/{target_db}")
+    try:
+        result = restore_database(
+            archive=archive, host=cfg.host, port=cfg.port, dbname=target_db, sslmode=cfg.sslmode,
+            user=cfg.migration_user or cfg.user, confirmation=confirmation, password_provider=_migration_credential,
+            production=(cfg.host, cfg.port, cfg.database),
+        )
+    except (DatabaseRecoveryError, DatabaseTargetRefused, OSError) as exc:
+        raise _recovery_exit(exc) from exc
+    console.print_json(data=result)
+    if result["status"] != "restored_verified":
+        raise typer.Exit(1)
 
 
 if __name__ == "__main__":

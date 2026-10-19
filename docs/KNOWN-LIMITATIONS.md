@@ -142,8 +142,10 @@ The installer stages versioned virtual environments at their permanent location,
 structure, and switches a runtime pointer only after its staging checks. Caught failures attempt to restore
 old plugin/runtime/launcher state. None of that has yet run under PowerShell here.
 
-A power loss at the publication boundary leaves a journal for manual recovery. Do not delete the journal
-blindly. This preview is not a guaranteed unattended, crash-repairing installer for a novice.
+A power loss at the publication boundary leaves a journal. The installer now persists exact snapshots of the
+Claude files, launchers and active pointer it changes, and `install_recovery.py inspect`/`recover --confirm`
+restores them deterministically or refuses on ambiguity (INSTALL-WINDOWS.md §9). It is tested offline only. Do
+not delete the journal blindly. This preview is not a guaranteed unattended, crash-repairing installer for a novice.
 Binary rollback is not database rollback. Back up PostgreSQL and artifact/source files before upgrades.
 Older executables must not be forced against an unknown newer schema.
 
@@ -165,8 +167,10 @@ effort; do not rely on their short native timeout to save a whole conversation.
 Migration/application semantics and the normal integration journeys execute against PostgreSQL 16 in CI.
 Real concurrent lock contention, serialization behavior under load, duplicate concurrent promotion attempts and
 interrupted transactions still require separate stress/fault testing. Model experiments additionally need
-repeated-run/concurrency semantics before they can support a future policy decision. No database-wide
-backup/restore operation is automated by this preview.
+repeated-run/concurrency semantics before they can support a future policy decision. Operator-initiated
+`vres recovery db-backup`/`db-restore` exist (approved targets only; restore only into a disposable `vres_restore_*`
+database; INSTALL-WINDOWS.md §9a). They are not scheduled or automatic, and have not yet been run against a real
+PostgreSQL server: real backup creation and restore proof remain pending. Cluster roles are not in the archive.
 
 Source paths often reference the original files; ingestion is not an archival backup. Moved/deleted raw
 sources can make evidence unavailable. Back up source/artifact storage with the DB. Hashes detect changes;

@@ -170,9 +170,53 @@ An ordinary caught installer failure restores the previous pointer/plugin/launch
 
 Do not delete the whole VresOS directory. Close all related applications. Read `pending-install.json` locally; it contains no password. Preserve it and the installation directories as evidence.
 
-An experienced operator should inspect `previous`, `new_release`, `plugin_backup`, `plugin_path` and `had_plugin`: restore the previous active pointer; restore the backed-up managed plugin; restore `releases\<new_release>\previous-bin` when present; only then remove the stale journal. If no previous installation existed, remove only the failed managed plugin/active pointer, leaving diagnostic release files. Never overwrite an unmanaged plugin or remove a database as part of this recovery.
+Before writing the journal, the installer persists and verifies exact snapshots of what it may change in `install-recovery\<new_release>\`:
+- `CLAUDE.md`, `vres-rules.md` and `settings.json` in the Claude home;
+- the Vres launchers in `bin\`;
+- `active-install.json`.
 
-This crash-recovery procedure is a live verification gate, not claimed as already executed here. A junior user should stop and provide the journal/error **without credentials**, rather than improvise destructive cleanup.
+Nothing else in the Claude home is copied or touched, including authentication, other plugins, hooks and your own files. From the extracted source folder:
+
+```powershell
+py -3.12 -I .\src\vres_os\install_recovery.py inspect --install-root "$env:LOCALAPPDATA\VresOS"
+py -3.12 -I .\src\vres_os\install_recovery.py recover --install-root "$env:LOCALAPPDATA\VresOS" --confirm
+```
+
+`inspect` prints the deterministic plan:
+- restore the exact previous active pointer;
+- restore the backed-up managed plugin, or remove only a Vres-managed new one;
+- restore the launchers and the three Claude files to their snapshot bytes;
+- remove the journal last.
+
+`recover --confirm` keeps a `pre-recovery-*` copy of the current Claude files, launchers and pointer before replacing anything. It refuses, changing nothing, whenever the evidence is ambiguous: an unmanaged plugin, an unexpected active release, a missing or tampered snapshot, or a journal written by an older installer without a snapshot. In that case use the manual procedure below. A `bin` entry added to the user PATH is not removed; it is harmless.
+
+Manual procedure (older journals, or when `inspect` refuses): an experienced operator should inspect `previous`, `new_release`, `plugin_backup`, `plugin_path` and `had_plugin`, then:
+1. Restore the previous active pointer.
+2. Restore the backed-up managed plugin.
+3. Restore `releases\<new_release>\previous-bin` when present.
+4. Only then remove the stale journal.
+
+If no previous installation existed, remove only the failed managed plugin and active pointer, leaving diagnostic release files. Never overwrite an unmanaged plugin or remove a database as part of this recovery.
+
+This crash-recovery procedure is a live verification gate. It is tested offline against a synthetic Claude home but has not been executed against a real installation. A junior user should stop and provide the journal/error **without credentials**, rather than improvise destructive cleanup.
+
+## 9a. Backup and restore
+
+Close Claude Code and Vres workers first.
+
+- `vres recovery state-backup <new directory>` copies only the Vres state files into a new directory outside `%LOCALAPPDATA%\VresOS`, with owner-only access and a SHA-256 manifest:
+  - `config.json`, `credential-resources.json`, `local-secret-handles.json` and `database-targets.json`;
+  - the active/pending install pointers, as evidence only.
+- Logs, locks, temporary files, releases, launchers, plugin and incident backups, and materialized secret files are excluded. Windows Credential Locker values are never exported.
+- `vres recovery state-verify <backup>` checks the manifest and every byte.
+- `vres recovery state-restore <backup>` restores only the four state files. It needs `--replace` to replace existing ones, keeps the current files in `restore-points\`, journals the change, and lists every credential reference as present or missing. Missing values must be re-entered through secure setup; a restore never creates them. After an interruption, `vres recovery state-restore-recover` rolls back.
+- `vres recovery db-backup <new file>` runs `pg_dump` only for the configured database, and only if it is approved and not held. The file is kept only after `pg_restore --list` verifies it contains the Vres ledger; a `.manifest.json` with its SHA-256 sits beside it.
+- `vres recovery db-restore <archive> --target-db vres_restore_<name>` restores only into a new, empty, approved disposable recovery database, after you type `RESTORE <name>`:
+  - it runs in a single transaction, never with `--clean` or `--create`;
+  - it reports success only after a read-only verification of the restored database;
+  - the Vres roles must already exist in that cluster, because roles are not part of the archive.
+
+None of these database operations has been run against a real PostgreSQL server yet; that physical verification is pending.
 
 ## 10. Uninstall
 
