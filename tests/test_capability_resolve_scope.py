@@ -10,7 +10,7 @@ def test_capability_resolve_passes_current_project_scope(monkeypatch):
 
     monkeypatch.setattr(
         mcp_server,
-        "_project",
+        "_existing_project",  # diagnostics resolve the project read-only (never register it)
         lambda *args, **kwargs: (42, SimpleNamespace(root=".")),
     )
 

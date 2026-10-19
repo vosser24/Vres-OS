@@ -9,7 +9,8 @@ def test_validation_evidence_tool_is_registered_read_only():
     service = (ROOT / "src/vres_os/validation_evidence.py").read_text(encoding="utf-8")
     assert "validation_evidence_mcp" in entrypoint
     assert "def validation_evidence(" in module
-    assert "_require_node(\"task\", task_key)" in module
+    assert "_require_node(\"task\", task_key, project_id=pid)" in module
+    assert "= _existing_project()" in module and "= _project()" not in module
     assert "write=True" not in module
     assert "UPDATE " not in service
     assert "INSERT " not in service

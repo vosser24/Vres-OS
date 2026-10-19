@@ -70,6 +70,21 @@ def _project(root: str = ".") -> tuple[int, Any]:
     return repo.ensure_project(p), p
 
 
+def _existing_project(root: str = ".") -> tuple[int, Any]:
+    """Read-only project resolution for diagnostic tools: never registers or updates a project.
+
+    Normal mutation-capable workflows keep using _project(), which registers the project.
+    """
+    p = discover_project(root)
+    project_id = Repository().existing_project_id(p)
+    if project_id is None:
+        raise ValueError(
+            "This project is not registered with Vres yet; diagnostics never register a project. "
+            "Begin Vres work in this project first."
+        )
+    return project_id, p
+
+
 def _current_session(project_id: int, session_id: str) -> str:
     """Use the latest hook context ID, never the MCP process's startup ID."""
     from .db import connect
@@ -86,12 +101,13 @@ def _current_session(project_id: int, session_id: str) -> str:
     return session_id
 
 
-def _require_node(kind: str, key: str | None, *, write: bool = False) -> None:
+def _require_node(kind: str, key: str | None, *, write: bool = False, project_id: int | None = None) -> None:
+    """Scope check. Diagnostics pass the read-only project_id; otherwise the project is resolved via _project()."""
     if key is None:
         return
     from .db import connect
     from .relations import _node
-    pid, _ = _project()
+    pid = project_id if project_id is not None else _project()[0]
     with connect() as conn:
         row = _node(conn, kind, key)
     if row["project_id"] != pid and (write or row["project_id"] is not None):
@@ -154,7 +170,12 @@ def vres_status() -> dict:
     }
     if not cfg.configured:
         return out
-    pid, project = _project()
+    project = discover_project(".")
+    pid = Repository().existing_project_id(project)  # read-only: status never registers a project
+    if pid is None:
+        out["project"] = None
+        out["project_registered"] = False
+        return out
     out["project"] = {"id": pid, "key": project.key, "name": project.name, "root": str(project.root)}
     task = Repository().active_task(pid)
     out["active_task"] = task.task_key if task else None
@@ -186,7 +207,7 @@ def task_resume(session_id: str, task_key: str | None = None) -> dict:
 @mcp.tool()
 def task_open_list() -> list[dict]:
     """List unfinished tasks when continuity is ambiguous instead of selecting one by recency."""
-    pid, _ = _project()
+    pid, _ = _existing_project()
     return Repository().list_open_tasks(pid)
 
 
@@ -551,8 +572,8 @@ def artifact_register(
 @mcp.tool()
 def artifact_get(artifact_key: str) -> dict:
     """Read one persisted artifact registration in the current project for independent verification."""
-    _require_node("artifact", artifact_key)
-    pid, _ = _project()
+    pid, _ = _existing_project()
+    _require_node("artifact", artifact_key, project_id=pid)
     return ArtifactService().get(artifact_key, project_id=pid)
 
 
@@ -735,7 +756,7 @@ def model_record_run(
 @mcp.tool()
 def capability_resolve(need: str, limit: int = 5) -> list[dict]:
     """Find current-project plus shared capabilities before fabricating expertise."""
-    pid, _ = _project()
+    pid, _ = _existing_project()
     return CapabilityService().resolve(need, limit, project_id=pid)
 
 

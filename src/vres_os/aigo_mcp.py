@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .company_mcp import mcp
-from .mcp_server import _current_session, _project, _require_node
+from .mcp_server import _current_session, _existing_project, _project, _require_node
 from .orchestration import OrchestrationService
 from .project_agents import ProjectAgentService
 
@@ -71,7 +71,7 @@ def project_agent_register(
 @mcp.tool()
 def project_agent_get(agent_key: str) -> dict[str, Any]:
     """Resolve one current-project agent and fail if its source digest drifted."""
-    pid, project = _project()
+    pid, project = _existing_project()
     return ProjectAgentService().get(
         agent_key=agent_key,
         project_id=pid,
@@ -85,7 +85,7 @@ def project_agent_search(
     capability_keys: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """List current-project registered agents matching an optional role/capability set."""
-    pid, project = _project()
+    pid, project = _existing_project()
     return ProjectAgentService().search(
         project_id=pid,
         root=project.root,
@@ -223,8 +223,8 @@ def orchestration_work_graph_record(
 @mcp.tool()
 def orchestration_work_ready(task_key: str, plan_key: str) -> dict[str, Any]:
     """Return all currently ready work units so independent assignments can be dispatched in one parallel turn."""
-    pid, project = _project()
-    _require_node("task", task_key)
+    pid, project = _existing_project()
+    _require_node("task", task_key, project_id=pid)
     return OrchestrationService().ready_work(
         project_id=pid,
         task_key=task_key,
@@ -339,6 +339,6 @@ def orchestration_finalize(
 @mcp.tool()
 def orchestration_evidence(task_key: str) -> list[dict[str, Any]]:
     """Return the durable orchestration event chain for authoritative inspection/validation."""
-    pid, _ = _project()
-    _require_node("task", task_key)
+    pid, _ = _existing_project()
+    _require_node("task", task_key, project_id=pid)
     return OrchestrationService().evidence(project_id=pid, task_key=task_key)

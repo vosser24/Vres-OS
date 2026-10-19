@@ -4,7 +4,7 @@ from typing import Any
 
 from .company_mcp import mcp
 from .deterministic_routing import try_deterministic_route
-from .mcp_server import _current_session, _project, _require_node
+from .mcp_server import _current_session, _existing_project, _project, _require_node
 from .routing import RoutingService
 from .routing_completion import complete_routed_task
 from .routing_risk import effective_risk_triggers
@@ -70,8 +70,8 @@ def routing_result(task_key: str, request_key: str) -> dict[str, Any]:
 @mcp.tool()
 def routing_evidence(task_key: str) -> dict[str, Any]:
     """Return authoritative routing decisions and host-observed worker model evidence."""
-    pid, _ = _project()
-    _require_node("task", task_key)
+    pid, _ = _existing_project()
+    _require_node("task", task_key, project_id=pid)
     return RoutingService().evidence(project_id=pid, task_key=task_key)
 
 

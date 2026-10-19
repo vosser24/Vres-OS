@@ -64,6 +64,13 @@ class ActiveTask:
 
 
 class Repository:
+    def existing_project_id(self, p: ProjectIdentity) -> int | None:
+        """Read-only lookup of an already registered project (same identity as ensure_project); never writes."""
+        with connect() as conn:
+            conn.execute("SET TRANSACTION READ ONLY")
+            row = conn.execute("SELECT id FROM vres.projects WHERE project_key=%s", (p.key,)).fetchone()
+        return int(row["id"]) if row else None
+
     def ensure_project(self, p: ProjectIdentity) -> int:
         with connect() as conn, conn.transaction():
             row = conn.execute(
