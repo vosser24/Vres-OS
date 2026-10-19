@@ -2,10 +2,14 @@
 
 Scope (explicit allow-list of top-level files in the Vres data directory):
 
-- restorable: config.json, credential-resources.json, local-secret-handles.json and
-  database-targets.json. These are configuration, credential-resource metadata and
-  project bindings, and database-target approvals and holds. They hold no secret values.
-- evidence only (backed up, never restored): active-install.json and pending-install.json.
+- restorable: config.json, credential-resources.json and local-secret-handles.json. These
+  are configuration, credential-resource metadata and project bindings; they hold no secret
+  values.
+- evidence only (backed up, never restored): database-targets.json, active-install.json and
+  pending-install.json. The P2-A1 approval/hold registry is never rolled back: restoring
+  historical bytes could drop a newer quarantine hold or revive a withdrawn approval, so a
+  restore and its rollback leave the current registry exactly as it is, and a fresh
+  installation stays default-deny until targets are approved through the P2-A1 workflow.
   Changing the active installation is the installer's job, not a state restore's.
 
 Everything else is excluded: logs, runtime locks, temporary files, releases and their
@@ -27,6 +31,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import stat
 import uuid
 from collections.abc import Callable
@@ -35,10 +40,15 @@ from pathlib import Path
 from typing import Any
 
 FORMAT = "vres-state-backup"
-VERSION = 1
+# Version 2 reclassified database-targets.json as evidence. Version 1 backups remain readable,
+# but their registry copy is evidence too: nothing outside RESTORABLE is ever written back.
+VERSION = 2
+SUPPORTED_VERSIONS = (1, 2)
 MANIFEST = "manifest.json"
-RESTORABLE = ("config.json", "credential-resources.json", "local-secret-handles.json", "database-targets.json")
-EVIDENCE = ("active-install.json", "pending-install.json")
+RESTORABLE = ("config.json", "credential-resources.json", "local-secret-handles.json")
+EVIDENCE = ("database-targets.json", "active-install.json", "pending-install.json")
+_V1_RESTORABLE = (*RESTORABLE, "database-targets.json")
+JOURNAL_VERSION = 2
 EXCLUDED = (
     "logs/ (diagnostic logs)",
     "runtime/ (process locks)",
@@ -57,6 +67,7 @@ LIMITATIONS = (
 )
 _JOURNAL = "restore-journal.json"
 _POINTS = "restore-points"
+_POINT_ID = re.compile(r"\d{8}T\d{6}Z-[0-9a-f]{8}")
 _MAX_FILE_BYTES = 16 * 1024 * 1024
 
 
@@ -99,6 +110,17 @@ def _read_plain_file(path: Path, label: str) -> bytes | None:
     if info.st_size > _MAX_FILE_BYTES:
         raise StateBackupError(f"Refused {label} {path.name}: larger than the state backup limit")
     return path.read_bytes()
+
+
+def _recovery_dir(path: Path, label: str, *, create: bool) -> Path:
+    """An ordinary directory inside the recovery root; links, junctions and other types are refused."""
+    info = _lstat(path)
+    if info is None:
+        if not create:
+            raise StateBackupError(f"{label} is missing: {path}")
+        path.mkdir()
+    _require_plain_dir(path, label)
+    return path
 
 
 def _inside(child: Path, parent: Path) -> bool:
@@ -180,12 +202,13 @@ def verify_backup(backup: Path) -> dict[str, Any]:
         not isinstance(manifest, dict)
         or manifest.get("format") != FORMAT
         or type(manifest.get("version")) is not int
-        or manifest["version"] != VERSION
+        or manifest["version"] not in SUPPORTED_VERSIONS
         or manifest.get("complete") is not True
         or not isinstance(manifest.get("files"), list)
     ):
         raise StateBackupError("Backup manifest is incomplete or of an unsupported format/version")
-    allowed = {**{n: "restorable" for n in RESTORABLE}, **{n: "evidence" for n in EVIDENCE}}
+    restorable = _V1_RESTORABLE if manifest["version"] == 1 else RESTORABLE
+    allowed = {n: "restorable" if n in restorable else "evidence" for n in (*RESTORABLE, *EVIDENCE)}
     listed: dict[str, dict] = {}
     for entry in manifest["files"]:
         if not isinstance(entry, dict) or set(entry) != {"path", "category", "bytes", "sha256"}:
@@ -255,7 +278,7 @@ def restore_backup(
         raise StateBackupError("An interrupted installation journal exists; recover the installation first")
     incoming = {
         e["path"]: (Path(backup) / e["path"]).read_bytes()
-        for e in verified["manifest"]["files"] if e["category"] == "restorable"
+        for e in verified["manifest"]["files"] if e["path"] in RESTORABLE  # never the P2-A1 registry
     }
     current = {name: _read_plain_file(target_root / name, "current state file") for name in incoming}
     changes = [name for name, data in incoming.items() if current[name] != data]
@@ -268,7 +291,9 @@ def restore_backup(
     point_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
     point = target_root / _POINTS / point_id
     if changes:
-        point.mkdir(parents=True)
+        _recovery_dir(target_root / _POINTS, "Restore recovery-point directory", create=True)
+        point.mkdir()
+        _require_plain_dir(point, "Restore recovery point")
         saved = []
         for name in changes:
             if current[name] is not None:
@@ -278,7 +303,8 @@ def restore_backup(
                           "sha256": _sha256(current[name]) if current[name] is not None else None})
         _write_atomic(point / MANIFEST, json.dumps({"files": saved}, indent=2).encode("utf-8"))
         _write_atomic(target_root / _JOURNAL, json.dumps(
-            {"state": "applying", "restore_point": point_id, "backup": str(backup), "started_at": _now()}
+            {"version": JOURNAL_VERSION, "state": "applying", "restore_point": point_id, "backup": str(backup),
+             "started_at": _now()}
         ).encode("utf-8"))
         try:
             for name in changes:
@@ -320,8 +346,17 @@ def recover_restore(target_root: Path) -> dict[str, Any]:
     raw = _read_plain_file(target_root / _JOURNAL, "restore journal")
     if raw is None:
         return {"status": "nothing_to_recover"}
-    journal = json.loads(raw.decode("utf-8"))
-    point = target_root / _POINTS / str(journal.get("restore_point", ""))
+    try:
+        journal = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        raise StateBackupError("Restore journal is unreadable; recover manually") from None
+    if not isinstance(journal, dict) or journal.get("version") != JOURNAL_VERSION:
+        raise StateBackupError("Restore journal has an unsupported (historical) format; recover manually")
+    point_id = str(journal.get("restore_point", ""))
+    if not _POINT_ID.fullmatch(point_id):
+        raise StateBackupError("Restore journal names an invalid recovery point")
+    _recovery_dir(target_root / _POINTS, "Restore recovery-point directory", create=False)
+    point = target_root / _POINTS / point_id
     _require_plain_dir(point, "Restore recovery point")
     point_manifest = json.loads((_read_plain_file(point / MANIFEST, "recovery point manifest") or b"{}").decode())
     entries = point_manifest.get("files")

@@ -205,13 +205,17 @@ This crash-recovery procedure is a live verification gate. It is tested offline 
 Close Claude Code and Vres workers first.
 
 - `vres recovery state-backup <new directory>` copies only the Vres state files into a new directory outside `%LOCALAPPDATA%\VresOS`, with owner-only access and a SHA-256 manifest:
-  - `config.json`, `credential-resources.json`, `local-secret-handles.json` and `database-targets.json`;
-  - the active/pending install pointers, as evidence only.
+  - restorable: `config.json`, `credential-resources.json` and `local-secret-handles.json`;
+  - evidence only: `database-targets.json` and the active/pending install pointers.
+- The database approval/hold registry (`database-targets.json`) is never restored or rolled back. That way a newer quarantine hold can't be lost and a withdrawn approval can't come back. After a restore on a fresh installation, every database stays refused until you approve it again in secure setup.
 - Logs, locks, temporary files, releases, launchers, plugin and incident backups, and materialized secret files are excluded. Windows Credential Locker values are never exported.
 - `vres recovery state-verify <backup>` checks the manifest and every byte.
-- `vres recovery state-restore <backup>` restores only the four state files. It needs `--replace` to replace existing ones, keeps the current files in `restore-points\`, journals the change, and lists every credential reference as present or missing. Missing values must be re-entered through secure setup; a restore never creates them. After an interruption, `vres recovery state-restore-recover` rolls back.
-- `vres recovery db-backup <new file>` runs `pg_dump` only for the configured database, and only if it is approved and not held. The file is kept only after `pg_restore --list` verifies it contains the Vres ledger; a `.manifest.json` with its SHA-256 sits beside it.
-- `vres recovery db-restore <archive> --target-db vres_restore_<name>` restores only into a new, empty, approved disposable recovery database, after you type `RESTORE <name>`:
+- `vres recovery state-restore <backup>` restores only the three restorable state files. It needs `--replace` to replace existing ones, keeps the current files in `restore-points\`, journals the change, and lists every credential reference as present or missing. Missing values must be re-entered through secure setup; a restore never creates them. After an interruption, `vres recovery state-restore-recover` rolls back.
+- Linked or junctioned `restore-points\` / `install-recovery\` directories are refused.
+- `pg_dump` and `pg_restore` are used only from `C:\Program Files\PostgreSQL\<major>\bin` (the highest installed major version), never from `PATH`. They are verified before any credential is read.
+- `vres recovery db-backup <new file>` runs `pg_dump` only for the configured database, and only if it is approved and not held. The archive is created with owner-only access. It is kept only after `pg_restore --list` verifies it contains the Vres ledger; a `.manifest.json` with its SHA-256 sits beside it. A failed, timed-out or unverifiable attempt deletes only its own partial file. If it can't, it names the leftover file and reports no backup.
+- `vres recovery db-restore <archive> --target-db vres_restore_<name>` restores only into an approved disposable recovery database, after you type `RESTORE <name>`:
+  - a read-only preflight first checks that the connected database is that target and is empty (no user schemas, tables or data, routines, types, extra extensions, event triggers or large objects); otherwise the restore is refused before `pg_restore` runs;
   - it runs in a single transaction, never with `--clean` or `--create`;
   - it reports success only after a read-only verification of the restored database;
   - the Vres roles must already exist in that cluster, because roles are not part of the archive.

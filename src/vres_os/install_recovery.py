@@ -37,7 +37,11 @@ from pathlib import Path
 from typing import Any
 
 FORMAT = "vres-install-snapshot"
-VERSION = 1
+# Version 2 adds a content digest of the pre-install plugin tree: the only accepted proof that a
+# plugin still at the target path (with no backup) is the original. Version 1 snapshots stay
+# readable, but cannot prove plugin identity, so that case is refused for them.
+VERSION = 2
+SUPPORTED_VERSIONS = (1, 2)
 CLAUDE_FILES = ("CLAUDE.md", "vres-rules.md", "settings.json")
 JOURNAL = "pending-install.json"
 ACTIVE = "active-install.json"
@@ -95,6 +99,30 @@ def _dir_files(path: Path) -> dict[str, bytes] | None:
     return out
 
 
+def _tree_digest(root: Path) -> str | None:
+    """Content digest of an ordinary directory tree (paths and bytes); None when absent. Links are refused."""
+    if not _plain_dir(root):
+        return None
+    digest = hashlib.sha256()
+    pending = [root]
+    entries: list[tuple[str, bytes]] = []
+    while pending:
+        current = pending.pop()
+        for child in current.iterdir():
+            info = _lstat(child)
+            if info is None or _is_link(info):
+                raise InstallRecoveryError(f"{child} is a link or junction; refusing to guess")
+            if stat.S_ISDIR(info.st_mode):
+                pending.append(child)
+            elif stat.S_ISREG(info.st_mode):
+                entries.append((child.relative_to(root).as_posix(), child.read_bytes()))
+            else:
+                raise InstallRecoveryError(f"{child} is not an ordinary file; refusing to guess")
+    for rel, data in sorted(entries):
+        digest.update(rel.encode("utf-8") + b"\0" + hashlib.sha256(data).digest())
+    return digest.hexdigest()
+
+
 def _write_atomic(path: Path, data: bytes) -> None:
     tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
@@ -116,14 +144,23 @@ def snapshot(install_root: Path, claude_home: Path, release: str) -> Path:
     """Persist and verify exact pre-install bytes. Must run before the journal and any mutation."""
     if not release or any(c in release for c in "\\/:.") or len(release) > 80:
         raise InstallRecoveryError("Invalid release id")
-    target = install_root / SNAPSHOTS / release
+    if not _plain_dir(install_root):
+        raise InstallRecoveryError(f"Install root {install_root} does not exist")
+    snapshots = install_root / SNAPSHOTS
+    target = snapshots / release
     if _lstat(target) is not None:
         raise InstallRecoveryError(f"Snapshot for release {release} already exists; refusing to overwrite it")
     claude = {name: _file(claude_home / name) for name in CLAUDE_FILES}
     bin_files = _dir_files(install_root / "bin")
     active = _file(install_root / ACTIVE)
-    (target / "claude").mkdir(parents=True)
-    (target / "bin").mkdir()
+    plugin_digest = _tree_digest(claude_home / "skills" / "vres-os")
+    if not _plain_dir(snapshots):
+        snapshots.mkdir()
+    target.mkdir()
+    for sub in (target, target / "claude", target / "bin"):
+        if sub != target:
+            sub.mkdir()
+        _plain_dir(sub)
     if active is not None:
         (target / ACTIVE).write_bytes(active)
     for name, data in claude.items():
@@ -136,6 +173,7 @@ def snapshot(install_root: Path, claude_home: Path, release: str) -> Path:
         "claude_home": str(claude_home),
         "claude": {name: _entry(data) for name, data in claude.items()},
         "active": _entry(active),
+        "plugin": {"existed": plugin_digest is not None, "tree_sha256": plugin_digest},
         "bin": {"existed": bin_files is not None,
                 "files": {name: _entry(data) for name, data in sorted((bin_files or {}).items())}},
     }
@@ -145,11 +183,18 @@ def snapshot(install_root: Path, claude_home: Path, release: str) -> Path:
 
 
 def _load_snapshot(path: Path) -> dict[str, Any]:
+    for directory in (path.parent, path, path / "claude", path / "bin"):  # no redirected recovery parents
+        if not _plain_dir(directory):
+            raise InstallRecoveryError("Installation snapshot is missing or incomplete")
     raw = _file(path / "snapshot.json")
     if raw is None:
         raise InstallRecoveryError("Installation snapshot is missing or incomplete")
     manifest = json.loads(raw.decode("utf-8"))
-    if manifest.get("format") != FORMAT or manifest.get("version") != VERSION or manifest.get("complete") is not True:
+    if (
+        manifest.get("format") != FORMAT
+        or manifest.get("version") not in SUPPORTED_VERSIONS
+        or manifest.get("complete") is not True
+    ):
         raise InstallRecoveryError("Installation snapshot has an unsupported or incomplete format")
     if set(manifest.get("claude", {})) != set(CLAUDE_FILES):
         raise InstallRecoveryError("Installation snapshot does not cover exactly the Claude files the installer changes")
@@ -227,6 +272,8 @@ def inspect(install_root: Path) -> dict[str, Any]:
         if claude_home is not None:
             plugin = Path(str(journal.get("plugin_path") or ""))
             backup = Path(str(journal.get("plugin_backup") or ""))
+            _plain_dir(claude_home / "skills")  # a redirected skills or backups parent is refused
+            _plain_dir(install_root / "backups")
             if plugin.resolve() != (claude_home / "skills" / "vres-os").resolve():
                 refusals.append("journal plugin path is not the Vres plugin in this Claude home")
             elif backup.resolve().parent != (install_root / "backups").resolve():
@@ -243,6 +290,15 @@ def inspect(install_root: Path) -> dict[str, Any]:
                             actions.append({"action": "restore_plugin_from_backup", "remove_current": has_target})
                     elif not has_target:
                         refusals.append("neither the previous plugin nor its backup exists")
+                    else:
+                        # No backup: the remaining plugin counts as the original only when it is
+                        # byte-identical to the tree digested before the journal was written.
+                        proof = (manifest or {}).get("plugin") or {}
+                        if not proof.get("tree_sha256") or _tree_digest(plugin) != proof["tree_sha256"]:
+                            refusals.append(
+                                "the plugin backup is missing and the remaining plugin cannot be proven to be the "
+                                "pre-install plugin; use the reviewed manual recovery procedure"
+                            )
                 elif journal.get("had_plugin") is False:
                     if has_backup:
                         refusals.append("a plugin backup exists although the journal says there was no plugin")
@@ -289,7 +345,8 @@ def recover(install_root: Path, *, confirm: bool) -> dict[str, Any]:
     manifest = _load_snapshot(snap)
     claude_home = Path(manifest["claude_home"])
     keep = snap / ("pre-recovery-" + datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:6])
-    (keep / "claude").mkdir(parents=True)
+    keep.mkdir()
+    (keep / "claude").mkdir()
     (keep / "bin").mkdir()
     for name in CLAUDE_FILES:
         data = _file(claude_home / name)
