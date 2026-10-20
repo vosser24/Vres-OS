@@ -5,12 +5,13 @@ param(
     [switch]$WithCodex,
     [switch]$UseRemotePostgres,
     [switch]$Update,
-    # Optional: the exact 40-hex source commit the operator approved; staging refuses any other source.
+    # Required: the full 40-hex source commit the operator approved; this checkout's HEAD must be it.
     [string]$SourceCommit
 )
 # Installation is interactive, user-scoped and conservative. No database credentials here.
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+if ($SourceCommit -notmatch '^[0-9a-fA-F]{40}$') { throw 'Pass -SourceCommit <full 40-hex commit> naming the release commit you approved. Nothing was changed.' }
 $RepoRoot = $PSScriptRoot
 $InstallRoot = Join-Path $env:LOCALAPPDATA 'VresOS'
 $Bin = Join-Path $InstallRoot 'bin'
@@ -118,10 +119,11 @@ $runningVres = @(Get-CimInstance Win32_Process -Filter "Name = 'python.exe' OR N
 })
 if ($runningVres.Count -gt 0) { throw 'A Vres Python worker is still running. Let it finish or stop that specific process before updating.' }
 
-if (-not (Test-Path (Join-Path $RepoRoot 'pyproject.toml')) -or
+if (-not (Test-Path (Join-Path $RepoRoot '.git')) -or
+    -not (Test-Path (Join-Path $RepoRoot 'pyproject.toml')) -or
     -not (Test-Path (Join-Path $RepoRoot 'plugins\vres-os\.claude-plugin\plugin.json')) -or
     -not (Test-Path (Join-Path $RepoRoot 'rules\vres-rules.md'))) {
-    throw 'Extract the COMPLETE source ZIP before running install.ps1.'
+    throw 'Run install.ps1 from a complete git checkout of the approved release commit (clone the release git bundle). Source ZIPs are not accepted.'
 }
 if (Get-Process -Name 'claude','codex' -ErrorAction SilentlyContinue) {
     throw 'Close Claude Code and Codex sessions first, then run the installer in a separate PowerShell window.'
@@ -152,6 +154,8 @@ if (-not $Python) {
 # Personal-release inputs (pinned migrations 001-041, no C2B/R0/F2 experimental files) are
 # validated from the source tree before any install root, venv or package is created.
 Run $Python @('-I','-X','utf8',(Join-Path $RepoRoot 'src\vres_os\release_inputs.py'),'--root',$RepoRoot)
+# The checkout must be exactly the pinned commit, read and verified from its git objects, before anything is written.
+Run $Python @('-I','-X','utf8',(Join-Path $RepoRoot 'src\vres_os\release_artifact.py'),'check','--root',$RepoRoot,'--source-commit',$SourceCommit)
 # The user-scoped skills-directory plugin facility requires a current Claude version.
 $cv = & claude --version
 if ($LASTEXITCODE -ne 0 -or "$cv" -notmatch '(\d+\.\d+\.\d+)') { throw 'Could not determine Claude Code version.' }
@@ -187,25 +191,28 @@ $pluginMoved = $false
 $published = $false
 try {
     New-Item -ItemType Directory -Force -Path $NewRelease,$DistributionRoot | Out-Null
-    # Stage the exact release inputs of one identified source commit (clean git checkout, or a source
-    # ZIP carrying RELEASE-MANIFEST.json) with a SHA-256 manifest. Everything below installs from this
-    # verified copy, never from the source tree, so a later source change cannot reach the install.
+    # Stage the release files of the pinned commit, read from its verified git objects (never from
+    # working-tree files), with a manifest of commit/tree/blob ids and SHA-256. Everything below
+    # installs from this copy and runs the staged tools; $RepoRoot is not read again.
     $StagedSource = Join-Path $NewRelease 'source'
     $ReleaseManifest = Join-Path $NewRelease 'release-manifest.json'
-    $stageArgs = @('-I','-X','utf8',(Join-Path $RepoRoot 'src\vres_os\release_artifact.py'),'stage','--root',$RepoRoot,'--out',$StagedSource,'--manifest',$ReleaseManifest)
-    if ($SourceCommit) { $stageArgs += @('--source-commit',$SourceCommit) }
-    Run $Python $stageArgs
+    Run $Python @('-I','-X','utf8',(Join-Path $RepoRoot 'src\vres_os\release_artifact.py'),'stage','--root',$RepoRoot,'--out',$StagedSource,'--manifest',$ReleaseManifest,'--source-commit',$SourceCommit)
     $ArtifactTool = Join-Path $StagedSource 'src\vres_os\release_artifact.py'
     # Build venv at its permanent path: Windows entry points contain absolute paths.
     Run $Python @('-m','venv',(Join-Path $NewRelease 'venv'))
     $NewPython = Join-Path $NewRelease 'venv\Scripts\python.exe'
     $extras = if ($WithEmbeddings) { 'full,embeddings' } else { 'full' }
-    Run $NewPython @('-m','pip','install',"$StagedSource[$extras]")
+    # No bytecode is written at install time, so the installed package can be verified as exactly the release.
+    Run $NewPython @('-m','pip','install','--no-compile',"$StagedSource[$extras]")
     Run $NewPython @('-m','pip','check')
-    # The installed package must be exactly the staged release (every .py and migration .sql).
-    $PackageDir = & $NewPython -I -c 'import pathlib, vres_os; print(pathlib.Path(vres_os.__file__).resolve().parent)'
+    # Locate the package without importing it (-B: no bytecode), then verify its complete file inventory:
+    # exactly the released modules and migrations, no compiled, native, .pth or other file. This is a
+    # point-in-time installation check, not ongoing integrity monitoring.
+    $PackageDir = & $NewPython -I -B -c 'import importlib.util as u; print(*u.find_spec(''vres_os'').submodule_search_locations)'
     if ($LASTEXITCODE -ne 0) { throw 'Could not locate the installed Vres package.' }
-    Run $Python @('-I','-X','utf8',$ArtifactTool,'verify-installed','--manifest',$ReleaseManifest,'--package-dir',"$($PackageDir | Select-Object -Last 1)")
+    $PackageDir = "$($PackageDir | Select-Object -Last 1)"
+    if (-not $PackageDir.StartsWith((Join-Path $NewRelease 'venv') + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'The located Vres package is not inside the new runtime.' }
+    Run $Python @('-I','-X','utf8',$ArtifactTool,'verify-installed','--manifest',$ReleaseManifest,'--package-dir',$PackageDir)
     Run $NewPython @('-c','from vres_os.cli import app; from vres_os.mcp_server import mcp; from vres_os.db import migrate; from vres_os.autocompact import install_autocompact')
     $freeze = & $NewPython -m pip freeze --all
     if ($LASTEXITCODE -ne 0) { throw 'Dependency inventory failed.' }
@@ -217,7 +224,7 @@ try {
     Run $NewPython @('-m','vres_os.cli','doctor','--allow-unconfigured')
     # Persist and verify exact snapshots of the Claude files and launchers this installer may change,
     # before the journal and before any mutation, so an interrupted install can be recovered exactly.
-    Run $Python @('-I','-X','utf8',(Join-Path $RepoRoot 'src\vres_os\install_recovery.py'),'snapshot','--install-root',$InstallRoot,'--claude-home',$ClaudeHome,'--release',$ReleaseId)
+    Run $Python @('-I','-X','utf8',(Join-Path $StagedSource 'src\vres_os\install_recovery.py'),'snapshot','--install-root',$InstallRoot,'--claude-home',$ClaudeHome,'--release',$ReleaseId)
     $ClaudeSnapshot = Join-Path $InstallRoot "install-recovery\$ReleaseId"
     Write-JsonAtomic (Join-Path $InstallRoot 'pending-install.json') @{ product='Vres-OS'; new_release=$ReleaseId; previous=$oldPointer; plugin_backup=$PluginBackup; plugin_path=$PluginTarget; had_plugin=(Test-Path $PluginTarget); claude_snapshot=$ClaudeSnapshot; claude_home=$ClaudeHome }
     # Only now change the selected runtime/plugin. Roll back both on failure.

@@ -8,36 +8,47 @@ Use a Windows VM/snapshot or an account that does not contain production credent
 
 Required access: normal Windows user for Vres; administrative consent may be requested by Git/Python/PostgreSQL dependency installers. Network access is required for WinGet/PyPI and vendor login. Do not run an unknown downloaded script through a remote `irm | iex` pipeline.
 
-Download the source ZIP, evidence/checksum files and optionally the Git bundle from the release. Verify the ZIP hash in PowerShell:
+Download the release Git bundle and the evidence/checksum files, and note the full 40-hex release commit id from the release record. A source ZIP is not installable: it carries no git objects, so its contents cannot be bound to a commit. Verify the bundle hash in PowerShell:
 
 ```powershell
-Get-FileHash .\Vres-OS-0.2.0-alpha.1-source.zip -Algorithm SHA256
+Get-FileHash .\Vres-OS-0.2.0-alpha.1.bundle -Algorithm SHA256
 ```
 
-Compare with `SHA256SUMS.txt`. This detects corruption; the checksum is not an independently signed publisher certificate. Keep the evidence package with the source archive.
+Compare with `SHA256SUMS.txt`. This detects corruption; the checksum is not an independently signed publisher certificate. Keep the evidence package with the bundle.
 
-## 2. Extract the complete archive
+## 2. Create a checkout of the approved commit
 
-Use File Explorer → Extract All. A suitable directory is `C:\Install\Vres-OS`. `install.ps1`, `pyproject.toml`, `src`, `plugins`, `scripts` and `docs` must be present together. Do not download only install.ps1.
-
-Open PowerShell in that directory:
+A suitable directory is `C:\Install\Vres-OS`. Replace `<commit>` with the full 40-hex commit id you approved. Run this in the folder that holds the hash-checked bundle:
 
 ```powershell
+$Bundle = (Resolve-Path .\Vres-OS-0.2.0-alpha.1.bundle).Path
+git clone $Bundle C:\Install\Vres-OS
 cd C:\Install\Vres-OS
+git bundle verify $Bundle
+git checkout --detach <commit>
+git fsck --full
+git rev-parse HEAD
+```
+
+`$Bundle` holds the bundle's absolute path, so it stays valid after `cd`. `git bundle verify` needs a repository, so it runs inside the new clone. `git rev-parse HEAD` must print exactly the approved id. Then install from that checkout, passing the same id:
+
+```powershell
 Set-ExecutionPolicy -Scope Process Bypass
-.\install.ps1
+.\install.ps1 -SourceCommit <commit>
 ```
 
 The process-only execution policy expires when this terminal closes. Vres does not change machine-wide script policy.
 
-**Exact release identity.** The installer installs only one identified source commit:
+**Exact release identity.** The installer installs only the one commit you pin:
 
-- The source must be a clean git checkout (the commit is `HEAD`) or a source ZIP that carries `RELEASE-MANIFEST.json`. That file is written when the ZIP is packaged, with `python -I src\vres_os\release_artifact.py manifest --root <clean checkout> --out RELEASE-MANIFEST.json`.
-- To pin the commit you approved, add `-SourceCommit <40-hex commit>`. Any other source is refused.
-- The installer copies the package, plugin, launchers, rules and build metadata into `releases\<id>\source` and records their SHA-256 hashes in `releases\<id>\release-manifest.json`. It validates that copy as a personal-release input (migrations 001-041 pinned, no C2B/R0/F2/C2A files).
-- pip, the plugin, the launchers and the global rules all come from that copy. A change to the source folder after staging cannot reach the installation.
-- Before activation, the installed `vres_os` package (every `.py` and migration `.sql`) and the plugin are compared with the manifest. Any difference stops the installation, with the usual rollback.
-- An uncommitted change in the release scope, an extracted ZIP that differs from its manifest, or a source with no identifiable commit is refused; nothing is rebuilt from other source.
+- `-SourceCommit <full 40-hex commit>` is required. Without it, or with a malformed id, the installer stops before it writes anything.
+- The source must be a git checkout whose `HEAD` is that commit, with no uncommitted or untracked change in the release scope. Anything else, including an extracted source ZIP, is refused before any installation directory is created.
+- The installer reads the package, plugin, launchers, rules and build metadata from the commit's git objects, not from the files on disk. It re-hashes the commit, every tree and every file against their git object ids, so a later edit, a different branch or a line-ending conversion in the checkout cannot change what is installed. Files are installed with the exact committed bytes (for example LF line endings).
+- A git object id proves the content belongs to the commit id you supplied. It is not a signature and does not prove who published the commit: approve the commit id itself through a channel you trust.
+- The copy goes to `releases\<id>\source`, with `releases\<id>\release-manifest.json` recording the commit, tree, each file's git blob id and SHA-256. The copy is validated as a personal-release input (migrations 001-041 pinned, no C2B/R0/F2/C2A files).
+- pip, the plugin, the launchers, the global rules and the recovery snapshot tool all come from that copy; the checkout is not read again.
+- The first tools to run, `release_inputs.py` and `release_artifact.py`, run from the checkout. They must equal their committed bytes (or exactly their CRLF checkout), otherwise nothing is installed. This detects an unexpected change; it cannot make a deliberately altered script trustworthy, so keep the checkout under your control.
+- pip installs with `--no-compile`. Before activation, the complete installed `vres_os` package must be exactly the released modules and migrations: any other file or directory, including bytecode (`.pyc`), extension modules (`.pyd`, `.so`, `.dll`) and `.pth` files, stops the installation with the usual rollback. The plugin is compared with the manifest the same way. This is a check at installation time, not continuous integrity monitoring: Python writes its own bytecode cache when Vres first runs.
 - Dependencies are not part of this identity; see `resolved-dependencies.txt` below.
 
 The installer first asks permission to install an unverified-live preview. Say yes only in the test environment. For each missing dependency it shows the exact package and asks for consent. WinGet checks the exact package ID before installation. If a package is unavailable, installation stops rather than selecting a similarly named package.
@@ -55,12 +66,12 @@ If Python was installed but is not visible, open a new PowerShell and rerun. Do 
 ### Optional components
 
 ```powershell
-.\install.ps1 -UseRemotePostgres
-.\install.ps1 -WithCodex
-.\install.ps1 -WithEmbeddings
+.\install.ps1 -SourceCommit <commit> -UseRemotePostgres
+.\install.ps1 -SourceCommit <commit> -WithCodex
+.\install.ps1 -SourceCommit <commit> -WithEmbeddings
 ```
 
-Flags can be combined. `-UseRemotePostgres` skips detection/installation of a local server; it does not skip credential setup. `-WithCodex` uses the official npm package `@openai/codex`, installing Node.js LTS if needed. Without it, Vres can use Claude but cannot perform Codex reviews. `-WithEmbeddings` installs local inference dependencies; the model download happens when first used, may be substantial, and is not included in the ZIP. Without it, use PostgreSQL lexical retrieval first.
+`-SourceCommit` is always required. Flags can be combined. `-UseRemotePostgres` skips detection/installation of a local server; it does not skip credential setup. `-WithCodex` uses the official npm package `@openai/codex`, installing Node.js LTS if needed. Without it, Vres can use Claude but cannot perform Codex reviews. `-WithEmbeddings` installs local inference dependencies; the model download happens when first used, may be substantial, and is not included in the release. Without it, use PostgreSQL lexical retrieval first.
 
 The package resolver uses declared compatibility ranges. `resolved-dependencies.txt` records what installed on **this machine**; it is not a tested cross-machine hash lock. Retain it as live-test evidence and do not describe this preview as a reproducible offline binary distribution.
 
@@ -89,7 +100,7 @@ The package resolver uses declared compatibility ranges. `resolved-dependencies.
 
 `CLAUDE_CONFIG_DIR` is honored for these Claude paths. Remove a conflicting `VRES_DATA_DIR` override before using the managed Windows installer. The installer rejects unmanaged target directories, symlink/junction install roots, a legacy in-place venv, and unresolved installation journals. It does not delete other plugins or modify unrelated CLAUDE.md/settings content. If a different custom Claude `statusLine` already exists, Vres preserves it and does not take ownership. For native context rollover, Vres sets `env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE="15"` only when that setting is absent or still Vres-owned. Claude defines this percentage against its **auto-compact window**, which never exceeds the model context window; the managed default therefore triggers after roughly 15% of that window is used, leaving roughly 85% of that window free. On native 1M Sonnet 5, if Claude's tuned window is about 967K, a 15%-of-window trigger corresponds to roughly 14.5% full-model context used. An update migrates the previously Vres-owned legacy `85` value to `15`; a custom/user-owned `85` is preserved. Existing `autoCompactWindow`/`autoCompactEnabled` settings, other custom thresholds, disable flags, or `CLAUDE_CODE_AUTO_COMPACT_WINDOW` overrides are preserved rather than overwritten; Vres does not install a custom auto-compact window. Higher-precedence project/managed/launch settings can intentionally change the effective boundary.
 
-The source extraction directory can be removed **after** the live test confirms the installed copy works; installation does not rely on that directory. Keep the release archive/evidence elsewhere.
+The source checkout can be removed **after** the live test confirms the installed copy works; installation does not rely on that directory. Keep the release bundle/evidence elsewhere.
 
 ## 4. Authenticate vendor applications
 
@@ -166,10 +177,10 @@ Then perform [LIVE-VERIFICATION.md](LIVE-VERIFICATION.md) in order. Do not use p
 
 ## 8. Update
 
-Close Claude/Codex and Vres workers. Back up the Vres database **and referenced source/artifact files** before a schema upgrade. Extract the new release elsewhere and run:
+Close Claude/Codex and Vres workers. Back up the Vres database **and referenced source/artifact files** before a schema upgrade. Create a checkout of the new approved commit elsewhere, exactly as in section 2, and run from it:
 
 ```powershell
-.\update.ps1
+.\update.ps1 -SourceCommit <commit>
 ```
 
 Supply `-WithEmbeddings` again to retain optional embedding packages in the new isolated environment. The new environment is staged at its final versioned path; pip/import/plugin gates precede pointer publication. The old environment is not overwritten.
@@ -185,7 +196,7 @@ Before writing the journal, the installer persists and verifies exact snapshots 
 - the Vres launchers in `bin\`;
 - `active-install.json`.
 
-Nothing else in the Claude home is copied or touched, including authentication, other plugins, hooks and your own files. From the extracted source folder:
+Nothing else in the Claude home is copied or touched, including authentication, other plugins, hooks and your own files. From the release checkout:
 
 ```powershell
 py -3.12 -I .\src\vres_os\install_recovery.py inspect --install-root "$env:LOCALAPPDATA\VresOS"
