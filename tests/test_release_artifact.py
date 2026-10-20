@@ -591,3 +591,43 @@ def test_the_documented_bundle_checkout_sequence_runs_as_written(tmp_path):
             pytest.fail(f"unexpected command in the documented sequence: {line!r}")
     assert _rev(target, "HEAD") == head
     assert any(line.startswith("git bundle verify $") for line in block)  # absolute path, not .\ relative
+
+
+# Documents that tell an operator how to install, update or verify a release.
+_OPERATIONAL_DOCS = ("README.md", "CLAUDE.md", "docs/INSTALL-WINDOWS.md", "docs/LIVE-VERIFICATION.md",
+                     "docs/RELEASE-VALIDATION.md")
+_STALE_INSTALL_PHRASES = ("Extract the complete release source ZIP", "fully extracted source",
+                          "source extraction directory", "ZIP directory", "RELEASE-MANIFEST.json",
+                          "release_artifact.py manifest")
+
+
+def _doc(rel: str) -> str:
+    return (_ROOT / rel).read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("rel", _OPERATIONAL_DOCS)
+def test_every_operational_install_or_update_command_carries_the_commit_pin(rel):
+    import re
+
+    unpinned = [line.strip() for line in _doc(rel).splitlines()
+                for m in re.finditer(r"\.\\(?:install|update)\.ps1\b", line)
+                if not re.match(r" -SourceCommit <[a-z ]*commit>", line[m.end():])]
+    assert unpinned == []
+
+
+@pytest.mark.parametrize("rel", _OPERATIONAL_DOCS)
+def test_no_operational_doc_describes_installing_from_a_source_zip(rel):
+    text = _doc(rel)
+    assert [phrase for phrase in _STALE_INSTALL_PHRASES if phrase in text] == []
+
+
+def test_docs_route_installs_through_a_pinned_bundle_checkout_and_keep_zips_review_only():
+    readme, validation, live = _doc("README.md"), _doc("docs/RELEASE-VALIDATION.md"), _doc("docs/LIVE-VERIFICATION.md")
+    install_section = readme.split("## Windows preview installation", 1)[1].split("\n## ", 1)[0]
+    assert "(docs/INSTALL-WINDOWS.md), section 2" in install_section
+    assert "source ZIPs are not installable" in install_section
+    assert "review-only source ZIP" in readme and "review-only source ZIP" in validation
+    assert "`git rev-parse HEAD` in the checkout prints it" in live
+    assert "-SourceCommit <commit>" in _doc("CLAUDE.md")
+    # Positive controls: historical evidence ZIPs and document-ingestion ZIP limits are not install instructions.
+    assert "the uploaded ZIP SHA-256 was" in validation and "path/ZIP limits hold" in live

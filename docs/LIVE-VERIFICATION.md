@@ -55,7 +55,7 @@ administrator action; the helper never guesses an admin credential or creates a 
 
 **Applicability:** Required. **Initial status:** NOT RUN.
 
-**Execute:** Restore a disposable Windows VM snapshot. Record OS, PowerShell, CPU/RAM, locale and user profile path. Verify source ZIP/bundle/wheel SHA-256 values against the manifest. Record exact source commit. Copy the synthetic fixtures, not company data.
+**Execute:** Restore a disposable Windows VM snapshot. Record OS, PowerShell, CPU/RAM, locale and user profile path. Verify the Git bundle (and any review-only source ZIP/wheel) SHA-256 values against the manifest. Record the exact full 40-hex source commit and confirm `git rev-parse HEAD` in the checkout prints it. Copy the synthetic fixtures, not company data.
 
 **Pass evidence:** The checksums match the supplied manifest and the directory is the correct version. No production DB/credential/project is in the test scope. A manifest is not a publisher signature.
 
@@ -65,7 +65,7 @@ administrator action; the helper never guesses an admin credential or creates a 
 
 **Applicability:** Required. **Initial status:** NOT RUN.
 
-**Execute:** Open a normal PowerShell in the fully extracted source. Run Set-ExecutionPolicy -Scope Process Bypass, then .\install.ps1. Follow the displayed dependency prompts. Record every consent, native exit code and prerequisite version; never record credential input.
+**Execute:** Open a normal PowerShell in the git checkout of the approved commit (INSTALL-WINDOWS.md section 2). Run Set-ExecutionPolicy -Scope Process Bypass, then .\install.ps1 -SourceCommit <commit>. Follow the displayed dependency prompts. Record every consent, native exit code and prerequisite version; never record credential input.
 
 **Pass evidence:** Missing required packages are offered by exact ID. Declining or unavailable package exits clearly. A supported Python is selected even with another newer default. No package failures are ignored; no unrelated plugin is removed.
 
@@ -385,9 +385,9 @@ administrator action; the helper never guesses an admin credential or creates a 
 
 **Applicability:** Required. **Initial status:** NOT RUN.
 
-**Execute:** After a working VM snapshot, remove/move only the source extraction directory and verify installed Vres still starts. Restore the source and run .\update.ps1 with native sessions/workers closed. Observe new release paths, plugin backup and active pointer.
+**Execute:** After a working VM snapshot, remove/move only the source checkout and verify installed Vres still starts. Restore the source and run .\update.ps1 -SourceCommit <new commit> from a checkout of the new approved commit, with native sessions/workers closed. Observe new release paths, plugin backup and active pointer.
 
-**Pass evidence:** Installed runtime is independent of the ZIP directory. New venv is built at its permanent path, checked before pointer publication, and old release retained. Actual resolved dependencies are recorded; DB backup is separate.
+**Pass evidence:** Installed runtime is independent of the source checkout. New venv is built at its permanent path, checked before pointer publication, and old release retained. Actual resolved dependencies are recorded; DB backup is separate.
 
 **Record:** actual result, sanitized evidence path, native versions, defect/reviewer.
 
@@ -405,7 +405,7 @@ administrator action; the helper never guesses an admin credential or creates a 
 
 **Applicability:** Required. **Initial status:** NOT RUN.
 
-**Execute:** Close sessions/workers; run .\uninstall.ps1 without RemoveLocalData. Inspect native vendor logins, DB, source repo, config/vault and PATH. Reinstall the same source and recover the known task after setup/status checks.
+**Execute:** Close sessions/workers; run .\uninstall.ps1 without RemoveLocalData. Inspect native vendor logins, DB, source repo, config/vault and PATH. Reinstall the same commit (.\install.ps1 -SourceCommit <commit>) and recover the known task after setup/status checks.
 
 **Pass evidence:** Only owned runtime/plugin/bin are removed. DB/project/vendor credentials remain untouched; local Vres config/runtime credential are preserved. Reinstall works without re-creating or resetting existing provisioned DB roles.
 

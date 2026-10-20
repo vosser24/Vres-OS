@@ -49,15 +49,15 @@ These mechanisms have different evidence levels. Local tests execute Python/pars
 
 ## Windows preview installation
 
-Use a disposable project, a dedicated PostgreSQL test database and a Windows snapshot/backup. Extract the complete release source ZIP, then run in a separate PowerShell window:
+Use a disposable project, a dedicated PostgreSQL test database and a Windows snapshot/backup. Create a git checkout of the approved release commit from the release Git bundle ([Windows installation](docs/INSTALL-WINDOWS.md), section 2), then run in a separate PowerShell window:
 
 ```powershell
 cd C:\Install\Vres-OS
 Set-ExecutionPolicy -Scope Process Bypass
-.\install.ps1
+.\install.ps1 -SourceCommit <commit>
 ```
 
-Optional flags: `-WithEmbeddings`, `-WithCodex`, `-UseRemotePostgres`. Embeddings are **off by default** so installation does not silently download a large model runtime.
+`-SourceCommit` (the full 40-hex commit you approved) is always required; source ZIPs are not installable. Optional flags: `-WithEmbeddings`, `-WithCodex`, `-UseRemotePostgres`. Embeddings are **off by default** so installation does not silently download a large model runtime.
 
 The installer requires current Claude Code (preview compatibility floor: 2.1.246), Python 3.12 or 3.13, and Git. It prompts before installing missing dependencies. It stages a versioned runtime under `%LOCALAPPDATA%\VresOS\releases`, validates it, and selects it through `active-install.json`. It installs the personal plugin at `%USERPROFILE%\.claude\skills\vres-os` (or the equivalent under `CLAUDE_CONFIG_DIR`). It does not rewrite unrelated settings or delete marketplaces.
 
@@ -93,7 +93,7 @@ python scripts\release_gate.py --output C:\VresEvidence\static
 
 The gate runs tests, compiles Python, checks plugin frontmatter/tool references, audits migration file ordering and provenance, builds a wheel offline from the prepared build environment, verifies packaged bytes, and imports installed wheel modules outside the source checkout. The local gate itself is **not** a substitute for running SQL or PowerShell. The repository CI adds a PostgreSQL 16 service and runs the full suite with the opt-in integration guard enabled before running the local release gate.
 
-The released evidence bundle contains actual logs, JUnit results, coverage data, dependency inventory and a per-file validation ledger. The source ZIP and Git bundle are exported from one final commit; checksums and a machine-readable release manifest identify them. Historical conversation test counts are not release evidence.
+The released evidence bundle contains actual logs, JUnit results, coverage data, dependency inventory and a per-file validation ledger. The Git bundle (the installable distribution) and a review-only source ZIP are exported from one final commit; checksums and a machine-readable release manifest identify them. Historical conversation test counts are not release evidence.
 
 ## Development rule
 

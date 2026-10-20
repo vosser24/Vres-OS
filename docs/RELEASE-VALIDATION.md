@@ -156,7 +156,7 @@ installed artifact on the target Windows live-test host before those target capa
    `-SourceCommit`, and the installer stages the release files from that commit's re-hashed git objects. The
    commit id binds content to the commit; it is not a signature, so its approval channel must be trusted.
 6. Restore the bundle into a separate checkout, run `git fsck`, and run the tests there.
-7. Compare every source ZIP member byte-for-byte with the committed Git blob.
+7. Compare every member of the review-only source ZIP byte-for-byte with the committed Git blob.
 8. Inspect the wheel, including every migration through 014 and the registered executor/worker/model-policy/
    model-experiment modules. A wheel alone is not the Windows distribution: it excludes the top-level
    installer/plugin/docs by design.

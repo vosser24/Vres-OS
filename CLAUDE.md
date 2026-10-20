@@ -18,7 +18,7 @@ Machine-wide engineering rules are owned by `rules/vres-rules.md` and installed 
 - Affected test: `python -m pytest <test-file> -q`
 - Full test suite: `python -m pytest`
 - Release gate: `python scripts/release_gate.py --output <outside-checkout-directory>`
-- Windows install/update: `.\install.ps1` / `.\update.ps1`
+- Windows install/update (from a git checkout of the approved commit): `.\install.ps1 -SourceCommit <commit>` / `.\update.ps1 -SourceCommit <commit>`
 
 ## Repository boundaries
 - Git owns code, tests, engineering docs, migrations, and this project contract.

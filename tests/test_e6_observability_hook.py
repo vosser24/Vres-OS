@@ -1,6 +1,9 @@
 """#176 E6 Chunk 1: hook registration, launcher and fail-safe behavior (no database)."""
+import hashlib
 import io
 import json
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -25,14 +28,83 @@ def test_hooks_json_registers_one_successful_posttooluse_observer():
     assert "vres-experience-observe" not in json.dumps(HOOKS["hooks"]["PostToolUseFailure"])
 
 
+def _canonical_lf(raw: bytes) -> bytes:
+    """The LF bytes of an LF checkout, or of exactly its all-CRLF form (a core.autocrlf checkout); nothing else."""
+    lf = raw.replace(b"\r\n", b"\n")
+    if b"\r" in lf or raw not in (lf, lf.replace(b"\n", b"\r\n")):
+        raise ValueError("line endings are neither LF nor exactly the CRLF form of LF")
+    return lf
+
+
+def _launcher_text(raw: bytes) -> str:
+    assert not raw.startswith(b"\xef\xbb\xbf")  # checked on the raw bytes
+    return _canonical_lf(raw).decode("utf-8")
+
+
 def test_launcher_is_bounded_utf8_nobom_and_fail_safe():
-    raw = LAUNCHER.read_bytes()
-    assert not raw.startswith(b"\xef\xbb\xbf")
-    text = raw.decode("utf-8")
+    text = _launcher_text(LAUNCHER.read_bytes())
     assert "1048577" in text and "1048576" in text and "UTF8Encoding $false" in text
     assert "-m vres_os.cli hook experience-observe" in text
     assert "exit $LASTEXITCODE" not in text and text.rstrip().endswith("exit 0\n}".strip())
     assert "$payload" not in text.split("catch {", 1)[1]  # the failure path never logs the payload
+
+
+@pytest.mark.parametrize("damage", ["mixed-endings", "cr-only", "stray-cr", "bom", "invalid-utf8"])
+def test_launcher_check_refuses_malformed_bytes(tmp_path, damage):
+    lf = _canonical_lf(LAUNCHER.read_bytes())
+    lines = lf.split(b"\n")
+    malformed = {
+        "mixed-endings": b"\r\n".join(lines[:3]) + b"\n" + b"\n".join(lines[3:]),
+        "cr-only": lf.replace(b"\n", b"\r"),
+        "stray-cr": lf.replace(b"\n", b"\r\n").replace(b"exit 0\r\n", b"exit 0\r\r\n"),
+        "bom": b"\xef\xbb\xbf" + lf,
+        "invalid-utf8": lf.replace(b"exit 0", b"exit \xff0"),
+    }[damage]
+    fixture = tmp_path / "vres-experience-observe.ps1"  # a disposable copy; the real launcher is never touched
+    fixture.write_bytes(malformed)
+
+    with pytest.raises((ValueError, AssertionError)):  # UnicodeDecodeError is a ValueError
+        _launcher_text(fixture.read_bytes())
+
+
+def test_launcher_check_accepts_only_lf_and_its_exact_crlf_form(tmp_path):
+    lf = _canonical_lf(LAUNCHER.read_bytes())
+    for name, data in (("lf.ps1", lf), ("crlf.ps1", lf.replace(b"\n", b"\r\n"))):
+        (tmp_path / name).write_bytes(data)
+        assert _launcher_text((tmp_path / name).read_bytes()) == lf.decode("utf-8")
+
+
+def _committed_launchers() -> dict[str, bytes]:
+    """{path: bytes} of every committed PowerShell launcher, read from HEAD's git objects and re-hashed."""
+    env = {k: v for k, v in os.environ.items() if not k.upper().startswith("GIT_")}
+    env.update(GIT_NO_REPLACE_OBJECTS="1", GIT_OPTIONAL_LOCKS="0")
+    listing = subprocess.run(["git", "-C", str(ROOT), "ls-tree", "-r", "-z", "HEAD", "--", "plugins/vres-os/bin",
+                              "scripts/windows"], capture_output=True, check=True, env=env, timeout=60).stdout
+    blobs = {}
+    for entry in filter(None, listing.split(b"\0")):
+        meta, path = entry.split(b"\t", 1)
+        mode, kind, oid = meta.decode("ascii").split()
+        if path.endswith(b".ps1"):
+            body = subprocess.run(["git", "-C", str(ROOT), "cat-file", "blob", oid], capture_output=True,
+                                  check=True, env=env, timeout=60).stdout
+            assert (mode, kind) == ("100644", "blob")
+            assert hashlib.sha1(b"blob %d\0" % len(body) + body).hexdigest() == oid  # the object, not a checkout
+            blobs[path.decode("utf-8")] = body
+    return blobs
+
+
+@pytest.mark.skipif(not (ROOT / ".git").exists(), reason="the committed launcher bytes need the git checkout")
+def test_committed_launcher_blobs_are_ascii_lf_without_bom():
+    blobs = _committed_launchers()
+    on_disk = sorted(p.relative_to(ROOT).as_posix() for d in ("plugins/vres-os/bin", "scripts/windows")
+                     for p in (ROOT / d).glob("*.ps1"))
+    assert sorted(blobs) == on_disk and "plugins/vres-os/bin/vres-experience-observe.ps1" in blobs
+    for path, body in blobs.items():
+        assert not body.startswith(b"\xef\xbb\xbf"), path
+        assert b"\r" not in body and body.endswith(b"\n"), path
+        body.decode("ascii")
+        assert _canonical_lf((ROOT / path).read_bytes()) == body, path  # the checkout is this blob, or its CRLF form
+    assert _launcher_text(blobs["plugins/vres-os/bin/vres-experience-observe.ps1"]).rstrip().endswith("exit 0\n}")
 
 
 def test_cli_registers_command():
