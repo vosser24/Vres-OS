@@ -71,7 +71,9 @@ def test_user_prompt_is_staged_before_task_attribution(monkeypatch, capsys):
     assert "VRES_CURRENT_SESSION_ID=S-NEW" in capsys.readouterr().out
 
 
-def test_stop_commits_prompt_to_final_bound_task(monkeypatch):
+def test_stop_commits_prompt_to_final_bound_task(monkeypatch, tmp_path):
+    app_data = tmp_path / "app-data"
+    monkeypatch.setenv("VRES_DATA_DIR", str(app_data))
     monkeypatch.setattr(hooks, "_input", lambda: {"session_id": "S-1"})
     monkeypatch.setattr(hooks, "ConfigStore", lambda: SimpleNamespace(load=lambda: VresConfig(configured=True)))
     monkeypatch.setattr(hooks, "_project_id", lambda _repo, _payload: 9)
@@ -79,6 +81,7 @@ def test_stop_commits_prompt_to_final_bound_task(monkeypatch):
     monkeypatch.setattr(hooks, "_observe_session", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(hooks, "inspect_stop_guard", lambda *_args, **_kwargs: {"allowed": True})
     monkeypatch.setattr(hooks, "_contamination_report", lambda *_args, **_kwargs: None)  # keep this unit DB-free
+    monkeypatch.setattr(hooks, "current_reply_turn", lambda *_args: None)  # reference capture reads the database
 
     committed = []
     events = []
@@ -102,6 +105,7 @@ def test_stop_commits_prompt_to_final_bound_task(monkeypatch):
 
     assert committed == [(9, "S-1", "TASK-NEW")]
     assert events == [("TASK-NEW", "MODEL_STOP", "vres-lifecycle", {}, "S-1")]
+    assert not (app_data / "logs" / "hook-errors.log").exists(), "the hook swallowed and logged an error"
 
 
 def test_validation_digest_ignores_latest_instruction_but_not_material_state():

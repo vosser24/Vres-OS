@@ -49,6 +49,7 @@ def test_provisioning_never_alters_existing_account_or_database(monkeypatch, rol
 
 
 def test_failed_setup_restores_previous_config_and_secret(monkeypatch, tmp_path, approve_database_target):
+    monkeypatch.setenv('VRES_DATA_DIR', str(tmp_path / 'app-data'))  # setup-last.json is written here
     approve_database_target(('localhost', 5432, 'vres_os'))
     # Reach the intended migration failure without any administrator connection attempt.
     monkeypatch.setattr(bootstrap, '_configure_provenance_boundary', lambda *a, **kw: None)
@@ -70,6 +71,9 @@ def test_failed_setup_restores_previous_config_and_secret(monkeypatch, tmp_path,
     assert store.load().configured is True
     assert vault[cfg.database.password_key] == 'previous-test-credential'
     assert 'credential' not in store.path.read_text()
+    # The failed-setup record is written only inside this test's own application data.
+    result = json.loads((tmp_path / 'app-data' / 'logs' / 'setup-last.json').read_text(encoding='utf-8'))
+    assert (result['status'], result['error_type'], result['message']) == ('failed', 'RuntimeError', 'migration rejected')
 
 
 def test_unknown_session_never_falls_through_to_other_window(monkeypatch):
@@ -102,16 +106,28 @@ def test_binding_unregistered_session_fails_before_changing_focus(monkeypatch):
     assert not any('project_focus' in str(sql) for sql, _ in conn.calls)
 
 
-def test_prompt_hook_delivers_current_session_even_without_task(monkeypatch, capsys):
+def test_prompt_hook_delivers_current_session_even_without_task(monkeypatch, capsys, tmp_path):
+    app_data = tmp_path / 'app-data'
+    monkeypatch.setenv('VRES_DATA_DIR', str(app_data))
     monkeypatch.setattr(hooks, '_input', lambda: {'session_id': 'AFTER-CLEAR', 'prompt': 'continue'})
     monkeypatch.setattr(hooks, 'ConfigStore', lambda: SimpleNamespace(load=lambda: VresConfig(configured=True)))
     monkeypatch.setattr(hooks, '_project_id', lambda *a: 7)
     opened = []
     monkeypatch.setattr(hooks, 'Repository', lambda: SimpleNamespace(open_session=lambda *a: opened.append(a), active_task=lambda *a: None))
+    # The session-lifecycle steps after open_session are database calls; this unit replaces them.
+    staged = []
+    monkeypatch.setattr(hooks, '_observe_session', lambda *a, **kw: None)
+    monkeypatch.setattr(hooks, 'inherit_replaced_session_task', lambda *a: None)
+    monkeypatch.setattr(hooks, 'bind_session_to_project_focus', lambda *a: None)
+    monkeypatch.setattr(hooks, 'stage_user_instruction', lambda *a: staged.append(a))
+    monkeypatch.setattr(hooks, 'begin_reply_turn', lambda *a: None)
     hooks.user_prompt()
     value = json.loads(capsys.readouterr().out)
+    assert staged == [(7, 'AFTER-CLEAR', 'continue')]
     assert 'AFTER-CLEAR' in value['hookSpecificOutput']['additionalContext']
     assert opened == [(7, 'AFTER-CLEAR')]
+    assert 'VRES_PERSISTENCE_WARNING' not in value['hookSpecificOutput']['additionalContext']
+    assert not (app_data / 'logs' / 'hook-errors.log').exists(), 'the hook swallowed and logged an error'
 
 
 def test_child_hook_cannot_write_main_session_state(monkeypatch, capsys):

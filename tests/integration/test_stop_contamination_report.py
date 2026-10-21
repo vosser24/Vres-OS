@@ -202,7 +202,7 @@ def test_hold_and_contamination_are_reported_independently(pg_project, monkeypat
     assert _key(pg_project, session_key)["contaminated"] is True
 
 
-def test_report_failure_is_logged_and_fails_open_for_reporting_only(pg_project, monkeypatch, capsys):
+def test_report_failure_is_logged_and_fails_open_for_reporting_only(pg_project, monkeypatch, capsys, tmp_path):
     sid, session_key, task_key = _bound(pg_project)
     _turn(pg_project, sid, task_key, "Report the status.", gate=False)
     _poison_and_revoke(pg_project)
@@ -210,10 +210,12 @@ def test_report_failure_is_logged_and_fails_open_for_reporting_only(pg_project, 
     def broken(*_args, **_kwargs):
         raise RuntimeError("injected report failure")
     monkeypatch.setattr(hooks, "contamination_notice", broken)
+    # The injected failure is logged to this test's own application data, never the live log.
+    monkeypatch.setenv("VRES_DATA_DIR", str(tmp_path / "app-data"))
     log = logs_dir() / "hook-errors.log"
-    size = log.stat().st_size if log.exists() else 0
+    assert not log.exists()
     out = _stop(monkeypatch, capsys, pg_project, sid)
     assert out["decision"] == "block" and REPORT not in out["reason"]  # the existing block is unaltered
-    assert "StopContaminationReport: RuntimeError: injected report failure" in log.read_bytes()[size:].decode("utf-8", "replace")
+    assert "StopContaminationReport: RuntimeError: injected report failure" in log.read_text("utf-8", "replace")
     assert _key(pg_project, session_key)["contaminated"] is True
     assert _pretool_denied(monkeypatch, capsys, sid)  # enforcement is unaffected

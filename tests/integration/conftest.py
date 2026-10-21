@@ -7,13 +7,15 @@ import pytest
 
 
 @pytest.fixture
-def pg_project(monkeypatch, tmp_path):
+def pg_project(monkeypatch, tmp_path, live_app_data_fence):
     pytest.importorskip("psycopg")
     from psycopg.conninfo import conninfo_to_dict
     from vres_os.db import connect, migrate
     from vres_os.project import ProjectIdentity
     from vres_os.repository import Repository
 
+    # Hooks and setup under test write logs and state under VRES_DATA_DIR: never the live application data.
+    live_app_data_fence.require_disposable(os.environ["VRES_DATA_DIR"])
     dsn = os.environ.get("VRES_TEST_DATABASE_URL")
     if not dsn:
         pytest.skip("VRES_TEST_DATABASE_URL is not set")
