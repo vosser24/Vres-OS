@@ -77,9 +77,13 @@ def start(project: str = ".") -> None:
 
 
 @app.command()
-def doctor(allow_unconfigured: bool = False) -> None:
-    """Read-only health checks. Does not migrate or mark a failed setup ready."""
-    from .db import connect
+def doctor(allow_unconfigured: bool = False, skip_database: bool = False) -> None:
+    """Read-only health checks. Does not migrate or mark a failed setup ready.
+
+    --skip-database is the installer's preflight: this command then makes no PostgreSQL connection and
+    reads no database credential, and reports the database as NOT CHECKED, configured or not. It is
+    not a database-health result.
+    """
     from importlib.util import find_spec
     table = Table(title="Vres-OS doctor")
     table.add_column("Component")
@@ -97,7 +101,12 @@ def doctor(allow_unconfigured: bool = False) -> None:
             missing.append(module)
     cfg = ConfigStore().load()
     table.add_row("configured", "YES" if cfg.configured else "NO — run secure setup")
-    if cfg.configured:
+    if skip_database:
+        table.add_row("PostgreSQL", "NOT CHECKED — database contact skipped by the installation preflight; "
+                      "database health is a separate check (vres doctor)")
+    if cfg.configured and not skip_database:
+        from .db import connect
+
         try:
             with connect() as conn:
                 row = conn.execute("SELECT count(*) AS n FROM vres.schema_migrations").fetchone()
@@ -105,7 +114,7 @@ def doctor(allow_unconfigured: bool = False) -> None:
         except Exception as exc:
             missing.append("PostgreSQL")
             table.add_row("PostgreSQL", "ERROR: " + redact_text(str(exc)))
-    else:
+    elif not cfg.configured:
         setup_last = last_setup_result()
         if setup_last and setup_last.get("status") == "failed":
             summary = f"FAILED {setup_last.get('error_type', 'Error')}: {setup_last.get('message', '')}"

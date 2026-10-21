@@ -73,6 +73,8 @@ If Python was installed but is not visible, open a new PowerShell and rerun. Do 
 
 `-SourceCommit` is always required. Flags can be combined. `-UseRemotePostgres` skips detection/installation of a local server; it does not skip credential setup. `-WithCodex` uses the official npm package `@openai/codex`, installing Node.js LTS if needed. Without it, Vres can use Claude but cannot perform Codex reviews. `-WithEmbeddings` installs local inference dependencies; the model download happens when first used, may be substantial, and is not included in the release. Without it, use PostgreSQL lexical retrieval first.
 
+pip also writes `releases\<id>\pip-install-report.json` (its `--report` output: each package's resolved version, download URL and, where pip recorded one, the archive digest). The installer requires pip 23.0 or newer (installation-report schema version 1) before it downloads anything, checks that the report is usable, and prints how many entries have no well-formed recorded SHA-256; the local staged Vres source always has none. A recorded digest is pip's own record, not an independent check of the bytes. The report is an audit record, not a hash-locked or reproducible resolution, and the isolated build dependencies (such as setuptools) are not in it. It stays in the release folder under your user profile. Downloads come only from pip's normal index; the installer adds no other source.
+
 The package resolver uses declared compatibility ranges. `resolved-dependencies.txt` records what installed on **this machine**; it is not a tested cross-machine hash lock. Retain it as live-test evidence and do not describe this preview as a reproducible offline binary distribution.
 
 ## 3. What is installed
@@ -171,17 +173,26 @@ vres status
 vres selftest
 ```
 
-`doctor` is read-only and exits nonzero for missing required components or configuration/connection failure. It does not run migrations. `selftest` intentionally creates and removes isolated test records in the configured Vres database. It checks continuity, retrieval and baseline procedure registration, but does not exercise real Claude hooks.
+`doctor` is read-only and exits nonzero for missing required components or configuration/connection failure. This ordinary `vres doctor` is the database-health check: it connects only through the database contact guard, to a target you approved, and a refused or held target is reported as an error. It does not run migrations. `selftest` intentionally creates and removes isolated test records in the configured Vres database. It checks continuity, retrieval and baseline procedure registration, but does not exercise real Claude hooks.
 
 Then perform [LIVE-VERIFICATION.md](LIVE-VERIFICATION.md) in order. Do not use production projects until the required gates pass with saved evidence.
 
 ## 8. Update
 
-Close Claude/Codex and Vres workers. Back up the Vres database **and referenced source/artifact files** before a schema upgrade. Create a checkout of the new approved commit elsewhere, exactly as in section 2, and run from it:
+Close Claude Code and Codex, and let Vres workers finish; the installer refuses to run while they are open. Back up the Vres database **and referenced source/artifact files** before a schema upgrade. Create a checkout of the new approved commit elsewhere, exactly as in section 2, and run from it in a separate Windows PowerShell window:
 
 ```powershell
 .\update.ps1 -SourceCommit <commit>
 ```
+
+The update asks one question, which defaults to No: whether to update the existing Vres installation for this Windows user from the pinned commit, without checking the database. Type `y` only if that is what you intend.
+
+**Database access during the update.** No PostgreSQL access is authorized for an update.
+
+- **VERIFIED DESIGN:** the installer's health check runs `vres doctor --allow-unconfigured --skip-database`, which skips database contact: it opens no PostgreSQL connection, reads no database credential, runs no migration and reports `PostgreSQL: NOT CHECKED`. A successful update therefore says nothing about database health.
+- **NOT VERIFIED:** that every other installer subprocess (pip, `claude plugin validate`) is unable to contact a database. The new runtime's database contact guard refuses every target you have not approved, but that is a safeguard, not a proof.
+- **PROHIBITED:** any contact with the schema-048 incident database (the local server at `127.0.0.1:5432` while that incident is open). Never approve it; record a hold for it instead (`python -I src\vres_os\database_targets.py hold --host 127.0.0.1 --port 5432 --reason "schema-048 incident"`, with your approval).
+- **PENDING:** physical installation acceptance and database acceptance. Database-dependent features stay blocked until a non-incident target is separately approved and accepted; check its health then with the ordinary `vres doctor`.
 
 Supply `-WithEmbeddings` again to retain optional embedding packages in the new isolated environment. The new environment is staged at its final versioned path; pip/import/plugin gates precede pointer publication. The old environment is not overwritten.
 

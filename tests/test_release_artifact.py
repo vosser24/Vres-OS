@@ -518,7 +518,7 @@ def test_installer_installs_only_from_the_verified_staged_artifact():
                "$SourceCommit")
     assert first_write < stage
     assert "$RepoRoot" not in text[stage + len("'stage','--root',$RepoRoot"):]  # nothing mutable after staging
-    pip = at("Run $NewPython @('-m','pip','install','--no-compile',\"$StagedSource[$extras]\")")
+    pip = at("Run $NewPython @('-m','pip','install','--no-compile','--report',$PipReport,\"$StagedSource[$extras]\")")
     assert stage < at("Run $Python @('-m','venv'") < pip
     # The package is located without importing it or writing bytecode, then verified in full.
     locate = at("$PackageDir = & $NewPython -I -B -c 'import importlib.util")

@@ -136,8 +136,14 @@ if (Test-Path (Join-Path $InstallRoot 'venv')) {
 }
 Assert-Managed $PluginTarget
 Write-Host 'Vres-OS controlled-live-test preview. Not production-verified.' -ForegroundColor Yellow
-Write-Host 'A secure separate window will request database credentials after you type start vres in Claude.'
-if (-not (Confirm-Choice 'Install this preview for a disposable project and dedicated test database?' $false)) { exit 0 }
+if ($Update) {
+    Write-Host "Update target: the existing Vres installation for this Windows user, from pinned commit $SourceCommit." -ForegroundColor Yellow
+    Write-Host 'Database health will NOT be checked during this update. No PostgreSQL access is authorized; database-dependent features remain blocked until separately accepted.' -ForegroundColor Yellow
+    if (-not (Confirm-Choice 'Update the existing Vres installation for this Windows user from the pinned commit, without checking the database?' $false)) { exit 0 }
+} else {
+    Write-Host 'A secure separate window will request database credentials after you type start vres in Claude.'
+    if (-not (Confirm-Choice 'Install this preview for a disposable project and dedicated test database?' $false)) { exit 0 }
+}
 foreach ($item in @(@('git','Git.Git'), @('claude','Anthropic.ClaudeCode'))) {
     if (-not (Have $item[0])) {
         if (-not (Confirm-Choice "$($item[0]) is missing. Install its Windows package?" $true)) { throw "$($item[0]) is required." }
@@ -202,8 +208,14 @@ try {
     Run $Python @('-m','venv',(Join-Path $NewRelease 'venv'))
     $NewPython = Join-Path $NewRelease 'venv\Scripts\python.exe'
     $extras = if ($WithEmbeddings) { 'full,embeddings' } else { 'full' }
+    # pip records what it resolved and downloaded (--report; installation-report schema version 1 is stable
+    # from pip 23.0, so older pip is refused here, before any download). That is audit evidence, not a lock:
+    # dependencies are still resolved within pyproject.toml's ranges at install time.
+    $PipVersionCheck = 'import pip, re, sys; m = re.match(''([0-9]+)[.]([0-9]+)'', pip.__version__); sys.exit(0 if m and (int(m[1]), int(m[2])) >= (23, 0) else 1)'
+    Run $NewPython @('-I','-c',$PipVersionCheck)
+    $PipReport = Join-Path $NewRelease 'pip-install-report.json'
     # No bytecode is written at install time, so the installed package can be verified as exactly the release.
-    Run $NewPython @('-m','pip','install','--no-compile',"$StagedSource[$extras]")
+    Run $NewPython @('-m','pip','install','--no-compile','--report',$PipReport,"$StagedSource[$extras]")
     Run $NewPython @('-m','pip','check')
     # Locate the package without importing it (-B: no bytecode), then verify its complete file inventory:
     # exactly the released modules and migrations, no compiled, native, .pth or other file. This is a
@@ -217,11 +229,17 @@ try {
     $freeze = & $NewPython -m pip freeze --all
     if ($LASTEXITCODE -ne 0) { throw 'Dependency inventory failed.' }
     [IO.File]::WriteAllLines((Join-Path $NewRelease 'resolved-dependencies.txt'), [string[]]$freeze, (New-Object System.Text.UTF8Encoding $false))
+    # Validate pip's report and count entries without a well-formed recorded SHA-256 (e.g. the local staged source).
+    $PipReportCheck = 'import json, re, sys; g = lambda d, k: d.get(k) if isinstance(d, dict) else None; r = json.load(open(sys.argv[1], encoding=''utf-8'')); i = g(r, ''install''); ok = g(r, ''version'') == ''1'' and isinstance(i, list) and len(i) > 0 and all(isinstance(g(e, ''metadata''), dict) and bool(g(g(e, ''metadata''), ''name'')) and bool(g(g(e, ''metadata''), ''version'')) for e in i); sha = lambda e: g(g(g(g(e, ''download_info''), ''archive_info''), ''hashes''), ''sha256''); sys.exit(1) if not ok else print(len(i), sum(1 for e in i if not (isinstance(sha(e), str) and re.fullmatch(''[0-9a-fA-F]{64}'', sha(e)))))'
+    $PipReportCounts = "$(Run $Python @('-I','-c',$PipReportCheck,$PipReport) | Select-Object -Last 1)".Split(' ')
+    Write-Host "Dependency report: $($PipReportCounts[0]) packages recorded in pip-install-report.json, $($PipReportCounts[1]) without a well-formed recorded SHA-256 (the local staged Vres source has none). A recorded digest is pip's own record, not an independent check of the bytes. This is an audit record, not a hash-locked or reproducible resolution; isolated build dependencies (such as setuptools) are not included."
     Copy-Item -Recurse -LiteralPath (Join-Path $StagedSource 'plugins\vres-os') -Destination $StagedPlugin
     Run $Python @('-I','-X','utf8',$ArtifactTool,'verify-tree','--manifest',$ReleaseManifest,'--prefix','plugins/vres-os','--dir',$StagedPlugin)
     [IO.File]::WriteAllText((Join-Path $StagedPlugin '.vres-managed'), 'Vres-OS')
     Run 'claude' @('plugin','validate',$StagedPlugin)
-    Run $NewPython @('-m','vres_os.cli','doctor','--allow-unconfigured')
+    # The doctor preflight skips database contact and reports PostgreSQL NOT CHECKED, not healthy. Database
+    # isolation of the other installer subprocesses (pip, claude plugin validate) is not independently verified.
+    Run $NewPython @('-m','vres_os.cli','doctor','--allow-unconfigured','--skip-database')
     # Persist and verify exact snapshots of the Claude files and launchers this installer may change,
     # before the journal and before any mutation, so an interrupted install can be recovered exactly.
     Run $Python @('-I','-X','utf8',(Join-Path $StagedSource 'src\vres_os\install_recovery.py'),'snapshot','--install-root',$InstallRoot,'--claude-home',$ClaudeHome,'--release',$ReleaseId)
@@ -284,6 +302,7 @@ try {
     if ($parts -notcontains $Bin) { [Environment]::SetEnvironmentVariable('Path', (($parts+$Bin)-join ';'), 'User') }
     Remove-Item -LiteralPath (Join-Path $InstallRoot 'pending-install.json') -ErrorAction SilentlyContinue
     Write-Host 'Vres preview installed. This does not certify Windows live behavior.' -ForegroundColor Green
+    Write-Host 'Database health was not checked: the doctor preflight skipped database contact. No PostgreSQL access is authorized; check database health separately with vres doctor only after approving a non-incident database target.' -ForegroundColor Yellow
     Write-Host "Release: $ReleaseId"
     Write-Host 'Open a fresh terminal, enter a disposable project, launch claude, then say: start vres'
     Write-Host 'Credentials belong in the separate setup console, never in Claude chat.'
