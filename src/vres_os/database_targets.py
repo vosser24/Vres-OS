@@ -23,14 +23,16 @@ Limitations: an approval names a host, port and database. It is not a cryptograp
 identification of the PostgreSQL cluster that answers there; a different cluster
 later serving the same host, port and database name would not be told apart before
 connecting. Holds are therefore deliberately broader than approvals (a whole server),
-but a hold matches only the host spelling it names, after lower-casing. The loopback
-spellings localhost, 127.0.0.1 and ::1 are recognized as one server; any other name or
-address that reaches the same machine (its computer name, a LAN address, a DNS alias,
-another 127.x address) is a different target to the guard and is not covered by the hold.
+but server holds recognize literal localhost (including a trailing DNS dot), all IPv4
+127/8 addresses, IPv6 ::1 and IPv4-mapped IPv6 loopback addresses as one server,
+without DNS resolution. Other hostnames and addresses that may reach the same machine
+(its computer name, a LAN address, other DNS aliases or unusual numeric spellings)
+remain outside that hold. Approvals still require the exact host, port and database.
 """
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import stat
@@ -51,11 +53,28 @@ REGISTRY_VERSION = 1
 REGISTRY_MAX_BYTES = 64 * 1024
 # libpq consults these when a connection string omits a key, so any of them makes the real target ambiguous.
 ROUTING_ENVIRONMENT = ("PGHOST", "PGHOSTADDR", "PGPORT", "PGDATABASE", "PGSERVICE", "PGSERVICEFILE", "PGSYSCONFDIR")
-# The loopback spellings the guard recognizes as one server. A hold on one of them covers exactly
-# these three; other names or addresses of this machine are not recognized and are not covered.
-_LOOPBACK = frozenset({"localhost", "127.0.0.1", "::1"})
+# Localhost names and common literal spellings. Numeric IP addresses are examined
+# without DNS resolution; holds are broad, while approvals remain exact.
+_LOOPBACK = frozenset({"localhost", "localhost.", "127.0.0.1", "::1"})
 _FOLDERID_LOCAL_APP_DATA = "{F1B32785-6FBA-4FCF-9D55-7B8E7F157091}"
 _NO_CONTACT = "No connection was attempted."
+
+
+def _is_loopback_host(host: str) -> bool:
+    """Classify literal loopback aliases offline, for server HOLDS only.
+
+    A resolver call would make the decision dependent on DNS and potentially
+    contact the network. This parser cannot establish remote cluster identity.
+    """
+    if host in _LOOPBACK:
+        return True
+    try:
+        address = ipaddress.ip_address(host.removesuffix("."))
+    except ValueError:
+        return False
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        address = address.ipv4_mapped
+    return address.is_loopback
 
 
 class DatabaseTarget(NamedTuple):
@@ -67,7 +86,7 @@ class DatabaseTarget(NamedTuple):
         return f"database {self.dbname!r} at {self.host}:{self.port}"
 
     def server(self) -> tuple[str, int]:
-        return ("loopback" if self.host in _LOOPBACK else self.host), self.port
+        return ("loopback" if _is_loopback_host(self.host) else self.host), self.port
 
 
 def _shell_local_app_data() -> str:
@@ -451,8 +470,8 @@ def confirm_target_for_setup(
 def hold_target(host: str, port: int, *, reason: str, dbname: str | None = None) -> Path:
     """Hold a database server for this installation. Holds are only ever added here, never removed.
 
-    The hold matches the host spelling given (lower-cased); the three loopback spellings
-    count as one server, but other names or addresses of the same machine are not covered.
+    A hold covers literal loopback aliases (including IPv4 127/8 and mapped IPv6),
+    but not unproven DNS aliases or LAN/computer names for that same machine.
     """
     if not reason.strip():
         raise ValueError("A hold needs a reason")
@@ -483,7 +502,7 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser("status")
     hold = commands.add_parser(
         "hold",
-        help="add-only; covers the host spelling given (loopback spellings count as one server), not other aliases",
+        help="add-only; recognizes literal loopback aliases, not arbitrary DNS or LAN aliases",
     )
     hold.add_argument("--host", required=True)
     hold.add_argument("--port", required=True, type=int)

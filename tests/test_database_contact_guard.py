@@ -124,13 +124,20 @@ def test_held_target_is_refused_before_connection_or_credential_read(personal_ro
     assert tripwires.secret_reads == []
 
 
-@pytest.mark.parametrize("host", ["localhost", "127.0.0.1", "::1", "LOCALHOST"])
-def test_held_server_covers_every_database_and_loopback_spelling(personal_root, host):
+@pytest.mark.parametrize(
+    "host",
+    [
+        "localhost", "localhost.", "127.0.0.1", "127.0.0.1.", "127.0.0.2",
+        "127.254.7.9", "::1", "0:0:0:0:0:0:0:1", "::ffff:127.0.0.2", "LOCALHOST",
+    ],
+)
+@pytest.mark.parametrize("purpose", ["runtime", "writer", "migrator"])
+def test_held_server_covers_every_database_and_loopback_spelling(personal_root, host, purpose):
     _configure(host=host, database="a_new_personal_db")
     _registry(personal_root, approved=[(host.lower(), 5432, "a_new_personal_db")], held=[("localhost", 5432)])
 
     with pytest.raises(DatabaseTargetRefused, match="held"):
-        db.build_dsn("runtime")
+        db.build_dsn(purpose)
 
 
 def test_held_target_cannot_be_approved_even_interactively(personal_root, monkeypatch):
@@ -145,6 +152,37 @@ def test_held_target_cannot_be_approved_even_interactively(personal_root, monkey
 
     assert asked == []
     assert json.loads((personal_root / database_targets.REGISTRY_NAME).read_text())["approved"] == []
+
+
+@pytest.mark.parametrize("host", ["127.0.0.2", "127.254.7.9", "::ffff:127.0.0.2", "localhost."])
+def test_held_loopback_alias_refuses_admin_contact_and_setup_approval(personal_root, monkeypatch, host):
+    _registry(personal_root, held=[("localhost", 5432)])
+    with pytest.raises(DatabaseTargetRefused, match="held"):
+        database_targets.require_admin_contact(
+            f"host={host} port=5432 dbname=postgres", "vres_personal"
+        )
+    monkeypatch.setattr(database_targets, "_interactive", lambda: True)
+    with pytest.raises(DatabaseTargetRefused, match="cannot be approved"):
+        database_targets.confirm_target_for_setup(
+            host, 5432, "vres_personal", ask=lambda _prompt: pytest.fail("approval prompt reached")
+        )
+    assert json.loads((personal_root / database_targets.REGISTRY_NAME).read_text())["approved"] == []
+
+
+@pytest.mark.parametrize("host", ["127.0.0.2", "localhost.", "::ffff:127.0.0.2"])
+def test_loopback_hold_matching_never_expands_exact_approval(personal_root, tripwires, host):
+    _configure(host=host)
+    _registry(personal_root, approved=[("localhost", 5432, "vres_personal")])
+    with pytest.raises(DatabaseTargetRefused, match="has not been approved"):
+        db.build_dsn("runtime")
+    assert tripwires.secret_reads == []
+
+
+@pytest.mark.parametrize("host", ["128.0.0.1", "192.0.2.5", "::ffff:192.0.2.5", "localhost.invalid"])
+def test_loopback_hold_does_not_match_unrelated_literal_or_dns_name(personal_root, host):
+    _registry(personal_root, approved=[(host, 5432, "vres_personal")], held=[("localhost", 5432)])
+    # Permission check only. Do not resolve the hostname, read a credential or contact a server.
+    database_targets.require_contact(f"host={host} port=5432 dbname=vres_personal")
 
 
 # B. Unknown and ambiguous targets
