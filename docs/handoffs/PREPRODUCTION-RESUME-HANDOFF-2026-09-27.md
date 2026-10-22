@@ -4039,3 +4039,19 @@ The CI pytest-collection defect is fixed and published: product head `d930adfa89
 ## Superseding pointer (appended 2026-10-13, control incident / C2A continuity)
 
 Newest incident and offline-candidate state: see **PREPRODUCTION-E7-C2A-C2B-CONTROL-INCIDENT-RESUME-HANDOFF-2026-10-13.md** in this handoffs directory. The live Vres control database was inadvertently migrated from 041 to 048 by F2 migration-credential fallback; its installed runtime still supports only 041. A post-incident backup was successfully restored in isolation, but there is no pre-incident rollback. C2A built a 13-file offline schema-048 compatibility candidate with 17 focused and 1,749 unit PASS / 3 SKIP, but the candidate remains UNVALIDATED and Windows-local; the distinct F2 three-file CI driver is unsafe, BLOCKED and uncommitted. Published product head d930adfa89617067115d9538e9692945230d9630; F1/R2/D2 protected history preserved. No C2B run, C2C protected review, live runtime update, PR or merge. G8 OPEN; positive issuance DISABLED; E7 NOT release ready. All preceding historical sections are unchanged.
+
+---
+
+## 2026-10-22 — Superseding program-direction POINTER ONLY
+
+The operator directed that the original and later Vres functional vision be restored to the ACTIVE DEVELOPMENT BACKLOG, with ChatGPT as lead implementer on GitHub and Claude as independent local evaluator. This replaces obsolete sequential roadmap scheduling instructions as the current PLANNING workflow only; the old handoff remains the truthful historical account for its own E1/E2/E3 era.
+
+Latest new GitHub documentation checkpoint is on branch docs/chatgpt-led-full-scope-20261022, created separately to avoid rewriting local unpublished October 15/16 K0 documentation. Start with:
+- docs/handoffs/VRES-CHATGPT-LEAD-SCOPE-REACTIVATION-CHECKPOINT-2026-10-22.md
+- docs/roadmap/VRES-FULL-SCOPE-FUNCTIONALITY-REGISTER-2026-10-22.md
+- docs/roadmap/VRES-CHATGPT-LED-FULL-SCOPE-DELIVERY-PLAN-2026-10-22.md
+- docs/handoffs/VRES-CHATGPT-NEW-SESSION-RESUME-2026-10-22.md
+
+The newest installed personal Windows candidate 82c82430b38f93bd6b9d5c3af3b5de9c1368af9c is locally committed and installed as release 20261022172833-4d82147b but, by user report, was NOT published to GitHub product main. Its full runtime PA tests are still pending. The live schema-048/D2 incident, prohibited PostgreSQL contact, experimental F2/R0/K0/native-trust restrictions and L-04 defect are NOT lifted. No unsafe activation can be authorized by a documentation-only scope decision.
+
+If the user has newer local source or docs than the remote branch, preserve them and reconcile before any merge or implementation. Follow the new ChatGPT-led plan while retaining all previously recorded proof and negative findings.
