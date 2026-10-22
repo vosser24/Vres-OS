@@ -225,7 +225,7 @@ try {
     $PackageDir = "$($PackageDir | Select-Object -Last 1)"
     if (-not $PackageDir.StartsWith((Join-Path $NewRelease 'venv') + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'The located Vres package is not inside the new runtime.' }
     Run $Python @('-I','-X','utf8',$ArtifactTool,'verify-installed','--manifest',$ReleaseManifest,'--package-dir',$PackageDir)
-    Run $NewPython @('-c','from vres_os.cli import app; from vres_os.mcp_server import mcp; from vres_os.db import migrate; from vres_os.autocompact import install_autocompact')
+    Run $NewPython @('-B','-c','from vres_os.cli import app; from vres_os.mcp_server import mcp; from vres_os.db import migrate; from vres_os.autocompact import install_autocompact')
     $freeze = & $NewPython -m pip freeze --all
     if ($LASTEXITCODE -ne 0) { throw 'Dependency inventory failed.' }
     [IO.File]::WriteAllLines((Join-Path $NewRelease 'resolved-dependencies.txt'), [string[]]$freeze, (New-Object System.Text.UTF8Encoding $false))
@@ -239,7 +239,7 @@ try {
     Run 'claude' @('plugin','validate',$StagedPlugin)
     # The doctor preflight skips database contact and reports PostgreSQL NOT CHECKED, not healthy. Database
     # isolation of the other installer subprocesses (pip, claude plugin validate) is not independently verified.
-    Run $NewPython @('-m','vres_os.cli','doctor','--allow-unconfigured','--skip-database')
+    Run $NewPython @('-B','-m','vres_os.cli','doctor','--allow-unconfigured','--skip-database')
     # Persist and verify exact snapshots of the Claude files and launchers this installer may change,
     # before the journal and before any mutation, so an interrupted install can be recovered exactly.
     Run $Python @('-I','-X','utf8',(Join-Path $StagedSource 'src\vres_os\install_recovery.py'),'snapshot','--install-root',$InstallRoot,'--claude-home',$ClaudeHome,'--release',$ReleaseId)
@@ -255,8 +255,10 @@ try {
     $BinBackup = Join-Path $NewRelease 'previous-bin'
     Copy-Item -Recurse -LiteralPath $Bin -Destination $BinBackup
     Copy-Item -Force -Path (Join-Path $StagedSource 'scripts\windows\*.ps1') -Destination $Bin
-    [IO.File]::WriteAllText((Join-Path $Bin 'vres.cmd'), "@echo off`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File `"%~dp0vres-launch.ps1`" %*`r`n", [Text.Encoding]::ASCII)
-    [IO.File]::WriteAllText((Join-Path $Bin 'vres-mcp.cmd'), "@echo off`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File `"%~dp0vres-mcp-launch.ps1`"`r`n", [Text.Encoding]::ASCII)
+    # Process-only RemoteSigned permits our local staged .ps1 launchers on a default Restricted system.
+    # Unlike Bypass it still enforces signed-script checks on Mark-of-the-Web scripts.
+    [IO.File]::WriteAllText((Join-Path $Bin 'vres.cmd'), "@echo off`r`npowershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File `"%~dp0vres-launch.ps1`" %*`r`n", [Text.Encoding]::ASCII)
+    [IO.File]::WriteAllText((Join-Path $Bin 'vres-mcp.cmd'), "@echo off`r`npowershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File `"%~dp0vres-mcp-launch.ps1`"`r`n", [Text.Encoding]::ASCII)
     $InstalledAt = Get-Date -Format o
     Write-JsonAtomic $ActivePath @{
         product='Vres-OS'
@@ -268,17 +270,17 @@ try {
     }
     $published=$true
     Run $NewPython @(
-        '-m','vres_os.claude_contract','install-global',
+        '-B','-m','vres_os.claude_contract','install-global',
         '--claude-home',$ClaudeHome,
         '--rules-source',(Join-Path $StagedSource 'rules\vres-rules.md')
     )
     Run $NewPython @(
-        '-m','vres_os.statusline','install',
+        '-B','-m','vres_os.statusline','install',
         '--claude-home',$ClaudeHome,
         '--runtime-python',$NewPython
     )
     $OwnedBeforeArg = if ($AutoCompactOwnedBefore) { 'true' } else { 'false' }
-    $AutoCompactOutput = & $NewPython -I -X utf8 -m vres_os.autocompact install --claude-home $ClaudeHome --owned-before $OwnedBeforeArg
+    $AutoCompactOutput = & $NewPython -I -B -X utf8 -m vres_os.autocompact install --claude-home $ClaudeHome --owned-before $OwnedBeforeArg
     if ($LASTEXITCODE -ne 0) { throw 'Could not configure Vres-managed native auto-compaction.' }
     $AutoCompactResult = "$($AutoCompactOutput | Select-Object -Last 1)" | ConvertFrom-Json
     Write-JsonAtomic $ActivePath @{
@@ -297,6 +299,9 @@ try {
     } else {
         Write-Host ("Claude native auto-compaction: existing user/host setting preserved ({0})." -f $AutoCompactResult.reason) -ForegroundColor Yellow
     }
+    # Final package gate: Vres import/doctor/configuration steps must not leave any
+    # bytecode or unexpected files in the installed package before success.
+    Run $Python @('-I','-B','-X','utf8',$ArtifactTool,'verify-installed','--manifest',$ReleaseManifest,'--package-dir',$PackageDir)
     $userPath=[Environment]::GetEnvironmentVariable('Path','User')
     $parts=@($userPath -split ';' | Where-Object { $_ })
     if ($parts -notcontains $Bin) { [Environment]::SetEnvironmentVariable('Path', (($parts+$Bin)-join ';'), 'User') }

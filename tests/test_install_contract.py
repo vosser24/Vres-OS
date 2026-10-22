@@ -122,7 +122,7 @@ def test_static_python_probe_treats_missing_selector_as_dependency_absence():
 
 def test_static_windows_import_smoke_avoids_nested_native_quoting():
     text = (ROOT / "install.ps1").read_text()
-    assert "Run $NewPython @('-c','from vres_os.cli import app; from vres_os.mcp_server import mcp; from vres_os.db import migrate; from vres_os.autocompact import install_autocompact')" in text
+    assert "Run $NewPython @('-B','-c','from vres_os.cli import app; from vres_os.mcp_server import mcp; from vres_os.db import migrate; from vres_os.autocompact import install_autocompact')" in text
     assert 'Vres import gate passed' not in text
 
 
@@ -144,3 +144,25 @@ def test_uninstall_removes_only_recorded_vres_owned_autocompact_before_runtime_r
     assert "vres_os.autocompact remove" in text
     assert "--owned $AutoCompactOwnedArg" in text
     assert text.index("-m vres_os.autocompact remove") < text.index("Remove-Item -LiteralPath $plugin")
+
+
+def test_personal_windows_launchers_use_process_only_remotesigned_not_bypass():
+    installer = (ROOT / "install.ps1").read_text(encoding="utf-8")
+    assert installer.count("-ExecutionPolicy RemoteSigned -File") == 2
+    assert "-ExecutionPolicy Bypass" not in installer
+    assert 'vres-launch.ps1`" %*' in installer
+    assert 'vres-mcp-launch.ps1`"' in installer
+    assert "Set-ExecutionPolicy" not in installer
+
+
+def test_postinstall_python_imports_disable_bytecode_and_are_rechecked_last():
+    installer = (ROOT / "install.ps1").read_text(encoding="utf-8")
+    assert "Run $NewPython @('-B','-c','from vres_os.cli import app;" in installer
+    assert "Run $NewPython @('-B','-m','vres_os.cli','doctor','--allow-unconfigured','--skip-database')" in installer
+    assert "'-B','-m','vres_os.claude_contract','install-global'" in installer
+    assert "'-B','-m','vres_os.statusline','install'" in installer
+    assert "& $NewPython -I -B -X utf8 -m vres_os.autocompact install" in installer
+    last_gate = "Run $Python @('-I','-B','-X','utf8',$ArtifactTool,'verify-installed','--manifest',$ReleaseManifest,'--package-dir',$PackageDir)"
+    assert installer.count(last_gate) == 1
+    assert installer.index(last_gate) > installer.index('Could not configure Vres-managed native auto-compaction.')
+    assert installer.index(last_gate) < installer.index("Remove-Item -LiteralPath (Join-Path $InstallRoot 'pending-install.json') -ErrorAction SilentlyContinue")

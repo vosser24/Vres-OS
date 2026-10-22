@@ -33,11 +33,11 @@ git rev-parse HEAD
 `$Bundle` holds the bundle's absolute path, so it stays valid after `cd`. `git bundle verify` needs a repository, so it runs inside the new clone. `git rev-parse HEAD` must print exactly the approved id. Then install from that checkout, passing the same id:
 
 ```powershell
-Set-ExecutionPolicy -Scope Process Bypass
+Set-ExecutionPolicy -Scope Process RemoteSigned
 .\install.ps1 -SourceCommit <commit>
 ```
 
-The process-only execution policy expires when this terminal closes. Vres does not change machine-wide script policy.
+The process-only execution policy expires when this terminal closes. Vres does not change machine-wide script policy. The generated `vres.cmd` and `vres-mcp.cmd` also use **process-only** `RemoteSigned` for locally staged PowerShell launchers, rather than `Bypass`; this is not an independent runtime file-hash check.
 
 **Exact release identity.** The installer installs only the one commit you pin:
 
@@ -48,7 +48,7 @@ The process-only execution policy expires when this terminal closes. Vres does n
 - The copy goes to `releases\<id>\source`, with `releases\<id>\release-manifest.json` recording the commit, tree, each file's git blob id and SHA-256. The copy is validated as a personal-release input (migrations 001-041 pinned, no C2B/R0/F2/C2A files).
 - pip, the plugin, the launchers, the global rules and the recovery snapshot tool all come from that copy; the checkout is not read again.
 - The first tools to run, `release_inputs.py` and `release_artifact.py`, run from the checkout. They must equal their committed bytes (or exactly their CRLF checkout), otherwise nothing is installed. This detects an unexpected change; it cannot make a deliberately altered script trustworthy, so keep the checkout under your control.
-- pip installs with `--no-compile`. Before activation, the complete installed `vres_os` package must be exactly the released modules and migrations: any other file or directory, including bytecode (`.pyc`), extension modules (`.pyd`, `.so`, `.dll`) and `.pth` files, stops the installation with the usual rollback. The plugin is compared with the manifest the same way. This is a check at installation time, not continuous integrity monitoring: Python writes its own bytecode cache when Vres first runs.
+- pip installs with `--no-compile`. Before activation, the complete installed `vres_os` package must be exactly the released modules and migrations: any other file or directory, including bytecode (`.pyc`), extension modules (`.pyd`, `.so`, `.dll`) and `.pth` files, stops the installation with the usual rollback. The plugin is compared with the manifest the same way. The installer prevents bytecode writing during its own Vres imports and verifies the package again after final configuration. These are point-in-time checks, not continuous integrity monitoring: ordinary Vres use may create Python bytecode caches later.
 - Dependencies are not part of this identity; see `resolved-dependencies.txt` below.
 
 The installer first asks permission to install an unverified-live preview. Say yes only in the test environment. For each missing dependency it shows the exact package and asks for consent. WinGet checks the exact package ID before installation. If a package is unavailable, installation stops rather than selecting a similarly named package.

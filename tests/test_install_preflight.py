@@ -134,7 +134,7 @@ def test_installer_preflight_never_contacts_the_database_and_keeps_its_integrity
     at = text.index
 
     doctor_calls = re.findall(r".*vres_os\.cli','doctor'.*", text)
-    assert doctor_calls == ["    Run $NewPython @('-m','vres_os.cli','doctor','--allow-unconfigured','--skip-database')"]
+    assert doctor_calls == ["    Run $NewPython @('-B','-m','vres_os.cli','doctor','--allow-unconfigured','--skip-database')"]
     assert "'selftest'" not in text and "'migrate'" not in text and "'setup'" not in text
     # Source identity, staging, package verification, journal and rollback are unchanged and in order.
     stage = at("'stage','--root',$RepoRoot,'--out',$StagedSource,'--manifest',$ReleaseManifest,'--source-commit',"
@@ -177,7 +177,7 @@ def test_update_asks_an_accurate_question_that_defaults_to_no():
 # -------------------------------------------------------------------- import smoke has no contact (T5)
 
 def test_installer_import_smoke_and_skipped_doctor_make_no_database_or_secret_contact(tmp_path):
-    smoke = re.search(r"Run \$NewPython @\('-c','([^']+)'\)", _installer()).group(1)
+    smoke = re.search(r"Run \$NewPython @\('-B','-c','([^']+)'\)", _installer()).group(1)
     probe = (
         "import sys, psycopg, keyring\n"
         "calls = []\n"
