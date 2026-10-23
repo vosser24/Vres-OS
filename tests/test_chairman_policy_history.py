@@ -193,6 +193,8 @@ def test_no_database_vault_model_or_disk_authority_is_exposed():
     assert "activate" not in vars(module)
     assert history.manifest()["state"] == "candidates_only"
     assert history.latest_proposal.policy.family == "opus"
+
+
 def test_full_128_entry_unicode_history_round_trips_under_same_byte_limit():
     """The old 192-KiB reader rejected this fully valid serialized history."""
     maximum_rationale = "λ" * 256  # 512 UTF-8 bytes, 1536 escaped bytes
@@ -214,16 +216,52 @@ def test_full_128_entry_unicode_history_round_trips_under_same_byte_limit():
     assert ChairmanPolicyHistory.from_document(canonical).to_document() == canonical
     assert history.manifest()["state"] == "candidates_only"
 
-    with pytest.raises(ChairmanPolicyHistoryError):
+    # Version 128 is sonnet/medium. The next request is opus/medium, so
+    # rejection must come from the 128-entry bound, not the no-op rule.
+    with pytest.raises(ChairmanPolicyHistoryError, match="bounded"):
         history.supersede(
-            ChairmanPolicy(129, "sonnet", "medium"),
+            ChairmanPolicy(129, "opus", "medium"),
             expected_latest_sha256=history.latest_proposal.sha256,
             reason="one too many",
         )
 
+    # Add a plausible 129th serialized entry without constructing an invalid
+    # ChairmanPolicyHistory in Python. Keep under the byte-size limit so the
+    # reader must reject the ENTRY COUNT, not the document length.
+    document = json.loads(canonical)
+    tail = document["proposals"][-1]
+    document["proposals"].append({
+        **tail,
+        "sequence": 129,
+        "policy": {**tail["policy"], "version": 129, "family": "opus"},
+        "supersedes_sha256": history.latest_proposal.sha256,
+        "reason": "extra candidate, not active",
+    })
+    overcount = json.dumps(
+        document, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    ).encode("ascii")
+    assert len(overcount) <= 256 * 1024
+    with pytest.raises(ChairmanPolicyHistoryError, match="unbounded"):
+        ChairmanPolicyHistory.from_document(overcount)
 
-def test_document_bound_applies_to_writer_and_reader():
+
+def test_reader_rejects_documents_over_declared_byte_limit():
     history = _start()
     assert ChairmanPolicyHistory.from_document(history.to_document()) == history
-    with pytest.raises(ChairmanPolicyHistoryError):
+    with pytest.raises(ChairmanPolicyHistoryError, match="bounded"):
         ChairmanPolicyHistory.from_document(b" " * (256 * 1024 + 1))
+
+
+def test_writer_refuses_canonical_output_over_its_effective_bound(monkeypatch):
+    import vres_os.chairman_policy_history as module
+
+    history = _start()
+    raw = history.to_document()
+    assert len(raw) > 1
+    # Valid histories fit the production bound. Lower it temporarily inside
+    # this isolated test to prove the writer's defensive failure path.
+    monkeypatch.setattr(module, "_MAX_DOCUMENT_BYTES", len(raw) - 1)
+    with pytest.raises(ChairmanPolicyHistoryError, match="exceeds size limit"):
+        history.to_document()
+    with pytest.raises(ChairmanPolicyHistoryError, match="bounded"):
+        module.ChairmanPolicyHistory.from_document(raw)
