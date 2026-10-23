@@ -37,7 +37,7 @@ LIVE_SCHEMA_048_INCIDENT=OPEN; PostgreSQL last observed STOPPED. Never connect, 
 
 Installed user-scoped Windows Vres release 20261022172833-4d82147b remains sourced from original P2 82c82430b38f93bd6b9d5c3af3b5de9c1368af9c; Chairman Sonnet/high still installed, Opus/medium candidate-only. Product main last observed 9a8acc5d464b96432a93cb95daa9581412fb07ee.
 
-Earlier offline accepted evidence retained: B2A R3 32847410952e374c4e7e0ae8e0a01eab5148cdf71e84e is INCORRECT if quoted — correct B2A R3 acceptance is 32847410952e9d4620bf7046cbee4a41a7ddc73b, 95 PASS lines exit 0 and procedural deviation R3-PROC-01; B2A R2 060756b02786c146b87a5262ba2b3b2cc6bf2784 independent REJECT, initial B2A c01152e374c4e7e0ae8e0a01eab5148cdf71e84e STATIC_REVIEW_REJECT. Also F2 follow-up 36a41b6151b7520329ccc0ada0ff827d836ec579 3/3 PASS, F2 b77e0eef07976877e7f198a00484f5d13ce36889 101/101, B1 f8237bb301dec160f33cab524727e6a0ec79b2c0 99/99, Phase A R2 11f2f8689308dfe43e482bca73aa57bb6467c788 53/53, P2-A1 R4 3ba41d5ae6b8f2c2abd93d27f82cce0755878237 183/183. Retain all earlier rejection evidence.
+Earlier offline accepted evidence retained: B2A R3 32847410952e9d4620bf7046cbee4a41a7ddc73b, 95 PASS lines, exit 0 and procedural deviation R3-PROC-01; B2A R2 060756b02786c146b87a5262ba2b3b2cc6bf2784 independent REJECT, initial B2A c01152e374c4e7e0ae8e0a01eab5148cdf71e84e STATIC_REVIEW_REJECT. Also F2 follow-up 36a41b6151b7520329ccc0ada0ff827d836ec579 3/3 PASS, F2 b77e0eef07976877e7f198a00484f5d13ce36889 101/101, B1 f8237bb301dec160f33cab524727e6a0ec79b2c0 99/99, Phase A R2 11f2f8689308dfe43e482bca73aa57bb6467c788 53/53, P2-A1 R4 3ba41d5ae6b8f2c2abd93d27f82cce0755878237 183/183. Retain all earlier rejection evidence.
 
 ## New-session resume
 
