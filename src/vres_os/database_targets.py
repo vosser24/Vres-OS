@@ -26,8 +26,10 @@ connecting. Holds are therefore deliberately broader than approvals (a whole ser
 but server holds recognize literal localhost (including a trailing DNS dot), all IPv4
 127/8 addresses, IPv6 ::1 and IPv4-mapped IPv6 loopback addresses as one server.
 Unusual numeric host spellings, bracketed/zone-scoped forms, socket paths and
-unspecified addresses are refused before any approval or connection. Neither this
-hold nor an exact host/port/database approval proves PostgreSQL cluster identity:
+unspecified addresses are refused before any approval or connection. Historical
+holds with unsupported host syntax remain preserved: they block contact on their
+port until reconciled, without blocking the addition of further holds. Neither a
+hold nor exact host/port/database approval proves PostgreSQL cluster identity:
 DNS aliases, LAN/computer names and endpoint replacement still need external
 verification. No DNS resolution is performed by this guard.
 """
@@ -65,6 +67,25 @@ _LOOPBACK = frozenset({"localhost", "localhost.", "127.0.0.1", "::1"})
 _NONCANONICAL_NUMERIC_HOST = re.compile(
     r"(?:0x[0-9a-f]+|[0-9]+)(?:\.(?:0x[0-9a-f]+|[0-9]+))*",
     re.IGNORECASE,
+)
+# Ordinary DNS labels only. In particular, @-prefixed libpq abstract sockets
+# and non-ASCII/whitespace/control hosts must never be independently approved.
+_SAFE_DNS_HOST = re.compile(
+    r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+    r"(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.?",
+    re.ASCII,
+)
+# Embedded IPv4 forms are not reliable identities for a held TCP server.
+# Preserve normal IPv6 literals and ::ffff:IPv4 mapped literals, but refuse
+# translation forms when their embedded address is loopback/unspecified.
+_V4_TRANSLATION_PREFIXES = tuple(
+    ipaddress.IPv6Network(network)
+    for network in (
+        "::/96",
+        "0:0:0:0:ffff:0:0:0/96",
+        "64:ff9b::/96",
+        "64:ff9b:1::/48",
+    )
 )
 _FOLDERID_LOCAL_APP_DATA = "{F1B32785-6FBA-4FCF-9D55-7B8E7F157091}"
 _NO_CONTACT = "No connection was attempted."
@@ -107,11 +128,11 @@ def _validate_contact_host(host: str) -> None:
     try:
         address = ipaddress.ip_address(literal)
     except ValueError:
-        # A colon cannot occur in a DNS hostname. Windows accepts several
-        # numeric IPv4 notations that ipaddress rejects; they must not become
-        # independently approvable hostnames.
+        # Only ordinary ASCII DNS names are supported. This also refuses
+        # @-prefixed Unix/abstract socket addresses and unusual Windows numeric
+        # IPv4 spellings even when an exact approval exists for the spelling.
         if (
-            ":" in host
+            not _SAFE_DNS_HOST.fullmatch(host)
             or _NONCANONICAL_NUMERIC_HOST.fullmatch(literal)
             or re.fullmatch(r"[0-9.]+", literal)
         ):
@@ -123,6 +144,21 @@ def _validate_contact_host(host: str) -> None:
         raise DatabaseTargetRefused(
             f"Vres refused an unspecified database host address. {_NO_CONTACT}"
         )
+    if isinstance(address, ipaddress.IPv6Address) and mapped is None:
+        # Known transition forms can embed 127/8 without being IPv6 loopback.
+        # Treat them as ambiguous, rather than granting a new host approval
+        # that might route back to the held IPv4 control database.
+        embedded = ipaddress.IPv4Address(int(address) & 0xFFFFFFFF)
+        from_translation_prefix = any(address in net for net in _V4_TRANSLATION_PREFIXES)
+        translated = (address.sixtofour, *(address.teredo or ()))
+        if (
+            (from_translation_prefix and (embedded.is_loopback or embedded.is_unspecified))
+            or any(
+                value is not None and (value.is_loopback or value.is_unspecified)
+                for value in translated
+            )
+        ):
+            raise DatabaseTargetRefused(refusal)
 
 
 class DatabaseTarget(NamedTuple):
@@ -414,8 +450,35 @@ def _save_registry(root: Path, approved: list[dict], held: list[dict]) -> None:
         tmp.unlink(missing_ok=True)
 
 
-def _held(target: DatabaseTarget, held: list[dict]) -> bool:
-    return any(target_for(item["host"], item["port"], "-").server() == target.server() for item in held)
+def _saved_hold_server(host: str, port: int) -> tuple[str, int] | None:
+    """Interpret historical holds without applying newer CONTACT validation.
+
+    Existing version-1 registries may contain spellings accepted by previous
+    releases. Keep those entries immutable. Unclassifiable entries have no
+    trustworthy server identity and must fail closed at contact time.
+    """
+    saved = host.strip().lower()
+    if saved.startswith("[") and saved.endswith("]"):
+        saved = saved[1:-1]
+    if _is_loopback_host(saved):
+        return ("loopback", port)
+    try:
+        _validate_contact_host(saved)
+    except DatabaseTargetRefused:
+        return None
+    return (saved, port)
+
+
+def _held(target: DatabaseTarget, held: list[dict], *, adding_hold: bool = False) -> bool:
+    """Historical unknown holds refuse contact on their port, not future hold writes."""
+    requested = target.server()
+    for item in held:
+        saved = _saved_hold_server(item["host"], item["port"])
+        if saved == requested:
+            return True
+        if saved is None and not adding_hold and item["port"] == target.port:
+            return True
+    return False
 
 
 def _approved(target: DatabaseTarget, approved: list[dict]) -> bool:
@@ -530,7 +593,7 @@ def hold_target(host: str, port: int, *, reason: str, dbname: str | None = None)
     target = target_for(host, port, dbname or "-")
     with _registry_lock(root):
         approved, held = _load_registry(root)
-        if not _held(target, held):
+        if not _held(target, held, adding_hold=True):
             held.append(
                 {
                     "host": target.host,

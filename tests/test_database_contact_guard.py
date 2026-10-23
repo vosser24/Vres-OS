@@ -286,6 +286,112 @@ def test_unrelated_canonical_host_remains_exactly_approvable(personal_root, host
     )
 
 
+# B3. Abstract socket hosts and IPv4-translation aliases never become approved.
+
+@pytest.mark.parametrize("host", ["@vres", "@/tmp/vres", "bad_host", "space name", "bad@host", "δοκιμή"])
+@pytest.mark.parametrize("purpose", ["runtime", "writer", "migrator"])
+def test_abstract_socket_and_invalid_hostname_refused_before_credential_or_contact(
+    personal_root, tripwires, host, purpose,
+):
+    _configure(host=host)
+    _registry(personal_root, approved=[(host, 5432, "vres_personal")], held=[("localhost", 5432)])
+    with pytest.raises(DatabaseTargetRefused, match="ambiguous or unsafe"):
+        db.build_dsn(purpose)
+    assert tripwires.secret_reads == []
+
+
+@pytest.mark.parametrize("host", ["@vres", "@/tmp/vres", "bad_host"])
+def test_abstract_socket_host_refused_before_admin_and_setup_approval(personal_root, monkeypatch, host):
+    _registry(personal_root, held=[("localhost", 5432)])
+    with pytest.raises(DatabaseTargetRefused, match="ambiguous or unsafe"):
+        database_targets.require_admin_contact(
+            f"host={host} port=5432 dbname=postgres", "vres_personal"
+        )
+    monkeypatch.setattr(database_targets, "_interactive", lambda: True)
+    with pytest.raises(DatabaseTargetRefused, match="ambiguous or unsafe"):
+        database_targets.confirm_target_for_setup(
+            host, 5432, "vres_personal",
+            ask=lambda _prompt: pytest.fail("unsafe socket host reached approval prompt"),
+        )
+    assert json.loads((personal_root / database_targets.REGISTRY_NAME).read_text())["approved"] == []
+
+
+@pytest.mark.parametrize("dsn", [
+    "host=@vres port=5432 dbname=vres_personal",
+    "postgresql://%40vres:5432/vres_personal",
+    "postgresql:///vres_personal?host=%40vres&port=5432",
+])
+def test_abstract_socket_env_connection_strings_fail_closed(personal_root, monkeypatch, tripwires, dsn):
+    _registry(personal_root, held=[("localhost", 5432)])
+    monkeypatch.setenv("VRES_DATABASE_URL", dsn)
+    with pytest.raises(DatabaseTargetRefused):
+        db.build_dsn("runtime")
+    assert tripwires.secret_reads == []
+
+
+@pytest.mark.parametrize("host", [
+    "::7f00:1", "::127.0.0.1", "::ffff:0:127.0.0.1",
+    "64:ff9b::7f00:1", "2002:7f00:100::",
+])
+def test_ipv6_embedded_loopback_translation_is_not_independently_approvable(
+    personal_root, tripwires, host,
+):
+    _configure(host=host)
+    _registry(personal_root, approved=[(host, 5432, "vres_personal")], held=[("localhost", 5432)])
+    with pytest.raises(DatabaseTargetRefused, match="ambiguous or unsafe"):
+        db.build_dsn("runtime")
+    assert tripwires.secret_reads == []
+
+
+@pytest.mark.parametrize("host", ["2001:db8::1", "::ffff:192.0.2.5", "db-01.example.internal"])
+def test_normal_ipv6_mapped_remote_and_dns_names_preserve_exact_approvals(personal_root, host):
+    _registry(personal_root, approved=[(host, 5432, "vres_personal")], held=[("localhost", 5432)])
+    database_targets.require_contact(f"host={host} port=5432 dbname=vres_personal")
+
+
+# B4. Historical unsafe holds cannot break the add-only incident mechanism.
+
+@pytest.mark.parametrize("legacy_host", ["127.1", "@vres", "0x7f000001"])
+def test_legacy_unclassifiable_hold_refuses_contact_but_allows_new_holds(
+    personal_root, legacy_host, capsys, tripwires,
+):
+    _configure(host="db.example.internal")
+    _registry(
+        personal_root,
+        approved=[("db.example.internal", 5432, "vres_personal")],
+        held=[(legacy_host, 5432)],
+    )
+    # An unknown historical host may actually be an alias of this server.
+    # Fail closed for ALL contacts on this port, but preserve new hold writes.
+    with pytest.raises(DatabaseTargetRefused, match="held"):
+        db.build_dsn("runtime")
+    assert database_targets.main(["status"]) == 0
+    assert "held for this installation" in capsys.readouterr().out
+    database_targets.hold_target("db.example.internal", 5432, reason="new incident hold")
+    registry = json.loads((personal_root / database_targets.REGISTRY_NAME).read_text())
+    assert [row["host"] for row in registry["held"]] == [legacy_host, "db.example.internal"]
+    with pytest.raises(DatabaseTargetRefused, match="held"):
+        db.build_dsn("runtime")
+    assert tripwires.secret_reads == []
+
+
+def test_legacy_bracketed_loopback_hold_remains_effective_and_deduplicates(personal_root):
+    _configure(host="localhost")
+    _registry(
+        personal_root,
+        approved=[("localhost", 5432, "vres_personal")],
+        held=[("[::1]", 5432)],
+    )
+    with pytest.raises(DatabaseTargetRefused, match="held"):
+        db.build_dsn("runtime")
+    database_targets.hold_target("127.0.0.2", 5432, reason="same held loopback")
+    registry = json.loads((personal_root / database_targets.REGISTRY_NAME).read_text())
+    assert [(row["host"], row["port"]) for row in registry["held"]] == [("[::1]", 5432)]
+    database_targets.hold_target("db.example.internal", 5432, reason="other host")
+    registry = json.loads((personal_root / database_targets.REGISTRY_NAME).read_text())
+    assert len(registry["held"]) == 2
+
+
 # B. Unknown and ambiguous targets
 
 
