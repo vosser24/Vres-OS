@@ -39,6 +39,10 @@ R2 strengthens the T2-resistant design with independently verified release/rende
 
 **R2 is NOT REVIEWED.** Claude must independently decide whether this design resolves R1-01..R1-13; developer-authored prose is not acceptance.
 
+## R2-DOC-SELF-01 — explicit pre-head B2A comparison semantics
+
+After publishing the initial R2 draft, ChatGPT read back the proposed §7 CAS preconditions and identified an ambiguity: the B2A comparator checks canonical equality for an entire history, while the authority is considering a NEW successor C relative to a trusted OLD head H_n. Directly comparing the whole C to H_n's old history digest would wrongly refuse a valid extension; deriving a new expected digest from C would provide self-authentication. A distinct documentation-only follow-up therefore specifies: validate full C internally, derive its canonical PRIOR prefix P, compare P against independently authenticated H_n count/history/latest digest through B2A, then require exactly ONE linked new successor and bind the full new C separately to E/V/CAS. The new negative-test requirement rejects multi-entry jumps, self-derived full-C expectations and mismatched historical prefixes. This is a SELF-AUDIT design clarification, NOT a test result or independent R2 acceptance. The new source R2 document is still DESIGN DRAFT/UNREVIEWED; no authority issued.
+
 ## Exact next operator gate
 
 Create a NEW clean detached DOCS worktree with a separately verified full 40-hex Git SHA of the current docs branch and its parent; allow only R2 architecture ADD, this handoff ADD, continuity index MODIFY and functionality register MODIFY relative to parent. Read-back and verify new R2 draft blob and unchanged R1/v0 blobs. Preserve R1 old review folder C:\Projects\Vres-ChatGPT-Review-165B2B-R1-20261023 untouched. Suggested new folder: C:\Projects\Vres-ChatGPT-Review-165B2B-R2-20261023.
