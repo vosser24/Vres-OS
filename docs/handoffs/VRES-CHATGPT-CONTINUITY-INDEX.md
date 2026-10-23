@@ -6,17 +6,21 @@ The 2026-10-22 full V-01–V-42 scope, historical C2B/K0, earlier REJECT and per
 
 ## READ FIRST
 
-1. [#165 B2A R3 independent Windows offline ACCEPT](VRES-165-B2A-R3-INDEPENDENT-OFFLINE-ACCEPTANCE-2026-10-23.md) — **NEWEST** exact 32847410952e9d4620bf7046cbee4a41a7ddc73b, Claude 95 PASSED lines and exit 0; prior R2 REJECT and extra Python version-probe deviation recorded.
-2. [#165 B2A R3 local worktree and R2 REJECT](VRES-165-B2A-R3-WINDOWS-WORKTREE-VERIFIED-AND-R2-REJECT-2026-10-23.md) — separate guarded checkout and R2 91/92 REJECT.
-3. [#165 B2A R2 and original STATIC_REVIEW_REJECT](VRES-165-B2A-STATIC-REJECT-AND-R2-REPAIR-2026-10-23.md), [initial static checkout](VRES-165-B2A-STATIC-REVIEW-WORKTREE-VERIFIED-2026-10-23.md).
-4. [#165 F2 test-only offline ACCEPT](VRES-165-F2-TEST-ONLY-INDEPENDENT-ACCEPTANCE-2026-10-23.md) — 36a41b6151b7520329ccc0ada0ff827d836ec579, 3/3 selected PASS.
-5. [#165 F2 size-bound source offline ACCEPT](VRES-165-B1-F2-INDEPENDENT-ACCEPTANCE-AND-TEST-HARDENING-2026-10-23.md) — b77e0eef07976877e7f198a00484f5d13ce36889, 101/101 PASS.
-6. [#165 B1 history offline ACCEPT](VRES-165-PHASE-B1-INDEPENDENT-ACCEPTANCE-2026-10-23.md) — f8237bb301dec160f33cab524727e6a0ec79b2c0, 99/99 PASS.
-7. [#165 Phase A R2 offline ACCEPT](VRES-165-PHASE-A-R2-INDEPENDENT-ACCEPTANCE-2026-10-23.md) — 11f2f8689308dfe43e482bca73aa57bb6467c788, 53/53 PASS; earlier R1 REJECT preserved.
-8. [P2-A1 R4 security guard offline ACCEPT](VRES-CHATGPT-P2A1-R4-INDEPENDENT-ACCEPTANCE-HANDOFF-2026-10-23.md) — 3ba41d5ae6b8f2c2abd93d27f82cce0755878237, 183/183 PASS, older R1–R3 REJECT.
-9. [Full original 42-item feature register](../roadmap/VRES-FULL-SCOPE-FUNCTIONALITY-REGISTER-2026-10-22.md), [full delivery plan](../roadmap/VRES-CHATGPT-LED-FULL-SCOPE-DELIVERY-PLAN-2026-10-22.md), historical C2B/K0 handoffs and release/incident records.
+1. [#165 B2B-0 trusted Chairman authority contract — DRAFT NOT REVIEWED](VRES-165-B2B-DESIGN-FIRST-DECISION-CHECKPOINT-2026-10-23.md) — **NEWEST** architecture-only next step; read the [full B2B authority draft](../architecture/VRES-165-B2B-TRUSTED-CHAIRMAN-AUTHORITY-CONTRACT-DRAFT-2026-10-23.md).
+2. [#165 B2A R3 independent Windows offline ACCEPT](VRES-165-B2A-R3-INDEPENDENT-OFFLINE-ACCEPTANCE-2026-10-23.md) — **NEWEST** exact 32847410952e9d4620bf7046cbee4a41a7ddc73b, Claude 95 PASSED lines and exit 0; prior R2 REJECT and extra Python version-probe deviation recorded.
+3. [#165 B2A R3 local worktree and R2 REJECT](VRES-165-B2A-R3-WINDOWS-WORKTREE-VERIFIED-AND-R2-REJECT-2026-10-23.md) — separate guarded checkout and R2 91/92 REJECT.
+4. [#165 B2A R2 and original STATIC_REVIEW_REJECT](VRES-165-B2A-STATIC-REJECT-AND-R2-REPAIR-2026-10-23.md), [initial static checkout](VRES-165-B2A-STATIC-REVIEW-WORKTREE-VERIFIED-2026-10-23.md).
+5. [#165 F2 test-only offline ACCEPT](VRES-165-F2-TEST-ONLY-INDEPENDENT-ACCEPTANCE-2026-10-23.md) — 36a41b6151b7520329ccc0ada0ff827d836ec579, 3/3 selected PASS.
+6. [#165 F2 size-bound source offline ACCEPT](VRES-165-B1-F2-INDEPENDENT-ACCEPTANCE-AND-TEST-HARDENING-2026-10-23.md) — b77e0eef07976877e7f198a00484f5d13ce36889, 101/101 PASS.
+7. [#165 B1 history offline ACCEPT](VRES-165-PHASE-B1-INDEPENDENT-ACCEPTANCE-2026-10-23.md) — f8237bb301dec160f33cab524727e6a0ec79b2c0, 99/99 PASS.
+8. [#165 Phase A R2 offline ACCEPT](VRES-165-PHASE-A-R2-INDEPENDENT-ACCEPTANCE-2026-10-23.md) — 11f2f8689308dfe43e482bca73aa57bb6467c788, 53/53 PASS; earlier R1 REJECT preserved.
+9. [P2-A1 R4 security guard offline ACCEPT](VRES-CHATGPT-P2A1-R4-INDEPENDENT-ACCEPTANCE-HANDOFF-2026-10-23.md) — 3ba41d5ae6b8f2c2abd93d27f82cce0755878237, 183/183 PASS, older R1–R3 REJECT.
+10. [Full original 42-item feature register](../roadmap/VRES-FULL-SCOPE-FUNCTIONALITY-REGISTER-2026-10-22.md), [full delivery plan](../roadmap/VRES-CHATGPT-LED-FULL-SCOPE-DELIVERY-PLAN-2026-10-22.md), historical C2B/K0 handoffs and release/incident records.
 
 ## CURRENT SOURCE AND INDEPENDENT REVIEW
+
+- **NEW B2B-0 DESIGN DRAFT (NOT REVIEWED):** docs/architecture/VRES-165-B2B-TRUSTED-CHAIRMAN-AUTHORITY-CONTRACT-DRAFT-2026-10-23.md. Defines consent provenance, independent monotonic history anchor and CAS, protected validation bound to exact policy/release, separate proposed/authorized/installed/host-observed states and fail-closed no-downgrade contract. No source code, trust signatures, vault/DB/installer/runtime actions or test executions. F1 remains OPEN.
+- **NEXT:** independent Claude STATIC SECURITY/DESIGN REVIEW of B2B-0, followed by bounded offline-only B2B-1 rejection contracts if approved. No new Windows pytest worktree needed for design docs.
 
 - **LATEST B2A R3 HEAD, INDEPENDENT OFFLINE ACCEPT:** 32847410952e9d4620bf7046cbee4a41a7ddc73b, branch feature/165-chairman-policy-foundation-20261023, parent R2 060756b02786c146b87a5262ba2b3b2cc6bf2784. ONE modified test path tests/test_chairman_history_expectation.py, production comparator unchanged at Git blob 304e515e0115716f4da3403017de87eabd888a43.
 - **R3 observed Windows evidence:** py -3.12 -B -m pytest -q -rA -p no:cacheprovider on tests/test_chairman_history_expectation.py and tests/test_chairman_policy_history.py. Exit 0; 95 separately listed PASSED results, 0 fail/error/skip. Four independently parameterized canonicalization variants PASS. Collected=95 inferred (no printed total); deselected not observed. Protected test isolation fence unexpected refusals 0; no observed DB contact or worktree changes.
@@ -29,7 +33,7 @@ The 2026-10-22 full V-01–V-42 scope, historical C2B/K0, earlier REJECT and per
 
 ## NEXT DEVELOPMENT ACTION
 
-The offline comparator is independently accepted, but **F1 is not closed**. Next architect a separately reviewed B2B trusted *source-of-expectation* and operator-event/protected-validation contract before any real authority. Define authenticated user-event provenance, a separately anchored canonical head, independent protected validation linked to exact policy/release, replay/rollback/fork refusal, missing/conflicting evidence fail-closed, no silent model downgrade and explicit proposed/evaluated/approved/installed/host-observed state separation. Do not claim proof of identity/signature or protected Fable results before actually obtaining them; no DB, vault, installer, credential or provider access. Begin with design/threat model and testable offline requirements; a future commit and independent evaluation will be separately bound to its own SHA.
+B2B-0 trusted-authority design draft is now documented, but NOT independently reviewed or implemented. Next independent Claude READ-ONLY design review of the canonical architecture document, focusing on operator consent provenance, independently anchored history/CAS, protected validation binding, replay/fork/rollback defenses, fail-closed model availability and no installation without positive trust. Do NOT use Bash/pytest, PostgreSQL, vault, Vres runtime or signing for this step. If design requires corrections, issue a separate docs-only commit before moving to B2B-1 inert offline rejection interfaces. F1 remains OPEN; issue #165 OPEN/PARTIAL.
 
 ## CONTINUITY DISCIPLINE
 
@@ -37,4 +41,4 @@ ChatGPT primary architect/coder/GitHub committer; Claude independent evaluator, 
 
 ## NEW SESSION RESUME
 
-RESUME vosser24/Vres-OS from latest GitHub docs/chatgpt-continuity-20261023 HEAD. Read this index and newest B2A R3 independent OFFLINE ACCEPT handoff FIRST. Source HEAD 32847410952e9d4620bf7046cbee4a41a7ddc73b, one modified test file, Claude independent Windows 95 PASS lines/exit 0, four canonicalization variants passed. Collected=95 only inferred, no deselection printed. Preserve extra interpreter-only py -c version command as R3-PROC-01 process deviation and keep R2 91/92 REJECT and original B2A STATIC_REVIEW_REJECT as historical evidence. Earlier F2 3/3+101/101, B1 99/99, Phase A R2 53/53 and P2-A1 R4 183/183 accepted offline. NEXT: B2B trusted external history provenance, authenticated operator-event and protected-validation contract in offline DESIGN-FIRST scope. F1 remains OPEN; #165 OPEN/PARTIAL, installed Chairman Sonnet/high, PostgreSQL schema-048 NO CONTACT, all K0/PA/vault/trust/install/model/merge restrictions. ChatGPT commits, Claude independently evaluates, user operates Windows.
+RESUME Vres-OS from current HEAD docs/chatgpt-continuity-20261023; read this index and NEW B2B-0 design checkpoint plus full trusted Chairman authority contract draft, then B2A R3 offline ACCEPT. No source changes in B2B docs-only checkpoint; latest independently accepted feature SHA 32847410952e9d4620bf7046cbee4a41a7ddc73b. R3 95 reported passes/exit 0, R3-PROC-01 one extra interpreter-version probe, prior B2A R2 91/92 REJECT and original STATIC_REVIEW_REJECT intact; earlier A/B1/F2/R4 accepted evidence intact. Next Claude STATIC DESIGN REVIEW only; F1 authenticated provenance trust still OPEN, #165 OPEN/PARTIAL, installed Sonnet/high, schema-048 no-contact and all K0/PA/vault/signing/installer holds intact. ChatGPT architects/commits, Claude evaluates, user operator; commit handoffs/index per substantive reply.
