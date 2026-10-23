@@ -64,3 +64,11 @@ The docs checkpoint is fetched into a safe new docs worktree or viewed through g
 ## D. Completion criteria
 
 The new session is successful if it (1) reads and follows the existing checkpoint, (2) verifies exact source identity, (3) makes one bounded source implementation or identifies a concrete unavoidable source blocker, and (4) supplies one reproducible local evaluation action. It should not merely write another multi-week planning exercise.
+
+## E. 2026-10-23 SUPERSEDING CONTINUITY POINTER (append-only)
+
+The 2026-10-22 instruction to publish the local personal P2 source is now **COMPLETED**, not still pending. The original source 82c82430b38f93bd6b9d5c3af3b5de9c1368af9c was published on personal/p2f-postinstall-hardening-20261022. ChatGPT has subsequently authored four narrowly scoped P2-A1 security corrections on fix/p2a1-loopback-hold-aliases-20261022; exact latest commit 3ba41d5ae6b8f2c2abd93d27f82cce0755878237 obtained independent Claude **ACCEPT** (183/183 selected offline tests passed), with remaining conditional network and diagnostic risks documented.
+
+**NEW READ-FIRST:** documentation branch docs/chatgpt-continuity-20261023, path docs/handoffs/VRES-CHATGPT-CONTINUITY-INDEX.md, then VRES-CHATGPT-P2A1-R4-INDEPENDENT-ACCEPTANCE-HANDOFF-2026-10-23.md. The prior Section A "YOUR FIRST ACTION" applies only to historical context and must NOT be repeated. The schema-048 incident and all runtime/security holds remain open.
+
+User additionally directs that EVERY substantive new development/evaluation response leave a committed, detailed Git handoff and latest-index pointer. Use separate docs commits so tests and accepted source SHA remain honest.

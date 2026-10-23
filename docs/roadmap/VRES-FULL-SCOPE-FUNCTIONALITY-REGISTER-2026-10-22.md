@@ -92,3 +92,11 @@ A previously disabled feature is NOT automatically enabled in the installed runt
 ## 6. Contract for closure
 
 A row closes only when its exact behavior, source/branch, tests, physical evidence and user-approved scope are recorded. Distinguish historical pass, current exact-commit pass, skipped, blocked, held, not applicable and not run. Avoid status-by-assertion and avoid replaying broad suites after unrelated docs edits.
+
+## 7. 2026-10-23 append-only V-36 security-hardening evidence update
+
+**V-36 / P2-A1 database-contact and held-server guard:** An independent Claude R4 evaluator gave **ACCEPT for exact-source OFFLINE security correction**, not live installation or database acceptance. Source branch fix/p2a1-loopback-hold-aliases-20261022, exact source SHA 3ba41d5ae6b8f2c2abd93d27f82cce0755878237, parent 2101c677639e454af91e3beff4b3e5e1cadf893c. 183/183 selected offline tests passed with source/test path allowlist and simulated PostgreSQL/secret tripwires. R1-R3 prior reviews were REJECT despite passing selected tests. The installed Windows release still runs source 82c8243 and this hardening is NOT merged/deployed. The live schema-048 incident and PA-04 remain BLOCKED.
+
+Residual code/release risks R4-1 through R4-5, detailed evidence, exact test command and next-session continuity are preserved in [the October 23 acceptance handoff](../handoffs/VRES-CHATGPT-P2A1-R4-INDEPENDENT-ACCEPTANCE-HANDOFF-2026-10-23.md). Conditional NAT64/6to4 routing could make R4-1 release-blocking for deployments that use nonloopback held servers; review before such deployment, not by asserting current installed safety. User requested a durable docs commit after each substantive Vres development/evaluation reply; the live [continuity index](../handoffs/VRES-CHATGPT-CONTINUITY-INDEX.md) is now the read-first pointer.
+
+Other V-01..V-42 full-scope entries remain active development backlog. No feature fence was enabled by this documentation update.
