@@ -1,42 +1,43 @@
 # Vres-OS — ChatGPT-led CURRENT continuity index
 
 **Updated:** 2026-10-23, Europe/Athens.
-**Documentation branch:** docs/chatgpt-continuity-20261023.
-Inherits full October 22 development roadmap from dc76d7c1305530ac685ef153753aae7d700b39e8, without overwriting historical preproduction C2B/K0 or personal release records.
+**Canonical documentation branch:** docs/chatgpt-continuity-20261023.
+Preserves October 22 full V-01–V-42 roadmap (dc76d7c1305530ac685ef153753aae7d700b39e8), C2B/K0 preproduction handoffs and original Windows personal release history.
 
-## READ FIRST — authoritative current order
+## READ FIRST
 
-1. [#165 B2A static-review Windows worktree verified](VRES-165-B2A-STATIC-REVIEW-WORKTREE-VERIFIED-2026-10-23.md) — NEWEST: c01152e3 checkout PASS, STATIC REVIEW NOT_RUN, B2A pytest BLOCKED by oversized unnamed test ID.
-2. [#165 F2 test-only independent ACCEPT](VRES-165-F2-TEST-ONLY-INDEPENDENT-ACCEPTANCE-2026-10-23.md) — **NEWEST** exact source 36a41b6151b7520329ccc0ada0ff827d836ec579, Claude selected 3/3 PASS, final ACCEPT for test-only offline scope, open F1 and next development.
-3. [#165 F2 test-only Windows worktree verification](VRES-165-B1-F2-TEST-ONLY-WINDOWS-WORKTREE-VERIFIED-2026-10-23.md) and [F2 original ACCEPT/test follow-up](VRES-165-B1-F2-INDEPENDENT-ACCEPTANCE-AND-TEST-HARDENING-2026-10-23.md) — local evidence, original F2 code 101/101 Windows PASS.
-4. [#165 B1 proposal history independent ACCEPT](VRES-165-PHASE-B1-INDEPENDENT-ACCEPTANCE-2026-10-23.md) — source f8237bb301dec160f33cab524727e6a0ec79b2c0, 99/99 offline PASS and reviewer F1/F2.
-5. [#165 Phase A R2 independent ACCEPT](VRES-165-PHASE-A-R2-INDEPENDENT-ACCEPTANCE-2026-10-23.md) — 53/53 Windows CRLF PASS, initial R1 REJECT preserved in earlier history.
-6. [P2-A1 R4 database-contact guard independent ACCEPT](VRES-CHATGPT-P2A1-R4-INDEPENDENT-ACCEPTANCE-HANDOFF-2026-10-23.md) — 183/183 offline PASS; earlier R1-R3 REJECT and five residuals.
-7. [Full V-01 through V-42 functionality register](../roadmap/VRES-FULL-SCOPE-FUNCTIONALITY-REGISTER-2026-10-22.md) and [development plan](../roadmap/VRES-CHATGPT-LED-FULL-SCOPE-DELIVERY-PLAN-2026-10-22.md).
-8. [Oct 22 full-scope direction](VRES-CHATGPT-LEAD-SCOPE-REACTIVATION-CHECKPOINT-2026-10-22.md), old C2B/K0 incident handoffs and SHA/worktree troubleshooting history.
+1. [#165 B2A independent STATIC REJECT and R2 correction](VRES-165-B2A-STATIC-REJECT-AND-R2-REPAIR-2026-10-23.md) — **NEWEST** source 060756b02786c146b87a5262ba2b3b2cc6bf2784; R2 fixes Windows ID and static gaps, OFFLINE TEST NOT_RUN; next guarded Windows review.
+2. [#165 B2A original static worktree verification](VRES-165-B2A-STATIC-REVIEW-WORKTREE-VERIFIED-2026-10-23.md) — c01152e3 original candidate, independent STATIC_REVIEW_REJECT and source test BLOCKED; historical, do not re-use folder.
+3. [#165 F2 test-only independent offline ACCEPT](VRES-165-F2-TEST-ONLY-INDEPENDENT-ACCEPTANCE-2026-10-23.md) — 36a41b6151b7520329ccc0ada0ff827d836ec579, 3/3 selected Windows PASS, exact accepted parent to B2A.
+4. [#165 F2 implementation independent offline ACCEPT](VRES-165-B1-F2-INDEPENDENT-ACCEPTANCE-AND-TEST-HARDENING-2026-10-23.md) — b77e0eef07976877e7f198a00484f5d13ce36889, 101/101 PASS, 256KiB history.
+5. [#165 B1 proposal history independent offline ACCEPT](VRES-165-PHASE-B1-INDEPENDENT-ACCEPTANCE-2026-10-23.md) — f8237bb301dec160f33cab524727e6a0ec79b2c0, 99/99 PASS.
+6. [#165 Phase A R2 independent offline ACCEPT](VRES-165-PHASE-A-R2-INDEPENDENT-ACCEPTANCE-2026-10-23.md) — 11f2f8689308dfe43e482bca73aa57bb6467c788, 53/53 Windows PASS, initial R1 REJECT retained.
+7. [P2-A1 R4 database-contact security offline ACCEPT](VRES-CHATGPT-P2A1-R4-INDEPENDENT-ACCEPTANCE-HANDOFF-2026-10-23.md) — 3ba41d5ae6b8f2c2abd93d27f82cce0755878237, 183/183 PASS, earlier R1–R3 REJECT and residuals.
+8. [Original 42-item feature register](../roadmap/VRES-FULL-SCOPE-FUNCTIONALITY-REGISTER-2026-10-22.md), [phased delivery roadmap](../roadmap/VRES-CHATGPT-LED-FULL-SCOPE-DELIVERY-PLAN-2026-10-22.md) and historical C2B/K0 handoffs.
 
-## VERIFIED GIT AND TEST STATE
+## CURRENT SOURCE / REVIEW STATUS
 
-- **LATEST B2A SOURCE/WORKTREE:** c01152e374c4e7e0ae8e0a01eab5148cdf71e84e, parent accepted F2 test-only 36a41b6151b7520329ccc0ada0ff827d836ec579, two ADDED files chairman_history_expectation.py and test_chairman_history_expectation.py; local detached C:\Projects\Vres-ChatGPT-Review-165B2A-ReadOnly-20261023 exists and passed guarded Git checks. B2A STATIC REVIEW NOT_RUN. B2A PYTEST NOT_RUN and held.
-- **WINDOWS PARAMETER-ID BLOCKER:** new B2A test module includes an unnamed 256KiB+1 bytes pytest parameter. Its short-ID correction attempt and a previous docs write were tool-blocked without publication; the exact source branch remains c01152e3. Don't execute pytest until an authorized source fix has been reviewed.
-- **F1 TRUST LIMIT:** offline comparison to caller-supplied digests can reject mismatches, NOT authenticate their source or approve model activation. External trusted operator-event/protected-validation anchor remains OPEN.
-- **Latest independently ACCEPTED source:** 36a41b6151b7520329ccc0ada0ff827d836ec579 on feature/165-chairman-policy-foundation-20261023, exact parent b77e0eef07976877e7f198a00484f5d13ce36889. Changes ONLY tests/test_chairman_policy_history.py, no implementation change. Claude Windows independent test-only ACCEPT, selected 3/3 PASS, exit 0, no fail/errors/skips. Deselected count was not printed; approx 51 is INFERRED, not evidence.
-- **Accepted F2 implementation:** b77e0eef07976877e7f198a00484f5d13ce36889, 101/101 targeted Python 3.12 Windows offline PASS, independently ACCEPT. F2 Unicode 128-entry/256-KiB history bound remains in effect.
-- **Accepted original B1:** f8237bb301dec160f33cab524727e6a0ec79b2c0, 99/99 offline PASS. **Accepted Phase A R2:** 11f2f8689308dfe43e482bca73aa57bb6467c788, 53/53 offline PASS. Earlier Phase A R1 9c919271 REJECT; P2-A1 R4 security guard 3ba41d5ae6b8f2c2abd93d27f82cce0755878237, 183/183 offline ACCEPT but NOT merged/installed; earlier R1-R3 REJECT preserved.
-- **#165 unresolved F1:** internally valid proposal SHA-256 chains can be truncated or forked; an independently AUTHENTICATED external expected chain identity anchored to protected operator events and validation is required before any live authority. No input digest, free-text proposal reason or local code can self-authorize policy activation. Reviewer's test-only LOW exact-error-message suggestion remains INFO, not a blocker.
-- **Current installed release:** 20261022172833-4d82147b (from P2 82c82430b38f93bd6b9d5c3af3b5de9c1368af9c), unchanged. Shipped Chairman remains Sonnet/high; requested Opus/medium policy is ONLY in-memory candidate. Issue #165 OPEN/PARTIAL. No installer/policy approval/host evidence.
-- **Main:** 9a8acc5d464b96432a93cb95daa9581412fb07ee, last verified unchanged.
-- **Schema-048 incident OPEN, PostgreSQL last observed STOPPED.** NO DB contact even SELECT; D2 OPEN, F2 quarantined, R0 NOT_RUN, K0-T1 blocked, L-04 OPEN, native trust not approved, positive trust issuance disabled; PA-01..PA-08 incomplete. No vault, real secret read, global Claude mutation, user release upgrade, PR/merge or model activation.
-- **V-01..V-42 backlog:** all original functionality retained as active DEVELOPMENT goals, not enabled production behavior.
+- **FEATURE HEAD — B2A R2 FIX PUBLISHED, INDEPENDENT TEST NOT_RUN:** 060756b02786c146b87a5262ba2b3b2cc6bf2784 on feature/165-chairman-policy-foundation-20261023, parent c01152e374c4e7e0ae8e0a01eab5148cdf71e84e. Exactly two modified paths src/vres_os/chairman_history_expectation.py and tests/test_chairman_history_expectation.py, one new source commit, no CI statuses. The old original c01152e was STATIC_REVIEW_REJECT and tests were NEVER run on it.
+- **R2 corrections:** safe short explicit pytest id="oversized-history"; byte-typed schema-negative plus exact check; extra canonical byte variant checks; deleted slot produces documented history-expectation error; revalidated expected snapshot reused; count bound imported from history. Existing weak isolation vars() test still requires source review. No activation/authority claims.
+- **OLDER SOURCE-TOOL BLOCKS:** previous attempt to fix test ID and earlier docs publish was BLOCKED, no commit from those attempts. Later distinct narrow corrective source commit succeeded at R2; do not relabel either event.
+- **F1 TRUST / POLICY AUTHORITY STILL OPEN:** a self-derived or forged expected count/history/latest SHA triple can match altered history; comparison is NOT independent authentication. Need trusted user event, external anchor and protected validation BEFORE installation/model selection. #165 OPEN/PARTIAL.
+- **Latest previously independent ACCEPT:** F2 test-only 36a41b6 (3/3), F2 code b77e0ee (101/101), B1 f8237bb (99/99), Phase A R2 11f2f868 (53/53), security R4 3ba41d5 (183/183), each bounded to its own exact SHA. Original Phase A R1 and P2-A1 R1–R3 REJECT preserved.
+- **Installed Chairman:** sonnet/high in personal release 20261022172833-4d82147b, source original P2 82c82430b38f93bd6b9d5c3af3b5de9c1368af9c; requested opus/medium NOT installed. Main last verified 9a8acc5d464b96432a93cb95daa9581412fb07ee, unchanged. No PR/merge/host-observed model proof.
+- **HELD SCHEMA-048 INCIDENT OPEN:** PostgreSQL last observed STOPPED; never connect including SELECT. D2 OPEN, F2 quarantined, R0 NOT_RUN, K0-T1 blocked, L-04 open, native trust not approved, positive trust issuance DISABLED, PA-01..PA-08 incomplete. No vault/real credential, global Claude, installed release update, model activation, signing or main merge.
+- **Full V-01–V-42 functionality** remains active DEVELOPMENT backlog only, not enabled production runtime.
 
-## NEXT DEVELOPMENT GATE
+## NEXT STRICT OPERATOR ACTION
 
-The pure OFFLINE, NON-AUTHENTICATING F1 expected-history comparator has been published on c01152e3 but is NOT REVIEWED. The Windows worktree already exists. NEXT: launch safe static-only Claude reviewer using Read/Glob/Grep without Bash/MCP; do not execute pytest until an authorized short-ID source correction. It can compare canonical history digest, latest proposal digest and count to externally provided expected values, and refuse mismatches due to prefix truncation/forks. It MUST NOT independently authenticate the expected values, grant approval, activate a model or write any real state. Full F1 authority remains open for separately trusted user-event/protected validation integration. Then one NEW Windows review worktree and independent Claude isolated offline tests tied only to that SHA. Do not reuse the already accepted 3/3 or 101/101 as new evidence.
+Use proven one-scriptblock PowerShell full-40-hex SHA/remote/fetched-commit/original-clean-parent checks to create NEW detached review C:\Projects\Vres-ChatGPT-Review-165B2A-R2-20261023 at exact 060756b02786c146b87a5262ba2b3b2cc6bf2784, parent c01152e374c4e7e0ae8e0a01eab5148cdf71e84e. Verify parent→HEAD diff exactly two modified source/test files, diff --check and clean status. Preserve original c01152e static-review checkout and accepted older worktrees.
 
-## CONTINUITY RULE
+Once READY, Claude independently reviews source, tests and conftest isolation, then (only if safe) ONE offline pytest invocation:
+\`py -3.12 -B -m pytest -q -rA -p no:cacheprovider tests/test_chairman_history_expectation.py tests/test_chairman_policy_history.py\`
+No live database, vault, Vres bootstrap, global Claude settings, installer, model-provider, MCP/hook or full suite; code edits by ChatGPT only. Report exact results; no R2 ACCEPT until they exist.
 
-ChatGPT architect/developer/committer, Claude independent evaluator, user Windows operator. After EACH substantive Vres response, append a detailed docs handoff, promote this current index on docs/chatgpt-continuity-20261023 and read back exact commit SHA. Preserve actual test counts, rejection/block evidence, original roadmap and all release/database holds. No background work promises.
+## CONTINUITY DISCIPLINE
 
-## NEW-SESSION RESUME
+ChatGPT develops/commits, Claude evaluates independently, Windows user approves consequential operations. After every substantive reply produce detailed append-only Git docs handoff and update this current read-first index on docs/chatgpt-continuity-20261023, read back exact commit SHA; preserve failed/test-blocked evidence and accepted reviews. No promises of background work.
 
-Read this index and F2 test-only independent ACCEPT handoff FIRST. Source HEAD 36a41b6151b7520329ccc0ada0ff827d836ec579, independently ACCEPT for new three-test offline scope, parent accepted F2 b77e0eef, 101/101 PASS; B1 99/99, Phase A R2 53/53, P2-A1 R4 183/183 accepted offline; prior REJECT preserved. B2A comparator c01152e3 exists and is UNTESTED; local static-only worktree created; run Claude code inspection without Bash/pytest; short-ID test correction is tool-blocked, no updated source SHA. Never claim matching expectation authenticates consent. #165 OPEN, Chairman installed Sonnet/high, PostgreSQL schema-048 held and all credential/K0/PA/release limits intact. After development, commit new docs index/handoff and independently evaluate on fresh Windows worktree.
+## RESUME PROMPT FOR NEW CHAT
+
+Resume Vres-OS from current HEAD docs/chatgpt-continuity-20261023. Read this index and B2A STATIC REJECT / R2 REPAIR handoff FIRST. Current source candidate HEAD 060756b02786c146b87a5262ba2b3b2cc6bf2784, parent original static REJECT c01152e374c4e7e0ae8e0a01eab5148cdf71e84e, two modified files. New source tests NOT_RUN. Next: one guarded Windows B2A R2 worktree and independent Claude review of two offline pytest modules; the previous oversized parameter was fixed to short ID. F1 external authenticated history identity/consent/validated authority still OPEN; do not activate Opus/medium. Preserve F2 test-only 3/3, F2 101/101, B1 99/99, Phase A 53/53 and P2-A1 R4 183/183 offline acceptances, earlier rejections, no schema-048 PostgreSQL contact, unchanged release Sonnet/high, K0/PA/vault/trust holds. ChatGPT GitHub committer, Claude independent reviewer, operator runs guarded Windows script; update docs after each substantive step.
