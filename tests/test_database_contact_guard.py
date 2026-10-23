@@ -185,6 +185,107 @@ def test_loopback_hold_does_not_match_unrelated_literal_or_dns_name(personal_roo
     database_targets.require_contact(f"host={host} port=5432 dbname=vres_personal")
 
 
+# B2. Windows/libpq numeric aliases must not become independent approvals.
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "127.1", "127.0.1", "2130706433", "0x7f000001", "0x7f.0.0.1",
+        "0177.0.0.1", "127.000.000.001", "127..1", "[::1]",
+        "::1%1", "::ffff:127.1", "0.0.0.0", "::", "::ffff:0.0.0.0",
+        "/tmp", r"C:\\temp", "localhost..",
+    ],
+)
+@pytest.mark.parametrize("purpose", ["runtime", "writer", "migrator"])
+def test_ambiguous_windows_host_cannot_use_even_an_existing_exact_approval(
+    personal_root, tripwires, host, purpose,
+):
+    _configure(host=host)
+    _registry(personal_root, approved=[(host, 5432, "vres_personal")], held=[("localhost", 5432)])
+    with pytest.raises(DatabaseTargetRefused, match="ambiguous|unspecified"):
+        db.build_dsn(purpose)
+    assert tripwires.secret_reads == []
+
+
+@pytest.mark.parametrize(
+    "host", ["127.1", "2130706433", "0x7f000001", "0177.0.0.1", "127.000.000.001", "[::1]", "::1%1", "0.0.0.0", "::"],
+)
+def test_ambiguous_windows_host_refused_before_admin_or_setup_prompt(
+    personal_root, monkeypatch, host,
+):
+    _registry(personal_root, held=[("localhost", 5432)])
+    with pytest.raises(DatabaseTargetRefused, match="ambiguous|unspecified"):
+        database_targets.require_admin_contact(
+            f"host={host} port=5432 dbname=postgres", "vres_personal"
+        )
+    monkeypatch.setattr(database_targets, "_interactive", lambda: True)
+    with pytest.raises(DatabaseTargetRefused, match="ambiguous|unspecified"):
+        database_targets.confirm_target_for_setup(
+            host, 5432, "vres_personal",
+            ask=lambda _prompt: pytest.fail("unsafe host reached an approval prompt"),
+        )
+    assert json.loads((personal_root / database_targets.REGISTRY_NAME).read_text())["approved"] == []
+
+
+@pytest.mark.parametrize(
+    "dsn",
+    [
+        "host=127.1 port=5432 dbname=vres_personal",
+        "host=0x7f000001 port=5432 dbname=vres_personal",
+        "host=[::1] port=5432 dbname=vres_personal",
+        "postgresql://127.1:5432/vres_personal",
+        "postgresql://%5B%3A%3A1%5D:5432/vres_personal",
+        "postgresql://0x7f000001:5432/vres_personal",
+    ],
+)
+def test_ambiguous_host_is_refused_from_environment_and_uri_routes(personal_root, monkeypatch, tripwires, dsn):
+    _registry(personal_root, held=[("localhost", 5432)])
+    monkeypatch.setenv("VRES_DATABASE_URL", dsn)
+    with pytest.raises(DatabaseTargetRefused) as exc:
+        db.build_dsn("runtime")
+    assert "No connection was attempted." in str(exc.value)
+    assert tripwires.secret_reads == []
+
+
+def test_standard_ipv6_uri_to_held_server_is_refused(personal_root, tripwires):
+    _registry(personal_root, held=[("localhost", 5432)])
+    with pytest.raises(DatabaseTargetRefused):
+        database_targets.require_contact("postgresql://[::1]:5432/vres_personal")
+    assert tripwires.secret_reads == []
+
+
+@pytest.mark.parametrize("held_alias", ["127.0.0.2", "::ffff:127.0.0.2", "::1"])
+def test_reverse_loopback_alias_hold_refuses_localhost(personal_root, held_alias):
+    _configure(host="localhost")
+    _registry(
+        personal_root,
+        approved=[("localhost", 5432, "vres_personal")],
+        held=[(held_alias, 5432)],
+    )
+    with pytest.raises(DatabaseTargetRefused, match="held"):
+        db.build_dsn("runtime")
+
+
+def test_hold_target_deduplicates_aliased_loopback_server(personal_root):
+    _registry(personal_root, held=[("127.0.0.2", 5432)])
+    database_targets.hold_target("localhost", 5432, reason="second hold")
+    registry = json.loads((personal_root / database_targets.REGISTRY_NAME).read_text())
+    assert len(registry["held"]) == 1
+    assert registry["held"][0]["host"] == "127.0.0.2"
+
+
+@pytest.mark.parametrize("host", ["192.0.2.5", "2001:db8::1", "localhost.invalid"])
+def test_unrelated_canonical_host_remains_exactly_approvable(personal_root, host):
+    _registry(
+        personal_root,
+        approved=[(host, 5432, "vres_personal")],
+        held=[("localhost", 5432)],
+    )
+    database_targets.require_contact(
+        f"host={host} port=5432 dbname=vres_personal"
+    )
+
+
 # B. Unknown and ambiguous targets
 
 

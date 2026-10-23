@@ -24,10 +24,12 @@ identification of the PostgreSQL cluster that answers there; a different cluster
 later serving the same host, port and database name would not be told apart before
 connecting. Holds are therefore deliberately broader than approvals (a whole server),
 but server holds recognize literal localhost (including a trailing DNS dot), all IPv4
-127/8 addresses, IPv6 ::1 and IPv4-mapped IPv6 loopback addresses as one server,
-without DNS resolution. Other hostnames and addresses that may reach the same machine
-(its computer name, a LAN address, other DNS aliases or unusual numeric spellings)
-remain outside that hold. Approvals still require the exact host, port and database.
+127/8 addresses, IPv6 ::1 and IPv4-mapped IPv6 loopback addresses as one server.
+Unusual numeric host spellings, bracketed/zone-scoped forms, socket paths and
+unspecified addresses are refused before any approval or connection. Neither this
+hold nor an exact host/port/database approval proves PostgreSQL cluster identity:
+DNS aliases, LAN/computer names and endpoint replacement still need external
+verification. No DNS resolution is performed by this guard.
 """
 from __future__ import annotations
 
@@ -35,6 +37,7 @@ import argparse
 import ipaddress
 import json
 import os
+import re
 import stat
 import sys
 import tempfile
@@ -56,6 +59,13 @@ ROUTING_ENVIRONMENT = ("PGHOST", "PGHOSTADDR", "PGPORT", "PGDATABASE", "PGSERVIC
 # Localhost names and common literal spellings. Numeric IP addresses are examined
 # without DNS resolution; holds are broad, while approvals remain exact.
 _LOOPBACK = frozenset({"localhost", "localhost.", "127.0.0.1", "::1"})
+# Windows may interpret shortened, integer, octal or hexadecimal IPv4 hosts as
+# addresses. Deny those spellings rather than allowing a held server to be
+# interactively approved under an alternate numeric host.
+_NONCANONICAL_NUMERIC_HOST = re.compile(
+    r"(?:0x[0-9a-f]+|[0-9]+)(?:\.(?:0x[0-9a-f]+|[0-9]+))*",
+    re.IGNORECASE,
+)
 _FOLDERID_LOCAL_APP_DATA = "{F1B32785-6FBA-4FCF-9D55-7B8E7F157091}"
 _NO_CONTACT = "No connection was attempted."
 
@@ -75,6 +85,44 @@ def _is_loopback_host(host: str) -> bool:
     if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
         address = address.ipv4_mapped
     return address.is_loopback
+
+
+def _validate_contact_host(host: str) -> None:
+    """Refuse host syntax whose Windows/libpq endpoint cannot be safely identified.
+
+    Validation is deliberately independent of the approval registry: an operator
+    must not be able to authorize an alternate spelling of a held server. No
+    resolver, socket or credential store is consulted.
+    """
+    refusal = (
+        "Vres refused an ambiguous or unsafe database host spelling. "
+        f"{_NO_CONTACT}"
+    )
+    # Bracketed IPv6 from conninfo, scoped IPv6, socket directories and unusual
+    # separators need a separate, explicitly verified connection contract.
+    if any(char in host for char in "[]/%\\") or ".." in host:
+        raise DatabaseTargetRefused(refusal)
+
+    literal = host.removesuffix(".")
+    try:
+        address = ipaddress.ip_address(literal)
+    except ValueError:
+        # A colon cannot occur in a DNS hostname. Windows accepts several
+        # numeric IPv4 notations that ipaddress rejects; they must not become
+        # independently approvable hostnames.
+        if (
+            ":" in host
+            or _NONCANONICAL_NUMERIC_HOST.fullmatch(literal)
+            or re.fullmatch(r"[0-9.]+", literal)
+        ):
+            raise DatabaseTargetRefused(refusal) from None
+        return
+
+    mapped = address.ipv4_mapped if isinstance(address, ipaddress.IPv6Address) else None
+    if (mapped or address).is_unspecified:
+        raise DatabaseTargetRefused(
+            f"Vres refused an unspecified database host address. {_NO_CONTACT}"
+        )
 
 
 class DatabaseTarget(NamedTuple):
@@ -205,6 +253,7 @@ def _target_from_params(params: Mapping[str, object]) -> DatabaseTarget:
         )
     if "," in host or "," in port:
         raise DatabaseTargetRefused(f"Vres refused a database target that names several servers. {_NO_CONTACT}")
+    _validate_contact_host(host)
     if "=" in dbname or "://" in dbname:
         raise DatabaseTargetRefused(
             f"Vres refused a database name that embeds another connection string. {_NO_CONTACT}"
