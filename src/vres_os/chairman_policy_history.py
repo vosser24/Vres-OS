@@ -76,12 +76,12 @@ class ChairmanPolicyProposal:
             type(self.reason) is not str
             or not self.reason
             or self.reason != self.reason.strip()
-            or len(self.reason.encode("utf-8")) > _MAX_REASON_BYTES
             or any(
                 unicodedata.category(char).startswith("C")
                 or unicodedata.category(char) in {"Zl", "Zp"}
                 for char in self.reason
             )
+            or len(self.reason.encode("utf-8")) > _MAX_REASON_BYTES
         ):
             raise ChairmanPolicyHistoryError("Proposal rationale must be bounded printable text")
 

@@ -110,7 +110,7 @@ def test_noop_policy_change_is_refused_and_cannot_implicitly_promote():
 
 @pytest.mark.parametrize("bad_reason", [
     "", " ", " leading", "trailing ", "\n", "hello\nthere",
-    "control\x00", "\x1b[31m", "bad\u2028separator", "x" * 513, 4, None,
+    "control\x00", "\x1b[31m", "bad\u2028separator", "bad\ud800surrogate", "x" * 513, 4, None,
 ])
 def test_reason_must_be_bounded_printable_text(bad_reason):
     with pytest.raises(ChairmanPolicyHistoryError, match="rationale"):
