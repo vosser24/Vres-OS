@@ -85,14 +85,11 @@ def test_missing_or_stale_supersession_digest_is_rejected(prior):
 @pytest.mark.parametrize("version", [0, 1, 3, True, "2"])
 def test_supersession_requires_exact_next_policy_version(version):
     initial = _start()
-    if version in {0, 3} and type(version) is int:
-        requested = ChairmanPolicy(version, "sonnet", "medium")
-    elif version is True or version == "2":
+    if type(version) is not int or version == 0:
         with pytest.raises(ValueError):
             ChairmanPolicy(version, "sonnet", "medium")
         return
-    else:
-        requested = ChairmanPolicy(version, "sonnet", "medium")
+    requested = ChairmanPolicy(version, "sonnet", "medium")
     with pytest.raises(ChairmanPolicyHistoryError, match="advance"):
         initial.supersede(
             requested,
@@ -191,8 +188,8 @@ def test_no_database_vault_model_or_disk_authority_is_exposed():
     forbidden = {"ConfigStore", "SecretStore", "connect", "open", "subprocess", "os"}
     assert forbidden.isdisjoint(vars(module))
     history = _start()
-    assert "active" not in vars(history)
-    assert "approved" not in vars(history)
+    assert not hasattr(history, "active")
+    assert not hasattr(history, "approved")
     assert "activate" not in vars(module)
     assert history.manifest()["state"] == "candidates_only"
     assert history.latest_proposal.policy.family == "opus"

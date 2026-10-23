@@ -77,7 +77,11 @@ class ChairmanPolicyProposal:
             or not self.reason
             or self.reason != self.reason.strip()
             or len(self.reason.encode("utf-8")) > _MAX_REASON_BYTES
-            or any(unicodedata.category(char).startswith("C") for char in self.reason)
+            or any(
+                unicodedata.category(char).startswith("C")
+                or unicodedata.category(char) in {"Zl", "Zp"}
+                for char in self.reason
+            )
         ):
             raise ChairmanPolicyHistoryError("Proposal rationale must be bounded printable text")
 
@@ -176,6 +180,8 @@ class ChairmanPolicyHistory:
                 object_pairs_hook=_no_duplicate_keys,
                 parse_constant=_refuse_non_json_constant,
             )
+        except ChairmanPolicyHistoryError:
+            raise
         except (UnicodeError, ValueError, RecursionError):
             raise ChairmanPolicyHistoryError("Invalid proposal-history JSON") from None
 
