@@ -6,25 +6,29 @@ This branch inherits the 2026-10-22 full-scope documentation checkpoint at dc76d
 
 ## Read first
 
-1. [#165 Phase A R1 REJECT, R2 CRLF correction](VRES-165-PHASE-A-R1-REJECT-R2-WINDOWS-CRLF-CORRECTION-2026-10-23.md) — NEWEST status: R1 Windows 39 pass / 5 fail / 2 errors, R2 fix committed at 11f2f8689308dfe43e482bca73aa57bb6467c788 and NOT YET RETESTED.
-2. [#165 Phase A Windows review worktree VERIFIED](VRES-165-PHASE-A-WINDOWS-WORKTREE-VERIFIED-2026-10-23.md) — historical R1 verified review folder for rejected source 9c919271; do not reuse for R2.
-3. [#165 Phase A operator SHA transcription recovery](VRES-165-PHASE-A-OPERATOR-SHA-ERRATUM-2026-10-23.md) — preserved former failure and now superseded correction step.
-4. [#165 Chairman Phase A development and next evaluation](VRES-165-CHAIRMAN-POLICY-PHASE-A-DEVELOPMENT-HANDOFF-2026-10-23.md) — newest source commit, exact changed files, NOT_RUN test status and next action.
-5. [P2-A1 R4 independent acceptance and resume](VRES-CHATGPT-P2A1-R4-INDEPENDENT-ACCEPTANCE-HANDOFF-2026-10-23.md) — accepted R4 security evidence, prior rejections and held incidents.
-6. [October 22 ChatGPT-led product-direction checkpoint](VRES-CHATGPT-LEAD-SCOPE-REACTIVATION-CHECKPOINT-2026-10-22.md) — original full development ambition.
-7. [Full 42-item functionality register](../roadmap/VRES-FULL-SCOPE-FUNCTIONALITY-REGISTER-2026-10-22.md).
-8. [Phased ChatGPT-led delivery plan](../roadmap/VRES-CHATGPT-LED-FULL-SCOPE-DELIVERY-PLAN-2026-10-22.md).
-9. [October 22 new-session historical resume](VRES-CHATGPT-NEW-SESSION-RESUME-2026-10-22.md), whose old source-publication action is now CLOSED/superseded.
-10. For the schema-048 incident, historical [E7 C2A/C2B incident handoff](PREPRODUCTION-E7-C2A-C2B-CONTROL-INCIDENT-RESUME-HANDOFF-2026-10-13.md) and local unpublished documents when the operator supplies them.
+1. [#165 Phase A R2 Windows review worktree VERIFIED](VRES-165-PHASE-A-R2-WINDOWS-WORKTREE-VERIFIED-2026-10-23.md) — NEWEST local operator PASS at exact R2 SHA, two files only; Claude R2 tests still NOT_RUN.
+2. [#165 Phase A R1 REJECT, R2 CRLF correction](VRES-165-PHASE-A-R1-REJECT-R2-WINDOWS-CRLF-CORRECTION-2026-10-23.md) — R1 Windows 39 pass / 5 fail / 2 errors; R2 code correction committed, independent tests pending.
+3. [#165 Phase A Windows review worktree VERIFIED](VRES-165-PHASE-A-WINDOWS-WORKTREE-VERIFIED-2026-10-23.md) — historical R1 verified review folder for rejected source 9c919271; do not reuse for R2.
+4. [#165 Phase A operator SHA transcription recovery](VRES-165-PHASE-A-OPERATOR-SHA-ERRATUM-2026-10-23.md) — preserved former failure and now superseded correction step.
+5. [#165 Chairman Phase A development and next evaluation](VRES-165-CHAIRMAN-POLICY-PHASE-A-DEVELOPMENT-HANDOFF-2026-10-23.md) — newest source commit, exact changed files, NOT_RUN test status and next action.
+6. [P2-A1 R4 independent acceptance and resume](VRES-CHATGPT-P2A1-R4-INDEPENDENT-ACCEPTANCE-HANDOFF-2026-10-23.md) — accepted R4 security evidence, prior rejections and held incidents.
+7. [October 22 ChatGPT-led product-direction checkpoint](VRES-CHATGPT-LEAD-SCOPE-REACTIVATION-CHECKPOINT-2026-10-22.md) — original full development ambition.
+8. [Full 42-item functionality register](../roadmap/VRES-FULL-SCOPE-FUNCTIONALITY-REGISTER-2026-10-22.md).
+9. [Phased ChatGPT-led delivery plan](../roadmap/VRES-CHATGPT-LED-FULL-SCOPE-DELIVERY-PLAN-2026-10-22.md).
+10. [October 22 new-session historical resume](VRES-CHATGPT-NEW-SESSION-RESUME-2026-10-22.md), whose old source-publication action is now CLOSED/superseded.
+11. For the schema-048 incident, historical [E7 C2A/C2B incident handoff](PREPRODUCTION-E7-C2A-C2B-CONTROL-INCIDENT-RESUME-HANDOFF-2026-10-13.md) and local unpublished documents when the operator supplies them.
 
 ## Current exact boundaries
 
+- **LATEST #165 OPERATOR PASS / R2 WORKTREE PREPARED:** user created clean detached C:\Projects\Vres-ChatGPT-Review-165A-R2-20261023 at exact source 11f2f8689308dfe43e482bca73aa57bb6467c788; parent 9c919271ba63fb979478c62abaf6c2c3d2679ae7; changed only chairman_policy.py and test_chairman_policy_materialization.py; no STOP/fatal. This does NOT certify the code; independent R2 tests remain NOT_RUN.
+- **NEXT STEP:** Launch Claude securely in the ALREADY PREPARED R2 review worktree, verify identity, preflight tests/conftest.py and run ONLY the previously scoped three offline pytest modules. Never recreate this review folder or run source R1 tests instead.
+
 - **NEWEST #165 SOURCE / TEST STATE:** R1 9c919271ba63fb979478c62abaf6c2c3d2679ae7 independently REJECTED (39 pass, 5 failed, 2 errors, exit 1), due to Git-for-Windows CRLF template refusal and oversized pytest parameter name. R2 correction **11f2f8689308dfe43e482bca73aa57bb6467c788** on feature/165-chairman-policy-foundation-20261023, parent 9c919271, changed only chairman_policy.py and test_chairman_policy_materialization.py, was published but R2 OFFLINE TESTS NOT_RUN. See newest handoff.
-- **NEXT REQUIRED OPERATOR ACTION:** Create a FRESH R2 detached review folder C:\Projects\Vres-ChatGPT-Review-165A-R2-20261023 using the correct full 40-character SHA and single-scriptblock Git identity guard. Keep historical R1 rejected checkout intact; independently rerun only three safe offline modules via Claude after preflight.
+- **HISTORICAL R2 REVIEW PREPARATION:** A fresh R2 review folder was required and HAS NOW BEEN CREATED successfully; retain old R1 review checkout, do not repeat fetch/worktree-add. Independent Claude evaluation is next.
 
 - **HISTORICAL R1 OPERATOR RESULT — REVIEW WORKTREE READY (SUBSEQUENTLY REJECTED):** Corrected single-scriptblock PowerShell completed without any STOP/fatal. Isolated C:\Projects\Vres-ChatGPT-Review-165A-20261023 contains detached HEAD 9c919271ba63fb979478c62abaf6c2c3d2679ae7, exact parent, clean worktree and three allowed files. This is synchronization PASS only, NOT #165 evaluation. See [new worktree-ready handoff](VRES-165-PHASE-A-WINDOWS-WORKTREE-VERIFIED-2026-10-23.md).
 - **HISTORICAL OPERATOR REVIEW STATUS CORRECTION:** The first #165 Windows worktree creation FAILED due to ChatGPT's 38-character SHA typo. Remote fetch subsequently succeeded but worktree add failed; the printed VRES_165_PHASE_A_REVIEW_READY was FALSE and is not acceptance evidence. Correct 40-character SHA: 9c919271ba63fb979478c62abaf6c2c3d2679ae7. Follow the new erratum handoff, not the copied command.
-- **NEXT REQUIRED STEP:** Set up a NEW independent R2 review worktree for source 11f2f8689308dfe43e482bca73aa57bb6467c788, then launch Claude with the same narrowed safe/offline evaluation. Existing R1 worktree is fixed at rejected 9c919271 and must NOT be reused.
+- **LATEST STEP:** R2 review worktree preparation is COMPLETE. Launch Claude only for guarded offline review; existing R1 worktree remains historical rejected evidence.
 - **HISTORICAL #165 R1 SOURCE — INDEPENDENT REJECT:** Phase A Chairman policy foundation, branch feature/165-chairman-policy-foundation-20261023 as originally published, commit 9c919271ba63fb979478c62abaf6c2c3d2679ae7, parent R4 3ba41d5ae6b8f2c2abd93d27f82cce0755878237. Three changed files: new chairman_policy.py, new test_chairman_policy_materialization.py and Chairman text clarification. Pure requested opus/medium policy candidate, not installed or enabled; existing template still sonnet/high.
 - **NEXT REQUIRED EVIDENCE:** one exact-commit isolated Windows Claude security/code review plus offline tests for NEW #165 R2 corrected commit. R1 REJECT and R4 ACCEPT are separate exact-SHA evidence; do not transfer prior results.
 - **Latest independently ACCEPTED source correction (OFFLINE ONLY):** 3ba41d5ae6b8f2c2abd93d27f82cce0755878237, branch fix/p2a1-loopback-hold-aliases-20261022.
@@ -37,7 +41,7 @@ This branch inherits the 2026-10-22 full-scope documentation checkpoint at dc76d
 - **Schema-048 incident database:** held; PostgreSQL service stopped at last operator observation; NEVER contact without separate explicit safe-target authorization.
 - **Unfinished PA-01..PA-08 and E7/K0 security holds:** unchanged.
 - **R4 residuals:** nonloopback translated IPv6 routing risk (conditional), invalid config status, terminal control characters in hold status, missing config-failure test, stale CLI help/docstring.
-- **Next action:** operator creates a clean NEW R2 #165 review worktree and launches Claude independently for exact R2 tests. Correct confirmed failures only; Phase A stays OPEN until reviewed. Subsequent Phase B policy authority/history and exact installer wiring require separately reviewed commits.
+- **Next action:** operator launches Claude in C:\Projects\Vres-ChatGPT-Review-165A-R2-20261023 and supplies one exact-commit evaluator prompt; tests NOT_RUN until independently executed. Correct confirmed failures only; Phase A OPEN until reviewed. Subsequent Phase B policy authority/history and exact installer wiring require separately reviewed commits.
 
 ## Continuity rule from user
 
@@ -47,4 +51,4 @@ If a current-turn checkpoint Git commit did not succeed, state the blocker inste
 
 ## Fast new-session instruction
 
-Read this index and the #165 R1 REJECT / R2 correction handoff FIRST. The R1 review folder exists but the NEW R2 review folder has NOT been created. Verify full GitHub refs, then perform one guarded R2 checkout and one bounded Claude offline test. Preserve R1 failed evidence and R4 accepted security safety. Verify live GitHub refs, never re-publish P2 or re-run R4 solely because docs changed.
+Read this index and the #165 R1 REJECT / R2 correction handoff FIRST. The R1 and R2 separate review folders BOTH exist; the R2 folder is verified at 11f2f8689308dfe43e482bca73aa57bb6467c788. Do NOT repeat worktree checkout. Next do the guarded Claude offline R2 evaluation. Preserve R1 failed evidence and R4 accepted security safety. Verify live GitHub refs, never re-publish P2 or re-run R4 solely because docs changed.
