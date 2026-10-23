@@ -9,6 +9,7 @@ import pytest
 from vres_os.chairman_policy import (
     DEFAULT_CHAIRMAN_POLICY,
     POLICY_SCHEMA,
+    ChairmanMaterialization,
     ChairmanPolicy,
     ChairmanPolicyError,
     materialize_chairman,
@@ -22,11 +23,25 @@ def _template() -> bytes:
     return (AGENTS / "chairman.md").read_bytes()
 
 
+def _newline(blob: bytes) -> bytes:
+    return b"\r\n" if b"\r\n" in blob else b"\n"
+
+
 def _frontmatter(blob: bytes) -> dict[str, str]:
     text = blob.decode("utf-8")
-    header, sep, _body = text[4:].partition("\n---\n")
-    assert sep and text.startswith("---\n")
-    return dict(line.split(": ", 1) for line in header.split("\n"))
+    newline = _newline(blob).decode("ascii")
+    assert text.startswith("---" + newline)
+    header, sep, _body = text[len("---" + newline):].partition(newline + "---" + newline)
+    assert sep
+    return dict(line.split(": ", 1) for line in header.split(newline))
+
+
+def _body(blob: bytes) -> bytes:
+    newline = _newline(blob)
+    assert blob.startswith(b"---" + newline)
+    prefix, sep, body = blob.partition(newline + b"---" + newline)
+    assert prefix and sep
+    return body
 
 
 def test_initial_chairman_control_policy_is_versioned_opus_medium_without_generation_pin():
@@ -82,6 +97,7 @@ def test_unknown_or_ambiguous_policy_fails_without_substituting_model(values):
         b'{"schema":"vres-chairman-control/1","version":true,"family":"opus","effort":"medium"}',
         b"\xff",
         b" " * 4097,
+        pytest.param(b"[" * 1050 + b"0" + b"]" * 1050, id="deep-json-nesting"),
     ],
 )
 def test_policy_document_refuses_unknown_duplicate_and_malformed_data(document):
@@ -102,7 +118,8 @@ def test_candidate_render_is_byte_deterministic_and_preserves_the_exact_body():
     assert header["model"] == "opus"
     assert header["effort"] == "medium"
     assert set(header) == {"name", "description", "model", "effort"}
-    assert source.partition(b"\n---\n")[2] == first.content.partition(b"\n---\n")[2]
+    assert _body(source) == _body(first.content)
+    assert _newline(source) == _newline(first.content)
     assert b"model: claude-opus-" not in first.content
     assert first.manifest() == second.manifest()
     assert first.manifest()["template_sha256"] == hashlib.sha256(source).hexdigest()
@@ -142,7 +159,7 @@ def test_review_candidate_policy_changes_only_model_and_effort_frontmatter_field
         b"---\r\nname: chairman\r\n---\r\nbody\r\n",
         b"\xef\xbb\xbf---\nname: chairman\n---\nbody\n",
         b"\xff" * 8,
-        b"x" * (512 * 1024 + 1),
+        pytest.param(b"x" * (512 * 1024 + 1), id="oversized-template"),
     ],
 )
 def test_unsafe_or_nonchairman_template_fails_closed(bad_template):
@@ -172,3 +189,60 @@ def test_no_filesystem_write_is_part_of_pure_candidate_render(monkeypatch):
     assert "connect" not in vars(module)
     assert "write" not in vars(module)
     materialize_chairman(_template(), DEFAULT_CHAIRMAN_POLICY)
+@pytest.mark.parametrize("newline", [b"\n", b"\r\n"], ids=["lf", "crlf"])
+def test_materializer_accepts_uniform_native_line_endings_without_altering_body(newline):
+    # Force each checkout style regardless of the evaluator host's core.autocrlf.
+    source = _template().replace(b"\r\n", b"\n").replace(b"\n", newline)
+    candidate = materialize_chairman(source, DEFAULT_CHAIRMAN_POLICY)
+    assert _newline(candidate.content) == newline
+    assert _body(candidate.content) == _body(source)
+    assert _frontmatter(candidate.content) == {
+        **_frontmatter(source),
+        "model": "opus",
+        "effort": "medium",
+    }
+    assert candidate.template_sha256 == hashlib.sha256(source).hexdigest()
+    assert candidate.rendered_sha256 == hashlib.sha256(candidate.content).hexdigest()
+    assert materialize_chairman(source, ChairmanPolicy(1, "sonnet", "high")).content == source
+
+
+@pytest.mark.parametrize("mixed", [
+    b"---\r\nname: chairman\ndescription: x\r\nmodel: sonnet\r\neffort: high\r\n---\r\nbody\r\n",
+    b"---\nname: chairman\ndescription: x\nmodel: sonnet\neffort: high\n---\nbody\r\n",
+    b"---\rname: chairman\rdescription: x\rmodel: sonnet\reffort: high\r---\rbody\r",
+])
+def test_mixed_or_bare_carriage_return_line_endings_are_refused(mixed):
+    with pytest.raises(ChairmanPolicyError, match="line endings"):
+        materialize_chairman(mixed, DEFAULT_CHAIRMAN_POLICY)
+
+
+def test_rendered_candidate_provenance_cannot_be_forged_from_supplied_hashes():
+    original = _template()
+    candidate = materialize_chairman(original, DEFAULT_CHAIRMAN_POLICY)
+    assert candidate.template_sha256 == hashlib.sha256(candidate.template).hexdigest()
+    assert candidate.rendered_sha256 == hashlib.sha256(candidate.content).hexdigest()
+    assert candidate.manifest()["template_sha256"] == candidate.template_sha256
+    assert candidate.manifest()["rendered_sha256"] == candidate.rendered_sha256
+
+    with pytest.raises(TypeError):
+        ChairmanMaterialization(
+            template=original, content=candidate.content, policy=DEFAULT_CHAIRMAN_POLICY,
+            template_sha256="0" * 64,
+        )
+    with pytest.raises(ChairmanPolicyError, match="does not match"):
+        ChairmanMaterialization(
+            template=original, content=b"not the rendered candidate", policy=DEFAULT_CHAIRMAN_POLICY,
+        )
+    with pytest.raises(ChairmanPolicyError, match="does not match"):
+        ChairmanMaterialization(
+            template=original,
+            content=candidate.content,
+            policy=ChairmanPolicy(1, "sonnet", "high"),
+        )
+    with pytest.raises(AttributeError):
+        candidate.content = b"changed"
+
+
+def test_materializer_rejects_unknown_policy_object():
+    with pytest.raises(ChairmanPolicyError, match="explicit ChairmanPolicy"):
+        materialize_chairman(_template(), object())

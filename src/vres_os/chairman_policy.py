@@ -75,7 +75,7 @@ class ChairmanPolicy:
 
         try:
             values = json.loads(raw.decode("utf-8"), object_pairs_hook=no_duplicate_keys)
-        except (ValueError, UnicodeDecodeError) as exc:
+        except (ValueError, RecursionError):
             raise ChairmanPolicyError("Invalid Chairman policy JSON") from None
         if not isinstance(values, dict) or set(values) != {"schema", "version", "family", "effort"}:
             raise ChairmanPolicyError("Chairman policy fields are incomplete or unknown")
@@ -89,12 +89,30 @@ DEFAULT_CHAIRMAN_POLICY = ChairmanPolicy(version=1, family="opus", effort="mediu
 
 @dataclass(frozen=True, slots=True)
 class ChairmanMaterialization:
-    """In-memory candidate and its reviewable provenance; not an installed record."""
+    """Immutable candidate derived from its ORIGINAL template, never a host proof.
 
+    Keep the template bytes rather than accepting caller-supplied digest fields.
+    Both digests are computed from actual bytes, and constructing a candidate
+    with mismatched rendered content is refused.
+    """
+
+    template: bytes
     content: bytes
     policy: ChairmanPolicy
-    template_sha256: str
-    rendered_sha256: str
+
+    def __post_init__(self) -> None:
+        if type(self.content) is not bytes:
+            raise ChairmanPolicyError("Chairman candidate content must be bytes")
+        if self.content != _render_chairman(self.template, self.policy):
+            raise ChairmanPolicyError("Chairman candidate does not match its template and policy")
+
+    @property
+    def template_sha256(self) -> str:
+        return hashlib.sha256(self.template).hexdigest()
+
+    @property
+    def rendered_sha256(self) -> str:
+        return hashlib.sha256(self.content).hexdigest()
 
     def manifest(self) -> dict[str, str | int]:
         return {
@@ -109,13 +127,13 @@ class ChairmanMaterialization:
         }
 
 
-def materialize_chairman(template: bytes, policy: ChairmanPolicy) -> ChairmanMaterialization:
-    """Render ONLY the Chairman agent's two frontmatter model fields.
+def _render_chairman(template: bytes, policy: ChairmanPolicy) -> bytes:
+    """Produce a deterministic candidate using the input's LF or CRLF style.
 
-    The source template must use the verified four-field LF/UTF-8 frontmatter
-    contract. Ambiguous or unfamiliar structure is refused, never repaired.
-    This function never touches another agent, reads an installed release,
-    chooses a fallback family, contacts a provider, or writes any file.
+    Git for Windows commonly checks out an LF Git blob as CRLF. Refusing CRLF
+    would make the shipped source unrenderable, while silently converting it
+    would lose byte identity. Accept only UNIFORM LF or UNIFORM CRLF and keep
+    every existing body byte and the exact newline convention.
     """
     if type(policy) is not ChairmanPolicy:
         raise ChairmanPolicyError("An explicit ChairmanPolicy snapshot is required")
@@ -125,13 +143,27 @@ def materialize_chairman(template: bytes, policy: ChairmanPolicy) -> ChairmanMat
         text = template.decode("utf-8")
     except UnicodeDecodeError:
         raise ChairmanPolicyError("Chairman template must be UTF-8") from None
-    if not text.startswith("---\n") or "\r" in text or "\x00" in text:
-        raise ChairmanPolicyError("Chairman template must have LF frontmatter")
-    raw_header, sep, body = text[4:].partition("\n---\n")
+
+    if "\x00" in text:
+        raise ChairmanPolicyError("Chairman template contains forbidden NUL bytes")
+    if "\r\n" in text:
+        newline = "\r\n"
+        remainder = text.replace("\r\n", "")
+        if "\r" in remainder or "\n" in remainder:
+            raise ChairmanPolicyError("Chairman template contains mixed line endings")
+    else:
+        newline = "\n"
+        if "\r" in text:
+            raise ChairmanPolicyError("Chairman template contains unsupported line endings")
+
+    opening = "---" + newline
+    if not text.startswith(opening):
+        raise ChairmanPolicyError("Chairman template must have LF or CRLF frontmatter")
+    raw_header, sep, body = text[len(opening):].partition(newline + "---" + newline)
     if not sep or not body.strip():
         raise ChairmanPolicyError("Chairman template is missing frontmatter closure or body")
 
-    lines = raw_header.split("\n")
+    lines = raw_header.split(newline)
     fields: dict[str, str] = {}
     for line in lines:
         key, separator, value = line.partition(": ")
@@ -152,10 +184,20 @@ def materialize_chairman(template: bytes, policy: ChairmanPolicy) -> ChairmanMat
         f"{key}: {policy.family if key == 'model' else policy.effort if key == 'effort' else value}"
         for key, value in (line.split(": ", 1) for line in lines)
     ]
-    content = ("---\n" + "\n".join(materialized_lines) + "\n---\n" + body).encode("utf-8")
+    return (
+        opening + newline.join(materialized_lines) + newline + "---" + newline + body
+    ).encode("utf-8")
+
+
+def materialize_chairman(template: bytes, policy: ChairmanPolicy) -> ChairmanMaterialization:
+    """Render only Chairman model/effort fields, without writing or activating.
+
+    A caller must separately verify the source template's release identity;
+    this function records the exact bytes supplied, not a physical model or
+    installed release attestation.
+    """
     return ChairmanMaterialization(
-        content=content,
+        template=template,
+        content=_render_chairman(template, policy),
         policy=policy,
-        template_sha256=hashlib.sha256(template).hexdigest(),
-        rendered_sha256=hashlib.sha256(content).hexdigest(),
     )
