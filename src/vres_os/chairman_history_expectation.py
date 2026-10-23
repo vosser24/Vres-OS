@@ -20,9 +20,9 @@ from dataclasses import dataclass
 from .chairman_policy_history import (
     ChairmanPolicyHistory,
     ChairmanPolicyHistoryError,
+    _MAX_PROPOSALS,
 )
 
-_MAX_PROPOSALS = 128
 _SHA256 = re.compile(r"[0-9a-f]{64}", re.ASCII)
 
 
@@ -64,12 +64,18 @@ def require_canonical_history_match(
     """
     if type(expected) is not ExpectedChairmanHistoryIdentity:
         raise ChairmanHistoryExpectationError("Expected comparison identity is required")
-    # Recheck even if someone used object.__setattr__ on a frozen value.
-    ExpectedChairmanHistoryIdentity(
-        expected.proposal_count,
-        expected.canonical_history_sha256,
-        expected.latest_proposal_sha256,
-    )
+    # Reconstruct once so corrupted/deleted slots fail closed with this API's
+    # documented error type; use the validated snapshot for all comparisons.
+    try:
+        checked = ExpectedChairmanHistoryIdentity(
+            expected.proposal_count,
+            expected.canonical_history_sha256,
+            expected.latest_proposal_sha256,
+        )
+    except AttributeError:
+        raise ChairmanHistoryExpectationError(
+            "Expected comparison identity is incomplete"
+        ) from None
     if type(raw_history) is not bytes:
         raise ChairmanHistoryExpectationError("Candidate history must be canonical bytes")
     try:
@@ -81,8 +87,8 @@ def require_canonical_history_match(
     if canonical != raw_history:
         raise ChairmanHistoryExpectationError("Candidate proposal history is not canonical")
     if (
-        len(history.proposals) != expected.proposal_count
-        or hashlib.sha256(canonical).hexdigest() != expected.canonical_history_sha256
-        or history.latest_proposal.sha256 != expected.latest_proposal_sha256
+        len(history.proposals) != checked.proposal_count
+        or hashlib.sha256(canonical).hexdigest() != checked.canonical_history_sha256
+        or history.latest_proposal.sha256 != checked.latest_proposal_sha256
     ):
         raise ChairmanHistoryExpectationError("Candidate history does not match expected identity")

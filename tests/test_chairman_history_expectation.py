@@ -7,7 +7,7 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from vres_os.chairman_policy import DEFAULT_CHAIRMAN_POLICY, ChairmanPolicy
-from vres_os.chairman_policy_history import ChairmanPolicyHistory
+from vres_os.chairman_policy_history import ChairmanPolicyHistory, ChairmanPolicyHistoryError, _MAX_PROPOSALS
 from vres_os.chairman_history_expectation import (
     ChairmanHistoryExpectationError,
     ExpectedChairmanHistoryIdentity,
@@ -144,8 +144,9 @@ def test_noncanonical_input_is_refused_even_if_history_itself_parses():
 
 
 @pytest.mark.parametrize("bad_document", [
-    b"", b"\xff", b"[]", b"not-json", b" " * (256 * 1024 + 1),
-    '{"schema":"wrong","proposals":[]}', None,
+    b"", b"\xff", b"[]", b"not-json",
+    pytest.param(b" " * (256 * 1024 + 1), id="oversized-history"),
+    b'{"schema":"wrong","proposals":[]}', None,
 ])
 def test_invalid_history_input_is_refused(bad_document):
     with pytest.raises(ChairmanHistoryExpectationError):
@@ -174,3 +175,87 @@ def test_no_model_activation_storage_vault_or_network_interface_is_exposed():
     assert "activate" not in vars(module)
     assert "approve" not in vars(module)
     assert not hasattr(_identity(_initial()), "authorized")
+
+
+def test_invalid_schema_reaches_history_schema_validator():
+    history = _initial()
+    canonical = history.to_document()
+    malformed = canonical.replace(
+        b'"schema":"vres-chairman-proposal-history/1"',
+        b'"schema":"unsupported-history/1"',
+        1,
+    )
+    assert malformed != canonical
+    with pytest.raises(ChairmanPolicyHistoryError, match="Unsupported proposal-history schema"):
+        ChairmanPolicyHistory.from_document(malformed)
+    with pytest.raises(ChairmanHistoryExpectationError, match="Invalid candidate"):
+        require_canonical_history_match(malformed, _identity(history))
+
+
+def test_noncanonical_key_order_raw_unicode_newline_and_bom_are_refused():
+    history = ChairmanPolicyHistory.begin(
+        DEFAULT_CHAIRMAN_POLICY, reason="Ελληνικά υποψήφια πολιτική"
+    )
+    canonical = history.to_document()
+    decoded = json.loads(canonical)
+    alternatives = {
+        "key-order": json.dumps(
+            {"proposals": decoded["proposals"], "schema": decoded["schema"]},
+            ensure_ascii=True, separators=(",", ":"),
+        ).encode("ascii"),
+        "literal-unicode": json.dumps(
+            decoded, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8"),
+        "trailing-newline": canonical + b"\n",
+        "bom": b"\xef\xbb\xbf" + canonical,
+    }
+    for label, altered in alternatives.items():
+        assert altered != canonical, label
+        with pytest.raises(ChairmanHistoryExpectationError):
+            require_canonical_history_match(altered, _identity(history))
+
+
+@pytest.mark.parametrize("field", [
+    "proposal_count", "canonical_history_sha256", "latest_proposal_sha256"
+])
+def test_deleted_frozen_identity_slot_fails_with_documented_exception(field):
+    expected = _identity(_initial())
+    object.__delattr__(expected, field)
+    with pytest.raises(ChairmanHistoryExpectationError, match="incomplete"):
+        require_canonical_history_match(_initial().to_document(), expected)
+
+
+@pytest.mark.parametrize("field", [
+    "canonical_history_sha256", "latest_proposal_sha256"
+])
+def test_low_level_digest_mutation_is_refused(field):
+    history = _initial()
+    expected = _identity(history)
+    object.__setattr__(expected, field, "BAD")
+    with pytest.raises(ChairmanHistoryExpectationError, match="lowercase SHA-256"):
+        require_canonical_history_match(history.to_document(), expected)
+
+
+@pytest.mark.parametrize("kind", ["none", "dict", "subclass"])
+def test_wrong_type_of_expected_object_is_refused(kind):
+    history = _initial()
+    existing = _identity(history)
+    if kind == "none":
+        expected = None
+    elif kind == "dict":
+        expected = {"proposal_count": 1}
+    else:
+        class OtherIdentity(ExpectedChairmanHistoryIdentity):
+            pass
+        expected = OtherIdentity(
+            existing.proposal_count,
+            existing.canonical_history_sha256,
+            existing.latest_proposal_sha256,
+        )
+    with pytest.raises(ChairmanHistoryExpectationError, match="required"):
+        require_canonical_history_match(history.to_document(), expected)
+
+
+def test_maximum_allowed_expected_count_matches_history_model_bound():
+    expected = ExpectedChairmanHistoryIdentity(128, "0" * 64, "f" * 64)
+    assert expected.proposal_count == _MAX_PROPOSALS
