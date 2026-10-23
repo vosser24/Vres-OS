@@ -6,16 +6,19 @@ This branch inherits the 2026-10-22 full-scope documentation checkpoint at dc76d
 
 ## Read first
 
-1. [#165 Chairman Phase A development and next evaluation](VRES-165-CHAIRMAN-POLICY-PHASE-A-DEVELOPMENT-HANDOFF-2026-10-23.md) — newest source commit, exact changed files, NOT_RUN test status and next action.
-2. [P2-A1 R4 independent acceptance and resume](VRES-CHATGPT-P2A1-R4-INDEPENDENT-ACCEPTANCE-HANDOFF-2026-10-23.md) — accepted R4 security evidence, prior rejections and held incidents.
-3. [October 22 ChatGPT-led product-direction checkpoint](VRES-CHATGPT-LEAD-SCOPE-REACTIVATION-CHECKPOINT-2026-10-22.md) — original full development ambition.
-4. [Full 42-item functionality register](../roadmap/VRES-FULL-SCOPE-FUNCTIONALITY-REGISTER-2026-10-22.md).
-5. [Phased ChatGPT-led delivery plan](../roadmap/VRES-CHATGPT-LED-FULL-SCOPE-DELIVERY-PLAN-2026-10-22.md).
-6. [October 22 new-session historical resume](VRES-CHATGPT-NEW-SESSION-RESUME-2026-10-22.md), whose old source-publication action is now CLOSED/superseded.
-7. For the schema-048 incident, historical [E7 C2A/C2B incident handoff](PREPRODUCTION-E7-C2A-C2B-CONTROL-INCIDENT-RESUME-HANDOFF-2026-10-13.md) and local unpublished documents when the operator supplies them.
+1. [#165 Phase A operator SHA transcription recovery](VRES-165-PHASE-A-OPERATOR-SHA-ERRATUM-2026-10-23.md) — newest operator failure; exact correct 40-character HEAD and single-block recovery; no review worktree yet.
+2. [#165 Chairman Phase A development and next evaluation](VRES-165-CHAIRMAN-POLICY-PHASE-A-DEVELOPMENT-HANDOFF-2026-10-23.md) — newest source commit, exact changed files, NOT_RUN test status and next action.
+3. [P2-A1 R4 independent acceptance and resume](VRES-CHATGPT-P2A1-R4-INDEPENDENT-ACCEPTANCE-HANDOFF-2026-10-23.md) — accepted R4 security evidence, prior rejections and held incidents.
+4. [October 22 ChatGPT-led product-direction checkpoint](VRES-CHATGPT-LEAD-SCOPE-REACTIVATION-CHECKPOINT-2026-10-22.md) — original full development ambition.
+5. [Full 42-item functionality register](../roadmap/VRES-FULL-SCOPE-FUNCTIONALITY-REGISTER-2026-10-22.md).
+6. [Phased ChatGPT-led delivery plan](../roadmap/VRES-CHATGPT-LED-FULL-SCOPE-DELIVERY-PLAN-2026-10-22.md).
+7. [October 22 new-session historical resume](VRES-CHATGPT-NEW-SESSION-RESUME-2026-10-22.md), whose old source-publication action is now CLOSED/superseded.
+8. For the schema-048 incident, historical [E7 C2A/C2B incident handoff](PREPRODUCTION-E7-C2A-C2B-CONTROL-INCIDENT-RESUME-HANDOFF-2026-10-13.md) and local unpublished documents when the operator supplies them.
 
 ## Current exact boundaries
 
+- **OPERATOR REVIEW STATUS CORRECTION:** The first #165 Windows worktree creation FAILED due to ChatGPT's 38-character SHA typo. Remote fetch subsequently succeeded but worktree add failed; the printed VRES_165_PHASE_A_REVIEW_READY was FALSE and is not acceptance evidence. Correct 40-character SHA: 9c919271ba63fb979478c62abaf6c2c3d2679ae7. Follow the new erratum handoff, not the copied command.
+- **NEXT REQUIRED STEP:** Single PowerShell scriptblock with strict git exit/identity checks; create the previously absent #165 review folder, then only later run the protected offline Claude evaluation.
 - **NEWEST SOURCE FEATURE — INDEPENDENT TEST NOT_RUN:** #165 Phase A Chairman policy foundation, branch feature/165-chairman-policy-foundation-20261023, commit 9c919271ba63fb979478c62abaf6c2c3d2679ae7, parent R4 3ba41d5ae6b8f2c2abd93d27f82cce0755878237. Three changed files: new chairman_policy.py, new test_chairman_policy_materialization.py and Chairman text clarification. Pure requested opus/medium policy candidate, not installed or enabled; existing template still sonnet/high.
 - **NEXT REQUIRED EVIDENCE:** one exact-commit isolated Windows Claude security/code review plus offline tests for #165 Phase A, NOT_RUN as of this checkpoint. Do not reuse R4 test count for this new source SHA.
 - **Latest independently ACCEPTED source correction (OFFLINE ONLY):** 3ba41d5ae6b8f2c2abd93d27f82cce0755878237, branch fix/p2a1-loopback-hold-aliases-20261022.
