@@ -192,27 +192,47 @@ def test_invalid_schema_reaches_history_schema_validator():
         require_canonical_history_match(malformed, _identity(history))
 
 
-def test_noncanonical_key_order_raw_unicode_newline_and_bom_are_refused():
+@pytest.mark.parametrize(
+    "variant, expected_error",
+    [
+        pytest.param("key-order", "not canonical", id="key-order"),
+        pytest.param("literal-unicode", "not canonical", id="literal-unicode"),
+        pytest.param("trailing-newline", "not canonical", id="trailing-newline"),
+        pytest.param("bom", "Invalid candidate", id="bom"),
+    ],
+)
+def test_noncanonical_key_order_raw_unicode_newline_and_bom_are_refused(
+    variant, expected_error
+):
     history = ChairmanPolicyHistory.begin(
         DEFAULT_CHAIRMAN_POLICY, reason="Ελληνικά υποψήφια πολιτική"
     )
     canonical = history.to_document()
     decoded = json.loads(canonical)
-    alternatives = {
-        "key-order": json.dumps(
-            {"proposals": decoded["proposals"], "schema": decoded["schema"]},
+
+    if variant == "key-order":
+        # Canonical sort_keys=True orders "proposals" before "schema".
+        # Put "schema" FIRST and do NOT sort the deliberate negative case.
+        assert canonical.startswith(b'{"proposals":')
+        altered = json.dumps(
+            {"schema": decoded["schema"], "proposals": decoded["proposals"]},
             ensure_ascii=True, separators=(",", ":"),
-        ).encode("ascii"),
-        "literal-unicode": json.dumps(
+        ).encode("ascii")
+        assert altered.startswith(b'{"schema":')
+    elif variant == "literal-unicode":
+        altered = json.dumps(
             decoded, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
-        ).encode("utf-8"),
-        "trailing-newline": canonical + b"\n",
-        "bom": b"\xef\xbb\xbf" + canonical,
-    }
-    for label, altered in alternatives.items():
-        assert altered != canonical, label
-        with pytest.raises(ChairmanHistoryExpectationError):
-            require_canonical_history_match(altered, _identity(history))
+        ).encode("utf-8")
+    elif variant == "trailing-newline":
+        altered = canonical + b"\n"
+    elif variant == "bom":
+        altered = b"\xef\xbb\xbf" + canonical
+    else:
+        raise AssertionError("Unexpected canonicalization test variant")
+
+    assert altered != canonical, variant
+    with pytest.raises(ChairmanHistoryExpectationError, match=expected_error):
+        require_canonical_history_match(altered, _identity(history))
 
 
 @pytest.mark.parametrize("field", [
