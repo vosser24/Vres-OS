@@ -392,6 +392,173 @@ def test_legacy_bracketed_loopback_hold_remains_effective_and_deduplicates(perso
     assert len(registry["held"]) == 2
 
 
+# B5. Equivalent non-loopback host spellings share HELDS, not approvals.
+
+@pytest.mark.parametrize(
+    "held_host,alias_host",
+    [
+        ("2001:db8::5", "2001:0db8::5"),
+        ("2001:db8::5", "2001:db8:0:0:0:0:0:5"),
+        ("2001:0db8::5", "2001:db8::5"),
+        ("10.0.0.5", "::ffff:10.0.0.5"),
+        ("::ffff:a00:5", "10.0.0.5"),
+        ("10.0.0.5", "10.0.0.5."),
+        ("db.example.internal", "db.example.internal."),
+        ("db.example.internal.", "DB.EXAMPLE.INTERNAL"),
+    ],
+)
+@pytest.mark.parametrize("purpose", ["runtime", "writer", "migrator"])
+def test_nonloopback_held_alias_refused_before_credentials(
+    personal_root, tripwires, held_host, alias_host, purpose,
+):
+    _configure(host=alias_host)
+    _registry(
+        personal_root,
+        approved=[(alias_host.lower(), 5432, "vres_personal")],
+        held=[(held_host, 5432)],
+    )
+    with pytest.raises(DatabaseTargetRefused, match="held"):
+        db.build_dsn(purpose)
+    assert tripwires.secret_reads == []
+
+
+@pytest.mark.parametrize(
+    "held_host,alias_host",
+    [
+        ("2001:db8::5", "2001:db8:0:0:0:0:0:5"),
+        ("10.0.0.5", "::ffff:a00:5"),
+        ("db.example.internal", "db.example.internal."),
+    ],
+)
+def test_nonloopback_alias_hold_refuses_admin_and_setup(
+    personal_root, monkeypatch, held_host, alias_host,
+):
+    _registry(personal_root, held=[(held_host, 5432)])
+    with pytest.raises(DatabaseTargetRefused, match="held"):
+        database_targets.require_admin_contact(
+            f"host={alias_host} port=5432 dbname=postgres",
+            "vres_personal",
+        )
+    monkeypatch.setattr(database_targets, "_interactive", lambda: True)
+    with pytest.raises(DatabaseTargetRefused, match="cannot be approved"):
+        database_targets.confirm_target_for_setup(
+            alias_host, 5432, "vres_personal",
+            ask=lambda _prompt: pytest.fail("held alias reached approval prompt"),
+        )
+
+
+@pytest.mark.parametrize(
+    "existing,second",
+    [
+        ("2001:db8::5", "2001:0db8:0:0:0:0:0:5"),
+        ("10.0.0.5", "::ffff:10.0.0.5"),
+        ("db.example.internal", "db.example.internal."),
+    ],
+)
+def test_nonloopback_alias_hold_is_deduplicated(personal_root, existing, second):
+    _registry(personal_root, held=[(existing, 5432)])
+    database_targets.hold_target(second, 5432, reason="same physical spelling")
+    registry = json.loads((personal_root / database_targets.REGISTRY_NAME).read_text())
+    assert len(registry["held"]) == 1
+    assert registry["held"][0]["host"] == existing
+
+
+@pytest.mark.parametrize(
+    "approved_host,other_spelling",
+    [
+        ("2001:db8::5", "2001:0db8::5"),
+        ("10.0.0.5", "::ffff:10.0.0.5"),
+        ("db.example.internal", "db.example.internal."),
+    ],
+)
+def test_nonloopback_hold_identity_never_expands_approval(
+    personal_root, tripwires, approved_host, other_spelling,
+):
+    _configure(host=other_spelling)
+    _registry(personal_root, approved=[(approved_host, 5432, "vres_personal")])
+    with pytest.raises(DatabaseTargetRefused, match="has not been approved"):
+        db.build_dsn("runtime")
+    assert tripwires.secret_reads == []
+
+
+@pytest.mark.parametrize(
+    "held_host,unrelated",
+    [
+        ("2001:db8::5", "2001:db8::6"),
+        ("10.0.0.5", "10.0.0.6"),
+        ("db.example.internal", "db2.example.internal"),
+    ],
+)
+def test_unrelated_approved_server_not_affected_by_nonloopback_hold(
+    personal_root, held_host, unrelated,
+):
+    _registry(
+        personal_root,
+        approved=[(unrelated, 5432, "vres_personal")],
+        held=[(held_host, 5432)],
+    )
+    database_targets.require_contact(
+        f"host={unrelated} port=5432 dbname=vres_personal"
+    )
+
+
+@pytest.mark.parametrize("bad_port", ["²", "٥٤٣٢", "５４３２"])
+def test_non_ascii_port_spelling_fails_closed_as_database_target_refused(bad_port):
+    with pytest.raises(DatabaseTargetRefused, match="invalid port"):
+        database_targets._target_from_params(
+            {"host": "localhost", "port": bad_port, "dbname": "vres_personal"}
+        )
+
+
+def test_status_reports_legacy_invalid_approvals_and_config_without_exiting(
+    personal_root, capsys,
+):
+    _configure(host="@vres")
+    _registry(
+        personal_root,
+        approved=[
+            ("@vres", 5432, "vres_personal"),
+            ("db.example.internal", 5433, "vres_personal"),
+        ],
+        held=[("@vres", 5432)],
+    )
+    assert database_targets.main(["status"]) == 0
+    output = capsys.readouterr().out
+    assert "approved (inactive): unsafe historical target at port 5432" in output
+    assert "approved: database 'vres_personal' at db.example.internal:5433" in output
+    assert "held server: @vres:5432" in output
+    assert "blocks EVERY host on port 5432" in output
+    assert "configured target: REFUSED" in output
+
+
+def test_status_explains_port_wide_legacy_hold_without_registry_mutation(
+    personal_root, capsys,
+):
+    _configure(host="db.example.internal")
+    _registry(
+        personal_root,
+        approved=[("db.example.internal", 5432, "vres_personal")],
+        held=[("127.1", 5432)],
+    )
+    before = (personal_root / database_targets.REGISTRY_NAME).read_bytes()
+    assert database_targets.main(["status"]) == 0
+    output = capsys.readouterr().out
+    assert "blocks EVERY host on port 5432" in output
+    assert "held for this installation" in output
+    assert (personal_root / database_targets.REGISTRY_NAME).read_bytes() == before
+
+
+def test_unverified_nat64_48_is_refused_even_with_exact_approval(
+    personal_root, tripwires,
+):
+    host = "64:ff9b:1::1234"
+    _configure(host=host)
+    _registry(personal_root, approved=[(host, 5432, "vres_personal")])
+    with pytest.raises(DatabaseTargetRefused, match="ambiguous or unsafe"):
+        db.build_dsn("runtime")
+    assert tripwires.secret_reads == []
+
+
 # B. Unknown and ambiguous targets
 
 

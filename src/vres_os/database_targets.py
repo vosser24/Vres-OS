@@ -23,15 +23,17 @@ Limitations: an approval names a host, port and database. It is not a cryptograp
 identification of the PostgreSQL cluster that answers there; a different cluster
 later serving the same host, port and database name would not be told apart before
 connecting. Holds are therefore deliberately broader than approvals (a whole server),
-but server holds recognize literal localhost (including a trailing DNS dot), all IPv4
-127/8 addresses, IPv6 ::1 and IPv4-mapped IPv6 loopback addresses as one server.
-Unusual numeric host spellings, bracketed/zone-scoped forms, socket paths and
-unspecified addresses are refused before any approval or connection. Historical
-holds with unsupported host syntax remain preserved: they block contact on their
-port until reconciled, without blocking the addition of further holds. Neither a
-hold nor exact host/port/database approval proves PostgreSQL cluster identity:
-DNS aliases, LAN/computer names and endpoint replacement still need external
-verification. No DNS resolution is performed by this guard.
+but server holds recognize equivalent numeric addresses (including compressed
+and expanded IPv6 and mapped IPv4), trailing-dot DNS names, and the full IPv4
+127/8 and IPv6 loopback groups. Approvals STILL require the exact recorded host,
+port and database, so hold normalization never expands permissions. Unusual
+numeric host spellings, bracketed/zone-scoped forms, socket paths and unspecified
+addresses are refused before any approval or connection. Historical holds with
+unsupported host syntax remain preserved: they conservatively block contact to
+every host on their port until separately authorized reconciliation, without
+preventing additional holds. DNS aliases, LAN/computer names and endpoint
+replacement remain unresolved without external identity proof. No DNS lookup is
+performed and no hold/approval proves the PostgreSQL cluster identity.
 """
 from __future__ import annotations
 
@@ -84,9 +86,12 @@ _V4_TRANSLATION_PREFIXES = tuple(
         "::/96",
         "0:0:0:0:ffff:0:0:0/96",
         "64:ff9b::/96",
-        "64:ff9b:1::/48",
     )
 )
+# This local-use /48 can embed IPv4 at multiple offsets. There is no reason
+# to allow an otherwise approved Vres DB endpoint through it before an explicit
+# translation/identity contract exists.
+_UNVERIFIED_NAT64_PREFIX = ipaddress.IPv6Network("64:ff9b:1::/48")
 _FOLDERID_LOCAL_APP_DATA = "{F1B32785-6FBA-4FCF-9D55-7B8E7F157091}"
 _NO_CONTACT = "No connection was attempted."
 
@@ -145,6 +150,8 @@ def _validate_contact_host(host: str) -> None:
             f"Vres refused an unspecified database host address. {_NO_CONTACT}"
         )
     if isinstance(address, ipaddress.IPv6Address) and mapped is None:
+        if address in _UNVERIFIED_NAT64_PREFIX:
+            raise DatabaseTargetRefused(refusal)
         # Known transition forms can embed 127/8 without being IPv6 loopback.
         # Treat them as ambiguous, rather than granting a new host approval
         # that might route back to the held IPv4 control database.
@@ -161,6 +168,25 @@ def _validate_contact_host(host: str) -> None:
             raise DatabaseTargetRefused(refusal)
 
 
+def _server_identity(host: str, port: int) -> tuple[str, int]:
+    """Offline comparison key for HELDS only; never use it for approvals.
+
+    Canonicalizes literal IP addresses, mapped IPv4, the localhost loopback
+    family, and the insignificant terminal dot on DNS names. Neither DNS
+    lookup nor a claim of physical server identity is involved.
+    """
+    if _is_loopback_host(host):
+        return ("loopback", port)
+    literal = host.removesuffix(".")
+    try:
+        address = ipaddress.ip_address(literal)
+    except ValueError:
+        return (f"dns:{literal}", port)
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        address = address.ipv4_mapped
+    return (f"ip:{address.compressed}", port)
+
+
 class DatabaseTarget(NamedTuple):
     host: str
     port: int
@@ -170,7 +196,7 @@ class DatabaseTarget(NamedTuple):
         return f"database {self.dbname!r} at {self.host}:{self.port}"
 
     def server(self) -> tuple[str, int]:
-        return ("loopback" if _is_loopback_host(self.host) else self.host), self.port
+        return _server_identity(self.host, self.port)
 
 
 def _shell_local_app_data() -> str:
@@ -294,7 +320,7 @@ def _target_from_params(params: Mapping[str, object]) -> DatabaseTarget:
         raise DatabaseTargetRefused(
             f"Vres refused a database name that embeds another connection string. {_NO_CONTACT}"
         )
-    if not port.isdigit() or not 1 <= int(port) <= 65535:
+    if not port.isascii() or not port.isdigit() or not 1 <= int(port) <= 65535:
         raise DatabaseTargetRefused(f"Vres refused a database target with an invalid port. {_NO_CONTACT}")
     return DatabaseTarget(host, int(port), dbname)
 
@@ -466,7 +492,7 @@ def _saved_hold_server(host: str, port: int) -> tuple[str, int] | None:
         _validate_contact_host(saved)
     except DatabaseTargetRefused:
         return None
-    return (saved, port)
+    return _server_identity(saved, port)
 
 
 def _held(target: DatabaseTarget, held: list[dict], *, adding_hold: bool = False) -> bool:
@@ -643,17 +669,31 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Personal-release database contact guard: active; registry {root / REGISTRY_NAME}")
         print("  (approvals name host, port and database; they do not prove PostgreSQL cluster identity)")
         for item in approved:
-            print(f"  approved: {target_for(item['host'], item['port'], item['dbname']).describe()}")
+            try:
+                approved_target = target_for(item["host"], item["port"], item["dbname"])
+            except DatabaseTargetRefused:
+                # Older registries may contain syntax no longer safe to contact.
+                # Keep reporting the remaining entries, but do not echo the
+                # original potentially sensitive or malformed host value.
+                print(f"  approved (inactive): unsafe historical target at port {item['port']}; contact refused")
+            else:
+                print(f"  approved: {approved_target.describe()}")
         for item in held:
             print(f"  held server: {item['host']}:{item['port']} ({item['reason']})")
+            if _saved_hold_server(item["host"], item["port"]) is None:
+                print(f"    WARNING: unclassifiable historical hold blocks EVERY host on port {item['port']}")
         db = ConfigStore().load().database
-        configured = target_for(db.host, db.port, db.database)
         try:
-            _decide(root, configured)
-            decision = "approved"
-        except DatabaseTargetRefused as exc:
-            decision = str(exc)
-        print(f"  configured {configured.describe()}: {decision}")
+            configured = target_for(db.host, db.port, db.database)
+        except DatabaseTargetRefused:
+            print("  configured target: REFUSED — unsafe host or port; no database contact permitted")
+        else:
+            try:
+                _decide(root, configured)
+                decision = "approved"
+            except DatabaseTargetRefused as exc:
+                decision = str(exc)
+            print(f"  configured {configured.describe()}: {decision}")
         return 0
     except (DatabaseTargetRefused, ValueError) as exc:
         print(str(exc), file=sys.stderr)
