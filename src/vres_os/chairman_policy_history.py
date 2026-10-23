@@ -22,7 +22,11 @@ from .chairman_policy import ChairmanPolicy, ChairmanPolicyError
 HISTORY_SCHEMA = "vres-chairman-proposal-history/1"
 _PROPOSAL_SCHEMA = "vres-chairman-proposal/1"
 _MAX_PROPOSALS = 128
-_MAX_DOCUMENT_BYTES = 192 * 1024
+# A valid 512-byte UTF-8 rationale may occupy 1536 bytes after ensure_ascii
+# JSON escaping. 128 such bounded entries serialize to less than 256 KiB
+# including the schema, hashes and policy metadata. Keep reading and writing
+# within the same limit, even on a full valid history.
+_MAX_DOCUMENT_BYTES = 256 * 1024
 _MAX_REASON_BYTES = 512
 _SHA256 = re.compile(r"[0-9a-f]{64}", re.ASCII)
 
@@ -165,10 +169,13 @@ class ChairmanPolicyHistory:
         return ChairmanPolicyHistory(self.proposals + (entry,))
 
     def to_document(self) -> bytes:
-        return _json_bytes({
+        content = _json_bytes({
             "schema": HISTORY_SCHEMA,
             "proposals": [entry.to_payload() for entry in self.proposals],
         })
+        if len(content) > _MAX_DOCUMENT_BYTES:
+            raise ChairmanPolicyHistoryError("Canonical proposal history exceeds size limit")
+        return content
 
     @classmethod
     def from_document(cls, raw: bytes) -> ChairmanPolicyHistory:

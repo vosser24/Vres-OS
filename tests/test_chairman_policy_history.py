@@ -157,7 +157,7 @@ def test_unknown_authority_fields_and_tampered_chain_fail_closed(change):
     b'{"schema":"vres-chairman-proposal-history/1","schema":"vres-chairman-proposal-history/1","proposals":[]}',
     b'{"schema":"vres-chairman-proposal-history/1","proposals":NaN}',
     pytest.param(b"[" * 1100 + b"]" * 1100, id="deep-json"),
-    pytest.param(b" " * (192 * 1024 + 1), id="oversized-document"),
+    pytest.param(b" " * (256 * 1024 + 1), id="oversized-document"),
 ])
 def test_malformed_documents_never_supply_an_active_policy(raw):
     with pytest.raises(ChairmanPolicyHistoryError):
@@ -193,3 +193,37 @@ def test_no_database_vault_model_or_disk_authority_is_exposed():
     assert "activate" not in vars(module)
     assert history.manifest()["state"] == "candidates_only"
     assert history.latest_proposal.policy.family == "opus"
+def test_full_128_entry_unicode_history_round_trips_under_same_byte_limit():
+    """The old 192-KiB reader rejected this fully valid serialized history."""
+    maximum_rationale = "λ" * 256  # 512 UTF-8 bytes, 1536 escaped bytes
+    history = ChairmanPolicyHistory.begin(
+        DEFAULT_CHAIRMAN_POLICY, reason=maximum_rationale
+    )
+    for sequence in range(2, 129):
+        family = "sonnet" if sequence % 2 == 0 else "opus"
+        history = history.supersede(
+            ChairmanPolicy(sequence, family, "medium"),
+            expected_latest_sha256=history.latest_proposal.sha256,
+            reason=maximum_rationale,
+        )
+
+    canonical = history.to_document()
+    assert len(history.proposals) == 128
+    assert 192 * 1024 < len(canonical) <= 256 * 1024
+    assert ChairmanPolicyHistory.from_document(canonical) == history
+    assert ChairmanPolicyHistory.from_document(canonical).to_document() == canonical
+    assert history.manifest()["state"] == "candidates_only"
+
+    with pytest.raises(ChairmanPolicyHistoryError):
+        history.supersede(
+            ChairmanPolicy(129, "sonnet", "medium"),
+            expected_latest_sha256=history.latest_proposal.sha256,
+            reason="one too many",
+        )
+
+
+def test_document_bound_applies_to_writer_and_reader():
+    history = _start()
+    assert ChairmanPolicyHistory.from_document(history.to_document()) == history
+    with pytest.raises(ChairmanPolicyHistoryError):
+        ChairmanPolicyHistory.from_document(b" " * (256 * 1024 + 1))
