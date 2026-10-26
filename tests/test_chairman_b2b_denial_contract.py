@@ -51,6 +51,26 @@ def _candidate() -> ClaimedCanonicalHistory:
     return ClaimedCanonicalHistory(_b1().to_document())
 
 
+def _next(history: ChairmanPolicyHistory, family: str) -> ChairmanPolicyHistory:
+    return history.supersede(
+        ChairmanPolicy(len(history.proposals) + 1, family, "medium"),
+        expected_latest_sha256=history.latest_proposal.sha256,
+        reason="next UNVERIFIED candidate, never installed",
+    )
+
+
+def _head_for(prior: ChairmanPolicyHistory) -> ClaimedAnchorHead:
+    return ClaimedAnchorHead(
+        epoch=len(prior.proposals) + 3,
+        proposal_count=len(prior.proposals),
+        history_sha256=prior.sha256,
+        latest_proposal_sha256=prior.latest_proposal.sha256,
+        governing=ClaimedGoverningReference(GoverningKind.PRE_HISTORY_BASELINE),
+        pending=ClaimedPendingState(PendingKind.NONE),
+        scope=_scope(),
+    )
+
+
 def _head(
     count: int = 0,
     pending: ClaimedPendingState | None = None,
@@ -310,10 +330,137 @@ def test_claimed_successor_count_is_exact_but_not_a_trust_head_check():
     assert _assess(candidate=two) == Refused(RefusalCode.CLAIM_CONFLICT)
     # A claimed existing L count=1 requires exactly one more B1 entry.
     assert _assess(head=_head(1)) == Refused(RefusalCode.CLAIM_CONFLICT)
-    # Even a fully self-consistent pair of *attacker supplied* count + B1
-    # bytes remains INDETERMINATE, not authenticated prefix equality.
+    # This pair matches the caller-SUPPLIED prior B1 prefix exactly.
+    # That equality is NOT independent anchoring or operator authorization.
     outcome = _assess(head=_head(1), candidate=two)
     assert outcome == Indeterminate(RefusalCode.INDEPENDENT_AUTHORITY_UNAVAILABLE)
+
+
+def test_canonical_prefix_match_still_is_not_external_authority():
+    first = _b1()
+    second = _next(first, "sonnet")
+    third = _next(second, "opus")
+    candidate = ClaimedCanonicalHistory(third.to_document())
+    assert _assess(head=_head_for(second), candidate=candidate) == Indeterminate(
+        RefusalCode.INDEPENDENT_AUTHORITY_UNAVAILABLE
+    )
+
+
+@pytest.mark.parametrize("variant", ["different-root-policy", "modified-first-reason"])
+def test_valid_fork_with_identical_count_is_refused_against_claimed_prior(variant):
+    first = _b1()
+    if variant == "different-root-policy":
+        alternate = ChairmanPolicyHistory.begin(
+            ChairmanPolicy(1, "sonnet", "high"), reason="unverified alternative"
+        )
+        fork = _next(alternate, "opus")
+    else:
+        alternate = ChairmanPolicyHistory.begin(
+            ChairmanPolicy(1, "opus", "medium"), reason="changed initial reason"
+        )
+        fork = _next(alternate, "sonnet")
+    assert alternate.sha256 != first.sha256
+    assert len(fork.proposals) == 2
+    assert fork.proposals[1].supersedes_sha256 == alternate.latest_proposal.sha256
+    assert _assess(
+        head=_head_for(first), candidate=ClaimedCanonicalHistory(fork.to_document())
+    ) == Refused(RefusalCode.CLAIM_CONFLICT)
+
+
+@pytest.mark.parametrize("field", ["history_sha256", "latest_proposal_sha256"])
+def test_wrong_claimed_prior_identity_refuses_even_for_correct_linked_history(field):
+    first = _b1()
+    second = _next(first, "sonnet")
+    altered_head = replace(_head_for(first), **{field: "f" * 64})
+    assert altered_head != _head_for(first)
+    assert _assess(
+        head=altered_head, candidate=ClaimedCanonicalHistory(second.to_document())
+    ) == Refused(RefusalCode.CLAIM_CONFLICT)
+
+
+@pytest.mark.parametrize("sequence", [1, 2])
+def test_governing_older_or_latest_must_match_prior_proposal_sha(sequence):
+    first = _b1()
+    second = _next(first, "sonnet")
+    third = _next(second, "opus")
+    candidate = ClaimedCanonicalHistory(third.to_document())
+    prior = _head_for(second)
+    exact_g = ClaimedGoverningReference(
+        GoverningKind.L_ENTRY, sequence, second.proposals[sequence - 1].sha256
+    )
+    valid_claim = replace(prior, governing=exact_g)
+    # The older G entry is deliberately allowed: G is not necessarily latest L.
+    assert _assess(head=valid_claim, candidate=candidate) == Indeterminate(
+        RefusalCode.INDEPENDENT_AUTHORITY_UNAVAILABLE
+    )
+    incorrect_g = ClaimedGoverningReference(GoverningKind.L_ENTRY, sequence, "e" * 64)
+    assert incorrect_g.proposal_sha256 != exact_g.proposal_sha256
+    invalid_claim = replace(prior, governing=incorrect_g)
+    assert _assess(head=invalid_claim, candidate=candidate) == Refused(
+        RefusalCode.CLAIM_CONFLICT
+    )
+
+
+def test_genesis_rejects_a_well_shaped_but_nonexistent_governing_b1_entry():
+    nonexistent = ClaimedGoverningReference(
+        GoverningKind.L_ENTRY, 1, _b1().latest_proposal.sha256
+    )
+    with pytest.raises(ClaimedEvidenceError):
+        replace(_head(), governing=nonexistent)
+
+
+@pytest.mark.parametrize("field", ["history_sha256", "latest_proposal_sha256"])
+def test_non_genesis_explicitly_refuses_zero_filled_sha(field):
+    with pytest.raises(ClaimedEvidenceError):
+        replace(_head(1), **{field: "0" * 64})
+
+
+@pytest.mark.parametrize(
+    "index, invalid",
+    [
+        (0, None), (1, None), (2, None), (3, None), (4, None),
+        (0, False), (1, False), (2, {}), (3, False), (4, {}),
+    ],
+)
+def test_every_assessment_argument_requires_an_exact_typed_claim(index, invalid):
+    head, candidate, scope = _head(), _candidate(), _scope()
+    arguments = [
+        head, candidate, scope,
+        claimed_evidence_digest(head), claimed_evidence_digest(candidate),
+    ]
+    arguments[index] = invalid
+    assert assess_unverified_claims(*arguments) == Refused(
+        RefusalCode.MALFORMED_CLAIM
+    )
+
+
+def test_candidate_bytes_changed_after_digest_snapshot_refuse_without_authority():
+    head, candidate, scope = _head(), _candidate(), _scope()
+    pinned_head = claimed_evidence_digest(head)
+    pinned_candidate = claimed_evidence_digest(candidate)
+    changed = ChairmanPolicyHistory.begin(
+        ChairmanPolicy(1, "sonnet", "medium"),
+        reason="different still-unverified initial candidate",
+    )
+    assert changed.to_document() != candidate.raw_b1
+    object.__setattr__(candidate, "raw_b1", changed.to_document())
+    assert assess_unverified_claims(
+        head, candidate, scope, pinned_head, pinned_candidate
+    ) == Refused(RefusalCode.CLAIM_CONFLICT)
+
+
+def test_reason_codes_are_information_not_a_consumer_permission():
+    for outcome in (
+        _assess(),
+        Refused(RefusalCode.CLAIM_CONFLICT),
+    ):
+        assert type(outcome) in (Refused, Indeterminate)
+        assert not hasattr(outcome, "approved")
+        assert not hasattr(outcome, "ready_for_install")
+        with pytest.raises(TypeError, match="authorization boolean"):
+            bool(outcome)
+    # String-valued codes are an existing compatibility choice: no caller
+    # may promote them or an Indeterminate type into installation authority.
 
 
 def test_pending_variants_are_closed_and_wrong_digest_domains_refuse():

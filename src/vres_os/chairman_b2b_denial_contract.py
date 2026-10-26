@@ -463,9 +463,10 @@ def assess_unverified_claims(
 ) -> DenialOnlyResult:
     """Deny malformed/conflicting claims; other claims remain INDETERMINATE.
 
-    Even self-consistent claim digests have no protected provenance. This
-    function never authenticates H0, checks a protected prior prefix, calls
-    B2A with a self-sourced expected head, or produces an install decision.
+    These offline checks compare a canonical prior B1 prefix to a CALLER-
+    SUPPLIED claimed head, which is NOT independently authenticated. They
+    never authenticate H0, issue a permit or install a model. Both a matching
+    claimed prefix and a matching claimed G still grant NO authority.
     """
     try:
         checked_head = _checked_head(head)
@@ -473,8 +474,13 @@ def assess_unverified_claims(
         anchor_bytes = canonical_claimed_anchor_bytes(checked_head)
         if type(candidate) is not ClaimedCanonicalHistory:
             raise ClaimedEvidenceError("Typed claimed candidate required")
-        history_bytes = candidate.evidence_bytes()
-        candidate_count = len(_read_canonical_b1(candidate.raw_b1).proposals)
+        # Take exactly one immutable bytes snapshot of the unverified candidate.
+        # B1 revalidation is required even after low-level dataclass mutation.
+        candidate_raw = candidate.raw_b1
+        parsed_candidate = _read_canonical_b1(candidate_raw)
+        history_bytes = (
+            _HISTORY_DOMAIN + len(candidate_raw).to_bytes(4, "big") + candidate_raw
+        )
         checked_head_digest = _checked_digest(head_digest)
         checked_candidate_digest = _checked_digest(candidate_digest)
     except (ValueError, TypeError, AttributeError, RecursionError):
@@ -492,12 +498,38 @@ def assess_unverified_claims(
         return Refused(RefusalCode.CLAIM_CONFLICT)
     if checked_head.pending.kind is not PendingKind.NONE:
         return Refused(RefusalCode.UNRESOLVED_INTENT)
-    # Check only count/one appended B1 shape. No caller-supplied prefix hash is
-    # promoted to a protected head: authentic prefix comparison is DEFERRED.
-    if candidate_count != checked_head.proposal_count + 1:
+    # B1 already checks every sequence, link, version and adjacent no-op.
+    # Count and the old canonical prefix must ALSO match the supplied L claim.
+    prior_count = checked_head.proposal_count
+    if len(parsed_candidate.proposals) != prior_count + 1:
         return Refused(RefusalCode.CLAIM_CONFLICT)
-    # Even if all CLAIMED fields are internally consistent, no independent
-    # protected authority was consulted. NEVER interpret this as checks passed.
+    if prior_count:
+        try:
+            prior = ChairmanPolicyHistory(parsed_candidate.proposals[:prior_count])
+            prior_raw = prior.to_document()  # standalone canonical B1 prefix, not a byte slice
+        except (ChairmanPolicyHistoryError, ValueError, TypeError, RecursionError):
+            return Refused(RefusalCode.MALFORMED_CLAIM)
+        if (
+            hashlib.sha256(prior_raw).hexdigest() != checked_head.history_sha256
+            or prior.latest_proposal.sha256 != checked_head.latest_proposal_sha256
+            or (
+                parsed_candidate.proposals[prior_count].supersedes_sha256
+                != prior.latest_proposal.sha256
+            )
+        ):
+            return Refused(RefusalCode.CLAIM_CONFLICT)
+        # Governing G may be older than L after pending/abandoned proposals.
+        # This only checks a caller's historical reference, NOT installed G.
+        g = checked_head.governing
+        if (
+            g.kind is GoverningKind.L_ENTRY
+            and prior.proposals[g.sequence - 1].sha256 != g.proposal_sha256
+        ):
+            return Refused(RefusalCode.CLAIM_CONFLICT)
+    # At p=0, B1's single-entry begin shape and null predecessor are enforced
+    # without fabricating an empty B1 history or calling B2A with count zero.
+    # ALL matching L/G/target hashes remain unverified caller-supplied claims.
+    # Neither the Indeterminate type nor its code permits a future action.
     return Indeterminate(RefusalCode.INDEPENDENT_AUTHORITY_UNAVAILABLE)
 
 
