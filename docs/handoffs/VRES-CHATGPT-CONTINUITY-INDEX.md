@@ -1,24 +1,28 @@
 # Vres-OS — ChatGPT-led CURRENT continuity index
 
-**Updated:** 2026-10-23, Europe/Athens.
+**Updated:** 2026-10-26, Europe/Athens.
 **Canonical documentation branch:** docs/chatgpt-continuity-20261023.
 Historical preproduction C2B/K0, Windows personal release, all source acceptances/rejections and original V-01..V-42 roadmap are preserved, never silently superseded.
 
 ## READ FIRST
 
-1. [#165 B2B R1 DESIGN_REVISE, new R2 security design](VRES-165-B2B-R1-INDEPENDENT-DESIGN-REVISE-AND-R2-SECURITY-REPAIR-2026-10-23.md) — **NEWEST** original B2B R1 independent DESIGN_REVISE, newly [authored R2 architecture](../architecture/VRES-165-B2B-TRUSTED-CHAIRMAN-AUTHORITY-CONTRACT-R2-2026-10-23.md), R2 independent review NOT_RUN.
-2. [#165 B2B R1 guarded Windows review worktree verification](VRES-165-B2B-R1-WINDOWS-DESIGN-REVIEW-WORKTREE-VERIFIED-2026-10-23.md) — reviewed R1 Git HEAD abde7e8086f1dfd3efd70318e24312112fcf314e, original R1 blob d020d19afefbc18bd731ca2d79975128787e4eef, independent DESIGN_REVISE.
-3. [#165 B2B v0 DESIGN_REVISE and R1 creation](VRES-165-B2B-0-DESIGN-REVISE-AND-R1-CORRECTION-2026-10-23.md), [original v0 architecture](../architecture/VRES-165-B2B-TRUSTED-CHAIRMAN-AUTHORITY-CONTRACT-DRAFT-2026-10-23.md) — original v0 blob 851f5323888bfd3043ba992abc8096834ee356d0, independently DESIGN_REVISE.
-4. [#165 B2A R3 independent OFFLINE ACCEPT](VRES-165-B2A-R3-INDEPENDENT-OFFLINE-ACCEPTANCE-2026-10-23.md) — source 32847410952e9d4620bf7046cbee4a41a7ddc73b, 95 PASSED lines, exit 0 and R3-PROC-01 minor procedural deviation.
-5. [#165 B2A R2 91/92 REJECT and initial B2A static REJECT](VRES-165-B2A-R3-WINDOWS-WORKTREE-VERIFIED-AND-R2-REJECT-2026-10-23.md) — unchanged historical rejections.
-6. [#165 F2 test-only ACCEPT](VRES-165-F2-TEST-ONLY-INDEPENDENT-ACCEPTANCE-2026-10-23.md) — 36a41b6151b7520329ccc0ada0ff827d836ec579, 3/3 targeted PASS.
-7. [#165 F2 source ACCEPT](VRES-165-B1-F2-INDEPENDENT-ACCEPTANCE-AND-TEST-HARDENING-2026-10-23.md) — b77e0eef07976877e7f198a00484f5d13ce36889, 101/101 PASS.
-8. [#165 B1 history ACCEPT](VRES-165-PHASE-B1-INDEPENDENT-ACCEPTANCE-2026-10-23.md) — f8237bb301dec160f33cab524727e6a0ec79b2c0, 99/99 PASS.
-9. [#165 Phase A R2 ACCEPT](VRES-165-PHASE-A-R2-INDEPENDENT-ACCEPTANCE-2026-10-23.md) — 11f2f8689308dfe43e482bca73aa57bb6467c788, 53/53 PASS, original R1 REJECT preserved.
-10. [P2-A1 DB contact guard R4 ACCEPT](VRES-CHATGPT-P2A1-R4-INDEPENDENT-ACCEPTANCE-HANDOFF-2026-10-23.md) — 3ba41d5ae6b8f2c2abd93d27f82cce0755878237, 183/183 PASS, earlier R1..R3 REJECTs and R4 residuals.
-11. [Full V-01..V-42 development functionality register](../roadmap/VRES-FULL-SCOPE-FUNCTIONALITY-REGISTER-2026-10-22.md) and [delivery plan](../roadmap/VRES-CHATGPT-LED-FULL-SCOPE-DELIVERY-PLAN-2026-10-22.md).
+1. [#165 B2B R2 Windows review workspace VERIFIED](VRES-165-B2B-R2-WINDOWS-DESIGN-REVIEW-READY-2026-10-26.md) — **NEWEST** operator READY in detached 7032c4c, R2 blob 02993e4c; independent R2 design review NOT_RUN.
+2. [#165 B2B R1 DESIGN_REVISE, new R2 security design](VRES-165-B2B-R1-INDEPENDENT-DESIGN-REVISE-AND-R2-SECURITY-REPAIR-2026-10-23.md) — **NEWEST** original B2B R1 independent DESIGN_REVISE, newly [authored R2 architecture](../architecture/VRES-165-B2B-TRUSTED-CHAIRMAN-AUTHORITY-CONTRACT-R2-2026-10-23.md), R2 independent review NOT_RUN.
+3. [#165 B2B R1 guarded Windows review worktree verification](VRES-165-B2B-R1-WINDOWS-DESIGN-REVIEW-WORKTREE-VERIFIED-2026-10-23.md) — reviewed R1 Git HEAD abde7e8086f1dfd3efd70318e24312112fcf314e, original R1 blob d020d19afefbc18bd731ca2d79975128787e4eef, independent DESIGN_REVISE.
+4. [#165 B2B v0 DESIGN_REVISE and R1 creation](VRES-165-B2B-0-DESIGN-REVISE-AND-R1-CORRECTION-2026-10-23.md), [original v0 architecture](../architecture/VRES-165-B2B-TRUSTED-CHAIRMAN-AUTHORITY-CONTRACT-DRAFT-2026-10-23.md) — original v0 blob 851f5323888bfd3043ba992abc8096834ee356d0, independently DESIGN_REVISE.
+5. [#165 B2A R3 independent OFFLINE ACCEPT](VRES-165-B2A-R3-INDEPENDENT-OFFLINE-ACCEPTANCE-2026-10-23.md) — source 32847410952e9d4620bf7046cbee4a41a7ddc73b, 95 PASSED lines, exit 0 and R3-PROC-01 minor procedural deviation.
+6. [#165 B2A R2 91/92 REJECT and initial B2A static REJECT](VRES-165-B2A-R3-WINDOWS-WORKTREE-VERIFIED-AND-R2-REJECT-2026-10-23.md) — unchanged historical rejections.
+7. [#165 F2 test-only ACCEPT](VRES-165-F2-TEST-ONLY-INDEPENDENT-ACCEPTANCE-2026-10-23.md) — 36a41b6151b7520329ccc0ada0ff827d836ec579, 3/3 targeted PASS.
+8. [#165 F2 source ACCEPT](VRES-165-B1-F2-INDEPENDENT-ACCEPTANCE-AND-TEST-HARDENING-2026-10-23.md) — b77e0eef07976877e7f198a00484f5d13ce36889, 101/101 PASS.
+9. [#165 B1 history ACCEPT](VRES-165-PHASE-B1-INDEPENDENT-ACCEPTANCE-2026-10-23.md) — f8237bb301dec160f33cab524727e6a0ec79b2c0, 99/99 PASS.
+10. [#165 Phase A R2 ACCEPT](VRES-165-PHASE-A-R2-INDEPENDENT-ACCEPTANCE-2026-10-23.md) — 11f2f8689308dfe43e482bca73aa57bb6467c788, 53/53 PASS, original R1 REJECT preserved.
+11. [P2-A1 DB contact guard R4 ACCEPT](VRES-CHATGPT-P2A1-R4-INDEPENDENT-ACCEPTANCE-HANDOFF-2026-10-23.md) — 3ba41d5ae6b8f2c2abd93d27f82cce0755878237, 183/183 PASS, earlier R1..R3 REJECTs and R4 residuals.
+12. [Full V-01..V-42 development functionality register](../roadmap/VRES-FULL-SCOPE-FUNCTIONALITY-REGISTER-2026-10-22.md) and [delivery plan](../roadmap/VRES-CHATGPT-LED-FULL-SCOPE-DELIVERY-PLAN-2026-10-22.md).
 
 ## CURRENT PROJECT STATE AND EVIDENCE
+
+- **B2B R2 operator review worktree READY (2026-10-26):** clean detached C:\Projects\Vres-ChatGPT-Review-165B2B-R2-20261023 pinned to docs SHA 7032c4ccb032518ea79cb9fa08bc1f75d878cd8d; R2 blob 02993e4caadfcd25f437f2c01b858c6be8cf9f26, R1/v0 blobs intact, exactly three authorized modified docs paths, marker VRES_165_B2B_R2_DESIGN_REVIEW_READY, STATUS=NEW_WORKTREE_CREATED, no STOP. Claude R2 independent review NOT_RUN. DO NOT fetch or recreate the worktree.
+- **NEXT:** guarded Claude Read/Glob/Grep-only static review of pinned R2 against R1-01..R1-13, no code/pytest/Bash/DB/vault/install; report DESIGN_ACCEPT/REVISE/BLOCKED. Docs-only continuity HEAD may advance while the correctly pinned review folder remains at 7032c4c.
 
 - **B2B v0 and R1 independent DESIGN_REVISE:** v0 reviewed at docs SHA 4db3125f224522b7e21b0aab3337157ad00e47b4, R1 reviewed at docs SHA abde7e8086f1dfd3efd70318e24312112fcf314e; both static-only using Read/Glob/Grep, no code/tests/DB/provider. R1 review revealed R1-01..R1-13, including three HIGH risks of untrusted release/template provenance, bypass through potentially same-user-writable runtime loads, and untrusted genesis H_0. All findings preserved in new handoff. Original v0/R1 docs unchanged.
 - **R2-DOC-SELF-01 follow-up:** explicitly verify canonical prior-history prefix against independent H_n via B2A, then separately verify one appended linked successor; never compare entire future C against old H_n or use a self-derived future expectation. This was author self-audit, not independent acceptance.
@@ -31,7 +35,7 @@ Historical preproduction C2B/K0, Windows personal release, all source acceptance
 
 ## NEXT GATE
 
-Create one NEW detached, guarded Windows documentation review worktree at the exact R2 docs SHA; preserve the old R1 reviewed folder. Check original clean P2 anchor and official remote, exact docs parent/head, R2 blob, unchanged R1 and v0 blobs, exactly FOUR allowlisted changed documentation paths, diff --check and clean status. After READY launch Claude safe-mode Read/Glob/Grep only to statically evaluate R2 against R1-01..R1-13 and F1 trust roots. Do not run Git/Python/pytest/MCP/Bash from Claude, no DB/vault/installed/model activity, no source edits. An independent report must return DESIGN_ACCEPT / DESIGN_REVISE / DESIGN_BLOCKED bound to the R2 blob. No B2B-1 code before independent design acceptance, no positive native trust/release act without separate user authorization.
+The R2 documentation review worktree is ALREADY prepared at C:\Projects\Vres-ChatGPT-Review-165B2B-R2-20261023. DO NOT create another or fetch/reset it. Re-verify detached HEAD 7032c4ccb032518ea79cb9fa08bc1f75d878cd8d, parent 2c611d60ba08b69c6680a28b17c6cf3375948308, three changed docs paths, R2/R1/v0 exact blob IDs and clean Git status. Then launch Claude safe-mode with Read/Glob/Grep ONLY; the independent evaluator reads the R2 contract and prior R1 findings, reports DESIGN_ACCEPT/REVISE/BLOCKED and identifies any residual trust boundaries. Do not use pytest/Python/Bash/Git/MCP inside Claude, PostgreSQL, vault, installer or provider. B2B-1 deny-only source code is still BLOCKED pending design acceptance, and positive trust remains unavailable.
 
 ## CONTINUITY RULE
 
@@ -39,4 +43,4 @@ ChatGPT architects/commits source and docs, Claude independently reviews, user o
 
 ## NEW SESSION RESUME
 
-RESUME Vres-OS from CURRENT GitHub HEAD docs/chatgpt-continuity-20261023. Read this index, new R1 DESIGN_REVISE/R2 security repair handoff and R2 trust architecture first, then v0/R1 originals and B2A R3 ACCEPT. Both v0 and R1 independently DESIGN_REVISE; NEW R2 independent review NOT_RUN. Source feature still 32847410952e9d4620bf7046cbee4a41a7ddc73b, B2A R3 95 PASS lines/exit 0, R3-PROC-01; earlier accepted/rejected evidence intact. Next guarded Windows docs R2 detached worktree, Claude static-only design review. #165 and F1 OPEN, installed Sonnet/high, schema-048 PostgreSQL NO CONTACT, no vault/signing/global Claude, K0/PA/installer/provider/host/main gates remain blocked. ChatGPT developer/committer, Claude evaluator, user Windows operator, detailed SHA-verifiable continuity after each step.
+Resume Vres-OS from CURRENT docs/chatgpt-continuity-20261023 HEAD. Read this index and newest B2B R2 Windows design-review-ready handoff first. User ALREADY created clean detached C:\Projects\Vres-ChatGPT-Review-165B2B-R2-20261023 at 7032c4ccb032518ea79cb9fa08bc1f75d878cd8d with R2 design blob 02993e4caadfcd25f437f2c01b858c6be8cf9f26; do not recreate or move HEAD. R2 independent Claude static review NOT_RUN; next safe read-only assessment of R1-01..R1-13 with Read/Glob/Grep only. R1/v0 DESIGN_REVISE preserved; B2A R3 accepted offline at source 32847410952e9d4620bf7046cbee4a41a7ddc73b, 95 PASS lines, exit 0, R3-PROC-01. F1/#165 OPEN, installed Sonnet/high, schema-048 DB NO CONTACT, K0/PA/vault/credential/installer/host/global Claude limitations all intact, 42-item roadmap preserved. ChatGPT GitHub docs/source committer; Claude independent reviewer; Windows user operator; commit every substantive continuity checkpoint with exact SHA verification.
