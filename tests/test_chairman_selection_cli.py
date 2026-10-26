@@ -175,7 +175,7 @@ def test_missing_source_template_is_neutral_and_does_not_echo_root(tmp_path, cap
         b"not valid frontmatter",
         b"---\nname: validator\ndescription: x\nmodel: sonnet\neffort: high\n---\nbody\n",
         b"\xff",
-        b"x" * (512 * 1024 + 1),
+        pytest.param(b"x" * (512 * 1024 + 1), id="oversized-template"),
     ],
 )
 def test_invalid_source_bytes_are_refused_without_rendering(
