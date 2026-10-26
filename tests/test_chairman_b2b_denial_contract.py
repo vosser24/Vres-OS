@@ -391,7 +391,7 @@ def test_frozen_slots_and_corruption_revalidation_fail_closed():
         head.epoch = 7
     with pytest.raises(FrozenInstanceError):
         candidate.raw_b1 = b"spoof"
-    with pytest.raises(AttributeError):
+    with pytest.raises(TypeError):
         vars(head)
     object.__setattr__(head.scope.target_ref, "purpose", DigestPurpose.RELEASE)
     with pytest.raises(ClaimedEvidenceError):
