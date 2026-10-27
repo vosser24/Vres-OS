@@ -1,0 +1,176 @@
+
+● I've read all five documents and all seven source files, and I'm now writing up the review. I used only Read and Grep.
+
+  C2-D2 Independent Trust-Provider and Release-Publisher Design Review
+
+  VERDICT: DESIGN_REVISE
+
+  The fail-closed spine is sound, and I found nothing fail-open. Three gaps must be closed in the design text before it can be an accepted
+  basis for provider selection. All three are documentation corrections.
+
+  Strengths
+
+  1. The design does not depend on an imaginary provider. D2:54 says "Calling a class TrustedProvider does not make it trusted." D2:129–135
+     select no provider, and D2:135 returns BLOCKED_TRUST_PROVIDER_UNAVAILABLE if any role is missing.
+  2. Same-user DPAPI, GitHub credentials, source SHA, Claude permission dialogs and Windows Hello text are rejected as positive trust (D2:56).
+     The source supports the content-identity-only reading. release_artifact.py:86–89 says its binding "is not a signature and does not
+     authenticate a publisher", and install.ps1:14 takes the approved commit as a human-typed string.
+  3. H0 is a typed pre-history genesis (D2:62), not a fabricated empty B1 history. This matches the source: chairman_policy_history.py:119
+     requires 1..128 proposals, :135–138 makes begin a version-1 proposal with a null predecessor, and chairman_b2b_denial_contract.py:176–178
+     types the genesis nulls.
+  4. Hn, L, G and Q are kept separate (D2:69–73). The one-appended-entry rule, the standalone-prefix reconstruction and the 128 cap all match
+     assess_unverified_claims (:503–528) and B1 (:126–131). D2 correctly forbids fake Sonnet hops.
+  5. Release v2 is described accurately. release_artifact.py:62–63 fixes FORMAT and VERSION=2, and :355–366 refuses any other version and any
+     file entry with the wrong keys. A derived Opus plugin cannot pass verify_tree against v2 manifest hashes. D2 reserves a new artifact
+     version for D3 (D2:106), and I agree with that boundary.
+  6. The D1B 193 PASS result does not leak into trust. D2:6, D2:11 and D2:20 keep it from granting H0/E/V/CAS/W trust, release authority or
+     Opus installation.
+
+  BLOCKING findings
+
+  B-1. No identity or key bootstrap for the E issuer, V wrapper, CAS store or W issuer.
+  - D2:60 lists what H_0 enrolls, and none of those items are the identities or verification keys of the roles that later sign E, V and W.
+  - D2:88 (§4 step 6) requires "independently verified" E and V at CAS. D2 never says what verifies them or what vouches for that verifier.
+  - No rotation, compromise or revocation ceremony is specified for these identities. D2:63 mentions only lineage.
+  - R3:§4 ("root controls provider identity") covers this only generically. D2 is meant to be the self-contained provider architecture.
+  - Correction: add the pinned identities and verification roots of all four role issuers to the H_0 enrollment record. Add a separate,
+    domain-separated ceremony for role-key rotation and compromise. Also add a one-line rule: any role identity absent from H_0 or the current
+    head means BLOCKED.
+
+  B-2. Provider-selection criteria are not consolidated, so the "credible path" cannot be assessed.
+  - The handoff (§7 of the D1B acceptance handoff, line 180) asks D2 to define "which genuinely independent T2-resistant trust provider can
+    supply" the roles. D2 only says a provider "COULD in principle" exist, given "concrete independent identity, origin, transactional and
+    loader-interface evidence" (D2:132).
+  - Missing from the design:
+    - How a candidate proves it is a separate principal from the user's T2 processes.
+    - How it proves a display and input path T2 cannot drive or overlay.
+    - How it proves its CAS is linearizable across head, nonce and revocation.
+    - Where its clock comes from.
+    - How its availability, loss and recovery behave.
+    - Who holds its credentials.
+  - D2:133 dismisses "Windows UI by name" in one clause. It never analyses candidate classes such as a separate Windows service principal with
+    an ACL-protected store and secure-desktop UI, a second-device approver, or a hardware token with a display.
+  - Correction: add one table of elimination criteria, each phrased as evidence the provider must supply, plus the candidate classes to
+    evaluate. Do not select a provider.
+
+  B-3. NF-10 names an attestation but defines no attestable evidence, and its feasibility is unstated.
+  - D2:82 and D2:119 require the wrapper to "attest actual model identity".
+  - The design does not say what evidence could establish this, or who vouches for a model-reported-by-endpoint value.
+  - If no vendor-signed model identity exists, the realistic evidence is the endpoint-reported model field over TLS, held by an
+    independent-principal wrapper. That trusts the vendor endpoint (T3) and is not cryptographic proof.
+  - D2:82 also never states that validator pins come only from G_n and never from C, L or Q. R3:§4 says so, but D2 does not repeat it.
+  - Correction: state the trust assumption explicitly, or declare NF-10 feasibility UNKNOWN with BLOCKED as the default outcome. Add the
+    pins-from-G_n-only rule.
+
+  INFORMATIONAL findings
+
+  - I-1. Publisher withdrawal cannot share the head store's atomicity across roles. D2:89 and D2:104 put publisher state inside the CAS check.
+    D2:102 puts a write-boundary recheck on the final byte commit, which is inherently check-then-write against a remote withdrawal. State an
+    accepted staleness bound or a mirrored withdrawal record in the head store. Cancel events issued by the presence role (Role 3) also have
+    to land in the head store's ordering domain (Role 2); D2:54 and D2:89 do not say so.
+  - I-2. In the accepted B2B-1 source, Indeterminate is returned only after every local check passes. The only return path is
+    chairman_b2b_denial_contract.py:533, so Refused versus Indeterminate is in effect a "claims consistent" oracle. R3:194 says "Indeterminate
+    never implies that prior checks passed." No caller exists in src. The planner defines its own types and does not call it. D2:20 and D2:73
+    are correct to forbid branching on it. Keep that rule explicit for any future positive API.
+  - I-3. B2B-1's ClaimedGoverningReference is narrower than D2's G. It holds only the kind, sequence and proposal SHA (:88–106). D2:70 defines
+    G as policy, release, pins and completion epoch. A future positive API must define its own schema.
+  - I-4. The B1 reason field is agent-authored free text. It is bounded to 512 bytes and control-character filtered
+    (chairman_policy_history.py:79–90). If the E screen shows it (D2:80), it must be labelled and escaped as untrusted.
+  - I-5. The existing installer and recovery paths must not be reused for a protected transition. install.ps1:314–347 auto-restores and
+    deletes the journal at :345. install_recovery.py:336–400 (recover --confirm) restores the plugin and pointer from a same-user journal.
+    Both contradict D2:97 ("never auto-revert"). D2:36 and D2:106 only imply this, so state it. Also, install.ps1:128 refuses to run while
+    Claude is open, which confirms that the E and W UIs cannot be Claude Code surfaces.
+  - I-6. The loader attack surface is real. install.ps1:20 honours CLAUDE_CONFIG_DIR, and :22 puts the plugin in a user-writable
+    skills\vres-os. This supports D2:108. The source search found no use of Claude managed-settings or ProgramData paths.
+  - I-7. Genesis is trust-on-first-use. The installed P2 baseline came from a same-user installer and a human-typed commit
+    (install.ps1:14,205). D2:60 says the baseline is "independently verified" but not against what. Require rebuilding the baseline from the
+    pinned commit through the publisher root.
+  - I-8. The B1 design leaves the user a dead end. After an abandoned Opus proposal, B1 refuses an adjacent identical retry
+    (chairman_policy_history.py:128–131). D2:98 correctly refuses without a fake hop, but leaves no path forward. The 128 cap is lifetime. Say
+    so plainly in the user-facing BLOCKED outcome.
+  - I-9. B1 does not refuse a first proposal equal to the pre-history baseline. Adjacency compares only the predecessor proposal (:128–131).
+    D2:71 is silent on this.
+  - I-10. The 300 s E-to-CAS window must also cover a Fable/high validation run (D2:85). Define behaviour when V takes too long.
+  - I-11. There is no disaster-recovery, lockout or stop-loss rule. Loss of the provider store leaves model change permanently BLOCKED. That
+    is safe, but D2:135–136 do not give the user a decision rule for abandoning the F1 path.
+  - I-12. Proportionality is acknowledged but not argued. Five roles, two presence ceremonies and a validator for one user are heavy. D2:53
+    allows combining roles but gives no minimal viable configuration.
+  - I-13. v2 load_manifest ignores unknown top-level keys (release_artifact.py:355–366). D2:106's rule that a new version is mandatory is
+    therefore essential. Keep it.
+
+  Mandatory R3 erratum requirements
+
+  All ten are present as D2:114–123 gates. None is implemented, and none is claimed.
+
+  ┌────────┬─────────────────────────────────────────────────────────────────────────────────────────────────┐
+  │   ID   │                                             Status                                              │
+  ├────────┼─────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ NF-05  │ Present (D2:89, 114). Gap: I-1.                                                                 │
+  ├────────┼─────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ NF-06  │ Present (D2:108, 115). Blocked pending D3/D4. Supported by I-6.                                 │
+  ├────────┼─────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ NF-07  │ Present (D2:104, 116). Supported by release_artifact.py:86–89. Gap: B-2 for the publisher root. │
+  ├────────┼─────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ NF-08  │ Present (D2:61–64, 117). Gaps: B-1, I-7, I-11.                                                  │
+  ├────────┼─────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ NF-09  │ Present (D2:102, 118). Gap: I-1.                                                                │
+  ├────────┼─────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ NF-10  │ Present (D2:82, 119). Gap: B-3.                                                                 │
+  ├────────┼─────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ R3-N01 │ Present (D2:97, 120). Gap: I-5.                                                                 │
+  ├────────┼─────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ R3-N02 │ Present (D2:95, 121).                                                                           │
+  ├────────┼─────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ R3-N06 │ Present (D2:80, 122).                                                                           │
+  ├────────┼─────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ R3-N07 │ Present (D2:98, 123). Gaps: I-8, I-9.                                                           │
+  └────────┴─────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+  Credible provider path
+
+  Unproven. D2 correctly claims none. B-2 and B-3 must be fixed before a future provider can be evaluated against anything concrete.
+
+  Coverage
+
+  ┌─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┬─────────────────┐
+  │                                                        Item                                                         │    Coverage     │
+  ├─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┼─────────────────┤
+  │ D2 design                                                                                                           │ FULL (1–167)    │
+  ├─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┼─────────────────┤
+  │ B2B R3                                                                                                              │ FULL            │
+  ├─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┼─────────────────┤
+  │ R3 erratum                                                                                                          │ FULL            │
+  ├─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┼─────────────────┤
+  │ C2 V1 design                                                                                                        │ FULL            │
+  ├─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┼─────────────────┤
+  │ D1B handoff                                                                                                         │ FULL            │
+  ├─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┼─────────────────┤
+  │ chairman_b2b_denial_contract.py, chairman_policy_history.py, chairman_history_expectation.py, chairman_policy.py,   │ FULL            │
+  │ release_artifact.py, install_recovery.py                                                                            │                 │
+  ├─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┼─────────────────┤
+  │ install.ps1                                                                                                         │ FULL (350       │
+  │                                                                                                                     │ lines)          │
+  ├─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┼─────────────────┤
+  │ chairman_c2_offline_planner.py                                                                                      │ PARTIAL (Grep   │
+  │                                                                                                                     │ only)           │
+  ├─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┼─────────────────┤
+  │ Continuity index, other repository files                                                                            │ NOT_READ        │
+  └─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┴─────────────────┘
+
+  - Inspected directly: document and source text exactly as present in the two checkouts.
+  - Relayed only: every Git SHA, tree and blob identity, and the 193-PASS and installed-release facts. I did not hash anything, and I did not
+    verify that the checkouts match the stated commits.
+
+  Minimal corrections
+
+  Fix B-1, B-2 and B-3, then add one sentence each for I-1, I-2, I-5 and I-7. No source changes are needed.
+
+  Statuses
+
+  DESIGN_ONLY / TESTS_NOT_RUN / SOURCE_MODIFICATION_NOT_RUN / NO_AUTHORITY_ISSUED / NO_MODEL_ACTIVATION / NO_POSTGRESQL_CONTACT_BY_REVIEWER
+
+  This review issues no authority, and I made no edits.
+
+  VRES_165_PERSONAL_C2_D2_TRUST_PROVIDER_DESIGN_REVIEW_COMPLETE
+  ⎿  Stop says: VRES_REPLY_GUARD_WARNING: Vres could not verify the authoritative pre-reply gate. Persistence may be stale; inspect Vres task
+     state before relying on continuity.
