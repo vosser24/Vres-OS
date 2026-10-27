@@ -1,0 +1,170 @@
+ C2-D2 V1.1 additive erratum: independent design review
+
+  VERDICT: DESIGN_ACCEPT. I found zero BLOCKING findings and no fail-open path for an untrusted normal-user process. All five of N-1 to N-5
+  are addressed at design level, with INFORMATIONAL residuals listed below. This accepts the documentation only. It selects no provider and
+  authorizes no enrollment, E/V/CAS/W, release or installation.
+
+  Line references: E:n is the V1.1 erratum, V1:n the accepted V1 design, R3:n the R3 design, R3E:n the R3 post-review erratum, S:file:n the
+  SOURCE checkout, and RPT:n the V1 accept report.
+
+  N-1: ADEQUATELY_ADDRESSED (with INFORMATIONAL residuals)
+
+  The V1 report's four corrective actions (RPT:132–133) are all met:
+
+  - Registry authority. Only the root principal, or a separately rooted recovery quorum, may mutate the registry (E:32). CAS may sign only
+    HEAD_ANCHOR_TRANSITION, never a registry update or root rotation (E:28). A current E, V, W or CAS signer cannot add, revoke or replace an
+    issuer key (E:28).
+  - Compromised CAS key. It cannot reauthorize itself, because the root key must be distinct from the CAS key (E:28). Atomic revocation with
+    E/V/W/Q invalidation is required (E:34). Missing root, quorum or ordering gives BLOCKED_ROLE_REGISTRY_MUTATION_UNVERIFIABLE, with no
+    self-rotation or silent clearing of Q (E:34).
+  - Bootstrap. Agent-selected fingerprints, local Git, CurrentUser certificates, DPAPI-only state and self-signed first-use assertions are
+    rejected. With no independent anchor the result is BLOCKED_BOOTSTRAP_ROOT_UNAVAILABLE, with no H_0 (E:26).
+  - Root loss. There is no invented genesis and no fallback to the CAS issuer (E:36).
+  - Reserved roles. D3 and D4 are "RESERVED, NOT ENROLLED" and cannot attest today's Chairman (E:50–51, 53).
+  - Withdrawal signer. PUBLISHER_WITHDRAWAL_SIGNER is a separate row and cannot self-authorize an issuer update (E:49).
+  - Cancel race. CANCEL_REQUESTED, CANCEL_PROTECTED_COMMITTED and APPEND_PENDING_CAS_COMMITTED are distinct. If CAS won, Q stays pending and a
+    new post-CAS abandon is required, with no rewind, local clear or E reuse (E:57).
+  - Honest scope. The erratum says that accepting it allows only a read-only study (E:18, 128).
+
+  INFORMATIONAL residuals. None creates fail-open authority; each is a specification gap to close before a candidate study:
+
+  - N1-a. The register has a withdrawal signer (E:49) but no row for the release-signing root that authenticates source, template, renderer
+    and pins (NF-07). E:26 says the root is "checked against the same source publisher", which is circular if the publisher root is itself
+    unanchored. Add a PUBLISHER_RELEASE_ROOT row.
+  - N1-b. The heading at E:38 says "Complete", but there is no issuer row for ABANDON, REVOKE, RECOVERY or COMPLETION events. R3:127–128 and
+    R3:141 require domain-separated, authenticated issuers for these. E:57 relies on an "independently authenticated post-CAS abandon/revoke"
+    that has no enrolled purpose. The failure is a Q that can never be cleared, which fails closed.
+  - N1-c. The CAS row "cannot change registry roots" (E:46) sits against the requirement that registry mutation commit inside the H_n ordering
+    (E:34). State that the CAS store only verifies and applies root-signed mutations.
+  - N1-d. E:28 requires a distinct root key, not a distinct custodian. E:53 allows one broker to host several roles. Require root and recovery
+    custody not to be co-hosted with the CAS, E or W signing path, or record the residual.
+  - N1-e. The acceptable anchor classes behind "independently authenticated out-of-band root trust" (E:26) are not enumerated. A future
+    candidate's claim cannot be judged against this wording.
+  - N1-f. E:32 and E:36 leave unsaid whether the quorum may ROTATE_ROOT or only mutate roles. The quorum's feasibility for one user, given E:4
+    ("no imaginary enterprise accounts"), is unassessed.
+  - N1-g. Which witness keeps registry epochs fresh and rollback-proof is not named (E:26 and V1:126 rely on the store). The human display for
+    a registry mutation (E:32) must not be hosted by a role it can mutate.
+
+  N-2: ADEQUATELY_ADDRESSED
+
+  - Standard-user versus administrator. E:61 refuses independence for admin, UAC or SYSTEM merely by process name. E:63 requires the candidate
+    to name its day-to-day token and demands either a standard-user principal with a protected elevation boundary or an explicit residual,
+    which gives BLOCKED_T2_BOUNDARY_NOT_ESTABLISHED.
+  - Elevation and prompts. Auto-elevation, privileged IPC, UAC automation and prompt fatigue are covered. UAC, Windows Hello and service ACLs
+    are not authenticated E or W (E:63).
+  - TLS. CurrentUser CA, user proxy, environment CA bundle, mutable pinset and process-loadable DLLs are all rejected. A machine store alone
+    is insufficient if T2 can elevate (E:65). Grade B stays endpoint-reported and NF-10 defaults to UNKNOWN or BLOCKED (E:65, V1:158, 161).
+    E:67 makes failed privilege, CA or proxy tests a hard refusal.
+  - Residual. Nobody owns the lifecycle of the immutable pin (E:65). A vendor certificate rotation is an authority change and needs a registry
+    or purpose owner.
+
+  N-3: ADEQUATELY_ADDRESSED as a protocol
+
+  - Protocol versus evidence. The erratum states it is a "proposed future READ-ONLY provider feasibility assessment protocol". No test or
+    account setup occurs, no candidate is under examination, and no provider PASS exists (E:71, 90).
+  - P01–P12. Each has a named negative attack and an evidence type (E:77–88). Gates are explicit PASS or BLOCKED, with no averages or "likely
+    PASS". Vendor marketing cannot satisfy a gate. ChatGPT or Claude prose is a design review, not an attestation (E:73). Any single blocker
+    or unknown gives BLOCKED_TRUST_PROVIDER_UNAVAILABLE (E:90).
+  - V0 status. V0 stays DESIGN_REVISE (E:16, 90; V1:11, 297; handoff:15). V0's own header still says "REVIEW_NOT_RUN" (V0:5), which is
+    unaltered history, not a claim of acceptance.
+  - Residuals.
+    - P01, P03 and P06 criteria partly restate the conclusion ("protected principal boundary proven", "genuinely independent"). E:90 uses
+      "credible issuer" without a definition.
+    - Thresholds are deferred: the P05 uncertainty budget and P11 ceiling are not set.
+    - E:73 allows "independent read-only vendor documentation" as evidence. State that documentation alone can satisfy no gate.
+    - No gate is re-adjudicated when a provider version changes.
+    - E:73 excludes AI adjudicators, so a human third-party adjudicator is implied, but its feasibility and cost are unassessed.
+  - V1:230. E:90 corrects the stale "DESIGN V0" phrase (V1:230, confirmed).
+
+  N-4: ADEQUATELY_ADDRESSED, with one wording caution
+
+  Every source fact checked in the SOURCE checkout is accurate:
+
+  - install.ps1:114 refuses a pending journal and points to inspect and recover (E:95).
+  - The catch block at install.ps1:314–347 restores the pointer, bin, plugin, CLAUDE.md, rules and settings.json from in-process state. It
+    removes the journal at line 345 (E:96).
+  - That handler and install_recovery.py are same-user JSON snapshots and journals with no protected authority (install_recovery.py:230,
+    336–400).
+  - release_artifact.py:355–366 checks only format, version, object_format, source_commit, source_tree and the per-file key set. It ignores
+    other top-level keys (E:101).
+  - verify_tree and _compare (release_artifact.py:414–455) compare only SHA-256 and paths. git_blob is shape-checked at line 362 (E:101).
+  - chairman_policy.py:130–189 changes only the frontmatter model and effort, so a derived render differs from the original blob (E:100).
+
+  Two refinements:
+
+  - Understated. At verify time bytes, mode, git_blob, source_commit and source_tree are never rechecked against any object. The erratum names
+    only the SHA-256 comparison.
+  - Wording that weakens the release boundary. E:100 ("obtains Git-object-pinned provenance") and the prior handoff's "cannot be forged at
+    original BUILD path" (handoff:38) can be read as authenticity. Staging binds bytes to an operator-supplied commit id in a local repository
+    (install.ps1:8, 164, 205; release_artifact.py:7–9, 14–17, 86–89). A T2-created commit stages cleanly. Add the module's own sentence: "not
+    a signature … does not authenticate a publisher." E:101–102 already deny any positive effect, so this is not blocking.
+
+  I could not verify blob IDs such as 29a5f0… or ddfc1b…. I observed content only.
+
+  N-5: ADEQUATELY_ADDRESSED
+
+  - Sequencing. Loader and observer feasibility come first, and a negative result gives BLOCKED_LOADER_OR_OBSERVER_UNAVAILABLE with no H_0, no
+    E/V and no consent (E:106). This is consistent with V1:128.
+  - Routine updates. A non-policy install, especially install.ps1 -Update, creates a protected G mismatch and is never silently treated as
+    latest G (E:108).
+  - No manufactured hops. B1 cannot carry a release identity. Its proposal payload has only schema, sequence, policy, supersedes and reason
+    (chairman_policy_history.py:92–99). So E:112's "no fake B1 hop" is correct.
+  - Stop-loss. The budget is ZERO until the user sets limits, with immediate stop on the first failed gate, an unestablished root, a broken
+    loader, unavailable recovery or unbounded ceremony. The user keeps an explicit choice to abandon F1, and
+    USER_DECISION_ON_NON_F1_PERSONAL_EXPERIMENT stays NOT_MADE (E:114).
+  - Residuals.
+    - E:108–110 present the fail-closed outcome as option (b) of an "or". Add a normative sentence that any release different from G blocks E,
+      V, CAS and W until a governed transition exists (supported by R3:66, 68).
+    - "As appropriate" (E:109) should map to R3:43 and R3:74. Pin, template, renderer or allowlist changes need disclosed consent and
+      protected validation under the old G pins. Calling them "non-policy" (E:108) sits against that. Resolve to the stricter reading.
+    - The interaction of a release-only transition with a pending Q is undefined.
+    - "FIRST failed gate" does not say whether the scope is the candidate or the whole program.
+    - There is no ceremony inventory or cost estimate. Under continuous V-01..V-42 development, every release changes G and would need an
+      independently published, loaded-verified transition. Publisher credentials cannot be the AI-author's (R3:38; R3E:19). That is likely
+      disproportionate for one user, and the erratum permits that conclusion (E:114) but does not state it.
+
+  Protection contract
+
+  NF-05 through NF-10 and R3-N01, N02, N06 and N07 are all named as OPEN and unimplemented (E:120, E:5). Nothing is converted to positive
+  authority. Historical per-SHA verdicts are preserved (E:16, 120). The 193-test D1B acceptance is "not loaded model proof" (E:7). E:128 and
+  the E:5 status banner deny any provider or installation permission, though the erratum does not state it in one sentence about the tests.
+  B2B-1 remains deny-only: Refused and Indeterminate raise on __bool__ (chairman_b2b_denial_contract.py:221–222, 233–234), and Indeterminate
+  is returned only at line 533.
+
+  Minimal corrective actions
+
+  These are optional and non-blocking, as a short V1.2 corrigendum before any candidate study:
+
+  1. Add the PUBLISHER_RELEASE_ROOT row and ABANDON/REVOKE/RECOVERY/COMPLETION issuer rows (N1-a, N1-b).
+  2. Clarify CAS as executor rather than authorizer, custody separation, quorum scope and anchor classes (N1-c to N1-g).
+  3. Amend the stage-provenance wording (N-4).
+  4. Add the mismatch-blocks-everything sentence, the stricter reading of "as appropriate", Q interaction, stop-loss scope and a ceremony
+     inventory (N-5).
+
+  Coverage and provenance
+
+  - FULL:
+    - Documents: the erratum (135 lines), V1 (297), the V1 accept report (207), the accept handoff (53), R3 (262), the R3 erratum (37) and C2
+      V1 (230).
+    - Source: install.ps1, release_artifact.py, install_recovery.py, chairman_b2b_denial_contract.py, chairman_policy_history.py and
+      chairman_policy.py, all in the SOURCE checkout.
+  - PARTIAL: The V0 design was checked by Grep of status lines only.
+  - NOT_READ: The continuity index. A Grep matched V1.1 text but its long lines were omitted.
+  - Git SHAs: Every commit, tree and blob ID in this review is relayed. I hashed nothing and ran no Git, so I cannot confirm the checkouts
+    match the stated commits. The documentation checkout's .git points to a gitdir outside my permitted scope, which I did not read. I
+    observed file text only.
+  - Warnings: VRES_PERSISTENCE_WARNING and VRES_REPLY_GUARD_WARNING were not investigated. I made no Vres task or database calls, so no task
+    checkpoint or reply gate was run.
+
+  Statuses
+
+  DESIGN_ONLY · TESTS_NOT_RUN · SOURCE_MODIFICATION_NOT_RUN · NO_AUTHORITY_ISSUED · NO_MODEL_ACTIVATION · NO_POSTGRESQL_CONTACT_BY_REVIEWER
+
+  STOPPED. Acceptance does not authorize provider selection, enrollment, E/V/CAS/W, signing or publishing, installation, or Opus activation. A
+  real provider may still turn out not to exist.
+
+  VRES_165_PERSONAL_C2_D2_V1_1_ADDITIVE_ERRATUM_DESIGN_REVIEW_COMPLETE
+  ⎿  Stop says: VRES_REPLY_GUARD_WARNING: Vres could not verify the authoritative pre-reply gate. Persistence may be stale; inspect Vres task
+     state before relying on continuity.
+
+✻ Cooked for 4m 41s · done 5:02 PM
