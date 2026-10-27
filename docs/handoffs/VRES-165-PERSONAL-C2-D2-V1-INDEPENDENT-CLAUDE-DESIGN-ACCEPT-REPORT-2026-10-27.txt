@@ -1,0 +1,207 @@
+ I read all seven documents and all seven source files with Read, Glob and Grep only. I'm now writing the report.
+
+  C2-D2 V1 Independent Security Architecture Review
+
+  VERDICT: DESIGN_ACCEPT. This accepts the documentation architecture only. It selects no provider and authorizes nothing. B-1, B-2 and B-3
+  are each RESOLVED_IN_DESIGN. I found no fail-open defect. The new informational findings are in the last section, and N-1 is the one to
+  settle first.
+
+  "V1:n" means a line number in the V1 design.
+
+  Blocking findings from V0
+
+  B-1 (issuer identity and key bootstrap): RESOLVED_IN_DESIGN.
+  - V1:107–118 enrolls all four roles in H_0 and in the current H_n: E issuer, V wrapper, CAS/nonce/revocation store and W issuer.
+  - Each role carries issuer principal, root and key fingerprint, algorithm, domain-separated purpose, machine/SID/install scope, and epoch.
+  - V1:118 adds that nothing local can establish a verifying root, and that overlapping roles stay purpose-separated.
+  - V1:120 returns BLOCKED_UNENROLLED_ROLE_ISSUER for any missing, unknown, withdrawn, expired, T2-editable or unauthenticated identity.
+  - V1:122–126 makes rotation and compromise a separate ceremony. The compromised key cannot authorize its own replacement (V1:124). Affected
+    E/V/W events are invalidated and Q stays blocked (V1:125). Verifiers fetch the current registry epoch (V1:126).
+  - This meets all three corrections V0 asked for. The remaining gap is N-1.
+
+  B-2 (provider feasibility and evidence): RESOLVED_IN_DESIGN.
+  - P01–P12 (V1:63–78) cover every area you listed. For loader protection (P09), P12 also keeps the D3 boundary separate.
+  - The four candidate classes (V1:81–84) are each marked "requiring future assessment, none approved".
+  - Same-user apps, DPAPI, GitHub credentials, Claude dialogs and generic Hello results are rejected (V1:85).
+  - Nothing implies a provider exists or is approved. V1:87, V1:224 and V1:228 say so, and V1:63 labels unmet evidence
+    BLOCKED_PROVIDER_EVIDENCE_UNAVAILABLE.
+  - The table is a necessary-evidence checklist, not yet a test plan. N-2 and N-3 cover that.
+
+  B-3 (NF-10 Fable/high attestation): RESOLVED_IN_DESIGN.
+  - V1:149 takes validator pins only from the last completed, load-verified G_n. It excludes C, L, Q, any agent override and any new source
+    file.
+  - V1:157–159 separates grade A (vendor-signed, none known to exist), grade B (wrapper's TLS observation of a vendor-reported model field)
+    and grade C (same-user logs, insufficient).
+  - V1:158 says grade B is not a cryptographic assertion about computation. It also says T3 vendor honesty must be trusted, and that aliases
+    and missing effort are not physical proof. Grade B still needs a separate reviewer judgment.
+  - V1:161 defaults to UNKNOWN / BLOCKED_VALIDATOR_IDENTITY_UNATTESTED and refuses on fallback.
+  - V1:161 and V1:163 keep D4 physical model proof separate.
+
+  V0 informational findings I-1 to I-13
+
+  ID: I-1
+  Disposition: Adequately addressed, with a wording residual.
+  Basis: V1:191–193 admits the withdrawal check is not atomic with the head CAS or the file write. It requires a mirrored, versioned
+  withdrawal
+  generation rechecked inside the CAS, with no approved staleness bound and BLOCKED when stale. The D3 final-write race is not claimed to be
+  linearizable. Residual: V1:191 does not say that a cancel in flight can lose the race against the CAS, so the UI should show "committed"
+  versus "pending" cancels. The withdrawal-signing key is also not an enrolled purpose (see N-1).
+  ────────────────────────────────────────
+  ID: I-2
+  Disposition: Adequate.
+  Basis: V1:236 matches the source: Indeterminate is returned only at chairman_b2b_denial_contract.py:533, and __bool__ raises (lines 221–222,
+
+  233–234).
+  ────────────────────────────────────────
+  ID: I-3
+  Disposition: Adequate (deferred with a hard STOP).
+  Basis: V1:130 matches ClaimedGoverningReference, lines 87–106.
+  ────────────────────────────────────────
+  ID: I-4
+  Disposition: Adequate.
+  Basis: V1:238 matches the filter at chairman_policy_history.py:79–90. The filter rejects control and format characters, so bidi overrides
+  are
+  blocked, but whitespace padding and look-alike characters are allowed. The inert, labelled display rule is therefore necessary.
+  ────────────────────────────────────────
+  ID: I-5
+  Disposition: Substance adequate, wording imprecise.
+  Basis: V1:195 is right that neither install.ps1 nor install_recovery.py can be reused as a protected path. See N-4 for the inaccuracy.
+  ────────────────────────────────────────
+  ID: I-6
+  Disposition: Adequate.
+  Basis: V1:197 matches install.ps1:20–22. My grep of src, scripts and plugins found no ProgramData or managed-settings use. Hard STOP at
+  D3/D4.
+  ────────────────────────────────────────
+  ID: I-7
+  Disposition: Adequate, with a sequencing note.
+  Basis: V1:128 requires publisher-pinned reconstruction plus a loaded-baseline observation. That creates a dependency on loader evidence
+  (N-5).
+  ────────────────────────────────────────
+  ID: I-8 / I-9
+  Disposition: Adequate.
+  Basis: V1:132 states the lifetime 128 cap and BLOCKED_HISTORY_RETRY_UNREPRESENTABLE, with no fake Sonnet hop. Source confirms the check
+  compares only the adjacent entry (chairman_policy_history.py:126–131) and that begin() has no baseline comparison (lines 135–138). The
+  future issuer must refuse a first proposal equal to G_0.
+  ────────────────────────────────────────
+  ID: I-10
+  Disposition: Adequate.
+  Basis: V1:163 puts the whole E→V→CAS span inside the window and never extends E. P05 requires measuring it. If V latency exceeds 300
+  seconds,
+  every attempt refuses, so the bound would need a reviewed change.
+  ────────────────────────────────────────
+  ID: I-11
+  Disposition: Adequate in principle, with a gap.
+  Basis: V1:240 gives BLOCKED with no new H_0 and no silent weaker experiment. It sets no objective stop-loss trigger, such as a candidate
+  count or cost limit.
+  ────────────────────────────────────────
+  ID: I-12
+  Disposition: Adequately addressed for a single switch.
+  Basis: V1:87 and V1:242 allow a combined broker with purpose-separated keys. The "only two ceremonies" claim (P11, V1:77) leaves H_0
+  enrollment, rotation, abandon and recovery unbudgeted.
+  ────────────────────────────────────────
+  ID: I-13
+  Disposition: Adequate.
+  Basis: V1:199 matches release_artifact.py:355–366: unknown top-level keys are ignored, and only per-file keys are strict.
+
+  R3 contract checks
+
+  All ten items are present, still OPEN, and not implemented. The V1 locations are:
+  - NF-05: V1:168, 191, P04.
+  - NF-06: V1:187, 197, P09.
+  - NF-07: V1:183, P07.
+  - NF-08: V1:95, 128, 240.
+  - NF-09: V1:181, 193.
+  - NF-10: V1:149–161.
+  - R3-N01: V1:176, 195.
+  - R3-N02: V1:174.
+  - R3-N06: V1:140. At W (V1:181) the latest L equals the pending C, so G versus C is disclosed.
+  - R3-N07: V1:132, 177.
+
+  I found no wording that makes D3 or D4 appear authorized, apart from one stale line (N-3, V1:230).
+
+  New informational findings
+
+  None of these is blocking.
+
+  - N-1 (settle first, before any candidate evaluation): V1 does not say who authenticates registry updates.
+    - If the head-store key signs them, then compromising the CAS key lets an attacker rewrite all four role entries, and the compromised
+      store cannot commit its own replacement.
+    - V1 relies on "root-controlled recovery principals" (V1:124) and a "publisher/root policy" (V1:118). Neither is a registry row with
+      identity, key or purpose fields.
+    - The publisher-withdrawal signer and the D3/D4 loader and observer purposes are also not enrolled.
+    - Fix: add one sentence saying registry and epoch changes are signed only by the root or recovery principals. Add root, withdrawal-signer
+      and reserved loader/observer rows. State how the root fingerprint is pinned in the H_0 ceremony.
+  - N-2 (T2/T3 boundary): A PERSONAL Windows user is often a local administrator. V1:48 excludes admin as T3 but never says whether a UAC
+    prompt, prompt fatigue or an auto-elevating binary counts as T2. Similarly, a wrapper that relies on the CurrentUser certificate store or
+    user proxy settings is attackable at T2. P01 and P08 should require a standard-user day-to-day account (or an explicit residual) and a
+    machine-scoped, pinned TLS trust store.
+  - N-3 (P01–P12 testability): They are evidence categories, not test procedures. There is no adversary capability list (UI automation,
+    overlays, token theft, DLL injection), no pass threshold, no evidence format, and no named adjudicator. Several terms are subjective (P11
+    "proportional", P03 "authentic"). Also, V1:230 still says "independently accepted DESIGN V0 or revised V1", but V0 was DESIGN_REVISE.
+    Remove "V0".
+  - N-4 (accuracy):
+    - V1:195 says install.ps1 "can auto-recover from a same-user journal". In fact install.ps1:114 refuses to run when a journal exists. Only
+      the catch block (lines 314–347) restores in-process and deletes the journal. The conclusion still holds.
+    - V1:185 says a derived candidate cannot masquerade as the original in v2. That is true at stage time only. verify_tree and _compare check
+      SHA-256 only (release_artifact.py:414–455), and git_blob is shape-checked only (line 362), so a hand-written v2 manifest passes. This
+      reinforces NF-07.
+  - N-5 (sequencing and steady state):
+    - H_0 requires a loaded-baseline observation (V1:128), which is loader-dependent D3/D4 capability. The first real post-D2 step is
+      therefore a loader and observer feasibility check, not E/V implementation.
+    - Because G includes the release and pins, V1 does not say what an ordinary non-policy release, or install.ps1 -Update, does to G after
+      enrollment. Under R3 a mismatch means BLOCKED. State whether routine releases need ceremonies, which bears on proportionality for
+      continuous PERSONAL development.
+
+  Corrective actions
+
+  Make these documentation edits in a later V1.1 or erratum. Do not rewrite V1:
+  1. Add the N-1 sentence and the extra registry rows.
+  2. Fix V1:230 and the two wording items in N-4.
+  3. Add the cancel-race note (I-1), an objective stop-loss trigger (I-11), and an N-2 sentence.
+
+  Coverage
+
+  - FULL:
+    - The V1 design (297 lines).
+    - The V0 design (167 lines).
+    - The V0 reviewer report (176 lines).
+    - The V0 revise handoff (81 lines).
+    - R3 (262 lines).
+    - The erratum (37 lines).
+    - C2 V1 (230 lines).
+    - All seven source files: chairman_b2b_denial_contract.py, chairman_policy_history.py, chairman_history_expectation.py,
+      chairman_policy.py, release_artifact.py, install_recovery.py and install.ps1.
+  - PARTIAL: Grep for ProgramData, managed-settings and CLAUDE_CONFIG_DIR over src, scripts and plugins. It had no matches, and install.ps1
+    sits outside those globs.
+  - NOT_READ: the continuity index, the D1B OFFLINE_ACCEPT handoff (confirmed by Glob only), the planner, and the other repository files.
+
+  Provenance limits
+
+  - Every commit, tree and blob SHA is relayed. I did not hash any Git object and could not confirm that the checkouts match the stated
+    commits. All I observed is the text in the two checkouts.
+  - The 193 PASSED/exit0 Windows result, the installed-release facts and the "four docs paths" claim are relayed.
+  - Glob showed the V1 file and the three handoff and report files in the documentation checkout. I did not diff it against the commit.
+  - This is a text-only design review. It says nothing about provider availability or physical behavior.
+
+  Statuses
+
+  DESIGN_ONLY · TESTS_NOT_RUN · SOURCE_MODIFICATION_NOT_RUN · NO_AUTHORITY_ISSUED · NO_MODEL_ACTIVATION · NO_POSTGRESQL_CONTACT_BY_REVIEWER
+
+  STOP. DESIGN_ACCEPT does not authorize any of the following:
+  - provider selection
+  - H_0 enrollment
+  - issuer credentials
+  - E, V, CAS or W
+  - signing
+  - release publication
+  - installer changes
+  - model activation
+  - PostgreSQL contact
+
+  Real provider selection stays BLOCKED until a candidate meets P01–P12 under a further review.
+
+  VRES_165_PERSONAL_C2_D2_V1_TRUST_PROVIDER_DESIGN_REVIEW_COMPLETE
+  ⎿  Stop says: VRES_REPLY_GUARD_WARNING: Vres could not verify the authoritative pre-reply gate. Persistence may be stale; inspect Vres task
+     state before relying on continuity.
+
+✻ Baked for 4m 17s · done 4:19 PM
