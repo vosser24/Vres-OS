@@ -7,6 +7,21 @@ from vres_os.orchestration import ROUTABLE_ROLES
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _chairman_source_frontmatter(text: str) -> dict[str, str]:
+    """Inspect the actual SOURCE header, never match a model label in body prose."""
+    lines = text.splitlines()
+    assert lines and lines[0] == "---"
+    assert "---" in lines[1:]
+    closing = lines.index("---", 1)
+    pairs = [line.split(": ", 1) for line in lines[1:closing]]
+    assert len(pairs) == 4 and all(len(pair) == 2 for pair in pairs)
+    header = dict(pairs)
+    assert len(header) == 4
+    assert set(header) == {"name", "description", "model", "effort"}
+    assert header["name"] == "chairman"
+    return header
+
+
 def test_aigo_migration_adds_project_capability_scope_and_missing_stable_domains():
     sql = resources.files("vres_os").joinpath("migrations", "025_aigo_orchestration.sql").read_text(encoding="utf-8")
     assert "ADD COLUMN IF NOT EXISTS project_id" in sql
@@ -106,7 +121,9 @@ def test_mcp_entrypoint_registers_orchestration_and_routing_from_dedicated_modul
 def test_chairman_requires_deterministic_first_routing_and_tiered_workers():
     text = (ROOT / "plugins/vres-os/agents/chairman.md").read_text(encoding="utf-8")
     lowered = text.lower()
-    assert "model: sonnet" in text
+    source_header = _chairman_source_frontmatter(text)
+    assert source_header["model"] == "sonnet"
+    assert source_header["effort"] == "high"
     assert "model: inherit" not in text
     assert "domain-level competencies" in text
     assert "Do not split an existing domain capability into arbitrary micro-techniques" in text
@@ -179,7 +196,9 @@ def test_governed_agents_pin_router_and_execution_model_families():
     router = (ROOT / "plugins/vres-os/agents/routing-arbiter.md").read_text(encoding="utf-8")
     sonnet = (ROOT / "plugins/vres-os/agents/sonnet-expert.md").read_text(encoding="utf-8")
     opus = (ROOT / "plugins/vres-os/agents/opus-expert.md").read_text(encoding="utf-8")
-    assert "model: sonnet" in chairman
+    source_header = _chairman_source_frontmatter(chairman)
+    assert source_header["model"] == "sonnet"
+    assert source_header["effort"] == "high"
     assert "model: fable" in router and "effort: high" in router
     assert "model: sonnet" in sonnet
     assert "model: opus" in opus and "effort: high" in opus
