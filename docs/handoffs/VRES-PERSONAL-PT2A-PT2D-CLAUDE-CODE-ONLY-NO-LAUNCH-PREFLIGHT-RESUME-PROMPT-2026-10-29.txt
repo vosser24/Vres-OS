@@ -1,0 +1,33 @@
+RESUME VRES-OS — CLAUDE CODE ONLY, SAFE BARE REVIEW PREFLIGHT PENDING, NO USER CLAUDE LAUNCH YET
+
+Repository vosser24/Vres-OS. Canonical docs branch docs/chatgpt-continuity-20261023. Verify actual docs HEAD fresh, read newest READ FIRST index before proceeding. This handoff supersedes the older browser Claude web CHAT reviewer method because the user explicitly requires CLAUDE CODE (terminal), not web chat.
+
+READ FIRST:
+1. docs/handoffs/VRES-CHATGPT-CONTINUITY-INDEX.md
+2. docs/handoffs/VRES-PERSONAL-PT2A-PT2D-CLAUDE-CODE-BARE-NO-LAUNCH-REVIEW-PREFLIGHT-HANDOFF-2026-10-29.md
+3. docs/handoffs/VRES-PERSONAL-PT2A-PT2D-CLAUDE-CODE-BARE-NO-LAUNCH-PREFLIGHT-2026-10-29.ps1 (exact 72-line PowerShell, paste complete block inline, do not tell user to just open file)
+4. docs/handoffs/VRES-PERSONAL-PT2A-PT2D-INDEPENDENT-STATIC-REVIEW-EXACT-SOURCE-PACKET-2026-10-29.txt (ten-file original full source packet)
+5. docs/handoffs/VRES-PERSONAL-PT2A-PT2D-GITHUB-ONLY-HOOK-AUDIT-AND-WEB-CHAT-REVIEW-PREFLIGHT-2026-10-29.md (HISTORICAL HOOK AUDIT; WEB CHAT WORKFLOW SUPERSEDED)
+6. docs/handoffs/VRES-PERSONAL-PT2D-50-PASS-EXIT0-INDEPENDENT-REVIEWS-OPEN-AND-NEXT-GATE-2026-10-29.md
+7. docs/handoffs/VRES-PERSONAL-PT1-R1-INDEPENDENT-CLAUDE-STATIC-ACCEPT-AND-HOOK-REFUSALS-REPORT-2026-10-29.txt
+8. docs/architecture/VRES-PERSONAL-RISK-PROFILE-AND-CHAIRMAN-GOVERNED-MODEL-TRANSITION-V1-2026-10-27.md
+9. docs/roadmap/VRES-FULL-SCOPE-FUNCTIONALITY-REGISTER-2026-10-22.md
+
+SOURCE/TARGET:
+PT2D feature HEAD a5913288b7748693adafc36c9c1cb35af3ea3949 tree d45ffc91781be6681124ff369af5df4d06300ce9, PT2C parent 81149beab52750c93db91453e18efbd5f7a21da4. Exact source/test new two-file additions, prior branch readback and Windows results verified. Source packet 7eb30e0ef2f2288e4e5951da4057352f256091d5 includes ten full matched Git source/test/dependency blobs; no credentials/installed file contents, independent packet provenance limited.
+
+WINDOWS TESTS: PT1 R1 189 selected PASS/exit0 + independent STATIC_ACCEPT 0 blockers/5 info; PT2A 213 selected PASS/exit0 independent STATIC REVIEW NOT_RUN; PT2B 43 PASS/exit0 independent NOT_RUN; PT2C 54 PASS/exit0 independent NOT_RUN; PT2D 50 PASS/exit0 independent NOT_RUN. Do NOT rerun passed tests without a reason or claim independent acceptance.
+
+ABSOLUTE HOLDS:
+LIVE_SCHEMA_048_INCIDENT OPEN: NO PostgreSQL even SELECT, direct or indirect via Vres MCP/CLI/tasks/hooks/doctor/bootstrap/health/recovery/F2. HOST_HOOK_DB_ROUTE_ATTEMPTED_AND_REFUSED OPEN: prior Claude Code PT1 reviewer Read x4/Grep x3 triggered 7 automatic DB-route attempts, all refused. Original Vres plugin hooks.json SOURCE has broad PostToolUse/PostToolUseFailure reply_activity_observe and experience-observe CLI. Native Claude Code with default settings is UNSAFE for independent read-only review. Do not start/stop/resume normal hooked sessions, disable global hooks, read installed profile or launch DB probes under this preflight. VRES_REPLY_GUARD_WARNING, VRES_PERSISTENCE_WARNING unresolved. Installed current-user P2 Chairman Sonnet/high last observed, Opus/medium NOT_INSTALLED, active effective model/effort UNKNOWN. Strict F1 positive issuer BLOCKED. PERSONAL P0–P3, Fable/high validator/arbiter, worker pins, current-user credential handles, V-01..V-42, Visual Studio fresh/legacy onboarding, E7/PA/F2/go-live holds preserved.
+
+ANTHROPIC OFFICIAL DOCUMENTATION CHECKED 2026-10-29:
+https://code.claude.com/docs/en/headless : claude --bare -p SKIPS automatic local user/project hooks, installed plugins, MCP servers and CLAUDE.md, but DOES NOT read existing subscription OAuth credentials or OS keychain. Requires ANTHROPIC_API_KEY already present or explicitly approved apiKeyHelper. Independent reviewer may incur separate API billing.
+https://code.claude.com/docs/en/cli-reference : --tools "" disables built-in tools, --disallowedTools "mcp__*" denies MCP (not covered by --tools); --no-session-persistence print only. --safe-mode retains managed hook policies and cannot be assumed safe; --restricted also loads managed settings. Do not silently fall back to normal, safe-mode, restricted mode or existing user configuration. CLI version/local support is NOT YET VERIFIED, no CLAUDE CLI invocation yet.
+https://code.claude.com/docs/en/env-vars : CLAUDE_CODE_SIMPLE equivalent bare mode, not OAuth keychain.
+
+NEXT OPERATOR ACTION (ONE ATOMIC BLOCK):
+Paste entire archived 72-line read-only PowerShell preflight from docs/handoffs/VRES-PERSONAL-PT2A-PT2D-CLAUDE-CODE-BARE-NO-LAUNCH-PREFLIGHT-2026-10-29.ps1 INLINE in a code block. It checks exact PT2D source HEAD/tree/clean at C:\Projects\Vres-ChatGPT-Review-Personal-PT2D-20261029 via Git read-only, Get-Command claude -All (does not invoke CLI, prints only type/basename), checks whether process ANTHROPIC_API_KEY exists (BOOLEANS ONLY, never prints keys) and whether ANTHROPIC_BASE_URL override exists (boolean only). Does not run Claude, config, plugin, hook, DB, installation or credential manager. Returns DECISION=STOP_BARE_MODE_AUTH_NOT_AVAILABLE or STOP_AMBIGUOUS_CLAUDE_COMMAND or STOP_CUSTOM_ENDPOINT_REQUIRES_SEPARATE_REVIEW or PREREQUISITES_SEEN_BUT_BARE_MODE_NOT_YET_ATTESTED. Always prints CLAUDE_VERSION=NOT_CHECKED_NO_LAUNCH and NATIVE_CLAUDE_CODE_REVIEW=NOT_RUN. User returns COMPLETE console. Do not claim any review success based on preflight.
+If API key unavailable and user only uses existing subscription OAuth, no proven safe bare-mode path yet. Do not suggest user paste secrets. If prerequisite booleans appear okay, proceed only to separately reviewed/no-hook version confirmation and guarded review execution as next gate, without local hooks or database contact; no active command is authorized by this handoff.
+
+METHODOLOGY: ChatGPT source-grounded smallest incremental SHA pinned commits and tests, independent Claude Code review only when documented no hooks, separate protected-source acceptance vs tests, user one PowerShell block per gate, no silent production changes, canonical docs-only continuity with exact allowlist, nonforced expected-old GitHub ref commit/readback. All prompts/code always given in code blocks, not just linked files. STOP on evidence/safety drift.
