@@ -8,9 +8,20 @@ from platformdirs import user_data_dir
 APP_NAME = "VresOS"
 
 
-def data_dir() -> Path:
+def data_dir_path() -> Path:
+    """Resolve the per-user Vres state root WITHOUT creating it.
+
+    Read-only inspections must use this resolver rather than data_dir(), which
+    intentionally creates the state root for state-writing workflows.
+    """
     override = os.environ.get("VRES_DATA_DIR")
-    path = Path(override) if override else Path(user_data_dir(APP_NAME, appauthor=False, roaming=False))
+    return Path(override) if override else Path(
+        user_data_dir(APP_NAME, appauthor=False, roaming=False)
+    )
+
+
+def data_dir() -> Path:
+    path = data_dir_path()
     path.mkdir(parents=True, exist_ok=True)
     return path
 

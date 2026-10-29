@@ -15,7 +15,7 @@ import typer
 from rich.console import Console
 from typer.testing import CliRunner
 
-from vres_os import architecture_governance, cli, project_adoption
+from vres_os import architecture_governance, cli, paths, project_adoption
 from vres_os.project import ProjectIdentity
 
 
@@ -251,6 +251,11 @@ def test_no_saved_state_stays_missing_after_plan_check(checked, monkeypatch):
     project, state, audit, sink, work = checked
     missing = work / "missing-state"
     monkeypatch.setenv("VRES_DATA_DIR", str(missing))
+    # A plan assessment MUST NEVER invoke the state-creating data_dir().
+    monkeypatch.setattr(
+        paths, "data_dir",
+        lambda: pytest.fail("read-only plan check invoked state-creating data_dir"),
+    )
     plan = _write_plan(work, _proposal(audit))
 
     with pytest.raises(typer.Exit) as failure:
@@ -259,3 +264,42 @@ def test_no_saved_state_stays_missing_after_plan_check(checked, monkeypatch):
     assert failure.value.exit_code == 2
     assert not missing.exists()
     assert sink.getvalue() == ""
+
+def test_data_dir_path_override_does_not_create_state_root(tmp_path, monkeypatch):
+    root = tmp_path / "absent"
+    monkeypatch.setenv("VRES_DATA_DIR", str(root))
+
+    assert paths.data_dir_path() == root
+    assert not root.exists()
+
+
+def test_data_dir_path_default_does_not_create_state_root(tmp_path, monkeypatch):
+    root = tmp_path / "default-user-state"
+    monkeypatch.delenv("VRES_DATA_DIR", raising=False)
+    monkeypatch.setattr(paths, "user_data_dir", lambda *_args, **_kw: str(root))
+
+    assert paths.data_dir_path() == root
+    assert not root.exists()
+
+
+def test_existing_state_creation_remains_explicit(tmp_path, monkeypatch):
+    root = tmp_path / "explicit-state"
+    monkeypatch.setenv("VRES_DATA_DIR", str(root))
+
+    assert not root.exists()
+    assert paths.data_dir() == root
+    assert root.is_dir()
+
+
+def test_valid_plan_check_does_not_call_creating_data_dir(checked, monkeypatch):
+    project, state, audit, sink, work = checked
+    monkeypatch.setattr(
+        paths, "data_dir",
+        lambda: pytest.fail("valid read-only plan-check invoked creating data_dir"),
+    )
+    before_state, before_project = _tree(state), _tree(project.root)
+    cli.project_plan_check(_write_plan(work, _proposal(audit)), project=project.root)
+
+    assert "PLAN_READY_FOR_PROTECTED_VALIDATION" in sink.getvalue()
+    assert _tree(state) == before_state
+    assert _tree(project.root) == before_project

@@ -804,10 +804,12 @@ def assess_alignment_plan(project, plan: Any, *, data_root: Path | None = None) 
     """
     from .architecture_governance import audit_project
     from .architecture_plan import check_alignment_plan
-    from .paths import data_dir
+    from .paths import data_dir_path
 
     root = Path(project.root).resolve(strict=True)
-    base = Path(data_root) if data_root is not None else data_dir()
+    # Unlike data_dir(), the path-only resolver does not create an empty state
+    # root before the checks below can refuse a missing adoption record.
+    base = Path(data_root) if data_root is not None else data_dir_path()
     sd = base / "projects" / hashlib.sha256(project.key.encode("utf-8")).hexdigest()[:24]
     # Unlike _state_dir, inspecting a missing or unsafe state NEVER creates it.
     for directory in (base, base / "projects", sd):
