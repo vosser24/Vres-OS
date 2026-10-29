@@ -791,3 +791,110 @@ def status(project, *, data_root: Path | None = None) -> dict[str, Any]:
         inv = _read_json(sd / "snapshots" / f"{record['inventory_version']}.json")
         out["items"], out["pending"], out["blockers"] = inv["items"], _pending(sd, inv), _blockers(inv)
     return out
+
+# ----------------------------------------------------------------------- offline architecture plan check
+
+def assess_alignment_plan(project, plan: Any, *, data_root: Path | None = None) -> dict[str, Any]:
+    """Assess a proposed existing-project plan without approval, activation or writes.
+
+    This consumes only an existing architecture_review_required record and a
+    fresh deterministic project audit. It does not edit the project, write
+    adoption state, invoke Claude/Fable, start any process or contact Vres DB.
+    A valid contract is still only ready for separate protected review.
+    """
+    from .architecture_governance import audit_project
+    from .architecture_plan import check_alignment_plan
+    from .paths import data_dir
+
+    root = Path(project.root).resolve(strict=True)
+    base = Path(data_root) if data_root is not None else data_dir()
+    sd = base / "projects" / hashlib.sha256(project.key.encode("utf-8")).hexdigest()[:24]
+    # Unlike _state_dir, inspecting a missing or unsafe state NEVER creates it.
+    for directory in (base, base / "projects", sd):
+        info = _lstat(directory)
+        if info is None or _is_link(info) or not stat.S_ISDIR(info.st_mode):
+            raise AdoptionError("A previously created ordinary adoption state directory is required")
+    record = _state(sd, project)
+    if not record or record.get("state") != "architecture_review_required":
+        raise AdoptionError("Project is not awaiting established-source architecture review")
+    recorded_root = record.get("project_root")
+    if not isinstance(recorded_root, str) or Path(recorded_root).resolve(strict=True) != root:
+        raise AdoptionError("Architecture review record belongs to a different project root")
+    if _lstat(sd / "journal.json") is not None:
+        raise AdoptionError("An interrupted adoption journal prevents plan assessment")
+
+    audit = audit_project(root)
+    blocking = [
+        reason for reason in audit["limitations"]
+        if reason not in _ARCHITECTURE_ANALYSIS_ADVISORIES
+    ]
+    if blocking:
+        raise AdoptionError("Architecture audit has incomplete or unsupported inputs; review is blocked")
+    if not audit["requires_alignment_plan"]:
+        raise AdoptionError("Current project is not an established-source architecture review candidate")
+    if (
+        record.get("architecture_audit_digest") != audit["audit_digest"]
+        or record.get("architecture_profiles") != list(audit["profiles"])
+        or record.get("architecture_audit_complete") is not True
+    ):
+        raise AdoptionError("Architecture audit differs from the recorded review; run start again")
+
+    rejected = None
+    if not isinstance(plan, dict):
+        rejected = "plan must be a JSON object"
+    else:
+        try:
+            payload = json.dumps(
+                plan, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+                allow_nan=False,
+            ).encode("utf-8")
+        except (TypeError, ValueError, OverflowError, RecursionError):
+            rejected = "plan must be bounded canonical JSON-compatible data"
+        else:
+            if len(payload) > 65536:
+                rejected = "plan exceeds the 65536-byte review limit"
+            elif (
+                isinstance(plan.get("tranches"), list)
+                and len(plan["tranches"]) > 64
+            ) or (
+                isinstance(plan.get("exceptions"), list)
+                and len(plan["exceptions"]) > 128
+            ):
+                rejected = "plan exceeds the bounded tranche or exception limit"
+
+    if rejected is not None:
+        contract = {
+            "contract_valid": False, "errors": [rejected], "plan_digest": None
+        }
+    else:
+        try:
+            contract = check_alignment_plan(plan, audit)
+        except (TypeError, ValueError, KeyError, OverflowError, RecursionError):
+            # The underlying plan checker is a validation contract, not an
+            # execution sandbox for malformed nested caller-supplied objects.
+            contract = {
+                "contract_valid": False,
+                "errors": ["plan contains invalid nested contract fields"],
+                "plan_digest": None,
+            }
+    accepted = contract.get("contract_valid") is True
+    return {
+        "project_adoption_state": "architecture_review_required",
+        "audit_digest": audit["audit_digest"],
+        "audit_digest_scope": "structural_findings_not_all_project_file_bytes",
+        "plan_digest": contract.get("plan_digest"),
+        "plan_contract_valid": accepted,
+        "plan_status": (
+            "PLAN_READY_FOR_PROTECTED_VALIDATION"
+            if accepted else "PLAN_CONTRACT_INVALID"
+        ),
+        "errors": [str(error)[:300] for error in contract.get("errors", [])][:32],
+        "required_validator": dict(audit["required_validator"]),
+        "protected_validation_required": True,
+        "activation_allowed": False,
+        "project_write_permitted": False,
+        "note": (
+            "This offline plan assessment is not user consent, independently "
+            "protected Fable validation, project activation or a release warrant"
+        ),
+    }
