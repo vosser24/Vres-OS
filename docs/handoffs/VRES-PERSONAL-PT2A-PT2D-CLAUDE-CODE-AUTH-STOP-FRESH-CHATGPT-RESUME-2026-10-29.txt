@@ -1,0 +1,54 @@
+RESUME VRES-OS — CLAUDE CODE ONLY, NO-LAUNCH PREFLIGHT AUTH STOP, NO INDEPENDENT PT2A-D REVIEW YET
+
+REPO: vosser24/Vres-OS. CANONICAL DOCS BRANCH: docs/chatgpt-continuity-20261023. VERIFY REMOTE LATEST HEAD FRESH BEFORE ACTION.
+
+READ FIRST:
+1. docs/handoffs/VRES-CHATGPT-CONTINUITY-INDEX.md
+2. docs/handoffs/VRES-PERSONAL-PT2A-PT2D-CLAUDE-CODE-NO-LAUNCH-AUTH-BLOCKED-AND-REVIEW-GATE-2026-10-29.md
+3. docs/handoffs/VRES-PERSONAL-PT2A-PT2D-CLAUDE-CODE-NO-LAUNCH-AUTH-BLOCKED-CONSOLE-CHAT-TRANSCRIPTION-2026-10-29.txt
+4. docs/handoffs/VRES-PERSONAL-PT2A-PT2D-CLAUDE-CODE-BARE-NO-LAUNCH-REVIEW-PREFLIGHT-HANDOFF-2026-10-29.md
+5. docs/handoffs/VRES-PERSONAL-PT2A-PT2D-INDEPENDENT-STATIC-REVIEW-EXACT-SOURCE-PACKET-2026-10-29.txt
+6. docs/handoffs/VRES-PERSONAL-PT2D-50-PASS-EXIT0-INDEPENDENT-REVIEWS-OPEN-AND-NEXT-GATE-2026-10-29.md
+7. docs/handoffs/VRES-PERSONAL-PT1-R1-INDEPENDENT-CLAUDE-STATIC-ACCEPT-AND-HOOK-REFUSALS-REPORT-2026-10-29.txt
+8. docs/architecture/VRES-PERSONAL-RISK-PROFILE-AND-CHAIRMAN-GOVERNED-MODEL-TRANSITION-V1-2026-10-27.md
+9. docs/roadmap/VRES-FULL-SCOPE-FUNCTIONALITY-REGISTER-2026-10-22.md
+
+CURRENT NO-LAUNCH PREFLIGHT USER CONSOLE:
+=== VRES CLAUDE CODE NO-LAUNCH REVIEW PREFLIGHT ===
+MODE=READ_ONLY_PREFLIGHT; NO_CLAUDE_EXECUTION
+PASS: published PT2D source HEAD
+PASS: published PT2D source tree
+PASS: detached PT2D review checkout clean
+CLAUDE_COMMAND_COUNT=1
+CLAUDE_COMMAND=Application/claude.exe
+SINGLE_DIRECT_CLAUDE_EXE=True
+BARE_MODE_API_KEY_ALREADY_AVAILABLE=False
+ANTHROPIC_ENDPOINT_OVERRIDE_PRESENT=False
+CLAUDE_VERSION=NOT_CHECKED_NO_LAUNCH
+INSTALLED_HOOKS=NOT_READ
+NATIVE_CLAUDE_CODE_REVIEW=NOT_RUN
+DECISION=STOP_BARE_MODE_AUTH_NOT_AVAILABLE
+VRES_CLAUDE_CODE_NO_LAUNCH_PREFLIGHT_COMPLETE
+Original Windows byte hash NOT SUPPLIED; LF-normalized ChatGPT transcription Git blob 2f41a59b5f94f538a48822528876303c3c483783. This is a safe preflight STOP, no failure in any PT2 source or test. Process API-key absence does not prove absence of separately authorized apiKeyHelper or account entitlement, and no Claude version or installed hook source was read.
+
+SOURCE PINS AND SCOPED WINDOWS TESTS:
+PT1 R1 7b6b7457236cf601fa056152b78713060fe0573e: 189 individual selected Windows PASS/exit0, independent STATIC_ACCEPT zero blockers/five informationals.
+PT2A 22122047cc985ffc8fb3e5d0d30e3d68d8d57df9: 213 selected Windows PASS/exit0, independent static NOT_RUN.
+PT2B 361500291601e241b7c579012a25442ff4a95d7d: 43 selected Windows PASS/exit0, independent static NOT_RUN.
+PT2C 81149beab52750c93db91453e18efbd5f7a21da4: 54 selected Windows PASS/exit0, independent static NOT_RUN. Separate unattached alternative PT2C 59d811... never Windows accepted; do not conflate.
+PT2D a5913288b7748693adafc36c9c1cb35af3ea3949, tree d45ffc91781be6681124ff369af5df4d06300ce9: 50 selected Windows PASS/exit0, independent static NOT_RUN.
+Exact 10-source-file GitHub-bound independent packet Git blob 7eb30e0ef2f2288e4e5951da4057352f256091d5 is prepared but not independently reviewed.
+
+MANDATORY CLAUDE CODE WORKFLOW:
+User explicitly chose CLAUDE CODE not web Chat. Old web Chat review suggestion superseded. Use Claude Code independent STATIC source review at exact Git SHAs only after a demonstrably zero-auto-hook/zero-DB-attempt setup exists. Prior installed Vres hooks after Read x4/Grep x3 made seven automatic Vres database routing ATTEMPTS, all refused. Never imply no-attempt safe from simply changing folder or telling prompt "no database". Anthropic documented claude --bare -p skips automatic user/project hook/plugin/MCP discovery but lacks normal subscription OAuth credentials and needs independently approved API key or helper. User's process ANTHROPIC_API_KEY is absent. DO NOT create/paste credentials, enable separately billed API, silently fall back to normal Claude Code, or edit installed/global hooks without specific fresh authorization. No Claude launch in last preflight. Further read-only CLI/version/auth-method verification only if explicitly authorized within safety boundaries. Never modify existing hooked Claude lifecycle merely to test.
+
+HARD INCIDENTS:
+LIVE_SCHEMA_048_INCIDENT=OPEN: NO PostgreSQL contact even SELECT, direct or indirect via Vres MCP/task/CLI/bootstrap/doctor/health/hooks/F2/recovery/migrations.
+HOST_HOOK_DB_ROUTE_ATTEMPTED_AND_REFUSED=OPEN: 7 posttool hook attempts refused, no-attempt requirement breached. VRES_REPLY_GUARD_WARNING and VRES_PERSISTENCE_WARNING unresolved, no database probes.
+No real release v2 installed-state readback/backup/rollback/in-place rewrite, no Opus medium activation or actual model attestation. Last observed installed original P2 Chairman Sonnet/high; Opus/medium UNINSTALLED, physical model/effort UNKNOWN.
+Strict F1 independently rooted positive authority BLOCKED, distinct from PERSONAL P0 ephemeral/P1 bounded reversible project/P2 protected explicit consent and real rollback/P3 incident STOP. Preserve protected Fable/high arbiter/validator, worker pins, current-user secret handles with cross-project binding, Visual Studio fresh/legacy onboarding, full V-01..V-42 feature scope, E7/PA/F2 and production holds. No release readiness inferred.
+
+PROJECT CADENCE:
+ChatGPT leads architecture and source-grounded implementation; Claude Code independently reviews only in proven safe scope; separate pinned branch/two-file allowlist/tree/parent/blobs; GitHub nonforced ref updates/readback; ONE atomic Windows PowerShell fail-fast -B pytest selected test with PG/DB env process isolation/restore, pytest plugin autoload off, AppData fence and individual case count/exits/pre/post Git clean; commit every material gate in docs-only continuity index/handoff. Always provide operator commands AND Claude prompts inline CODE BLOCKS, never only a file. Never rerun passed tests by default; STOP on hook attempt or unmet auth requirement.
+
+NEXT: User may request targeted source-only safe reviewer feasibility, but no live Claude review is authorized yet. Most recent preflight explicitly STOP_BARE_MODE_AUTH_NOT_AVAILABLE. Do not replace user's Claude Code workflow with web Chat. If no safe subscription-compatible method or separately approved API helper exists, keep PT2A-D independent reviews BLOCKED, preserve source and stop before any protected installation.
