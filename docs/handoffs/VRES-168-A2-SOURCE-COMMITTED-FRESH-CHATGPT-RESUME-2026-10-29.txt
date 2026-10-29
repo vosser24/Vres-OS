@@ -1,0 +1,38 @@
+RESUME VRES-OS — #168 A1 R1 WINDOWS 88 DISTINCT PASS/EXIT0 SEALED; A2 OFFLINE ARCHITECTURE PLAN-ASSESSMENT SOURCE COMMITTED; A2 GUARDED WINDOWS TEST NEXT
+
+Repository vosser24/Vres-OS; canonical documentation branch docs/chatgpt-continuity-20261023; VERIFY ACTUAL LATEST REMOTE DOCS HEAD before action.
+
+READ FIRST:
+1. docs/handoffs/VRES-CHATGPT-CONTINUITY-INDEX.md
+2. docs/handoffs/VRES-168-A2-OFFLINE-ARCHITECTURE-PLAN-ASSESSMENT-SOURCE-COMMITTED-WINDOWS-NEXT-2026-10-29.md
+3. docs/handoffs/VRES-168-A2-GUARDED-WINDOWS-SELECTED-TEST-NEXT-2026-10-29.ps1 — COMPLETE 166-line block MUST be shown INLINE in the chat in one PowerShell code block, not just linked
+4. docs/handoffs/VRES-168-A1-R1-WINDOWS-88-PASS-EXIT0-AND-NEXT-OFFLINE-PROJECT-ADOPTION-STAGE-2026-10-29.md
+5. docs/handoffs/VRES-168-A1-R1-WINDOWS-88-PASS-EXIT0-ORIGINAL-OPERATOR-TRANSCRIPT-RAW-CRLF-2026-10-29.txt
+6. docs/roadmap/VRES-CHATGPT-LED-FULL-SCOPE-DELIVERY-PLAN-2026-10-22.md
+7. docs/roadmap/VRES-FULL-SCOPE-FUNCTIONALITY-REGISTER-2026-10-22.md
+8. docs/handoffs/VRES-PERSONAL-HOOK-R1-WINDOWS-34-PASS-EXIT0-INDEPENDENT-REVIEW-AND-INSTALLED-HOOK-HOLDS-2026-10-29.md
+
+LATEST CODE:
+Branch feature/168-personal-architecture-plan-contract-20261029
+NEW HEAD 3ce27dd2fa46b9b2f3bb921c92e953926bcf8c8d
+NEW TREE 76fa41d6561fc26454eb46149f4ddabd308d5f36
+ONE PARENT accepted-Windows selected A1 R1 HEAD fa54b68cd8bfdf86c9de6782040858957976dd02, tree 5f57c7d9b06d45ba18c14369409d59461d508e10
+EXACT two changed paths: M src/vres_os/project_adoption.py new blob 7747d2ea5891debda173fa2b5d71bc0699303304 (append-only new assess_alignment_plan); A tests/test_project_adoption_alignment.py new blob 1d1eeafb597e5e6a5e6385c3f3dc7ddd58586b0b (13 synthetic focused tests). Nonforced GitHub ref update/commit/tree/parent and exact M+A source compare PASS. A2 WINDOWS SELECTED PYTEST NOT_RUN, INDEPENDENT SOURCE REVIEW NOT_RUN, NO INSTALL.
+
+A2 BEHAVIOR:
+Offline read-only plan assessor for existing architecture_review_required project state from A1. Loads existing Vres state directory without creating a new one; exact project key/root and no pending journal; re-audits project using accepted static #174 auditor; blocks any unknown/missing/incomplete/unsupported limitation, changed recorded structural digest/profile; bounds caller JSON (<=65536 bytes, <=64 tranches, <=128 exceptions), fail closes invalid nested types/cyclic/oversized; reuses accepted check_alignment_plan contract. Returns PLAN_READY_FOR_PROTECTED_VALIDATION only when plan contract is correct, else PLAN_CONTRACT_INVALID. ALWAYS activation_allowed=False and protected Fable/high required; no user consent, actual Fable call, project write, CLI/start, DB, credentials or model. A returned plan digest is NOT a source-code-byte hash; source audit digest is structural findings, not all project file bytes. No real legacy adoption approved.
+
+PRIOR WINDOWS:
+A1 R1 at HEAD fa54b68... 88 distinct named selected Windows tests PASS/0 FAIL/exit0 across new corrected gate 10, existing P2-D adoption 52 and architecture-governance 26. Original raw console UTF8 no BOM 14,003 bytes/159 lines/158 CRLF, no final newline, SHA256 77e2dff55579fd7a01e122ca10ae9d70491e9cb5943de1e56ab8bb437d1c9528, GitHub raw blob 88603126de2669ee95a44edf9ffb6d56609990c2; final terminal text truncated PS C but completion marker full. 13 pre/post blob identities, old failed A1/new R1 clean PASS, process DB/PG vars isolated/restored, AppData unexpected refusals0/integration_opt_in False, final VRES_PERSONAL_168_R1_WINDOWS_SELECTED_TEST_COMPLETE.
+Earlier REJECTED original A1 HEAD 2a21431... exact original 16,297-byte CRLF console Git blob 7954de7f56257a63745234e357af9397e9aa908e, SHA256 15757875acf25d632c984c8709a0fe1ad3cfac5d22a0e2023ebf6c347ce643d7, 84 PASS/2 FAIL/exit1 correct ABORTED. Root cause known Python import-root limitation, corrected A1 R1; do not rerun or rewrite failed evidence.
+
+NEXT ONE USER ACTION:
+Normal Windows PowerShell, not Claude. Copy COMPLETE new A2 script from canonical docs .ps1 INLINE. Guard original P2 anchor at 82c82430b38f93bd6b9d5c3af3b5de9c1368af9c clean, prior R1 C:\Projects\Vres-ChatGPT-Review-168-Architecture-Gate-R1-20261029 at fa54... tree 5f57... clean, NEW destination C:\Projects\Vres-ChatGPT-Review-168-Plan-Assessment-20261029 initially absent, official remote/fetch exact A2 SHA, create detached new checkout, exact new SHA/tree/parent and 14 inherited/new blob IDs, exact 1M+1A, diff --check, clean. ONE selected Python3.12 -B pytest -q -rA -p no:cacheprovider of tests/test_project_adoption_alignment.py (13 new test functions) plus 4 selected existing exact A1 R1 + #174 contract cases. PYTEST_DISABLE_PLUGIN_AUTOLOAD, process DB/PG/integration vars isolated/restored, protected AppData fixture; print all individual case results, exit and post HEAD/tree/14 blobs + clean new/prior, final VRES_PERSONAL_168_A2_WINDOWS_SELECTED_TEST_COMPLETE only on exit0. STOP/ABORT means no success; paste entire console, do not run fragments. No preclaimed A2 Windows test result.
+
+ABSOLUTE HOLDS:
+LIVE_SCHEMA_048_INCIDENT=OPEN NO PostgreSQL contact EVEN SELECT directly or through installed Vres MCP/CLI/tasks/hooks/doctor/bootstrap/health/F2/migration/recovery.
+HOST_HOOK_DB_ROUTE_ATTEMPTED_AND_REFUSED=OPEN: 7 refused PT1 Claude Read/Grep posttool DB route attempts. Hook-R1 Git SOURCE matcher correction selected 34 Windows PASS but installed user/global/session lifecycle hooks unchanged, native Claude Code normal source reviews blocked. Do not retry account/API-key tier probes or Claude web Chat; subscription-based Claude Code is the established reviewer only when truly safe.
+Prior PT1 R1 189 Windows PASS + independent STATIC_ACCEPT 0 blockers/5 informationals (7 refused automatic hook routes); PT2A 213, PT2B 43, PT2C selected 54, PT2D 50 selected Windows PASS but independent PT2A-D NOT_RUN; Hook-R1 independently NOT_RUN; A1 R1 independently NOT_RUN; A2 tests/review NOT_RUN. P2 installed Chairman last observed Sonnet/high, requested Opus/medium NOT_INSTALLED, physical model UNKNOWN, strict F1 protected positive issuer BLOCKED, Fable/high arbiter+validator and worker pins preserved, PERSONAL P0-P3 risk tiers, credential handles current-user and cross-project approvals, original full V-01..V-42 and E7/PA/F2/Visual Studio legacy PRISM adoption/go-live holds remain.
+
+METHODOLOGY:
+ChatGPT architecture/code/tests and immutable GitHub commits, user runs exactly one complete fail-fast SHA-pinned Windows PowerShell selected offline test block and returns FULL original evidence, ChatGPT reviews and commits meaningful docs-only source+test result/continuity, independent Claude Code with existing subscription review only after zero automatic DB-attempt environment proven. No normal DB, no native installed changes, no broad repetitive test suites, no speculation promoted to PASS. All scripts/prompts INLINE CODE BLOCKS, not files alone.
