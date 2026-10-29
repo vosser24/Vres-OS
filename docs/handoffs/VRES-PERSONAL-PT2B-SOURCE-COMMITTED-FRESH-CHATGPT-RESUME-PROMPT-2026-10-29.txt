@@ -1,0 +1,24 @@
+RESUME VRES-OS — PERSONAL-FIRST PT2B OFFLINE RECOVERY SOURCE COMMITTED / WINDOWS TEST NEXT
+
+Repo: vosser24/Vres-OS. Canonical docs branch: docs/chatgpt-continuity-20261023. Verify latest docs HEAD fresh; do not assume an old SHA.
+
+READ FIRST from current docs branch:
+1. docs/handoffs/VRES-CHATGPT-CONTINUITY-INDEX.md
+2. docs/handoffs/VRES-PERSONAL-PT2B-OFFLINE-RECOVERY-SOURCE-COMMITTED-WINDOWS-TEST-NEXT-2026-10-29.md
+3. docs/handoffs/VRES-PERSONAL-PT2B-PROPOSED-GUARDED-WINDOWS-TEST-2026-10-29.ps1
+4. docs/handoffs/VRES-PERSONAL-PT2A-213-PASS-PT1-ACCEPT-OPEN-ISSUES-AND-FRESH-CHATGPT-HANDOFF-2026-10-29.md
+5. docs/handoffs/VRES-PERSONAL-PT2A-WINDOWS-213-PASSED-EXIT0-ORIGINAL-OPERATOR-TRANSCRIPT-2026-10-29.txt
+6. docs/handoffs/VRES-PERSONAL-PT1-R1-INDEPENDENT-CLAUDE-STATIC-ACCEPT-AND-HOOK-REFUSALS-REPORT-2026-10-29.txt
+7. docs/architecture/VRES-PERSONAL-RISK-PROFILE-AND-CHAIRMAN-GOVERNED-MODEL-TRANSITION-V1-2026-10-27.md
+8. docs/roadmap/VRES-FULL-SCOPE-FUNCTIONALITY-REGISTER-2026-10-22.md
+
+SOURCE PIN:
+- PT2B feature branch feature/personal-governed-chairman-pt2b-offline-recovery-20261029 at HEAD 361500291601e241b7c579012a25442ff4a95d7d; tree 903fa86fc9ee9548d20509a5485efa010ae4a3fe; sole PT2A parent 22122047cc985ffc8fb3e5d0d30e3d68d8d57df9. EXACT two new files: src/vres_os/personal_chairman_recovery_journal.py blob 5b9a0ed4f52a4e4d95201d48a131e2186f9c06c8, tests/test_personal_chairman_recovery_journal.py blob 0d6e5a8263dcdb8463d8a2794468c20a5b4f4aa4. No other feature files changed; nonforced GitHub readback confirmed.
+- PT2B is deterministic pure in-memory dual-role change journal/recovery SIMULATION. No actual backups/install/host/model/DB/credentials/file I/O, no real reconciliation proof. Every manifest safe_to_install=False. Local synthetic harness had 43 test cases PASS only; actual Windows checkout tests NOT_RUN, independent PT2B review NOT_RUN.
+- PT2A already 213 distinct selected Windows PASSED/exit0, independent PT2A static review NOT_RUN. PT1 R1 independently STATIC_ACCEPT (zero blocking, five info) and 189 selected Windows PASS/exit0. Previous failed R0 attempts archived. Do not rerun passed PT2A by default.
+
+ABSOLUTE HOLDS: LIVE_SCHEMA_048_INCIDENT=OPEN NO PostgreSQL EVEN SELECT, direct or via Vres MCP/CLI/tasks/bootstrap/doctor/health/hooks/F2/recovery. HOST_HOOK_DB_ROUTE_ATTEMPTED_AND_REFUSED=OPEN (four Read and three Grep native Claude PostToolUse database route attempts, all refused). No new hook-bearing native Claude review until separately approved proven no-DB-attempt mode; do not edit global hooks/installed current-user Claude. Last observed original P2 Chairman Sonnet/high, Opus/medium UNINSTALLED, effective model/effort UNKNOWN. No activation, no PT2 actual protected write, no new install consent. Strict F1 positive authority separately BLOCKED; PERSONAL P0-P3, protected Fable/high validator/router, credentials, V-01..V-42 and E7/PA/F2 all remain.
+
+NEXT EXACT ACTION: provide/use the ENTIRE archived PT2B 159-line PowerShell & { ... } script as ONE atomic pasted code block, not a file or separated statements. It creates NEW detached SHA-pinned PT2B checkout from clean P2 anchor and prior PT2A review, guards exact changed paths/blobs/tree/sole parent, clears/restores PG/DB/integration env in the process, disables pytest plugins, uses Python3.12 -B -m pytest -q -rA -p no:cacheprovider, runs ONLY tests/test_personal_chairman_recovery_journal.py, checks conftest AppData fence, pre/post clean and exit0, and prints final VRES_PERSONAL_PT2B_WINDOWS_SELECTED_TEST_COMPLETE only after full success. Script is proposed, NOT YET WINDOWS EXECUTED. User returns full original console. Verify every case line and STOP chronology; do not mistake synthetic 43 PASS for actual Windows PASS. If anything fails or a safety check blocks, STOP, do not bypass.
+
+After a material gate, update the canonical docs-only read-first index and handoff using exact Git diff allowlist, one-parent nonforced expected-old GitHub update and readback. No installed Opus without fresh specific approval and real rollback proof. Maintain method and full roadmap.
