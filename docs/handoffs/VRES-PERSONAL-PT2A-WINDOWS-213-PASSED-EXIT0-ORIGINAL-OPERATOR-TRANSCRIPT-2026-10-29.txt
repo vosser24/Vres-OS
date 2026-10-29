@@ -1,0 +1,275 @@
+=== PERSONAL PT2A ONE ATOMIC WINDOWS PREFLIGHT ===
+PASS: Original P2 anchor HEAD
+PASS: Original P2 anchor
+PASS: Accepted D1B HEAD
+PASS: Accepted D1B tree
+PASS: Original accepted D1B
+PASS: Accepted PT1 R1 HEAD
+PASS: Accepted PT1 R1 tree
+PASS: Accepted PT1 R1 checkout
+PASS: Official GitHub origin
+PASS: Remote PT2A HEAD
+remote: Enumerating objects: 7, done.
+remote: Counting objects: 100% (7/7), done.
+remote: Compressing objects: 100% (6/6), done.
+remote: Total 7 (delta 0), reused 0 (delta 0), pack-reused 0 (from 0)
+Unpacking objects: 100% (7/7), 13.37 KiB | 526.00 KiB/s, done.
+From https://github.com/vosser24/Vres-OS
+ * branch            feature/personal-governed-chairman-pt2a-offline-plan-20261029 -> FETCH_HEAD
+ * [new branch]      feature/personal-governed-chairman-pt2a-offline-plan-20261029 -> origin/feature/personal-governed-chairman-pt2a-offline-plan-20261029
+PASS: Fetched PT2A HEAD
+Preparing worktree (detached HEAD 2212204)
+HEAD is now at 2212204 feat(personal): add PT2-A offline dual-role Chairman transition plan and tests
+PASS: PT2A detached mode
+PASS: PT2A HEAD
+PASS: PT2A tree
+PASS: PT2A sole parent
+PASS: Git blob src/vres_os/personal_chairman_transition_plan.py
+PASS: Git blob tests/test_personal_chairman_transition_plan.py
+PASS: Git blob src/vres_os/personal_chairman_preview.py
+PASS: Git blob tests/test_personal_chairman_preview.py
+PASS: Git blob plugins/vres-os/agents/chairman.md
+PASS: Git blob tests/conftest.py
+PASS: exactly two PT2A added source/test files
+PASS: PT2A diff --check
+PASS: PT2A review clean before tests
+VRES_PERSONAL_PT2A_PREFLIGHT_PASS
+=== PERSONAL PT2A GUARDED OFFLINE SELECTED PYTEST ===
+PYTEST_PLUGIN_AUTOLOAD=DISABLED
+PASS: process database/PG/integration environment isolated
+TEST_COMMAND=py -3.12 -B -m pytest -q -rA -p no:cacheprovider tests/test_architecture_governance_contract.py tests/test_aigo_orchestration_contract.py tests/test_chairman_policy_materialization.py tests/test_chairman_c2_offline_planner.py tests/test_chairman_policy_aware_body.py tests/test_personal_chairman_preview.py tests/test_personal_chairman_transition_plan.py
+................................................................................................................ [ 52%]
+.....................................................................................................            [100%]
+======================================================= PASSES ========================================================
+LIVE APP-DATA FENCE: unexpected refusals=0 protected=['c:\\users\\user\\appdata\\local\\vresos', 'c:\\users\\user\\appdata\\roaming\\vresos'] trusted_temp_base=C:\Users\User\AppData\Local\Temp session_root=C:\Users\User\AppData\Local\Temp\vres-pytest-app-data-4uxadwyw\VresOS init_order=['validate-temp-base', 'create-session-directory', 'validate-session-directory', 'create-app-data-root', 'enable-isolation'] removed_env=[] integration_opt_in=False
+=============================================== short test summary info ===============================================
+PASSED tests/test_architecture_governance_contract.py::test_architecture_governance_is_chairman_only_not_user_command_surface
+PASSED tests/test_architecture_governance_contract.py::test_c7_control_phrase_language_present_in_all_three_governing_files
+PASSED tests/test_architecture_governance_contract.py::test_c7_credential_local_terminal_carve_out_present_in_all_three_files
+PASSED tests/test_architecture_governance_contract.py::test_existing_project_alignment_plan_is_always_protected_fable_validated
+PASSED tests/test_architecture_governance_contract.py::test_constitution_freezes_dependency_and_strangler_principles
+PASSED tests/test_architecture_governance_contract.py::test_architecture_tools_are_registered_on_main_mcp_entrypoint
+PASSED tests/test_architecture_governance_contract.py::test_policy_distinguishes_deterministic_contract_from_validation_authority
+PASSED tests/test_aigo_orchestration_contract.py::test_aigo_migration_adds_project_capability_scope_and_missing_stable_domains
+PASSED tests/test_aigo_orchestration_contract.py::test_capability_alias_migration_covers_pricing_subproblems_without_new_authority
+PASSED tests/test_aigo_orchestration_contract.py::test_software_architecture_alias_migration_reuses_shipped_capability_without_new_authority
+PASSED tests/test_aigo_orchestration_contract.py::test_routable_roster_matches_supported_executive_roles_without_validator_or_chairman
+PASSED tests/test_aigo_orchestration_contract.py::test_mcp_entrypoint_registers_orchestration_and_routing_from_dedicated_modules
+PASSED tests/test_aigo_orchestration_contract.py::test_chairman_requires_deterministic_first_routing_and_tiered_workers
+PASSED tests/test_aigo_orchestration_contract.py::test_project_capability_acquisition_is_mechanically_bound_to_latest_blocked_gap
+PASSED tests/test_aigo_orchestration_contract.py::test_work_execution_is_bound_to_latest_orchestration_plan_without_new_state_machine
+PASSED tests/test_aigo_orchestration_contract.py::test_work_unit_acceptance_contract_is_durable_but_not_a_test_management_system
+PASSED tests/test_aigo_orchestration_contract.py::test_governed_agents_pin_router_and_execution_model_families
+PASSED tests/test_aigo_orchestration_contract.py::test_subagent_hooks_observe_router_and_worker_model_evidence
+PASSED tests/test_aigo_orchestration_contract.py::test_vres_claude_contract_preserves_aigo_simplicity_and_scope_separation
+PASSED tests/test_chairman_policy_materialization.py::test_initial_chairman_control_policy_is_versioned_opus_medium_without_generation_pin
+PASSED tests/test_chairman_policy_materialization.py::test_policy_round_trip_is_deterministic_and_immutable
+PASSED tests/test_chairman_policy_materialization.py::test_unknown_or_ambiguous_policy_fails_without_substituting_model[values0]
+PASSED tests/test_chairman_policy_materialization.py::test_unknown_or_ambiguous_policy_fails_without_substituting_model[values1]
+PASSED tests/test_chairman_policy_materialization.py::test_unknown_or_ambiguous_policy_fails_without_substituting_model[values2]
+PASSED tests/test_chairman_policy_materialization.py::test_unknown_or_ambiguous_policy_fails_without_substituting_model[values3]
+PASSED tests/test_chairman_policy_materialization.py::test_unknown_or_ambiguous_policy_fails_without_substituting_model[values4]
+PASSED tests/test_chairman_policy_materialization.py::test_unknown_or_ambiguous_policy_fails_without_substituting_model[values5]
+PASSED tests/test_chairman_policy_materialization.py::test_unknown_or_ambiguous_policy_fails_without_substituting_model[values6]
+PASSED tests/test_chairman_policy_materialization.py::test_unknown_or_ambiguous_policy_fails_without_substituting_model[values7]
+PASSED tests/test_chairman_policy_materialization.py::test_unknown_or_ambiguous_policy_fails_without_substituting_model[values8]
+PASSED tests/test_chairman_policy_materialization.py::test_unknown_or_ambiguous_policy_fails_without_substituting_model[values9]
+PASSED tests/test_chairman_policy_materialization.py::test_unknown_or_ambiguous_policy_fails_without_substituting_model[values10]
+PASSED tests/test_chairman_policy_materialization.py::test_policy_document_refuses_unknown_duplicate_and_malformed_data[]
+PASSED tests/test_chairman_policy_materialization.py::test_policy_document_refuses_unknown_duplicate_and_malformed_data[not-json]
+PASSED tests/test_chairman_policy_materialization.py::test_policy_document_refuses_unknown_duplicate_and_malformed_data[[]]
+PASSED tests/test_chairman_policy_materialization.py::test_policy_document_refuses_unknown_duplicate_and_malformed_data[{"schema":"wrong","version":1,"family":"opus","effort":"medium"}]
+PASSED tests/test_chairman_policy_materialization.py::test_policy_document_refuses_unknown_duplicate_and_malformed_data[{"schema":"vres-chairman-control/1","version":1,"family":"opus"}]
+PASSED tests/test_chairman_policy_materialization.py::test_policy_document_refuses_unknown_duplicate_and_malformed_data[{"schema":"vres-chairman-control/1","version":1,"family":"opus","effort":"medium","extra":1}]
+PASSED tests/test_chairman_policy_materialization.py::test_policy_document_refuses_unknown_duplicate_and_malformed_data[{"schema":"vres-chairman-control/1","version":1,"family":"opus","family":"sonnet","effort":"medium"}]
+PASSED tests/test_chairman_policy_materialization.py::test_policy_document_refuses_unknown_duplicate_and_malformed_data[{"schema":"vres-chairman-control/1","version":true,"family":"opus","effort":"medium"}]
+PASSED tests/test_chairman_policy_materialization.py::test_policy_document_refuses_unknown_duplicate_and_malformed_data[\xff]
+PASSED tests/test_chairman_policy_materialization.py::test_policy_document_refuses_unknown_duplicate_and_malformed_data[                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 ]
+PASSED tests/test_chairman_policy_materialization.py::test_policy_document_refuses_unknown_duplicate_and_malformed_data[deep-json-nesting]
+PASSED tests/test_chairman_policy_materialization.py::test_candidate_render_is_byte_deterministic_and_preserves_the_exact_body
+PASSED tests/test_chairman_policy_materialization.py::test_template_identity_when_existing_sonnet_high_is_explicitly_requested
+PASSED tests/test_chairman_policy_materialization.py::test_review_candidate_policy_changes_only_model_and_effort_frontmatter_fields
+PASSED tests/test_chairman_policy_materialization.py::test_unsafe_or_nonchairman_template_fails_closed[]
+PASSED tests/test_chairman_policy_materialization.py::test_unsafe_or_nonchairman_template_fails_closed[not-a-template]
+PASSED tests/test_chairman_policy_materialization.py::test_unsafe_or_nonchairman_template_fails_closed[---\nname: chairman\n]
+PASSED tests/test_chairman_policy_materialization.py::test_unsafe_or_nonchairman_template_fails_closed[---\nname: validator\ndescription: x\nmodel: sonnet\neffort: high\n---\nbody\n]
+PASSED tests/test_chairman_policy_materialization.py::test_unsafe_or_nonchairman_template_fails_closed[---\nname: chairman\ndescription: x\nmodel: sonnet\neffort: high\nmodel: opus\n---\nbody\n]
+PASSED tests/test_chairman_policy_materialization.py::test_unsafe_or_nonchairman_template_fails_closed[---\nname: chairman\ndescription: x\nmodel: opus\neffort: high\nunknown: x\n---\nbody\n]
+PASSED tests/test_chairman_policy_materialization.py::test_unsafe_or_nonchairman_template_fails_closed[---\nname: chairman\ndescription: x\nmodel: auto\neffort: high\n---\nbody\n]
+PASSED tests/test_chairman_policy_materialization.py::test_unsafe_or_nonchairman_template_fails_closed[---\nname: chairman\ndescription: x\nmodel: sonnet\neffort: high\n---\n]
+PASSED tests/test_chairman_policy_materialization.py::test_unsafe_or_nonchairman_template_fails_closed[---\r\nname: chairman\r\n---\r\nbody\r\n]
+PASSED tests/test_chairman_policy_materialization.py::test_unsafe_or_nonchairman_template_fails_closed[\xef\xbb\xbf---\nname: chairman\n---\nbody\n]
+PASSED tests/test_chairman_policy_materialization.py::test_unsafe_or_nonchairman_template_fails_closed[\xff\xff\xff\xff\xff\xff\xff\xff]
+PASSED tests/test_chairman_policy_materialization.py::test_unsafe_or_nonchairman_template_fails_closed[oversized-template]
+PASSED tests/test_chairman_policy_materialization.py::test_other_governed_agents_stay_pinned_and_untouched_by_chairman_materialization
+PASSED tests/test_chairman_policy_materialization.py::test_no_filesystem_write_is_part_of_pure_candidate_render
+PASSED tests/test_chairman_policy_materialization.py::test_materializer_accepts_uniform_native_line_endings_without_altering_body[lf]
+PASSED tests/test_chairman_policy_materialization.py::test_materializer_accepts_uniform_native_line_endings_without_altering_body[crlf]
+PASSED tests/test_chairman_policy_materialization.py::test_mixed_or_bare_carriage_return_line_endings_are_refused[---\r\nname: chairman\ndescription: x\r\nmodel: sonnet\r\neffort: high\r\n---\r\nbody\r\n]
+PASSED tests/test_chairman_policy_materialization.py::test_mixed_or_bare_carriage_return_line_endings_are_refused[---\nname: chairman\ndescription: x\nmodel: sonnet\neffort: high\n---\nbody\r\n]
+PASSED tests/test_chairman_policy_materialization.py::test_mixed_or_bare_carriage_return_line_endings_are_refused[---\rname: chairman\rdescription: x\rmodel: sonnet\reffort: high\r---\rbody\r]
+PASSED tests/test_chairman_policy_materialization.py::test_rendered_candidate_provenance_cannot_be_forged_from_supplied_hashes
+PASSED tests/test_chairman_policy_materialization.py::test_materializer_rejects_unknown_policy_object
+PASSED tests/test_chairman_c2_offline_planner.py::test_unverified_good_looking_input_is_indeterminate_not_a_permission
+PASSED tests/test_chairman_c2_offline_planner.py::test_all_caller_claimed_reviews_are_untrusted_even_when_everything_matches
+PASSED tests/test_chairman_c2_offline_planner.py::test_neither_baseline_nor_opus_policy_can_result_in_positive_authority[sonnet-claims0]
+PASSED tests/test_chairman_c2_offline_planner.py::test_neither_baseline_nor_opus_policy_can_result_in_positive_authority[sonnet-claims1]
+PASSED tests/test_chairman_c2_offline_planner.py::test_neither_baseline_nor_opus_policy_can_result_in_positive_authority[opus-claims0]
+PASSED tests/test_chairman_c2_offline_planner.py::test_neither_baseline_nor_opus_policy_can_result_in_positive_authority[opus-claims1]
+PASSED tests/test_chairman_c2_offline_planner.py::test_pure_renderer_preserves_caller_template_line_endings[lf]
+PASSED tests/test_chairman_c2_offline_planner.py::test_pure_renderer_preserves_caller_template_line_endings[crlf]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_or_oversized_caller_template_is_refused_without_digest[]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_or_oversized_caller_template_is_refused_without_digest[not-a-template]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_or_oversized_caller_template_is_refused_without_digest[---\nname: chairman\n]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_or_oversized_caller_template_is_refused_without_digest[---\nname: validator\ndescription: x\nmodel: sonnet\neffort: high\n---\nbody\n]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_or_oversized_caller_template_is_refused_without_digest[---\nname: chairman\ndescription: x\nmodel: sonnet\neffort: high\n---\n]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_or_oversized_caller_template_is_refused_without_digest[---\nname: chairman\ndescription: x\nmodel: sonnet\nmodel: opus\neffort: high\n---\nbody\n]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_or_oversized_caller_template_is_refused_without_digest[---\nname: chairman\ndescription: x\nmodel: sonnet\neffort: high\n---\nbody\r\n]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_or_oversized_caller_template_is_refused_without_digest[\xff]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_or_oversized_caller_template_is_refused_without_digest[oversized-template]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_or_oversized_caller_template_is_refused_without_digest[not bytes]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_or_oversized_caller_template_is_refused_without_digest[template10]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_noncanonical_or_duplicate_policy_documents_refuse_neutrally[baseline-]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_noncanonical_or_duplicate_policy_documents_refuse_neutrally[baseline-not json]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_noncanonical_or_duplicate_policy_documents_refuse_neutrally[baseline-{}]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_noncanonical_or_duplicate_policy_documents_refuse_neutrally[baseline-[]]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_noncanonical_or_duplicate_policy_documents_refuse_neutrally[baseline-{"schema":"wrong","version":1,"family":"sonnet","effort":"high"}]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_noncanonical_or_duplicate_policy_documents_refuse_neutrally[baseline-{"effort":"high","family":"sonnet","schema":"vres-chairman-control/1"}]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_noncanonical_or_duplicate_policy_documents_refuse_neutrally[baseline-{"effort":"high","family":"auto","schema":"vres-chairman-control/1","version":1}]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_noncanonical_or_duplicate_policy_documents_refuse_neutrally[baseline-{"effort":"high","family":"sonnet","schema":"vres-chairman-control/1","version":true}]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_noncanonical_or_duplicate_policy_documents_refuse_neutrally[baseline-{"effort":"high","family":"sonnet","schema":"vres-chairman-control/1","family":"opus","version":1}]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_noncanonical_or_duplicate_policy_documents_refuse_neutrally[baseline-\xef\xbb\xbf{"effort":"high","family":"sonnet","schema":"vres-chairman-control/1","version":1}]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_noncanonical_or_duplicate_policy_documents_refuse_neutrally[baseline-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 ]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_noncanonical_or_duplicate_policy_documents_refuse_neutrally[baseline-deep-json-nesting]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_noncanonical_or_duplicate_policy_documents_refuse_neutrally[baseline-{"effort":"high","family":"sonnet","schema":"vres-chairman-control/1","version":1}\n]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_noncanonical_or_duplicate_policy_documents_refuse_neutrally[baseline-{"schema":"vres-chairman-control/1","version":1,"family":"sonnet","effort":"high"}]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_noncanonical_or_duplicate_policy_documents_refuse_neutrally[proposed-]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_noncanonical_or_duplicate_policy_documents_refuse_neutrally[proposed-not json]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_noncanonical_or_duplicate_policy_documents_refuse_neutrally[proposed-{}]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_noncanonical_or_duplicate_policy_documents_refuse_neutrally[proposed-[]]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_noncanonical_or_duplicate_policy_documents_refuse_neutrally[proposed-{"schema":"wrong","version":1,"family":"sonnet","effort":"high"}]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_noncanonical_or_duplicate_policy_documents_refuse_neutrally[proposed-{"effort":"high","family":"sonnet","schema":"vres-chairman-control/1"}]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_noncanonical_or_duplicate_policy_documents_refuse_neutrally[proposed-{"effort":"high","family":"auto","schema":"vres-chairman-control/1","version":1}]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_noncanonical_or_duplicate_policy_documents_refuse_neutrally[proposed-{"effort":"high","family":"sonnet","schema":"vres-chairman-control/1","version":true}]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_noncanonical_or_duplicate_policy_documents_refuse_neutrally[proposed-{"effort":"high","family":"sonnet","schema":"vres-chairman-control/1","family":"opus","version":1}]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_noncanonical_or_duplicate_policy_documents_refuse_neutrally[proposed-\xef\xbb\xbf{"effort":"high","family":"sonnet","schema":"vres-chairman-control/1","version":1}]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_noncanonical_or_duplicate_policy_documents_refuse_neutrally[proposed-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 ]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_noncanonical_or_duplicate_policy_documents_refuse_neutrally[proposed-deep-json-nesting]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_noncanonical_or_duplicate_policy_documents_refuse_neutrally[proposed-{"effort":"high","family":"sonnet","schema":"vres-chairman-control/1","version":1}\n]
+PASSED tests/test_chairman_c2_offline_planner.py::test_malformed_noncanonical_or_duplicate_policy_documents_refuse_neutrally[proposed-{"schema":"vres-chairman-control/1","version":1,"family":"sonnet","effort":"high"}]
+PASSED tests/test_chairman_c2_offline_planner.py::test_untyped_claims_cannot_become_a_review_approval[None]
+PASSED tests/test_chairman_c2_offline_planner.py::test_untyped_claims_cannot_become_a_review_approval[False]
+PASSED tests/test_chairman_c2_offline_planner.py::test_untyped_claims_cannot_become_a_review_approval[value2]
+PASSED tests/test_chairman_c2_offline_planner.py::test_untyped_claims_cannot_become_a_review_approval[claim]
+PASSED tests/test_chairman_c2_offline_planner.py::test_untyped_claims_cannot_become_a_review_approval[value4]
+PASSED tests/test_chairman_c2_offline_planner.py::test_corrupted_frozen_claims_are_revalidated_at_call_boundary
+PASSED tests/test_chairman_c2_offline_planner.py::test_same_sha_under_wrong_digest_purpose_is_refused_not_converted[RENDERED_CANDIDATE]
+PASSED tests/test_chairman_c2_offline_planner.py::test_same_sha_under_wrong_digest_purpose_is_refused_not_converted[RELEASE]
+PASSED tests/test_chairman_c2_offline_planner.py::test_mismatching_caller_template_sha_is_refused_even_with_claimed_review
+PASSED tests/test_chairman_c2_offline_planner.py::test_untyped_or_bad_claimed_digest_is_neutral_refusal[hash]
+PASSED tests/test_chairman_c2_offline_planner.py::test_untyped_or_bad_claimed_digest_is_neutral_refusal[False]
+PASSED tests/test_chairman_c2_offline_planner.py::test_untyped_or_bad_claimed_digest_is_neutral_refusal[None]
+PASSED tests/test_chairman_c2_offline_planner.py::test_untyped_or_bad_claimed_digest_is_neutral_refusal[bad3]
+PASSED tests/test_chairman_c2_offline_planner.py::test_untyped_or_bad_claimed_digest_is_neutral_refusal[bad4]
+PASSED tests/test_chairman_c2_offline_planner.py::test_constructing_invalid_typed_digest_refuses[SUPPLIED_TEMPLATE-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]
+PASSED tests/test_chairman_c2_offline_planner.py::test_constructing_invalid_typed_digest_refuses[SUPPLIED_TEMPLATE-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA]
+PASSED tests/test_chairman_c2_offline_planner.py::test_constructing_invalid_typed_digest_refuses[SUPPLIED_TEMPLATE-000000000000000000000000000000000000000000000000000000000000000]
+PASSED tests/test_chairman_c2_offline_planner.py::test_constructing_invalid_typed_digest_refuses[SUPPLIED_TEMPLATE-True]
+PASSED tests/test_chairman_c2_offline_planner.py::test_reported_baseline_disagreement_refuses_without_source_discovery
+PASSED tests/test_chairman_c2_offline_planner.py::test_known_sonnet_default_doctrine_refuses_even_if_claimed_reviewed[claims0-p2-sonnet]
+PASSED tests/test_chairman_c2_offline_planner.py::test_known_sonnet_default_doctrine_refuses_even_if_claimed_reviewed[claims0-opus-not-shell]
+PASSED tests/test_chairman_c2_offline_planner.py::test_known_sonnet_default_doctrine_refuses_even_if_claimed_reviewed[claims1-p2-sonnet]
+PASSED tests/test_chairman_c2_offline_planner.py::test_known_sonnet_default_doctrine_refuses_even_if_claimed_reviewed[claims1-opus-not-shell]
+PASSED tests/test_chairman_c2_offline_planner.py::test_known_doctrine_case_variants_conservatively_refuse
+PASSED tests/test_chairman_c2_offline_planner.py::test_old_doctrine_does_not_claim_a_runtime_model_from_sonnet_noop
+PASSED tests/test_chairman_c2_offline_planner.py::test_result_types_are_frozen_closed_and_never_truthy
+PASSED tests/test_chairman_c2_offline_planner.py::test_module_has_only_closed_negative_api_and_no_side_effect_surface
+PASSED tests/test_chairman_policy_aware_body.py::test_source_frontmatter_is_sonnet_high_baseline_not_installed_proof[lf]
+PASSED tests/test_chairman_policy_aware_body.py::test_source_frontmatter_is_sonnet_high_baseline_not_installed_proof[crlf]
+PASSED tests/test_chairman_policy_aware_body.py::test_actual_opus_then_sonnet_materialization_round_trips_exact_bytes[lf]
+PASSED tests/test_chairman_policy_aware_body.py::test_actual_opus_then_sonnet_materialization_round_trips_exact_bytes[crlf]
+PASSED tests/test_chairman_policy_aware_body.py::test_real_source_body_has_explicit_parent_worker_and_protected_validation_doctrine
+PASSED tests/test_chairman_policy_aware_body.py::test_new_source_never_contains_normalized_legacy_default_shell_doctrine[lf]
+PASSED tests/test_chairman_policy_aware_body.py::test_new_source_never_contains_normalized_legacy_default_shell_doctrine[crlf]
+PASSED tests/test_chairman_policy_aware_body.py::test_actual_source_planner_remains_indeterminate_never_authorized[plain-sonnet-lf]
+PASSED tests/test_chairman_policy_aware_body.py::test_actual_source_planner_remains_indeterminate_never_authorized[plain-sonnet-crlf]
+PASSED tests/test_chairman_policy_aware_body.py::test_actual_source_planner_remains_indeterminate_never_authorized[plain-opus-lf]
+PASSED tests/test_chairman_policy_aware_body.py::test_actual_source_planner_remains_indeterminate_never_authorized[plain-opus-crlf]
+PASSED tests/test_chairman_policy_aware_body.py::test_actual_source_planner_remains_indeterminate_never_authorized[claimed-sonnet-lf]
+PASSED tests/test_chairman_policy_aware_body.py::test_actual_source_planner_remains_indeterminate_never_authorized[claimed-sonnet-crlf]
+PASSED tests/test_chairman_policy_aware_body.py::test_actual_source_planner_remains_indeterminate_never_authorized[claimed-opus-lf]
+PASSED tests/test_chairman_policy_aware_body.py::test_actual_source_planner_remains_indeterminate_never_authorized[claimed-opus-crlf]
+PASSED tests/test_chairman_policy_aware_body.py::test_synthetic_legacy_doctrine_still_refuses_opus_candidate[sonnet-only-control-lf]
+PASSED tests/test_chairman_policy_aware_body.py::test_synthetic_legacy_doctrine_still_refuses_opus_candidate[sonnet-only-control-crlf]
+PASSED tests/test_chairman_policy_aware_body.py::test_synthetic_legacy_doctrine_still_refuses_opus_candidate[unqualified-default-shell-lf]
+PASSED tests/test_chairman_policy_aware_body.py::test_synthetic_legacy_doctrine_still_refuses_opus_candidate[unqualified-default-shell-crlf]
+PASSED tests/test_chairman_policy_aware_body.py::test_synthetic_legacy_doctrine_still_refuses_opus_candidate[opus-default-shell-lf]
+PASSED tests/test_chairman_policy_aware_body.py::test_synthetic_legacy_doctrine_still_refuses_opus_candidate[opus-default-shell-crlf]
+PASSED tests/test_chairman_policy_aware_body.py::test_independent_governor_validator_and_worker_frontmatter_stays_pinned[governor]
+PASSED tests/test_chairman_policy_aware_body.py::test_independent_governor_validator_and_worker_frontmatter_stays_pinned[validator]
+PASSED tests/test_chairman_policy_aware_body.py::test_independent_governor_validator_and_worker_frontmatter_stays_pinned[sonnet-worker]
+PASSED tests/test_chairman_policy_aware_body.py::test_independent_governor_validator_and_worker_frontmatter_stays_pinned[opus-worker]
+PASSED tests/test_chairman_policy_aware_body.py::test_this_source_only_test_module_imports_no_history_or_installer_boundary
+PASSED tests/test_personal_chairman_preview.py::test_exact_accepted_source_git_blob_is_pinned_to_byte_content
+PASSED tests/test_personal_chairman_preview.py::test_preview_only_changes_two_chairman_frontmatter_fields[lf]
+PASSED tests/test_personal_chairman_preview.py::test_preview_only_changes_two_chairman_frontmatter_fields[crlf]
+PASSED tests/test_personal_chairman_preview.py::test_preview_manifest_is_deterministic_purpose_labelled_and_uninstalled[lf]
+PASSED tests/test_personal_chairman_preview.py::test_preview_manifest_is_deterministic_purpose_labelled_and_uninstalled[crlf]
+PASSED tests/test_personal_chairman_preview.py::test_unaccepted_modified_source_is_refused[body]
+PASSED tests/test_personal_chairman_preview.py::test_unaccepted_modified_source_is_refused[model]
+PASSED tests/test_personal_chairman_preview.py::test_unaccepted_modified_source_is_refused[effort]
+PASSED tests/test_personal_chairman_preview.py::test_unaccepted_modified_source_is_refused[append]
+PASSED tests/test_personal_chairman_preview.py::test_unaccepted_modified_source_is_refused[duplicate-key]
+PASSED tests/test_personal_chairman_preview.py::test_wrong_type_empty_or_unbounded_source_is_refused[none]
+PASSED tests/test_personal_chairman_preview.py::test_wrong_type_empty_or_unbounded_source_is_refused[text]
+PASSED tests/test_personal_chairman_preview.py::test_wrong_type_empty_or_unbounded_source_is_refused[bytearray]
+PASSED tests/test_personal_chairman_preview.py::test_wrong_type_empty_or_unbounded_source_is_refused[empty]
+PASSED tests/test_personal_chairman_preview.py::test_wrong_type_empty_or_unbounded_source_is_refused[oversized]
+PASSED tests/test_personal_chairman_preview.py::test_mixed_lf_crlf_and_bare_carriage_return_refuse
+PASSED tests/test_personal_chairman_preview.py::test_direct_constructor_cannot_own_forged_derived_content
+PASSED tests/test_personal_chairman_preview.py::test_protected_agents_keep_original_pinned_frontmatter[routing-arbiter.md-fable-high]
+PASSED tests/test_personal_chairman_preview.py::test_protected_agents_keep_original_pinned_frontmatter[validator.md-fable-high]
+PASSED tests/test_personal_chairman_preview.py::test_protected_agents_keep_original_pinned_frontmatter[sonnet-expert.md-sonnet-medium]
+PASSED tests/test_personal_chairman_preview.py::test_protected_agents_keep_original_pinned_frontmatter[opus-expert.md-opus-high]
+PASSED tests/test_personal_chairman_preview.py::test_personal_preview_module_has_only_stdlib_and_accepted_pure_policy_imports
+PASSED tests/test_personal_chairman_transition_plan.py::test_no_before_copies_is_explicitly_unknown_and_never_installable[lf]
+PASSED tests/test_personal_chairman_transition_plan.py::test_no_before_copies_is_explicitly_unknown_and_never_installable[crlf]
+PASSED tests/test_personal_chairman_transition_plan.py::test_same_claimed_before_bytes_only_prove_caller_match_not_real_install[lf]
+PASSED tests/test_personal_chairman_transition_plan.py::test_same_claimed_before_bytes_only_prove_caller_match_not_real_install[crlf]
+PASSED tests/test_personal_chairman_transition_plan.py::test_crlf_source_identity_and_as_supplied_sha_are_separate
+PASSED tests/test_personal_chairman_transition_plan.py::test_older_sonnet_release_body_is_reported_not_silently_replaced
+PASSED tests/test_personal_chairman_transition_plan.py::test_managed_and_distribution_claim_divergence_is_explicitly_blocked
+PASSED tests/test_personal_chairman_transition_plan.py::test_line_ending_drift_in_claimed_copies_is_not_silently_normalized
+PASSED tests/test_personal_chairman_transition_plan.py::test_a_missing_one_sided_copy_is_never_accepted[managed]
+PASSED tests/test_personal_chairman_transition_plan.py::test_a_missing_one_sided_copy_is_never_accepted[distribution]
+PASSED tests/test_personal_chairman_transition_plan.py::test_unbounded_or_untyped_claimed_before_is_refused[none]
+PASSED tests/test_personal_chairman_transition_plan.py::test_unbounded_or_untyped_claimed_before_is_refused[text]
+PASSED tests/test_personal_chairman_transition_plan.py::test_unbounded_or_untyped_claimed_before_is_refused[empty]
+PASSED tests/test_personal_chairman_transition_plan.py::test_unbounded_or_untyped_claimed_before_is_refused[bytearray]
+PASSED tests/test_personal_chairman_transition_plan.py::test_unbounded_or_untyped_claimed_before_is_refused[oversized]
+PASSED tests/test_personal_chairman_transition_plan.py::test_malformed_or_nonbaseline_claimed_before_is_refused[garbage]
+PASSED tests/test_personal_chairman_transition_plan.py::test_malformed_or_nonbaseline_claimed_before_is_refused[invalid-utf8]
+PASSED tests/test_personal_chairman_transition_plan.py::test_malformed_or_nonbaseline_claimed_before_is_refused[malformed-frontmatter]
+PASSED tests/test_personal_chairman_transition_plan.py::test_claims_that_are_not_sonnet_high_are_refused[wrong-family]
+PASSED tests/test_personal_chairman_transition_plan.py::test_claims_that_are_not_sonnet_high_are_refused[wrong-effort]
+PASSED tests/test_personal_chairman_transition_plan.py::test_modified_accepted_source_cannot_become_a_new_pt2_release
+PASSED tests/test_personal_chairman_transition_plan.py::test_claimed_before_raw_body_not_disclosed_in_plan_or_manifest
+PASSED tests/test_personal_chairman_transition_plan.py::test_direct_constructor_rejects_partial_or_forged_digest_metadata
+PASSED tests/test_personal_chairman_transition_plan.py::test_pt2_source_imports_are_pure_and_no_host_or_installer_surface
+PYTEST_EXIT_CODE=0
+PASS: PROCESS_ENVIRONMENT_RESTORED
+=== PERSONAL PT2A POSTTEST GIT INTEGRITY ===
+PASS: Posttest PT2A HEAD
+PASS: Posttest PT2A tree
+PASS: Posttest blob src/vres_os/personal_chairman_transition_plan.py
+PASS: Posttest blob tests/test_personal_chairman_transition_plan.py
+PASS: Posttest blob src/vres_os/personal_chairman_preview.py
+PASS: Posttest blob tests/test_personal_chairman_preview.py
+PASS: Posttest blob plugins/vres-os/agents/chairman.md
+PASS: Posttest blob tests/conftest.py
+PASS: PT2A checkout after selected test
+PASS: Accepted PT1 checkout still clean
+PASS: Accepted D1B checkout still clean
+PT2A_TEST_EXIT_CODE=0
+VRES_PERSONAL_PT2A_WINDOWS_SELECTED_TEST_COMPLETE
+PS C:\Projects\Vres-ChatGPT-Review-Personal-PT1-R1-20261029>

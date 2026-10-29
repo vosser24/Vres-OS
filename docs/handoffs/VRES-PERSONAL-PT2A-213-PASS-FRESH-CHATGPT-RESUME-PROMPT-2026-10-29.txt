@@ -1,0 +1,111 @@
+RESUME VRES-OS — FULL CONTINUITY, PERSONAL-FIRST METHOD, PT2A 213 PASS, PT2B NEXT
+
+Repository: vosser24/Vres-OS
+Canonical documentation branch: docs/chatgpt-continuity-20261023
+READ FIRST (latest branch HEAD, never assume historical SHA remains tip):
+  docs/handoffs/VRES-CHATGPT-CONTINUITY-INDEX.md
+  docs/handoffs/VRES-PERSONAL-PT2A-213-PASS-PT1-ACCEPT-OPEN-ISSUES-AND-FRESH-CHATGPT-HANDOFF-2026-10-29.md
+  docs/handoffs/VRES-PERSONAL-PT2A-WINDOWS-213-PASSED-EXIT0-ORIGINAL-OPERATOR-TRANSCRIPT-2026-10-29.txt
+  docs/handoffs/VRES-PERSONAL-PT1-R1-INDEPENDENT-CLAUDE-STATIC-ACCEPT-AND-HOOK-REFUSALS-REPORT-2026-10-29.txt
+  docs/architecture/VRES-PERSONAL-RISK-PROFILE-AND-CHAIRMAN-GOVERNED-MODEL-TRANSITION-V1-2026-10-27.md
+  docs/roadmap/VRES-FULL-SCOPE-FUNCTIONALITY-REGISTER-2026-10-22.md
+
+IMPORTANT: Before the October 29 final docs checkpoint, canonical docs HEAD was
+9528d4ee8597a3924350b12a58c3a90685a2ec6c. Verify latest HEAD/tree/
+direct-parent and that this handoff, original PT1 acceptance and PT2A logs are
+REACHABLE files. If docs update was blocked, report that truthfully and use
+the standalone/downloadable backup. Do not claim unattached Git blobs are commits.
+
+AUTHORITATIVE SOURCE/STATUS:
+- PT2A pure offline transition plan feature branch
+  feature/personal-governed-chairman-pt2a-offline-plan-20261029
+  HEAD 22122047cc985ffc8fb3e5d0d30e3d68d8d57df9
+  tree a64cdc6cd188e6f9f4186cf5d3887ce82125cf0e
+  direct accepted PT1 R1 parent 7b6b7457236cf601fa056152b78713060fe0573e
+  exactly two ADD paths (never altered the installed Chairman):
+    src/vres_os/personal_chairman_transition_plan.py
+       blob 0aa49e386432c7e080da18831a9b6c6afb200ad8
+    tests/test_personal_chairman_transition_plan.py
+       blob 463f6c291a4f52f4056056ab6659237c386ed498
+- PT2A GUARDED WINDOWS 7 SELECTED offline modules:
+  213 unique individual PASSED, 0 FAILED, PYTEST_EXIT_CODE=0,
+  PT2A_TEST_EXIT_CODE=0; exact preflight, process env restoration, AppData
+  fence unexpected refusals 0, integration opt-in false, posttest clean.
+  Individual module counts: 7/12/48/74/26/22/24. Full original uploaded
+  console SHA256 0be6bc57b19b44be5f4da5c4bd77c8a69e112c92634adf0be4627b5989712b1c.
+  Full normalized Git blob c495f3adba582065c42f7464fd5d283247076fe7.
+  Tests already passed. Do NOT rerun by default.
+  PT2A independent reviewer: NOT_RUN (author GitHub static scope inspection only).
+- PT1 independently STATIC_ACCEPT, ZERO blocking, FIVE info I1..I5.
+  PT1 R1 feature HEAD 7b6b7457236cf601fa056152b78713060fe0573e,
+  tree bcdd89b01dabbd663e1b7d874ad4750718a1c1b0,
+  guarded Windows 189 individual PASSED/exit0; original preflight excerpt
+  absent and final marker printed separately (no full atomic claim).
+  Independent Claude report blob efb87f1cebb39b8eb2936e5fc3cbe6bc84a65fd2;
+  original historical R0 188 PASS/1 FAIL/exit1 twice remain preserved.
+- Original accepted D1B feature HEAD e26cc43acfed9664e497067189962ac847ad266f
+  independently OFFLINE_ACCEPT with 193 selected guarded Windows PASS/exit0.
+- Original Chairman source remains Sonnet/high; last-observed installed P2
+  release 20261022172833-4d82147b Sonnet/high; Opus/medium NOT INSTALLED,
+  physical resolved model/effort UNKNOWN.
+
+ABSOLUTE HOLDS:
+LIVE_SCHEMA_048_INCIDENT=OPEN: NO PostgreSQL even SELECT, including indirect
+Vres MCP/tasks/CLI/bootstrap/doctor/health/hooks/F2/recovery. Never approve
+a DB target or use task persistence/reply warnings to justify a query.
+HOST_HOOK_DB_ROUTE_ATTEMPTED_AND_REFUSED=OPEN: in the PT1 Claude reviewer
+host, FOUR Read and THREE Grep automatic PostToolUse reply_activity_observe
+hooks attempted DB routing and were REFUSED by guard. No completed SELECT is
+shown, but NO-ATTEMPT is not proved. No further native Claude Code tool-based
+reviews with installed hooks until separately authorized no-DB-attempt-safe
+operation established. Do not disable/rewrite global/user Claude or installed
+hooks without explicit user consent.
+VRES_REPLY_GUARD_WARNING and VRES_PERSISTENCE_WARNING remain unresolved.
+F1 strict independent positive H0/E/V/CAS/W/publisher/real loaded-model
+authority remains BLOCKED, NOT replaced by local PERSONAL plan.
+Protected credentials, Fable/high router/validator, worker pinning,
+PA/F2/E7/prod and original V-01..V-42 roadmap remain.
+
+USER-APPROVED PRODUCT DOCTRINE:
+PERSONAL-first proportionate P0 ephemeral / P1 project reversible /
+P2 protected user consent, audit and rollback / P3 hard incident HOLD.
+This permits PURE OFFLINE source and tests, not live Opus installation,
+provider calls, credentials, current-user/global Claude modifications, signing,
+main merges, PRs, or PostgreSQL.
+PT2A plan is always PREPARED_OFFLINE_ONLY / NO_F1_AUTHORITY /
+NOT_INSTALLED / safe_to_install=False, and caller before-bytes are NOT host
+observations. Differentiate LF-normalized source Git blob and raw supplied
+SHA256 (I2). Existing installed P2 body/release manifest may differ from
+accepted newer Git SOURCE. Never fabricate v2 manifest/publisher proof.
+
+DEVELOPMENT METHODOLOGY:
+ChatGPT primary architect/developer using GitHub; Claude only scoped independent
+review when host hooks safe; user operator executes atomic guarded Windows
+PowerShell, one scriptblock & { ... } (NOT split commands that continue after STOP).
+At every increment: exact source SHA/tree/sole parent/changed paths; smallest
+pure source+negative tests; separate branch and GitHub blob/tree/commit
+with nonforced CAS/readback; new detached clean Windows test review checkout;
+verify exact remote/source sha & allowed diff BEFORE tests; only selected
+Python 3.12 offline pytest, plugin autoload disabled, process DB/PG/
+integration vars cleared+finally restored, app data/psycopg tripwire; every
+individual -rA case, actual exit0/fence/posttest Git integrity, and only then
+relevant independent static review. Avoid repeat speculative design cycles,
+blind reruns, known AST ast.Import.name mistake, and false success markers.
+Commit detailed docs-only evidence/handoff/index with exact allowlist and
+readback; if safety block, STOP, never bypass and provide local backup.
+
+NEXT:
+PT2B is NOT_STARTED. The next permitted separate scope is an isolated PURE
+OFFLINE, IN-MEMORY reversible plugin-only change journal/reconciliation and
+crash-boundary state contract + negative tests, based on PT2A two logical roles.
+Do NOT write files, create actual rollback, inspect installed profile, contact
+provider/DB or claim a released installer. Define exact before/after
+hash/managed/distribution/release/pointer consistency and fail-closed outcomes;
+user approval required at later PT4 live change. PT2A independent source
+review remains NOT_RUN, and is not automatically gained from Windows 213 PASS.
+Keep the full 42-capability roadmap, credential reuse, Visual Studio legacy
+onboarding and all E7/PA/F2/old F1 gates in current handoff.
+
+Start by reporting verified GitHub/document branch tips and any docs seal
+blocker. Then continue ONE bounded deliverable without asking questions already
+resolved, preserve the methodology and every open issue.

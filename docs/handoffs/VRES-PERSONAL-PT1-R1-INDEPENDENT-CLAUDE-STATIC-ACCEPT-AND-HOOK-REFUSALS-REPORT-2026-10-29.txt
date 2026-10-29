@@ -1,0 +1,203 @@
+I'll start with the mandatory full reads.
+
+● Searching for 3 patterns, reading 4 files… (ctrl+o to expand)
+  ⎿  "ast\.Import\b|alias\.name|node\.name|\.names"
+  ⎿  PostToolUse:Read hook error
+  ⎿  Error executing tool reply_activity_observe: Vres refused to contact database 'vres_os' at 127.0.0.1:5432: it has
+     not been approved for this installation. Approve the exact target in secure setup (`vr…
+  ⎿  PostToolUse:Read hook error
+  ⎿  Error executing tool reply_activity_observe: Vres refused to contact database 'vres_os' at 127.0.0.1:5432: it has
+     not been approved for this installation. Approve the exact target in secure setup (`vr…
+  ⎿  PostToolUse:Read hook error
+  ⎿  Error executing tool reply_activity_observe: Vres refused to contact database 'vres_os' at 127.0.0.1:5432: it has
+     not been approved for this installation. Approve the exact target in secure setup (`vr…
+  ⎿  PostToolUse:Read hook error
+  ⎿  Error executing tool reply_activity_observe: Vres refused to contact database 'vres_os' at 127.0.0.1:5432: it has
+     not been approved for this installation. Approve the exact target in secure setup (`vr…
+  ⎿  PostToolUse:Grep hook error
+  ⎿  Error executing tool reply_activity_observe: Vres refused to contact database 'vres_os' at 127.0.0.1:5432: it has
+     not been approved for this installation. Approve the exact target in secure setup (`vr…
+  ⎿  PostToolUse:Grep hook error
+  ⎿  Error executing tool reply_activity_observe: Vres refused to contact database 'vres_os' at 127.0.0.1:5432: it has
+     not been approved for this installation. Approve the exact target in secure setup (`vr…
+  ⎿  PostToolUse:Grep hook error
+  ⎿  Error executing tool reply_activity_observe: Vres refused to contact database 'vres_os' at 127.0.0.1:5432: it has
+     not been approved for this installation. Approve the exact target in secure setup (`vr…
+
+● Verdict: STATIC_ACCEPT (offline source and test acceptance only, with the proof limits in §5).
+
+  1. Coverage and evidence classes
+
+  - FULL reads: src/vres_os/personal_chairman_preview.py, tests/test_personal_chairman_preview.py,
+    src/vres_os/chairman_policy.py, plugins/vres-os/agents/chairman.md.
+  - PARTIAL reads:
+    - tests/conftest.py: grep of imports, environment handling, the opt-in flag and the fence lines only.
+    - routing-arbiter.md, validator.md, sonnet-expert.md, opus-expert.md: grep of the name, model and effort lines only,
+      not the bodies.
+    - The corresponding file in the failed-R0 checkout: grep of the import-test region only.
+  - NOT_READ: chairman_c2_offline_planner.py and the denial-only modules. The preview module does not import them, so I
+    saw no reason to read them.
+  - Relayed, not hashed by me: all Git SHAs, trees and blobs, and the checkout cleanliness.
+  - Operator stdout: the pytest case lines, exit 0 and the postcheck lines.
+  - My own observations: only the file text I read.
+
+  2. Challenge 1: pure, deterministic, no-write renderer
+
+  Confirmed from source, with no BLOCKING finding.
+  - Imports and I/O: personal_chairman_preview.py imports only hashlib, dataclasses and .chairman_policy (lines 8-13).
+    chairman_policy imports only hashlib, json, re, dataclasses and typing (lines 13-19). Neither file has any
+    filesystem, DB, network, subprocess, credential or environment call.
+  - Input gate: _canonical_source_and_newline requires exact bytes of 1 to 512 KiB (line 27) and refuses mixed line
+    endings and bare CR (lines 30-37). preview_personal_chairman then requires the LF-normalized Git blob SHA-1 to equal
+    bc16… (lines 111-113). This is a content-identity check, not publisher authority, and the code says so at line 41.
+  - Exactly two fields change:
+    - _render_chairman (chairman_policy.py 130-189) rewrites only the model and effort lines.
+    - It re-emits the original newline style and appends body unchanged (line 188).
+    - PersonalChairmanPreview.__post_init__ (lines 64-78) independently re-checks that:
+      - the template re-renders to itself under Sonnet/high (line 73),
+      - content equals the Opus/medium render (line 75),
+      - the bodies are byte-equal (line 77).
+  - No fallback: every failure raises PersonalChairmanPreviewError. There is no downshift path.
+  - Labels: the manifest (lines 84-103) says PREVIEW_ONLY, NO_F1_AUTHORITY, NOT_INSTALLED, consent REQUIRED_SEPARATELY,
+    and effective_model: UNKNOWN with observed: False. __bool__ raises TypeError (lines 105-106). I saw no
+    installed-model or attestation claim.
+  - Protected agents: the preview touches only the Chairman bytes. The grep shows:
+    - routing-arbiter and validator at fable/high,
+    - sonnet-expert at sonnet/medium,
+    - opus-expert at opus/high.
+
+    The bodies of these four files were not read.
+
+  3. Challenge 2: adversarial inputs
+
+  ┌───────────────────────────────────────────────┬─────────────────────────────────────────────────────────────────┐
+  │                     Input                     │                       Where it is refused                       │
+  ├───────────────────────────────────────────────┼─────────────────────────────────────────────────────────────────┤
+  │ Malformed, oversized or non-bytes source      │ personal_chairman_preview.py:27                                 │
+  ├───────────────────────────────────────────────┼─────────────────────────────────────────────────────────────────┤
+  │ Altered body, model, effort, appended text or │ Blob mismatch at lines 112-113 (tests at 101-130)               │
+  │  duplicate key                                │                                                                 │
+  ├───────────────────────────────────────────────┼─────────────────────────────────────────────────────────────────┤
+  │ Unsafe frontmatter, unknown family or effort  │ chairman_policy.py 140-181, with deeper coverage in the         │
+  │                                               │ materialization tests                                           │
+  ├───────────────────────────────────────────────┼─────────────────────────────────────────────────────────────────┤
+  │ Mixed LF/CRLF, bare CR                        │ personal_chairman_preview.py 30-37, tested at 148-156           │
+  ├───────────────────────────────────────────────┼─────────────────────────────────────────────────────────────────┤
+  │ Forged constructor                            │ __post_init__ 66-78, tested at 159-166                          │
+  └───────────────────────────────────────────────┴─────────────────────────────────────────────────────────────────┘
+
+  BLOCKING: none.
+
+  INFORMATIONAL:
+  - I1: The parser-level cases (duplicate key, unknown fields) in test_unaccepted_modified_source_is_refused (lines
+    101-130) are all caught by the blob-hash gate first. They prove tamper refusal, not frontmatter-parser robustness.
+    That parser is covered by the materialization tests.
+  - I2: For CRLF input, the manifest's source_git_blob (line 92) names the LF-normalized blob, while source_sha256 and
+    source_bytes (lines 93, 96) describe the CRLF bytes actually supplied. The output is deterministic per input and not
+    misleading, but the label is subtle.
+  - I3: The frozen dataclass can be bypassed with object.__setattr__, and a subclass could override manifest. This is a
+    Python-level limit, not a security boundary, and "forged constructor" is only guaranteed for the normal construction
+    path.
+  - I4: The purity test (lines 188-211) is a coarse static check. The substring checks (open(, os.environ, psycopg,
+    subprocess) would not catch importlib or __import__. The from_modules set (lines 197-201) cannot distinguish a
+    relative import from an absolute one. My reading of the whole module, not the test, is what supports purity.
+  - I5: Static assertions and the PASS lines do not show runtime guarantees such as which model actually runs or whether
+    any host I/O happens. I read nothing about those, and this is not a defect.
+
+  4. Challenge 3: the single R1 test patch
+
+  - R0 (checkout …PT1-20261027, lines 191-195): the set comprehension was module.name for module in ast.walk(tree) if
+    isinstance(module, ast.Import). ast.Import has no .name; it has .names, a list of alias objects. That is the cause
+    of the R0 AttributeError.
+  - R1 (tests/test_personal_chairman_preview.py 191-196): alias.name for node … if isinstance(node, ast.Import) for
+    alias in node.names. This is syntactically and semantically correct.
+  - Nothing weakened: the assertions are unchanged and are stricter than a mere fix needs:
+    - imported == {"hashlib"}
+    - from_modules == {"__future__", "dataclasses", "chairman_policy"}
+    - no async or await constructs
+    - the four substring bans
+  - Coverage: the test covers the intended purity surface of this one module and no more. It does not cover transitive
+    imports; I covered those by reading chairman_policy.py.
+  - Not verified: that the patch is the only change since R0. That comes from relayed Git information, and I did not
+    diff the trees.
+
+  5. Challenge 4: pins
+
+  - Source pins: the grep of the four protected agent files shows the pins above, and
+    test_protected_agents_keep_original_pinned_frontmatter asserts the same values. The test reads bytes from disk, so
+    it proves the source text only.
+  - Chairman body: chairman.md line 74 describes source frontmatter as a baseline, "not proof of installed bytes or the
+    host-resolved running model". Lines 90 and 107-108 keep protected validation as Fable/high, and lines 107-108 keep
+    Agent.model unset. No installed-model claim appears.
+  - Runtime: I make no claim that a protected validator, Fable or Opus executed. Nothing in this evidence shows it.
+
+  6. Challenge 5: recount of the PASSED lines
+
+  I recounted every PASSED tests/ record. This is my own recount of the supplied text, not the author's figure.
+
+  ┌──────────────────────────────────────────┬────────┐
+  │                  Module                  │ PASSED │
+  ├──────────────────────────────────────────┼────────┤
+  │ test_architecture_governance_contract.py │ 7      │
+  ├──────────────────────────────────────────┼────────┤
+  │ test_aigo_orchestration_contract.py      │ 12     │
+  ├──────────────────────────────────────────┼────────┤
+  │ test_chairman_policy_materialization.py  │ 48     │
+  ├──────────────────────────────────────────┼────────┤
+  │ test_chairman_c2_offline_planner.py      │ 74     │
+  ├──────────────────────────────────────────┼────────┤
+  │ test_chairman_policy_aware_body.py       │ 26     │
+  ├──────────────────────────────────────────┼────────┤
+  │ test_personal_chairman_preview.py        │ 22     │
+  ├──────────────────────────────────────────┼────────┤
+  │ Total                                    │ 189    │
+  └──────────────────────────────────────────┴────────┘
+
+  - Cross-checks:
+    - The six modules match the six files in TEST_COMMAND.
+    - The progress lines are two, with [ 59%] and [100%]. 112 / 189 = 59.3%, so the first row is about 112 dots and the
+      second 77.
+    - There are zero FAILED lines.
+    - PYTEST_EXIT_CODE=0.
+    - The fence line reads unexpected refusals=0 … integration_opt_in=False, with removed_env=[].
+    - The environment and PYTHONPATH restore lines read PASS.
+  - Limits of the recount:
+    - I counted some long parametrized IDs (the whitespace-padded ones) by line, not by byte.
+    - There is no 189 passed in X s footer, and I did not invent one.
+    - A few parametrized-count details rest on my reading of the pasted lines, so treat the per-module split as high
+      confidence, not mechanical certainty. The 189 total is corroborated by the progress rows.
+  - Postcheck lines: Post-test HEAD, tree, test blob, module blob and the three clean-worktree checks all read PASS.
+    These are operator-reported, not verified by me.
+
+  7. Challenges 6 to 8: provenance and chronology
+
+  - Missing preflight: the pasted text begins at the PYTEST section, so the R1 preflight lines and
+    PERSONAL_PT1_R1_PREFLIGHT_PASS are absent.
+  - The completion marker: it was printed by a separate interactive Write-Host. It does not prove atomic execution of
+    the full script, and I do not treat it as a cryptographic or physical attestation.
+  - What still stands: the pytest result is supported by the 189 case lines plus exit 0, independent of the marker. The
+    absent preflight reduces provenance for the checkout state, not the pass.
+  - If extra checkout proof is wanted: read-only commands in the R1 checkout would do it: git rev-parse HEAD, git
+    rev-parse HEAD^{tree}, git rev-parse HEAD^, git rev-parse HEAD:tests/test_personal_chairman_preview.py, and git
+    status --porcelain. No pytest rerun is needed.
+  - R0 chronology:
+    - R0 had two historical failures at 188 passed / 1 failed with exit 1, both from the ast.Import.name bug.
+    - The second used an old R0 script and bypassed four STOPs.
+    - Neither is this R1 pass.
+  - What is not authorized: this is a PERSONAL-proportional safeguard. The F1 independent positive issuer or provider is
+    NOT implemented, there is no authority for install, Opus activation, user consent or PostgreSQL contact, and
+    nothing in the source claims otherwise.
+
+  8. Required statuses
+
+  REVIEW_ONLY / TESTS_NOT_RERUN / SOURCE_MODIFICATION_NOT_RUN / NO_AUTHORITY_ISSUED / NO_MODEL_ACTIVATION /
+  NO_POSTGRESQL_CONTACT_BY_REVIEWER
+
+  I used only Read, Glob and Grep, with no Vres tools. The LIVE_SCHEMA_048_INCIDENT and the reply-guard and persistence
+  warnings remain unresolved, and this task is not persisted.
+
+  VRES_PERSONAL_PT1_R1_INDEPENDENT_STATIC_AND_OFFLINE_EVIDENCE_REVIEW_COMPLETE
+  ⎿  Stop says: VRES_REPLY_GUARD_WARNING: Vres could not verify the authoritative pre-reply gate. Persistence may be
+     stale; inspect Vres task state before relying on continuity.
+
+✻ Cogitated for 1m 20s · done 10:52 AM
