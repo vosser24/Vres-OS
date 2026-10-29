@@ -97,7 +97,7 @@
             $changed[0] -cne ("M" + [char]9 + $bootstrap) -or
             $changed[1] -cne ("M" + [char]9 + $adoption) -or
             $changed[2] -cne ("A" + [char]9 + $newtest)) {
-            throw 'STOP: 168_A1 two-file allowlist mismatch'
+            throw 'STOP: 168_A1 three-file allowlist mismatch'
         }
         Write-Host 'PASS: exactly two modified source files and one new test file'
         $diffCheck = @(& git -C $review diff --no-ext-diff --check $parent HEAD --)

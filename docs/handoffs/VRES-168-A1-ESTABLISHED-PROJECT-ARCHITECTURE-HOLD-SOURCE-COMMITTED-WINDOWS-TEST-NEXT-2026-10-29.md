@@ -6,7 +6,7 @@
 
 ## 1. Why this is the next material functional increment
 
-The full <LINK> V-01..V-42 functionality register and the ChatGPT-led full-scope October 22 delivery plan remain binding; #168 "Project adoption and canonical Claude scaffold" is OPEN/PARTIAL. The accepted P2-D module already implements fresh-project scaffold, legacy Claude-surface inventory, secret-safe snapshot, numbered KEEP/DROP, operator decisions, activation journaling, interrupted recovery and rollback. Do NOT rebuild those.
+The full V-01..V-42 functionality register and the ChatGPT-led full-scope October 22 delivery plan remain binding; #168 "Project adoption and canonical Claude scaffold" is OPEN/PARTIAL. The accepted P2-D module already implements fresh-project scaffold, legacy Claude-surface inventory, secret-safe snapshot, numbered KEEP/DROP, operator decisions, activation journaling, interrupted recovery and rollback. Do NOT rebuild those.
 
 **Reproduced source-level gap:** src/vres_os/project_adoption.py START previously treated **any project with zero existing Claude surfaces** as fresh, immediately wrote root CLAUDE.md, and changed state to active, even if a substantial Python/JavaScript/.NET codebase was already present. That skipped the existing independently accepted #174 architecture auditor's established-project alignment-plan requirement and Fable/high protected validator hold. This is a real V-30 fail-open readiness classification, not another speculative planning contract.
 
@@ -33,7 +33,7 @@ All original #174 architecture policy/plan/auditor files, existing 724-line P2-D
 ## 3. Exact next operator Windows validation, and acceptance limits
 
 **Proposed one-atomic 166-line Windows source checkout/test script:**
-docs/handoffs/VRES-168-A1-GUARDED-WINDOWS-SELECTED-TEST-NEXT-2026-10-29.ps1 — Git blob **9a8a166067236065b62434f4e7b2132f6634b1ab**. Include the COMPLETE literal PowerShell block INLINE in the ChatGPT response (not only file link). DO NOT run via Claude Code or execute from installed Vres CLI.
+docs/handoffs/VRES-168-A1-GUARDED-WINDOWS-SELECTED-TEST-NEXT-2026-10-29.ps1 — Git blob **936a6d0b52ab4bd727b0b7a0c269bafbb750f7fc**. Include the COMPLETE literal PowerShell block INLINE in the ChatGPT response (not only file link). DO NOT run via Claude Code or execute from installed Vres CLI.
 
 Script checks:
 - Original personal P2 source anchor **C:\Projects\Vres-P2F-Postinstall-Hardening-20261022**, expected HEAD **82c82430b38f93bd6b9d5c3af3b5de9c1368af9c**, clean.
