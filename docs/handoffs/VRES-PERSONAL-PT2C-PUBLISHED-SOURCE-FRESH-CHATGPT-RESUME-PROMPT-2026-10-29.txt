@@ -1,0 +1,32 @@
+RESUME VRES-OS — PERSONAL-FIRST PT2C PUBLISHED 81149..., GUARDED WINDOWS TEST NEXT
+
+Repository: vosser24/Vres-OS.
+Canonical docs branch: docs/chatgpt-continuity-20261023 (VERIFY LATEST HEAD FRESH).
+Read first:
+1. docs/handoffs/VRES-CHATGPT-CONTINUITY-INDEX.md
+2. docs/handoffs/VRES-PERSONAL-PT2C-PUBLISHED-BRANCH-COLLISION-RESOLVED-WINDOWS-TEST-NEXT-2026-10-29.md
+3. docs/handoffs/VRES-PERSONAL-PT2C-PUBLISHED-81149-GUARDED-WINDOWS-TEST-NEXT-2026-10-29.ps1
+4. docs/handoffs/VRES-PERSONAL-PT2B-43-PASSED-EXIT0-AND-SOURCE-ONLY-CONTINUATION-HANDOFF-2026-10-29.md
+5. docs/handoffs/VRES-PERSONAL-PT2B-WINDOWS-43-PASSED-EXIT0-CHAT-PASTED-OPERATOR-TRANSCRIPT-2026-10-29.txt
+6. docs/handoffs/VRES-PERSONAL-PT2A-213-PASS-PT1-ACCEPT-OPEN-ISSUES-AND-FRESH-CHATGPT-HANDOFF-2026-10-29.md
+7. docs/architecture/VRES-PERSONAL-RISK-PROFILE-AND-CHAIRMAN-GOVERNED-MODEL-TRANSITION-V1-2026-10-27.md
+8. docs/roadmap/VRES-FULL-SCOPE-FUNCTIONALITY-REGISTER-2026-10-22.md
+
+PT2C SELECTED PUBLISHED FEATURE:
+Branch feature/personal-governed-chairman-pt2c-release-reconciliation-20261029.
+HEAD 81149beab52750c93db91453e18efbd5f7a21da4.
+Tree f7ad6c6ef07c5b60c698ac4aae0487e1a8976f35.
+Sole PT2B parent 361500291601e241b7c579012a25442ff4a95d7d, tree 903fa86fc9ee9548d20509a5485efa010ae4a3fe.
+EXACT TWO ADDED paths: src/vres_os/personal_chairman_release_reconciliation.py blob 68b0f430ebfe3dd8128a4c834f4a28966ecb51fe (268 lines); tests/test_personal_chairman_release_reconciliation.py blob 6459dfff36b829c4edced19c2dd24e7636f5303b (347 lines). No changes to older accepted source, release/installer or installed configuration. Authored PT2C test suite describes 54 parametrized cases, WINDOWS_SELECTED_TEST_NOT_RUN and INDEPENDENT_SOURCE_REVIEW_NOT_RUN. Never invent pass, no live source installations.
+
+CONFLICT:
+Another PT2C Git commit 59d811eb130725ebd2d91b542713fcce05b1634d (tree 3fbb9b55d89b2e95abb1f3c0a6f985dce5d07995; same PT2B parent) was created as an UNATTACHED ALTERNATIVE with two different blobs fa2a559de545f12a2301f418455fd29bae05365c and 7158cd1a8761295fd78100259e9a3099c2a2e1ba. Its 88-case synthetic harness is NOT Windows acceptance. The intended PT2C branch already existed; create_branch returned HTTP 422, and NO FORCE, deletion or overwrite occurred. User confirmed no other Claude/ChatGPT session currently working. Cause of branch origin unknown. Preserve both SHA identities, validate only existing published 81149... to avoid confusion; no speculative merge.
+
+SAFETY:
+LIVE_SCHEMA_048_INCIDENT=OPEN NO PostgreSQL EVEN SELECT, directly or indirectly through Vres MCP/CLI/task/bootstrap/doctor/health/hooks/F2/recovery. HOST_HOOK_DB_ROUTE_ATTEMPTED_AND_REFUSED=OPEN: prior Claude Read x4 / Grep x3 automatic PostToolUse database route refused; NO native Claude reviewer until proven safe no-DB-attempt mode. Do not modify installed/global hooks/profile, contact credentials, or activate Opus. Original last-observed P2 Chairman Sonnet/high, Opus/medium UNINSTALLED, active physical model/effort UNKNOWN. Strict F1 positive independently rooted authority BLOCKED. PERSONAL P0-P3 remain and protected Fable/high validation/routing pins, full V-01..V-42 roadmap, Visual Studio legacy onboarding, reusable per-user credentials, E7/PA/F2 go-live holds unchanged.
+
+PREVIOUS TESTS:
+PT2B 43 DISTINCT Windows selected PASS/exit0 at 361500..., PT2B independent review NOT_RUN; PT2A 213 PASS/exit0 at 221220..., independent NOT_RUN; PT1 R1 189 selected Windows PASS/exit0 and independent STATIC_ACCEPT five informationals at 7b6b...; older failed R0 archived. No blind rerun of prior tests.
+
+NEXT EXACT ACTION:
+User currently has NORMAL PowerShell in C:\Projects\Vres-P2F-Postinstall-Hardening-20261022. Do NOT start native Claude Code. Provide the COMPLETE archived PT2C 164-line & { ... } script in ONE code block (do not just link a file). It guards existing PT2B and original P2 clean worktrees; exact official remote, Git branch 81149..., HEAD/tree/sole parent, 13 protected Git blobs, exactly TWO A changed paths, diff--check, creates NEW detached worktree C:\Projects\Vres-ChatGPT-Review-Personal-PT2C-20261029; Python3.12 -B -m pytest -q -rA -p no:cacheprovider tests/test_personal_chairman_release_reconciliation.py with plugin autoload disabled, process-only PG/DB/integration vars cleared/restored, disposable AppData/psycopg guard. Exit0 and posttest Git cleanliness before final VRES_PERSONAL_PT2C_WINDOWS_SELECTED_TEST_COMPLETE. STOP and preserve output on any failure. User returns FULL console. Verify exact 54 distinct cases (if indeed reported), failures, exit and fence/marker ordering. After a material gate, GitHub docs-only handoff/index single parent nonforced expected-old CAS and readback. No installed/profile/Opus operation without separate approval/independent review/rollback readiness.
