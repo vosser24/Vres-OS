@@ -4,6 +4,7 @@ import getpass
 import json
 import os
 import shutil
+import stat
 import subprocess
 from pathlib import Path
 
@@ -806,6 +807,78 @@ def project_rollback() -> None:
 
     _adoption(lambda project: rollback(project, authority=console_authority))
 
+
+def _operator_architecture_plan(path: Path, project_root: Path):
+    """Load only an explicitly chosen bounded external JSON plan.
+
+    Never opens a sensitive-looking path, link/junction or project file.
+    The caller sees fixed error text, not user-supplied JSON or a filename.
+    """
+    from .sensitive_policy import sensitive_path_reason
+
+    if path.suffix.lower() != ".json" or sensitive_path_reason(path):
+        raise ValueError("Plan must be an explicitly supplied non-sensitive JSON document")
+    try:
+        before = os.lstat(path)
+        root = Path(project_root).resolve(strict=True)
+        resolved = path.resolve(strict=True)
+    except OSError as exc:
+        raise ValueError("Plan document cannot be inspected safely") from exc
+    if resolved.is_relative_to(root):
+        raise ValueError("Plan file must be outside the project to avoid changing its audit")
+    if (
+        not stat.S_ISREG(before.st_mode)
+        or stat.S_ISLNK(before.st_mode)
+        or bool(getattr(before, "st_file_attributes", 0)
+                & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
+    ):
+        raise ValueError("Plan file must be a regular file without links or junctions")
+    if before.st_size < 2 or before.st_size > 65536:
+        raise ValueError("Plan file must contain 2 to 65536 bytes")
+    try:
+        with path.open("rb") as stream:
+            observed = os.fstat(stream.fileno())
+            if (
+                not stat.S_ISREG(observed.st_mode)
+                or (observed.st_dev, observed.st_ino, observed.st_size)
+                != (before.st_dev, before.st_ino, before.st_size)
+            ):
+                raise ValueError("Plan file changed during inspection")
+            raw = stream.read(65537)
+        if len(raw) != before.st_size:
+            raise ValueError("Plan file changed during inspection")
+        return json.loads(raw.decode("utf-8-sig"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("Plan file is not valid UTF-8 JSON") from exc
+    except OSError as exc:
+        raise ValueError("Plan file could not be read safely") from exc
+
+
+@project_app.command("plan-check")
+def project_plan_check(
+    plan_file: Path,
+    project: Path = typer.Option(
+        Path("."), "--project", help="Project with an existing architecture-review hold."
+    ),
+) -> None:
+    """Offline read-only contract check. A valid plan is NOT Fable approval or activation."""
+    from .project_adoption import AdoptionError, assess_alignment_plan
+
+    try:
+        identity = discover_project(project)
+        candidate = _operator_architecture_plan(plan_file, identity.root)
+        result = assess_alignment_plan(identity, candidate)
+    except (AdoptionError, OSError, ValueError) as exc:
+        raise _recovery_exit(exc) from exc
+
+    # Underlying detailed errors can quote arbitrary plan fields. Never echo
+    # untrusted plan values (including unknown profile names) into the console.
+    safe = dict(result)
+    if not result.get("plan_contract_valid"):
+        safe["errors"] = ["Plan contract invalid; correct the JSON proposal and recheck"]
+    console.print_json(data=safe)
+    if not result.get("plan_contract_valid"):
+        raise typer.Exit(2)
 
 if __name__ == "__main__":
     app()
