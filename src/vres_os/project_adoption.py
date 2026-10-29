@@ -102,6 +102,13 @@ _FRONTMATTER_KEY = re.compile(r"^([A-Za-z_][\w-]*)[ \t]*:(.*)$", re.M)
 _EXECUTING_FIELDS = {"hooks", "allowedtools", "mcpservers", "shell"}
 _SAFE_PERMISSION_MODES = {"default", "plan"}
 _INERT_SETTINGS = {"$schema"}
+# These are fixed, documented *analytical* limits of the existing architecture
+# auditor, not evidence that files were omitted or parsing failed. Treat every
+# unknown or path-specific limitation as blocking, including future new codes.
+_ARCHITECTURE_ANALYSIS_ADVISORIES = frozenset({
+    "python_custom_import_roots_not_resolved",
+    "javascript_dependency_scan_lexical_only",
+})
 Authority = Callable[[str], dict[str, Any]]
 
 
@@ -533,15 +540,26 @@ def start(project, *, data_root: Path | None = None) -> dict[str, Any]:
 
         audit = audit_project(root)
         limitations = audit["limitations"]
-        if audit["requires_alignment_plan"] or limitations:
+        blocking_limitations = [
+            reason for reason in limitations
+            if reason not in _ARCHITECTURE_ANALYSIS_ADVISORIES
+        ]
+        if audit["requires_alignment_plan"] or blocking_limitations:
             # This is diagnostic structural evidence, not project source identity,
             # independent Fable validation, consent, or an activation permission.
             details = {
                 "architecture_audit_digest": audit["audit_digest"],
                 "architecture_profiles": list(audit["profiles"]),
                 "architecture_plan_required": bool(audit["requires_alignment_plan"]),
-                "architecture_audit_complete": not bool(limitations),
+                # "complete" means no omitted/unparseable audit inputs, not
+                # proof of exhaustive semantic or dynamic import analysis.
+                "architecture_audit_complete": not bool(blocking_limitations),
                 "architecture_limitation_count": len(limitations),
+                "architecture_blocking_limitation_count": len(blocking_limitations),
+                "architecture_analysis_advisories": sorted(
+                    reason for reason in limitations
+                    if reason in _ARCHITECTURE_ANALYSIS_ADVISORIES
+                ),
                 "required_validator": dict(audit["required_validator"]),
                 "architecture_plan_status": "NOT_SUBMITTED",
             }

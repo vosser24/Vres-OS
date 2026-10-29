@@ -588,7 +588,8 @@ def start_for_project(project_root: str = ".") -> dict:
         "state", "changed", "pending", "blockers", "created", "error",
         "architecture_audit_digest", "architecture_profiles",
         "architecture_plan_required", "architecture_audit_complete",
-        "architecture_limitation_count", "architecture_plan_status",
+        "architecture_limitation_count", "architecture_blocking_limitation_count",
+        "architecture_analysis_advisories", "architecture_plan_status",
         "required_validator",
     ) if k in adoption}
     if adoption.get("state") == "architecture_review_required":

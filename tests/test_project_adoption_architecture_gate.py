@@ -56,7 +56,13 @@ def test_established_source_without_claude_is_review_required_not_active(tmp_pat
     assert result["changed"] is False
     assert result["architecture_plan_required"] is True
     assert result["architecture_audit_complete"] is True
-    assert result["architecture_limitation_count"] == 0
+    # The existing Python import scanner explicitly records a known analytical
+    # caveat. It must remain visible without masquerading as a truncated scan.
+    assert result["architecture_limitation_count"] == 1
+    assert result["architecture_blocking_limitation_count"] == 0
+    assert result["architecture_analysis_advisories"] == [
+        "python_custom_import_roots_not_resolved"
+    ]
     assert result["architecture_plan_status"] == "NOT_SUBMITTED"
     assert result["required_validator"] == {
         "agent": "vres-os:validator", "model": "fable", "effort": "high"
@@ -145,6 +151,8 @@ def test_incomplete_architecture_audit_refuses_even_empty_project(
     assert result["architecture_plan_required"] is False
     assert result["architecture_audit_complete"] is False
     assert result["architecture_limitation_count"] == 1
+    assert result["architecture_blocking_limitation_count"] == 1
+    assert result["architecture_analysis_advisories"] == []
     assert result["changed"] is False
     assert _files(project.root) == before
     assert not (project.root / "CLAUDE.md").exists()
@@ -212,9 +220,60 @@ def test_bootstrap_reports_review_gate_before_setup_migration_or_repository(
     assert result["project_adoption"]["state"] == "architecture_review_required"
     assert result["project_adoption"]["architecture_plan_required"] is True
     assert result["project_adoption"]["required_validator"]["model"] == "fable"
+    assert result["project_adoption"]["architecture_blocking_limitation_count"] == 0
+    assert result["project_adoption"]["architecture_analysis_advisories"] == [
+        "python_custom_import_roots_not_resolved"
+    ]
     assert "architecture audit" in result["action"]
     assert "Fable/high" in result["action"]
     assert "does not authorize a project write or database setup" in result["action"]
     assert "project_id" not in result
     assert touched == []
+    assert _files(project.root) == before
+
+def test_syntax_unavailable_alongside_python_advisory_stays_blocked(tmp_path):
+    project = _project(tmp_path / "unparseable")
+    (project.root / "main.py").write_text("def broken(:\n", encoding="utf-8")
+    before = _files(project.root)
+
+    result = project_adoption.start(project, data_root=tmp_path / "state")
+
+    assert result["state"] == "architecture_review_required"
+    assert result["architecture_plan_required"] is False
+    assert result["architecture_audit_complete"] is False
+    assert result["architecture_limitation_count"] == 2
+    assert result["architecture_blocking_limitation_count"] == 1
+    assert result["architecture_analysis_advisories"] == [
+        "python_custom_import_roots_not_resolved"
+    ]
+    assert result["changed"] is False
+    assert _files(project.root) == before
+    assert not (project.root / "CLAUDE.md").exists()
+
+
+def test_unknown_future_analysis_limitation_is_not_silently_allowed(
+    tmp_path, monkeypatch
+):
+    project = _project(tmp_path / "unknown-gap")
+    before = _files(project.root)
+    monkeypatch.setattr(
+        architecture_governance, "audit_project",
+        lambda _root: {
+            "audit_digest": "b" * 64,
+            "profiles": ["minimal"],
+            "requires_alignment_plan": False,
+            "limitations": ["new_unknown_analysis_gap"],
+            "required_validator": {
+                "agent": "vres-os:validator", "model": "fable", "effort": "high"
+            },
+        }
+    )
+
+    result = project_adoption.start(project, data_root=tmp_path / "state")
+
+    assert result["state"] == "architecture_review_required"
+    assert result["architecture_audit_complete"] is False
+    assert result["architecture_blocking_limitation_count"] == 1
+    assert result["architecture_analysis_advisories"] == []
+    assert result["changed"] is False
     assert _files(project.root) == before
