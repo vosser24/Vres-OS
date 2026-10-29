@@ -1,0 +1,38 @@
+RESUME VRES-OS — #168 / V-30 A1 ESTABLISHED PROJECT ARCHITECTURE-HOLD SOURCE COMMITTED; GUARDED WINDOWS TEST NEXT
+
+Repository: vosser24/Vres-OS.
+Canonical docs: docs/chatgpt-continuity-20261023; verify actual latest GitHub ref before acting.
+Read newest docs/handoffs/VRES-CHATGPT-CONTINUITY-INDEX.md FIRST.
+
+READ:
+1. docs/handoffs/VRES-168-A1-ESTABLISHED-PROJECT-ARCHITECTURE-HOLD-SOURCE-COMMITTED-WINDOWS-TEST-NEXT-2026-10-29.md
+2. docs/handoffs/VRES-168-A1-GUARDED-WINDOWS-SELECTED-TEST-NEXT-2026-10-29.ps1 — must copy complete 166-line PowerShell & { ... } block INLINE, not merely a file link, for operator one-time normal Windows PowerShell execution
+3. docs/roadmap/VRES-CHATGPT-LED-FULL-SCOPE-DELIVERY-PLAN-2026-10-22.md
+4. docs/roadmap/VRES-FULL-SCOPE-FUNCTIONALITY-REGISTER-2026-10-22.md
+5. docs/handoffs/VRES-PERSONAL-HOOK-R1-WINDOWS-34-PASS-EXIT0-INDEPENDENT-REVIEW-AND-INSTALLED-HOOK-HOLDS-2026-10-29.md
+6. docs/handoffs/VRES-PERSONAL-PT2D-50-PASS-EXIT0-INDEPENDENT-REVIEWS-OPEN-AND-NEXT-GATE-2026-10-29.md
+
+CURRENT NEW CODE:
+Branch feature/168-personal-established-project-architecture-gate-20261029
+HEAD 2a21431d440632e09f2bc5e155aa27a47ecdfa98
+TREE bb5b16fc71d55f9d2030cc250df93c03e76f8ebe
+SOLE PARENT previously Windows-validated Hook-R1 891fb22287b6ee8b028eda7256c0b5639df40c04 / tree 1b9d7ddcc4f6c8e0cafda8cea5e1c5d51e3ca9db.
+EXACT 3 paths:
+M src/vres_os/project_adoption.py NEW blob 5d6988cd13471a3012ee407327d0d82974062ed3
+M src/vres_os/bootstrap.py NEW blob c326842ac936e70a0c3d238578942759ae68aff9
+A tests/test_project_adoption_architecture_gate.py NEW blob 9d95b63c29773084aa9ecf780f2f6dabead2d089 (8 focused test functions).
+GitHub nonforced ref update, source SHA/tree/parent and compare 2M/1A readback verified. Windows validation NOT_RUN, independent source review NOT_RUN.
+
+ACTUAL GAP FIX:
+P2-D previously treated established source code with zero Claude config as FRESH and automatically created CLAUDE.md/marked active, skipping existing #174 architect-audit Fable/high plan hold. New logic calls only existing read-only architecture_governance.audit_project when NO existing Claude surfaces. If established source OR partial audit, it durably records architecture_review_required and structural audit digest/profiles/limitations/required Fable/high validator/NOT_SUBMITTED plan in separate Vres state directory, and leaves project bytes UNTOUCHED. Repeat unchanged audit idempotent; if source structural evidence changes, digest changes but no authorization. bootstrap.start_for_project reports PROJECT_REVIEW_REQUIRED before ConfigStore, secure setup, migration or Repository. No fake approval, no activate path for new state; truly fresh small project still only gets CLAUDE.md and active. Existing P2-D legacy KEEP/DROP/snapshot/rollback untouched. No real Fable run, user project write, current-user plugin/Claude setting edit, SQL or model activation. #168 broader transition/plan-validation/approved activation and #166/#167 remain next distinct scopes.
+
+ONE USER WINDOWS ACTION:
+Normal Windows PowerShell in original P2 worktree, paste COMPLETE archived 166-line block from docs handoff inline once. It asserts clean original P2 HEAD 82c82430b38f93bd6b9d5c3af3b5de9c1368af9c; clean previous Hook-R1 checkout C:\Projects\Vres-ChatGPT-Review-Personal-HOOK-R1-20261029 HEAD 891fb222... tree 1b9d7d...; fresh new target C:\Projects\Vres-ChatGPT-Review-168-Architecture-Gate-20261029 NOT PRESENT; remote/fetch branch exact SHA; new detached checkout HEAD/tree/one parent; 13 Git blob identities; exact M bootstrap, M project_adoption, A new test; diff --check and clean. One selected -B -q -rA -p no:cacheprovider Python 3.12 pytest of tests/test_project_adoption_architecture_gate.py tests/test_project_adoption.py tests/test_architecture_governance.py only. Process PYTHONPATH restricted to new src, pytest plugin autoload disabled, PG/DB/integration env cleared/restored, protected test conftest disposable AppData fence. Demand all named PASSED/FAILED, actual exit0, environment restoration and posttest 13 blobs/new+prior clean; final VRES_PERSONAL_168_A1_WINDOWS_SELECTED_TEST_COMPLETE only on success. If ANY STOP/ABORT, do not continue manually. User returns full console. Do not invent a case count or success beforehand.
+
+EVIDENCE:
+PT1 R1 189 Windows PASS plus independently STATIC_ACCEPT, but prior Claude auto hook Read x4/Grep x3 invoked SEVEN DB-route attempts, all refused.
+PT2A 213, PT2B 43, PT2C selected 54, PT2D 50 selected Windows PASS at exact SHA; independent reviews all NOT_RUN. HOOK-R1 source-only observer fix 34 Windows PASS, independent NOT_RUN; installed hooks remain unchanged. No source SHA pass transfers to another commit. Earlier failed R0 and unselected PT2C alt 59d811... remain separate.
+ABSOLUTE LIVE_SCHEMA_048_INCIDENT OPEN — NO PostgreSQL even SELECT directly or via Vres CLI/MCP/bootstrap/task/doctor/hooks/F2/recovery. HOST_HOOK_DB_ROUTE_ATTEMPTED_AND_REFUSED OPEN; normal Claude Code read-review cannot restart safely under currently installed automatic hooks. No global/user profile modification, no API-key/account/Claude web Chat diversion. Original P2 installed Chairman last-observed Sonnet/high, requested Opus/medium UNINSTALLED, actual physical model UNKNOWN. Strict F1 positive issuer BLOCKED. PERSONAL P0-P3, protected Fable/high router+validator and specialist pins, current-user secret handles and cross-project explicit reuse, entire V-01..V-42 scope, Visual Studio real legacy onboarding and E7/PA/F2/go-live holds preserve.
+
+METHODOLOGY:
+ChatGPT source author and GitHub committer; operator Windows SHA-pinned clean worktree and one atomic PowerShell scoped offline validation; Claude Code existing subscription independent reviewer ONLY after demonstrated no automatic DB-route attempt mode. Always code/prompt INLINE CODE BLOCKS, not just files. Preserve source SHA/parent/tree/blobs/diff allowlist, test count and real exit with pre/post, no generic progress ceremony or redundant test. After observed test, commit docs-only PASS/FAIL console/handoff/index, nonforced single-parent CAS and GitHub readback. Fix genuine defects in new source SHA if failure, preserve failed history.
