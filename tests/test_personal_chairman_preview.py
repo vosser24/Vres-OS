@@ -189,9 +189,10 @@ def test_personal_preview_module_has_only_stdlib_and_accepted_pure_policy_import
     source = MODULE.read_text(encoding="utf-8")
     tree = ast.parse(source)
     imported = {
-        module.name
-        for module in ast.walk(tree)
-        if isinstance(module, ast.Import)
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
     }
     from_modules = {
         module.module
