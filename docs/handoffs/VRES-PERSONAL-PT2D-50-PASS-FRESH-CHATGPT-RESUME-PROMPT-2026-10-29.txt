@@ -1,0 +1,42 @@
+RESUME VRES-OS — PERSONAL-FIRST PT2D 50/50 SELECTED WINDOWS TEST PASS / EXIT0; PROTECTED SOURCE REVIEW GATE NEXT
+
+Repository: vosser24/Vres-OS.
+Canonical documentation branch: docs/chatgpt-continuity-20261023. VERIFY REMOTE HEAD AND NEWEST READ-FIRST INDEX BEFORE ACTION; do not rely on old SHA.
+
+READ FIRST in exact order:
+1. docs/handoffs/VRES-CHATGPT-CONTINUITY-INDEX.md
+2. docs/handoffs/VRES-PERSONAL-PT2D-50-PASS-EXIT0-INDEPENDENT-REVIEWS-OPEN-AND-NEXT-GATE-2026-10-29.md
+3. docs/handoffs/VRES-PERSONAL-PT2D-WINDOWS-50-PASSED-EXIT0-ORIGINAL-OPERATOR-TRANSCRIPT-LF-NORMALIZED-2026-10-29.txt
+4. docs/handoffs/VRES-PERSONAL-PT2D-PURE-OFFLINE-CANDIDATE-SOURCE-COMMITTED-WINDOWS-TEST-NEXT-2026-10-29.md (historical pending-test handoff)
+5. docs/handoffs/VRES-PERSONAL-PT2D-GUARDED-WINDOWS-TEST-NEXT-2026-10-29.ps1 (historical USED script, DO NOT rerun without new demonstrated defect)
+6. docs/handoffs/VRES-PERSONAL-PT2C-54-PASS-EXIT0-INDEPENDENT-REVIEWS-OPEN-AND-NEXT-SAFE-HANDOFF-2026-10-29.md
+7. docs/handoffs/VRES-PERSONAL-PT2B-43-PASSED-EXIT0-AND-SOURCE-ONLY-CONTINUATION-HANDOFF-2026-10-29.md
+8. docs/handoffs/VRES-PERSONAL-PT2A-213-PASS-PT1-ACCEPT-OPEN-ISSUES-AND-FRESH-CHATGPT-HANDOFF-2026-10-29.md
+9. docs/handoffs/VRES-PERSONAL-PT1-R1-INDEPENDENT-CLAUDE-STATIC-ACCEPT-AND-HOOK-REFUSALS-REPORT-2026-10-29.txt
+10. docs/architecture/VRES-PERSONAL-RISK-PROFILE-AND-CHAIRMAN-GOVERNED-MODEL-TRANSITION-V1-2026-10-27.md
+11. docs/roadmap/VRES-FULL-SCOPE-FUNCTIONALITY-REGISTER-2026-10-22.md
+
+LATEST SOURCE PIN:
+PT2D feature/personal-governed-chairman-pt2d-offline-release-candidate-20261029 HEAD a5913288b7748693adafc36c9c1cb35af3ea3949 tree d45ffc91781be6681124ff369af5df4d06300ce9 sole PT2C parent 81149beab52750c93db91453e18efbd5f7a21da4, parent tree f7ad6c6ef07c5b60c698ac4aae0487e1a8976f35. Exactly TWO additions only: src/vres_os/personal_chairman_release_candidate.py blob 2f6d69508e0dceb68e45610d2c3dd59565232c1a and tests/test_personal_chairman_release_candidate.py blob 28ab0476f1a82bc4e875d7500eff6d4d07744291. GitHub ref and compare reverified, no code/installer/Chairman/install changes since source commit, no main merge.
+
+LATEST WINDOWS VALIDATION:
+User supplied original Επικολλημένο κείμενο.txt Windows terminal log. 11,101 original raw UTF-8 bytes, no BOM, 125 lines, 124 CRLF, no terminal newline, original SHA256 8635fb176b0a54db2d7a421aadf8db21f7d53cfc8a1b871946f05febf8a930dc. Full LF-normalized equivalent 10,977 bytes SHA256 89fdc876dcf67faed55f580dd8bf515f811881bc32bc36f971d439b07d94c495, Git blob 2ea53a7f646aa06198849836b1bf8230f18eceb1. Distinguish raw original from normalized archival record. Report: exact source anchor/PT2C worktree/remote SHA, newly created PT2D SHA-pinned detached checkout, HEAD/tree/one parent, fifteen protected source/test/installer/Chairman Git blobs and exact two-ADD allowlist PASS, pretest clean, preflight marker line42 BEFORE pytest. Selected Python3.12 -B -q -rA -p no:cacheprovider tests/test_personal_chairman_release_candidate.py only, plugin autoload disabled, process PG/DB/integration env isolated/restored, conftest AppData fence unexpected refusals0/integration_opt_in=False, exactly FIFTY (50) DISTINCT individually named PASSED records at lines51-100, zero FAILED/ERROR, PYTEST_EXIT_CODE=0 line101, environment restored line102, posttest PT2D/old PT2C Git HEAD/tree/15 blobs/clean PASS lines103-122, PT2D_TEST_EXIT_CODE=0 line123, final VRES_PERSONAL_PT2D_WINDOWS_SELECTED_TEST_COMPLETE line124, Windows prompt line125. No STOP or ABORT marker. Status: PT2D_WINDOWS_SELECTED_OFFLINE_TEST_PASS_AT_EXACT_SHA. These are operator-reported selected unit tests, NOT independently authenticated physical DB contact trace, real installation/recovery, full suite or active provider attestation.
+
+HISTORICAL TEST/REVIEW ACCEPTANCE BY SHA:
+PT1 R1 7b6b7457236cf601fa056152b78713060fe0573e: 189 selected Windows PASS/exit0; independent Claude STATIC_ACCEPT zero blockers/five info I1–I5, old failed R0 remains archived.
+PT2A 22122047cc985ffc8fb3e5d0d30e3d68d8d57df9: 213 selected Windows PASS/exit0; INDEPENDENT STATIC REVIEW NOT_RUN.
+PT2B 361500291601e241b7c579012a25442ff4a95d7d: 43 selected Windows PASS/exit0; INDEPENDENT STATIC REVIEW NOT_RUN.
+PT2C selected 81149beab52750c93db91453e18efbd5f7a21da4: 54 selected Windows PASS/exit0; INDEPENDENT STATIC REVIEW NOT_RUN. Unselected unattached alternative PT2C commit 59d811eb130725ebd2d91b542713fcce05b1634d has separate 88 synthetic harness cases only; DO NOT merge or treat as Windows acceptance.
+PT2D a5913288b7748693adafc36c9c1cb35af3ea3949: 50 selected Windows PASS/exit0; INDEPENDENT STATIC REVIEW NOT_RUN.
+
+PT2D product: in-memory deterministic versioned Chairman candidate proposal schema vres-personal-chairman-versioned-proposal/1. All PT2A/B/C evidence untrusted caller claims. Even no findings => OFFLINE_DRAFT_ONLY, NOT install permission, safe_to_install=False, release_v2_manifest_emitted=False, NO actual backup, no installed-state verification, NO model activation, independent F1 positive authority still blocked. Actual Opus/medium UNINSTALLED, last observed current-user Chairman Sonnet/high, physical model/effort UNKNOWN.
+
+HARD STOP ISSUES:
+LIVE_SCHEMA_048_INCIDENT=OPEN: NO PostgreSQL even SELECT, direct or via Vres MCP/task/CLI/bootstrap/doctor/health/hooks/F2/migration/recovery.
+HOST_HOOK_DB_ROUTE_ATTEMPTED_AND_REFUSED=OPEN: prior Claude PT1 reviewer Read x4/Grep x3 triggered seven automatic PostToolUse Vres DB-route attempts, all refused; no-attempt condition FAILED. No new native hook-bearing Claude Code reviewer until an authorized proven no-DB-attempt-safe mode exists. DO NOT alter installed/global Claude hooks/profile, probe warning via DB or contact credentials/provider.
+VRES_REPLY_GUARD_WARNING and VRES_PERSISTENCE_WARNING unresolved.
+PERSONAL P0/P1/P2/P3 scope, protected Fable/high arbiter/validator pins, Sonnet and Opus worker pins, credential handle cross-project binding and current-user storage, full V-01..V-42 roadmap and Visual Studio fresh/legacy onboarding, preproduction E7/PA/F2 holds and go-live gates remain.
+
+NEXT RECOMMENDATION:
+Do NOT rerun passed tests or automatically create PT2E, install Opus, or start Claude Code. Address the source-review safety gate proportionately: first inspect immutable GitHub-only hook/reviewer configuration contracts without installed-profile access and assess a genuinely no-DB-attempt reviewer path; STOP if impossible without new authorization. Once separately authorized and verified safe, focused independent source review of PT2A–PT2D pinned SHAs. Actual physical protected write still REQUIRES independent review, real release-v2 provenance/full inventory, safe installed-read preflight, snapshot/rollback readiness, explicit fresh user approval and no P3 conflict. No silent green status.
+METHODOLOGY: exact GitHub SHA/tree/parent/blob/allowlist, nonforced GitHub ref update/readback, single atomic PowerShell guarded new SHA-pinned detached checkout, selected offline Python3.12 pytest with plugin autoload off/PG env restored/disposable AppData fence, every named test line and chronological exit, canonical docs-only index+handoff commit on material gate. STOP and preserve evidence if any guard blocks. Avoid earlier PT1 AST alias test mistake, spurious success markers after STOP, blind reruns, infinite F1 design-review churn.

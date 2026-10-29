@@ -1,0 +1,125 @@
+== PERSONAL PT2D ONE ATOMIC WINDOWS PREFLIGHT ===
+PASS: Original P2 anchor HEAD
+PASS: Original P2 anchor checkout
+PASS: Prior PT2C HEAD
+PASS: Prior PT2C tree
+PASS: Prior PT2C validation checkout
+PASS: Official GitHub origin
+PASS: Remote PT2D HEAD
+remote: Enumerating objects: 7, done.
+remote: Counting objects: 100% (7/7), done.
+remote: Compressing objects: 100% (6/6), done.
+remote: Total 7 (delta 0), reused 0 (delta 0), pack-reused 0 (from 0)
+Unpacking objects: 100% (7/7), 15.90 KiB | 561.00 KiB/s, done.
+From https://github.com/vosser24/Vres-OS
+ * branch            feature/personal-governed-chairman-pt2d-offline-release-candidate-20261029 -> FETCH_HEAD
+ * [new branch]      feature/personal-governed-chairman-pt2d-offline-release-candidate-20261029 -> origin/feature/personal-governed-chairman-pt2d-offline-release-candidate-20261029
+PASS: Fetched PT2D HEAD
+Preparing worktree (detached HEAD a591328)
+HEAD is now at a591328 feat(personal): add PT2D pure offline versioned Chairman candidate proposal
+PASS: PT2D detached mode
+PASS: PT2D HEAD
+PASS: PT2D tree
+PASS: PT2D single parent
+PASS: Git blob src/vres_os/personal_chairman_release_candidate.py
+PASS: Git blob tests/test_personal_chairman_release_candidate.py
+PASS: Git blob src/vres_os/personal_chairman_release_reconciliation.py
+PASS: Git blob tests/test_personal_chairman_release_reconciliation.py
+PASS: Git blob src/vres_os/personal_chairman_recovery_journal.py
+PASS: Git blob tests/test_personal_chairman_recovery_journal.py
+PASS: Git blob src/vres_os/personal_chairman_transition_plan.py
+PASS: Git blob tests/test_personal_chairman_transition_plan.py
+PASS: Git blob src/vres_os/personal_chairman_preview.py
+PASS: Git blob tests/test_personal_chairman_preview.py
+PASS: Git blob plugins/vres-os/agents/chairman.md
+PASS: Git blob tests/conftest.py
+PASS: Git blob src/vres_os/release_artifact.py
+PASS: Git blob src/vres_os/install_recovery.py
+PASS: Git blob install.ps1
+PASS: exactly two PT2D source/test additions
+PASS: PT2D git diff --check
+PASS: PT2D checkout before tests
+VRES_PERSONAL_PT2D_PREFLIGHT_PASS
+=== PERSONAL PT2D GUARDED OFFLINE SELECTED PYTEST ===
+PYTEST_PLUGIN_AUTOLOAD=DISABLED
+PASS: process DB/PG/integration variables isolated
+TEST_COMMAND=py -3.12 -B -m pytest -q -rA -p no:cacheprovider tests/test_personal_chairman_release_candidate.py
+..................................................                                                               [100%]
+======================================================= PASSES ========================================================
+LIVE APP-DATA FENCE: unexpected refusals=0 protected=['c:\\users\\user\\appdata\\local\\vresos', 'c:\\users\\user\\appdata\\roaming\\vresos'] trusted_temp_base=C:\Users\User\AppData\Local\Temp session_root=C:\Users\User\AppData\Local\Temp\vres-pytest-app-data-mda42gmk\VresOS init_order=['validate-temp-base', 'create-session-directory', 'validate-session-directory', 'create-app-data-root', 'enable-isolation'] removed_env=[] integration_opt_in=False
+=============================================== short test summary info ===============================================
+PASSED tests/test_personal_chairman_release_candidate.py::test_consistent_input_yields_draft_not_release_or_install_permission[lf]
+PASSED tests/test_personal_chairman_release_candidate.py::test_consistent_input_yields_draft_not_release_or_install_permission[crlf]
+PASSED tests/test_personal_chairman_release_candidate.py::test_candidate_receipt_is_deterministic_and_audit_dictionary_is_fresh
+PASSED tests/test_personal_chairman_release_candidate.py::test_different_proposed_release_names_get_different_receipts_not_authority
+PASSED tests/test_personal_chairman_release_candidate.py::test_lf_and_crlf_share_source_git_blob_but_not_raw_receipt_or_target_hash
+PASSED tests/test_personal_chairman_release_candidate.py::test_invalid_new_release_id_is_rejected_without_receipt[]
+PASSED tests/test_personal_chairman_release_candidate.py::test_invalid_new_release_id_is_rejected_without_receipt[..]
+PASSED tests/test_personal_chairman_release_candidate.py::test_invalid_new_release_id_is_rejected_without_receipt[../escape]
+PASSED tests/test_personal_chairman_release_candidate.py::test_invalid_new_release_id_is_rejected_without_receipt[old/release]
+PASSED tests/test_personal_chairman_release_candidate.py::test_invalid_new_release_id_is_rejected_without_receipt[.hidden]
+PASSED tests/test_personal_chairman_release_candidate.py::test_invalid_new_release_id_is_rejected_without_receipt[a b]
+PASSED tests/test_personal_chairman_release_candidate.py::test_invalid_new_release_id_is_rejected_without_receipt[xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx]
+PASSED tests/test_personal_chairman_release_candidate.py::test_invalid_new_release_id_is_rejected_without_receipt[\u03a9Greek]
+PASSED tests/test_personal_chairman_release_candidate.py::test_invalid_new_release_id_is_rejected_without_receipt[None]
+PASSED tests/test_personal_chairman_release_candidate.py::test_invalid_new_release_id_is_rejected_without_receipt[True]
+PASSED tests/test_personal_chairman_release_candidate.py::test_invalid_new_release_id_is_rejected_without_receipt[1]
+PASSED tests/test_personal_chairman_release_candidate.py::test_old_release_id_may_not_be_reused_even_for_consistent_claims
+PASSED tests/test_personal_chairman_release_candidate.py::test_wrong_source_contract_objects_rejected[plan]
+PASSED tests/test_personal_chairman_release_candidate.py::test_wrong_source_contract_objects_rejected[journal]
+PASSED tests/test_personal_chairman_release_candidate.py::test_wrong_source_contract_objects_rejected[assessment]
+PASSED tests/test_personal_chairman_release_candidate.py::test_pt2c_stop_decision_is_preserved_not_upgraded_to_installer_ready
+PASSED tests/test_personal_chairman_release_candidate.py::test_old_source_body_claim_is_reported_as_blocked_and_redacted
+PASSED tests/test_personal_chairman_release_candidate.py::test_pt2b_advanced_state_can_never_yield_fresh_candidate
+PASSED tests/test_personal_chairman_release_candidate.py::test_pt2b_cross_plan_binding_drift_is_a_blocker
+PASSED tests/test_personal_chairman_release_candidate.py::test_pt2c_claim_identity_drift_fails_closed[source_git_blob-cccccccccccccccccccccccccccccccccccccccc-PT2C_SOURCE_GIT_BLOB_MISMATCH]
+PASSED tests/test_personal_chairman_release_candidate.py::test_pt2c_claim_identity_drift_fails_closed[candidate_sha256-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-PT2C_CANDIDATE_HASH_MISMATCH]
+PASSED tests/test_personal_chairman_release_candidate.py::test_unknown_pt2c_verdict_does_not_become_draft[PASS]
+PASSED tests/test_personal_chairman_release_candidate.py::test_unknown_pt2c_verdict_does_not_become_draft[ACCEPT]
+PASSED tests/test_personal_chairman_release_candidate.py::test_unknown_pt2c_verdict_does_not_become_draft[INSTALL_READY]
+PASSED tests/test_personal_chairman_release_candidate.py::test_unknown_pt2c_verdict_does_not_become_draft[None]
+PASSED tests/test_personal_chairman_release_candidate.py::test_unknown_pt2c_verdict_does_not_become_draft[True]
+PASSED tests/test_personal_chairman_release_candidate.py::test_unknown_pt2c_verdict_does_not_become_draft[]
+PASSED tests/test_personal_chairman_release_candidate.py::test_missing_prior_release_projection_must_not_be_invented
+PASSED tests/test_personal_chairman_release_candidate.py::test_claimed_evidence_digest_is_not_a_signature_and_malformed_is_refused
+PASSED tests/test_personal_chairman_release_candidate.py::test_malformed_or_excessive_findings_refused[]
+PASSED tests/test_personal_chairman_release_candidate.py::test_malformed_or_excessive_findings_refused[lower_case]
+PASSED tests/test_personal_chairman_release_candidate.py::test_malformed_or_excessive_findings_refused[aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]
+PASSED tests/test_personal_chairman_release_candidate.py::test_malformed_or_excessive_findings_refused[5]
+PASSED tests/test_personal_chairman_release_candidate.py::test_malformed_or_excessive_findings_refused[None]
+PASSED tests/test_personal_chairman_release_candidate.py::test_malformed_or_excessive_findings_refused[abc-123]
+PASSED tests/test_personal_chairman_release_candidate.py::test_findings_are_sorted_and_deduplicated_for_stable_digest
+PASSED tests/test_personal_chairman_release_candidate.py::test_direct_constructor_metadata_drift_is_rejected[receipt_sha256-000000000000000000000000000000000000000000000000000000000000000]
+PASSED tests/test_personal_chairman_release_candidate.py::test_direct_constructor_metadata_drift_is_rejected[source_git_blob_lf-GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG]
+PASSED tests/test_personal_chairman_release_candidate.py::test_direct_constructor_metadata_drift_is_rejected[candidate_sha256-zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz]
+PASSED tests/test_personal_chairman_release_candidate.py::test_direct_constructor_metadata_drift_is_rejected[candidate_size-True]
+PASSED tests/test_personal_chairman_release_candidate.py::test_direct_constructor_metadata_drift_is_rejected[candidate_size-0]
+PASSED tests/test_personal_chairman_release_candidate.py::test_direct_constructor_metadata_drift_is_rejected[candidate_size-524289]
+PASSED tests/test_personal_chairman_release_candidate.py::test_direct_constructor_metadata_drift_is_rejected[pt2b_journal_id-not-a-digest]
+PASSED tests/test_personal_chairman_release_candidate.py::test_direct_constructor_metadata_drift_is_rejected[proposed_release_id-old-release-20261022]
+PASSED tests/test_personal_chairman_release_candidate.py::test_pt2d_source_has_no_filesystem_database_or_installer_surface
+PYTEST_EXIT_CODE=0
+PASS: PROCESS_ENVIRONMENT_RESTORED
+=== PERSONAL PT2D POSTTEST GIT INTEGRITY ===
+PASS: Posttest PT2D HEAD
+PASS: Posttest PT2D tree
+PASS: Posttest blob src/vres_os/personal_chairman_release_candidate.py
+PASS: Posttest blob tests/test_personal_chairman_release_candidate.py
+PASS: Posttest blob src/vres_os/personal_chairman_release_reconciliation.py
+PASS: Posttest blob tests/test_personal_chairman_release_reconciliation.py
+PASS: Posttest blob src/vres_os/personal_chairman_recovery_journal.py
+PASS: Posttest blob tests/test_personal_chairman_recovery_journal.py
+PASS: Posttest blob src/vres_os/personal_chairman_transition_plan.py
+PASS: Posttest blob tests/test_personal_chairman_transition_plan.py
+PASS: Posttest blob src/vres_os/personal_chairman_preview.py
+PASS: Posttest blob tests/test_personal_chairman_preview.py
+PASS: Posttest blob plugins/vres-os/agents/chairman.md
+PASS: Posttest blob tests/conftest.py
+PASS: Posttest blob src/vres_os/release_artifact.py
+PASS: Posttest blob src/vres_os/install_recovery.py
+PASS: Posttest blob install.ps1
+PASS: PT2D worktree after selected test
+PASS: Prior PT2C worktree unchanged
+PT2D_TEST_EXIT_CODE=0
+VRES_PERSONAL_PT2D_WINDOWS_SELECTED_TEST_COMPLETE
+PS C:\Projects\Vres-P2F-Postinstall-Hardening-20261022>
