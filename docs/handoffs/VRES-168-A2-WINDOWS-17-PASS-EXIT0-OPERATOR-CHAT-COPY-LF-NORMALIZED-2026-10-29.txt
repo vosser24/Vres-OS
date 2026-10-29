@@ -1,0 +1,90 @@
+=== PERSONAL 168_A2 ONE ATOMIC WINDOWS PREFLIGHT ===
+PASS: Original P2 anchor HEAD
+PASS: Original P2 anchor checkout
+PASS: Prior tested #168 R1 HEAD
+PASS: Prior tested #168 R1 tree
+PASS: Prior tested #168 R1 validation checkout
+PASS: Official GitHub origin
+PASS: Remote 168_A2 HEAD
+remote: Enumerating objects: 7, done.
+remote: Counting objects: 100% (7/7), done.
+remote: Compressing objects: 100% (6/6), done.
+remote: Total 7 (delta 0), reused 0 (delta 0), pack-reused 0 (from 0)
+Unpacking objects: 100% (7/7), 24.48 KiB | 835.00 KiB/s, done.
+From https://github.com/vosser24/Vres-OS
+ * branch            feature/168-personal-architecture-plan-contract-20261029 -> FETCH_HEAD
+ * [new branch]      feature/168-personal-architecture-plan-contract-20261029 -> origin/feature/168-personal-architecture-plan-contract-20261029
+PASS: Fetched 168_A2 HEAD
+Preparing worktree (detached HEAD 3ce27dd)
+HEAD is now at 3ce27dd feat(168): add non-authorizing audit-bound offline architecture plan assessment
+PASS: 168_A2 detached mode
+PASS: 168_A2 HEAD
+PASS: 168_A2 tree
+PASS: 168_A2 single parent
+PASS: Git blob src/vres_os/project_adoption.py
+PASS: Git blob tests/test_project_adoption_alignment.py
+PASS: Git blob src/vres_os/bootstrap.py
+PASS: Git blob tests/test_project_adoption_architecture_gate.py
+PASS: Git blob src/vres_os/architecture_governance.py
+PASS: Git blob src/vres_os/architecture_plan.py
+PASS: Git blob src/vres_os/architecture_policy.py
+PASS: Git blob tests/test_project_adoption.py
+PASS: Git blob tests/test_architecture_governance.py
+PASS: Git blob tests/conftest.py
+PASS: Git blob plugins/vres-os/hooks/hooks.json
+PASS: Git blob tests/test_hook_readonly_posttool_fence.py
+PASS: Git blob plugins/vres-os/agents/chairman.md
+PASS: Git blob install.ps1
+PASS: exactly one modified adoption source and one added assessment test
+PASS: 168_A2 git diff --check
+PASS: 168_A2 checkout before tests
+VRES_PERSONAL_168_A2_PREFLIGHT_PASS
+=== PERSONAL 168_A2 GUARDED OFFLINE SELECTED PYTEST ===
+PYTEST_PLUGIN_AUTOLOAD=DISABLED
+PASS: process DB/PG/integration variables isolated
+TEST_COMMAND=py -3.12 -B -m pytest -q -rA -p no:cacheprovider tests/test_project_adoption_alignment.py tests/test_project_adoption_architecture_gate.py::test_established_source_without_claude_is_review_required_not_active tests/test_project_adoption_architecture_gate.py::test_genuinely_fresh_small_source_still_scaffolds_once tests/test_architecture_governance.py::test_complete_alignment_plan_is_ready_for_fable_but_never_activates tests/test_architecture_governance.py::test_plan_stale_audit_digest_fails_closed
+.................                                                                                                [100%]
+======================================================= PASSES ========================================================
+LIVE APP-DATA FENCE: unexpected refusals=0 protected=['c:\\users\\user\\appdata\\local\\vresos', 'c:\\users\\user\\appdata\\roaming\\vresos'] trusted_temp_base=C:\Users\User\AppData\Local\Temp session_root=C:\Users\User\AppData\Local\Temp\vres-pytest-app-data-6a2wtcjc\VresOS init_order=['validate-temp-base', 'create-session-directory', 'validate-session-directory', 'create-app-data-root', 'enable-isolation'] removed_env=[] integration_opt_in=False
+=============================================== short test summary info ===============================================
+PASSED tests/test_project_adoption_alignment.py::test_valid_plan_is_ready_for_protected_validation_but_never_activates
+PASSED tests/test_project_adoption_alignment.py::test_replay_is_deterministic_and_never_persists_or_grants_authority
+PASSED tests/test_project_adoption_alignment.py::test_stale_plan_digest_is_contract_invalid_and_no_write
+PASSED tests/test_project_adoption_alignment.py::test_forged_approval_field_cannot_turn_contract_into_authority
+PASSED tests/test_project_adoption_alignment.py::test_changed_architecture_since_recorded_audit_is_refused
+PASSED tests/test_project_adoption_alignment.py::test_missing_state_refuses_without_creating_any_state_directories
+PASSED tests/test_project_adoption_alignment.py::test_fresh_active_project_cannot_claim_an_established_plan
+PASSED tests/test_project_adoption_alignment.py::test_other_project_root_with_same_key_cannot_reuse_pending_record
+PASSED tests/test_project_adoption_alignment.py::test_malformed_nonobject_cyclic_and_oversized_plans_fail_closed
+PASSED tests/test_project_adoption_alignment.py::test_nested_unhashable_exception_field_does_not_crash_checker
+PASSED tests/test_project_adoption_alignment.py::test_incomplete_parse_after_prior_review_blocks_plan
+PASSED tests/test_project_adoption_alignment.py::test_unknown_new_audit_limitation_stays_blocking
+PASSED tests/test_project_adoption_alignment.py::test_interrupted_activation_journal_stops_plan_assessment
+PASSED tests/test_project_adoption_architecture_gate.py::test_established_source_without_claude_is_review_required_not_active
+PASSED tests/test_project_adoption_architecture_gate.py::test_genuinely_fresh_small_source_still_scaffolds_once
+PASSED tests/test_architecture_governance.py::test_complete_alignment_plan_is_ready_for_fable_but_never_activates
+PASSED tests/test_architecture_governance.py::test_plan_stale_audit_digest_fails_closed
+PYTEST_EXIT_CODE=0
+PASS: PROCESS_ENVIRONMENT_RESTORED
+=== PERSONAL 168_A2 POSTTEST GIT INTEGRITY ===
+PASS: Posttest 168_A2 HEAD
+PASS: Posttest 168_A2 tree
+PASS: Posttest blob src/vres_os/project_adoption.py
+PASS: Posttest blob tests/test_project_adoption_alignment.py
+PASS: Posttest blob src/vres_os/bootstrap.py
+PASS: Posttest blob tests/test_project_adoption_architecture_gate.py
+PASS: Posttest blob src/vres_os/architecture_governance.py
+PASS: Posttest blob src/vres_os/architecture_plan.py
+PASS: Posttest blob src/vres_os/architecture_policy.py
+PASS: Posttest blob tests/test_project_adoption.py
+PASS: Posttest blob tests/test_architecture_governance.py
+PASS: Posttest blob tests/conftest.py
+PASS: Posttest blob plugins/vres-os/hooks/hooks.json
+PASS: Posttest blob tests/test_hook_readonly_posttool_fence.py
+PASS: Posttest blob plugins/vres-os/agents/chairman.md
+PASS: Posttest blob install.ps1
+PASS: 168_A2 worktree after selected test
+PASS: Prior tested #168 R1 worktree unchanged
+168_A2_TEST_EXIT_CODE=0
+VRES_PERSONAL_168_A2_WINDOWS_SELECTED_TEST_COMPLETE
+PS C:\Projects\Vres-ChatGPT-Review-Personal-PT2D-20261029>
