@@ -1,0 +1,41 @@
+# Vres-OS PERSONAL PT-1 — second incorrect R0 replay; fail-fast R1 review next
+
+**Date:** 2026-10-29 Europe/Athens.
+**Verdict:** SECOND_OLD_PT1_R0_SCRIPT_EXECUTED / INVALID_PREFLIGHT / 188_PASSED_1_FAILED_EXIT1_AGAIN / CORRECTED_PT1_R1_COMMITTED_BUT_WINDOWS_TEST_NOT_RUN / NO_INSTALL / NO_MODEL_ACTIVATION.
+**Absolute hold:** LIVE_SCHEMA_048_INCIDENT=OPEN. Never contact PostgreSQL even SELECT, including via Vres task/bootstrap/CLI/doctor/health/hooks/recovery. VRES_REPLY_GUARD_WARNING and VRES_PERSISTENCE_WARNING remain unresolved and not to be probed. No provider/Fable/Opus/model, credentials, installed/global Claude files, PR/main, signing or installer actions.
+
+## 0. Pinned original attached operator evidence
+
+The current user uploaded full Windows PowerShell 5.1 console as generated pasted text: **55,345 bytes**, original UTF-8 SHA256 **9c10bf656f8415302085ad7a9654fa94c476e370120a534ae758580e5a349638**, **560 logical lines, 559 CRLF boundaries**. Its COMPLETE LF/trailing-space-normalized visible Git copy is at \`docs/handoffs/VRES-PERSONAL-PT1-R0-SECOND-INCORRECT-OLD-SCRIPT-188-PASS-1-FAIL-EXIT1-TRANSCRIPT-2026-10-29.txt\`, Git blob **4a7b8718c90f6054992630e9391796d75c7a5fa3**. The Git blob is not byte-identical to uploaded raw console or an attested Windows host trace. No secret values were needed for this analysis.
+
+This was **NOT the corrected R1 command**. The submitted PowerShell block explicitly assigned original already-existing R0 worktree \`C:\Projects\Vres-ChatGPT-Review-Personal-PT1-20261027\`, original R0 \`$head=8e2628bbf94ffb204796fb51d3056d9eb4e7025f\`, tree \`58f16e4849934da3cca3dd3483d07ffc020bf697\`, and original R0 parent \`e26cc43acfed9664e497067189962ac847ad266f\`, while GitHub remote feature HEAD was ALREADY advanced to fixed R1 \`7b6b7457236cf601fa056152b78713060fe0573e\`.
+
+**FOUR PRE-TEST STOPS recorded:**
+1. \`STOP: PT1 review folder already exists\`.
+2. \`STOP: Remote PT1 HEAD mismatch\`.
+3. \`STOP: Fetched PT1 HEAD mismatch\` (targeted fetch actually retrieved newer R1).
+4. \`fatal: ... R0 folder already exists\` and \`STOP: Detached PT1 worktree creation failed\`.
+
+These STOPs were bypassed by sending the subsequent statements interactively as *separate commands* after their individual \`throw\` had terminated. The later standalone \`Write-Host PT1_PREFLIGHT_PASS\` was therefore INVALID; it did not reverse the earlier STOP. The console then ran the **OLD R0 pytest in the OLD R0 folder** and reproduced **188 individually printed PASSED and 1 FAILED, PYTEST_EXIT_CODE=1**. Exactly the original author test \`tests/test_personal_chairman_preview.py::test_personal_preview_module_has_only_stdlib_and_accepted_pure_policy_imports\` fails at line192, \`AttributeError: 'Import' object has no attribute 'name'\`; not an R1 renderer failure. Per-module PASSED counts: architecture governance **7**, AIGO **12**, policy materialization **48**, C2 offline planner **74**, policy-aware body **26**, PT1 preview **21 PASSED /1 FAILED**.
+
+The printed \`LIVE APP-DATA FENCE: unexpected refusals=0\`, \`integration_opt_in=False\`, plugin autoload disabled, process PG/integration environment cleared and later restored, original R0 HEAD/tree/blob and old worktree clean, accepted D1B checkout clean are operator observations and NOT physical network/DB-attestation. The operator ended with \`STOP: Selected PT1 pytest exit code was 1\` yet a subsequent standalone \`Write-Host VRES_PERSONAL_PT1_GUARDED_WINDOWS_TEST_EXECUTION_COMPLETE\` printed the old marker anyway. **That final marker is not success evidence; no corrected R1 selected pytest was run.**
+
+## 1. Corrected R1 GitHub status unchanged and source not modified
+
+Original independently accepted D1B source HEAD **e26cc43acfed9664e497067189962ac847ad266f**, tree **65a468ab8b3846219bb37edf1606eb6e1ef67cba**. Isolated \`feature/personal-governed-chairman-preview-20261027\` corrected R1 current HEAD **7b6b7457236cf601fa056152b78713060fe0573e**, tree **bcdd89b01dabbd663e1b7d874ad4750718a1c1b0**, sole parent old failed R0 **8e2628bbf94ffb204796fb51d3056d9eb4e7025f**. Single diff is MODIFY \`tests/test_personal_chairman_preview.py\`, new blob **fcdbc695107d6cc1d9f9c66e5fa6469bc6be64a3**, iterating \`alias.name for alias in node.names\` correctly for \`ast.Import\`. Pure PT1 preview implementation blob **045969e7a0b6f2b4320f9edba5e1629a4b50ec6e**, governed Chairman blob **bc160273c1a1f8cfb8a844041da206c90a00769b**, tests/conftest blob **1c33bb206dbf42691a6af9a709514bf3cc9994af**, all unchanged from original PT1 R0. New R1 has **NO Windows pytest evidence**, no independent static review and no installation.
+
+First separate R0 failed run was already sealed in \`docs/handoffs/VRES-PERSONAL-PT1-R0-WINDOWS-188-PASS-1-FAIL-AND-R1-TEST-ONLY-FIX-REVIEW-NEXT-2026-10-29.md\` (blob fa65fb1f2afd6a2ea9c78da1ae71ee53d82cd59d), original 260-line normalized operator output blob 43c38c211832c808136bed0d02f34a79343c478e. The second 560-line replay is a DISTINCT invalid attempt; neither is R1 acceptance.
+
+## 2. Next one fail-fast R1 command, and review sequencing
+
+To eliminate the interactive PowerShell continuation hazard, a **SINGLE ATOMIC \`& { ... }\` Windows PowerShell 5.1 block** has been authored in the active ChatGPT conversation as downloadable text \`VRES_PERSONAL_PT1_R1_FAIL_FAST_WINDOWS_2026-10-29.txt\`: **8,981 UTF-8 bytes**, SHA256 **057435380dfcd9a524e7ef277521775692f74abb2ba617844ec48488531ecb64**, 170 physical lines. Local syntax/shape and required SHA/test/STOP ordering checks passed, but no native Windows PowerShell execution/pytest is claimed. User must copy the ENTIRE text, including the first \`& {\` and final \`}\`, into normal Windows PowerShell AS ONE BLOCK; do not paste separate old R0 commands.
+
+This atomic R1 block checks original P2 clean anchor, accepted D1B HEAD/tree/clean, ORIGINAL failed R0 HEAD/clean, absence of NEW \`C:\Projects\Vres-ChatGPT-Review-Personal-PT1-R1-20261029\`, official GitHub origin and remote R1 HEAD. It performs targeted fetch and ONE new detached R1 checkout, exact R1 SHA/tree/parent/test+pure-source+Chairman+conftest blobs, ONE modified TEST file allowlist/diff--check/worktree clean. ANY failed check \`throw\` aborts the whole scriptblock BEFORE pytest. Only after preflight PASS does it run the SAME six offline Python3.12 selected modules once, \`-B -q -rA -p no:cacheprovider\`, disable plugin autoload, process-only PG/POSTGRES/DATABASE_/VRES_ and pytest injection environment temporarily cleared/restored, PYTHONPATH new R1/src. It checks pytest exit0, original/accepted checkout and new R1 HEAD/tree/source blobs and clean worktrees AFTER test. Only if all pass does it print the NEW unique marker \`VRES_PERSONAL_PT1_R1_GUARDED_WINDOWS_TEST_EXECUTION_COMPLETE\`; failure prints \`VRES_PERSONAL_PT1_R1_ABORTED: ...\` without success marker.
+
+**Next operator action:** run the NEW atomic R1 text ONCE and paste full stdout including case-level PASS/FAIL, pytest exit, AppData fence and final NEW R1 marker (or STOP) here. If R1 dir already exists, do not delete or rerun blindly; return STOP. No PostgreSQL contact even SELECT, no provider/model/installed operation.
+
+If and only if Windows R1 gate passes, perform ONE focused independent Claude static+operator-evidence review at immutable R1 SHA. Then PT1 can be independently accepted if reviewer also accepts; next bounded PERSONAL PT2 plugin-only reversible source implementation; installed PT4 Sonnet/high→Opus/medium requires separate informed user authorization. Strict independently rooted F1 is still BLOCKED. Approved PERSONAL P0–P3 risk model, full PERSONAL V-01..V-42 roadmap, Visual Studio legacy onboarding, safe cross-project reusable user credentials, all earlier D2/F0/E7/PA/F2 incident and per-SHA findings preserved.
+
+## 3. Documentation seal boundary
+
+Exactly THREE docs paths permitted on canonical docs/chatgpt-continuity-20261023 branch: ADD full normalized second invalid R0 console, ADD this distinct wrong-R0/R1-atomic handoff, MODIFY canonical docs/handoffs/VRES-CHATGPT-CONTINUITY-INDEX.md. One direct-parent nonforced expected-old commit and exact 3-path/tree/blob/ref readback. Feature R1 HEAD 7b6b745... and accepted source e26cc43... MUST remain unchanged. No source, provider, credentials, installed/global Claude or main branch action.
