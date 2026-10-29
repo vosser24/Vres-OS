@@ -1,0 +1,125 @@
+== PERSONAL PT2C ONE ATOMIC WINDOWS PREFLIGHT ===
+PASS: Original P2 anchor HEAD
+PASS: Original P2 anchor checkout
+PASS: Prior PT2B HEAD
+PASS: Prior PT2B tree
+PASS: Prior PT2B validation checkout
+PASS: Official GitHub origin
+PASS: Remote PT2C HEAD
+remote: Enumerating objects: 7, done.
+remote: Counting objects: 100% (7/7), done.
+remote: Compressing objects: 100% (6/6), done.
+remote: Total 7 (delta 0), reused 0 (delta 0), pack-reused 0 (from 0)
+Unpacking objects: 100% (7/7), 15.86 KiB | 477.00 KiB/s, done.
+From https://github.com/vosser24/Vres-OS
+ * branch            feature/personal-governed-chairman-pt2c-release-reconciliation-20261029 -> FETCH_HEAD
+ * [new branch]      feature/personal-governed-chairman-pt2c-release-reconciliation-20261029 -> origin/feature/personal-governed-chairman-pt2c-release-reconciliation-20261029
+PASS: Fetched PT2C HEAD
+Preparing worktree (detached HEAD 81149be)
+HEAD is now at 81149be feat(personal): add PT2-C offline release-v2 reconciliation decisions
+PASS: PT2C detached mode
+PASS: PT2C HEAD
+PASS: PT2C tree
+PASS: PT2C single parent
+PASS: Git blob src/vres_os/personal_chairman_release_reconciliation.py
+PASS: Git blob tests/test_personal_chairman_release_reconciliation.py
+PASS: Git blob src/vres_os/personal_chairman_recovery_journal.py
+PASS: Git blob tests/test_personal_chairman_recovery_journal.py
+PASS: Git blob src/vres_os/personal_chairman_transition_plan.py
+PASS: Git blob tests/test_personal_chairman_transition_plan.py
+PASS: Git blob src/vres_os/personal_chairman_preview.py
+PASS: Git blob tests/test_personal_chairman_preview.py
+PASS: Git blob plugins/vres-os/agents/chairman.md
+PASS: Git blob tests/conftest.py
+PASS: Git blob src/vres_os/release_artifact.py
+PASS: Git blob src/vres_os/install_recovery.py
+PASS: Git blob install.ps1
+PASS: exactly two PT2C source/test additions
+PASS: PT2C git diff --check
+PASS: PT2C checkout before tests
+VRES_PERSONAL_PT2C_PREFLIGHT_PASS
+=== PERSONAL PT2C GUARDED OFFLINE SELECTED PYTEST ===
+PYTEST_PLUGIN_AUTOLOAD=DISABLED
+PASS: process DB/PG/integration variables isolated
+TEST_COMMAND=py -3.12 -B -m pytest -q -rA -p no:cacheprovider tests/test_personal_chairman_release_reconciliation.py
+......................................................                                                           [100%]
+======================================================= PASSES ========================================================
+LIVE APP-DATA FENCE: unexpected refusals=0 protected=['c:\\users\\user\\appdata\\local\\vresos', 'c:\\users\\user\\appdata\\roaming\\vresos'] trusted_temp_base=C:\Users\User\AppData\Local\Temp session_root=C:\Users\User\AppData\Local\Temp\vres-pytest-app-data-l5y3aixr\VresOS init_order=['validate-temp-base', 'create-session-directory', 'validate-session-directory', 'create-app-data-root', 'enable-isolation'] removed_env=[] integration_opt_in=False
+=============================================== short test summary info ===============================================
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_matching_claims_still_demand_new_versioned_release_not_install[lf]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_matching_claims_still_demand_new_versioned_release_not_install[crlf]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_no_release_projection_is_explicitly_stopped
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_no_claimed_release_entry_bytes_remains_unresolved
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_unsupported_v2_header_or_chairman_entry_is_refused[format-legacy-format]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_unsupported_v2_header_or_chairman_entry_is_refused[version-1]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_unsupported_v2_header_or_chairman_entry_is_refused[source_origin-working-tree]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_unsupported_v2_header_or_chairman_entry_is_refused[object_format-sha256]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_unsupported_v2_header_or_chairman_entry_is_refused[chairman_path-plugins/vres-os/agents/wrong.md]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_unsupported_v2_header_or_chairman_entry_is_refused[chairman_mode-120000]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_missing_or_different_active_pointer_never_identifies_release[None]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_missing_or_different_active_pointer_never_identifies_release[old-release]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_missing_or_different_active_pointer_never_identifies_release[other_release]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_pending_install_unknown_or_present_is_blocking[UNKNOWN]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_pending_install_unknown_or_present_is_blocking[PRESENT_CLAIMED]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_plugin_tree_unknown_or_drift_is_blocking[UNKNOWN]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_plugin_tree_unknown_or_drift_is_blocking[DRIFT_CLAIMED]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_reparse_status_unknown_or_redirected_is_blocking[UNKNOWN]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_reparse_status_unknown_or_redirected_is_blocking[PRESENT_CLAIMED]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_open_or_unknown_claude_session_is_blocking[UNKNOWN]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_open_or_unknown_claude_session_is_blocking[OPEN_CLAIMED]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_any_role_digest_drift_against_pt2a_is_blocking[managed_before_sha256]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_any_role_digest_drift_against_pt2a_is_blocking[distribution_before_sha256]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_raw_claimed_chairman_bytes_must_match_all_manifest_identity_fields[chairman_sha256-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_raw_claimed_chairman_bytes_must_match_all_manifest_identity_fields[chairman_git_blob-dddddddddddddddddddddddddddddddddddddddd]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_raw_claimed_chairman_bytes_must_match_all_manifest_identity_fields[chairman_bytes-1]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_crlf_release_entry_is_never_silently_normalized_to_lf_role_claim
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_older_release_manifest_cannot_be_silently_updated_in_place
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_candidate_digest_cannot_masquerade_as_existing_release_v2_entry
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_cross_plan_journal_identity_refuses_even_if_it_replays
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_advanced_simulation_is_not_a_fresh_preinstall_journal
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_broken_simulation_journal_fails_closed_instead_of_raising_host_action
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_no_before_claims_and_blocked_journal_cannot_be_promoted_by_v2_projection
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_untyped_or_unbounded_v2_manifest_projection_is_rejected[source_commit-000000000000000000000000000000000000000]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_untyped_or_unbounded_v2_manifest_projection_is_rejected[source_tree-00000000000000000000000000000000000000000]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_untyped_or_unbounded_v2_manifest_projection_is_rejected[chairman_git_blob-GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_untyped_or_unbounded_v2_manifest_projection_is_rejected[chairman_sha256-zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_untyped_or_unbounded_v2_manifest_projection_is_rejected[chairman_bytes-True]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_untyped_or_unbounded_v2_manifest_projection_is_rejected[chairman_bytes-524289]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_untyped_or_unbounded_v2_manifest_projection_is_rejected[version-True]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_untyped_or_unbounded_v2_manifest_projection_is_rejected[format-None]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_invalid_release_target_or_unsupported_assertion_is_rejected[release_directory_id-../escape]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_invalid_release_target_or_unsupported_assertion_is_rejected[active_pointer_release-C:/path]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_invalid_release_target_or_unsupported_assertion_is_rejected[managed_before_sha256-000000000000000000000000000000000000000000000000000000000000000]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_invalid_release_target_or_unsupported_assertion_is_rejected[pending_install-True]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_invalid_release_target_or_unsupported_assertion_is_rejected[plugin_tree_coherence-ACTUALLY_VERIFIED]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_invalid_release_target_or_unsupported_assertion_is_rejected[reparse_points-CLEAN]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_invalid_release_target_or_unsupported_assertion_is_rejected[claude_session-CERTIFIED]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_nonbytes_or_unbounded_manifest_entry_content_is_refused[str]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_nonbytes_or_unbounded_manifest_entry_content_is_refused[bytearray]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_nonbytes_or_unbounded_manifest_entry_content_is_refused[empty]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_nonbytes_or_unbounded_manifest_entry_content_is_refused[oversized]
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_wrong_object_types_are_rejected_even_if_their_dict_shape_matches
+PASSED tests/test_personal_chairman_release_reconciliation.py::test_pt2c_source_has_only_pure_imports_and_no_installer_host_access
+PYTEST_EXIT_CODE=0
+PASS: PROCESS_ENVIRONMENT_RESTORED
+=== PERSONAL PT2C POSTTEST GIT INTEGRITY ===
+PASS: Posttest PT2C HEAD
+PASS: Posttest PT2C tree
+PASS: Posttest blob src/vres_os/personal_chairman_release_reconciliation.py
+PASS: Posttest blob tests/test_personal_chairman_release_reconciliation.py
+PASS: Posttest blob src/vres_os/personal_chairman_recovery_journal.py
+PASS: Posttest blob tests/test_personal_chairman_recovery_journal.py
+PASS: Posttest blob src/vres_os/personal_chairman_transition_plan.py
+PASS: Posttest blob tests/test_personal_chairman_transition_plan.py
+PASS: Posttest blob src/vres_os/personal_chairman_preview.py
+PASS: Posttest blob tests/test_personal_chairman_preview.py
+PASS: Posttest blob plugins/vres-os/agents/chairman.md
+PASS: Posttest blob tests/conftest.py
+PASS: Posttest blob src/vres_os/release_artifact.py
+PASS: Posttest blob src/vres_os/install_recovery.py
+PASS: Posttest blob install.ps1
+PASS: PT2C worktree after selected test
+PASS: Prior PT2B worktree unchanged
+PT2C_TEST_EXIT_CODE=0
+VRES_PERSONAL_PT2C_WINDOWS_SELECTED_TEST_COMPLETE
+PS C:\Projects\Vres-P2F-Postinstall-Hardening-20261022>

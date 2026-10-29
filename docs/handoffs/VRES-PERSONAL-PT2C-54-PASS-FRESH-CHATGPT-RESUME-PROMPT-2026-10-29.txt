@@ -1,0 +1,46 @@
+RESUME VRES-OS — PERSONAL-FIRST PT2C 54/54 GUARDED WINDOWS SELECTED TESTS PASS / EXIT0 — SOURCE-ONLY NEXT
+
+Repository: vosser24/Vres-OS.
+Canonical documentation branch: docs/chatgpt-continuity-20261023. VERIFY ACTUAL REMOTE HEAD FRESH; do not assume an older SHA.
+
+READ FIRST from current docs branch:
+1. docs/handoffs/VRES-CHATGPT-CONTINUITY-INDEX.md
+2. docs/handoffs/VRES-PERSONAL-PT2C-54-PASS-EXIT0-INDEPENDENT-REVIEWS-OPEN-AND-NEXT-SAFE-HANDOFF-2026-10-29.md
+3. docs/handoffs/VRES-PERSONAL-PT2C-WINDOWS-54-PASSED-EXIT0-OPERATOR-CONSOLE-LF-NORMALIZED-2026-10-29.txt
+4. docs/handoffs/VRES-PERSONAL-PT2C-PUBLISHED-BRANCH-COLLISION-RESOLVED-WINDOWS-TEST-NEXT-2026-10-29.md (HISTORICAL pretest)
+5. docs/handoffs/VRES-PERSONAL-PT2C-PUBLISHED-81149-GUARDED-WINDOWS-TEST-NEXT-2026-10-29.ps1 (HISTORICAL executed script, DO NOT rerun)
+6. docs/handoffs/VRES-PERSONAL-PT2B-43-PASSED-EXIT0-AND-SOURCE-ONLY-CONTINUATION-HANDOFF-2026-10-29.md
+7. docs/handoffs/VRES-PERSONAL-PT2A-213-PASS-PT1-ACCEPT-OPEN-ISSUES-AND-FRESH-CHATGPT-HANDOFF-2026-10-29.md
+8. docs/handoffs/VRES-PERSONAL-PT1-R1-INDEPENDENT-CLAUDE-STATIC-ACCEPT-AND-HOOK-REFUSALS-REPORT-2026-10-29.txt
+9. docs/architecture/VRES-PERSONAL-RISK-PROFILE-AND-CHAIRMAN-GOVERNED-MODEL-TRANSITION-V1-2026-10-27.md
+10. docs/roadmap/VRES-FULL-SCOPE-FUNCTIONALITY-REGISTER-2026-10-22.md
+
+PT2C SELECTED SOURCE IDENTITY (VERIFY BEFORE USE):
+Branch: feature/personal-governed-chairman-pt2c-release-reconciliation-20261029
+HEAD: 81149beab52750c93db91453e18efbd5f7a21da4
+Tree: f7ad6c6ef07c5b60c698ac4aae0487e1a8976f35
+Single parent PT2B: 361500291601e241b7c579012a25442ff4a95d7d
+Exactly TWO added paths: src/vres_os/personal_chairman_release_reconciliation.py Git blob 68b0f430ebfe3dd8128a4c834f4a28966ecb51fe; tests/test_personal_chairman_release_reconciliation.py blob 6459dfff36b829c4edced19c2dd24e7636f5303b. No inherited source/test, installer, recovery or original Chairman changes.
+UNSELECTED ALTERNATIVE PT2C commit 59d811eb130725ebd2d91b542713fcce05b1634d from same PT2B parent has DIFFERENT source/test blobs fa2a559de545f12a2301f418455fd29bae05365c and 7158cd1a8761295fd78100259e9a3099c2a2e1ba. It is unattached, NOT Windows tested. Its 88-case synthetic smoke cannot be applied to published 81149. Do not overwrite/force or speculate about branch creator.
+
+NEW WINDOWS EVIDENCE EXACTLY FROM USER ORIGINAL UPLOADED FILE:
+Original filename Επικολλημένο κείμενο.txt. Raw UTF-8 no BOM 12,066 bytes / 125 logical lines / 124 CRLF / no final newline; SHA256 77c9222ca7db291ea64cd2c42ff7d85b61368388c07c49e6c9f177812ac8f402. LF-normalized complete Git transcript blob 5dee147f5e39aca8b9905ffcac4f9ae0452326e5 (11,942 bytes; LF SHA256 be05a26e9f5d9f498d2afe01b84593da761c102122f9bde5d1f41138f079234f) is newline-equivalent, not raw Windows bytes.
+One atomic normal Windows PowerShell test transcript, no Claude Code: initial preflight original P2 HEAD/clean, PT2B HEAD/tree/clean, official origin, remote/fetched PT2C HEAD, new detached PT2C review, exact HEAD/tree/sole parent, 13 protected blob checks and exact two ADD files, diff--check clean. Preflight marker line40 precedes Python3.12 selected pytest ONLY tests/test_personal_chairman_release_reconciliation.py. Pytest plugin autoload DISABLED; DB/PG/integration env isolated in process; disposable AppData fence unexpected refusals=0 and integration_opt_in=False. 54 individually named DISTINCT PASSED cases lines49-102, ZERO FAILED/ERROR, PYTEST_EXIT_CODE=0 line103, environment RESTORED line104, posttest HEAD/tree/13 blobs/clean plus prior PT2B clean lines105-122, PT2C_TEST_EXIT_CODE=0 line123, final VRES_PERSONAL_PT2C_WINDOWS_SELECTED_TEST_COMPLETE line124 and prompt line125. No STOP/ABORT marker. Verdict PT2C_WINDOWS_SELECTED_OFFLINE_TEST_PASS_AT_EXACT_81149; not full suite or independent source review, not physical SQL packet/network trace or active host attestation.
+
+CURRENT REVIEW AND PRODUCT GATES:
+PT1 R1 7b6b7457236cf601fa056152b78713060fe0573e: 189 selected Windows PASS/exit0 + independent Claude STATIC_ACCEPT zero BLOCKING five INFORMATIONAL.
+PT2A 22122047cc985ffc8fb3e5d0d30e3d68d8d57df9: 213 selected Windows PASS/exit0; independent static review NOT_RUN.
+PT2B 361500291601e241b7c579012a25442ff4a95d7d: 43 selected Windows PASS/exit0; independent review NOT_RUN.
+PT2C 81149beab52750c93db91453e18efbd5f7a21da4: 54 selected Windows PASS/exit0; independent review NOT_RUN.
+PT2C only evaluates CALLER-SUPPLIED UNTRUSTED v2 manifest/header, Chairman hashes/bytes, active-pointer, managed/distribution, recovery/pending, reparse/session claims; even coherent CLAIMS_CONSISTENT_NEW_RELEASE_REQUIRED / DESIGN_NEW_VERSIONED_RELEASE_AND_REAL_PREFLIGHT, never real installation. No actual backup, restored state or Opus switch. No code change on main, installed Claude, release-artifact/install.ps1 or original Chairman.
+
+ABSOLUTE OPEN HOLD:
+LIVE_SCHEMA_048_INCIDENT=OPEN: ABSOLUTELY NO PostgreSQL even SELECT via direct or Vres MCP/tasks/CLI/bootstrap/doctor/health/hooks/F2/recovery/migrations.
+HOST_HOOK_DB_ROUTE_ATTEMPTED_AND_REFUSED=OPEN: native Claude PT1 reviewer Read x4 + Grep x3 triggered automatic Vres PostToolUse database route attempts (all REFUSED). No new hook-bearing Claude Code reviewer unless independently established authorized no-DB-attempt-safe mode; do not alter installed/global hooks/profiles.
+VRES_REPLY_GUARD_WARNING / VRES_PERSISTENCE_WARNING open; NO database probes.
+Last observed original P2 installed Chairman Sonnet/high; Opus/medium UNINSTALLED; physical effective model/effort UNKNOWN. No model activation consent. Strict F1 independently rooted positive authority remains BLOCKED, separate PERSONAL P0..P3 proportional scope. Protect Fable/high validator/router and worker pins; current-user credentials handles and explicit cross-project binding; full V-01..V-42 roadmap, Visual Studio fresh/legacy onboarding, E7/PA/F2 and production holds.
+
+NEXT RECOMMENDED SOURCE-ONLY WORK:
+Do not rerun already-passed PT2A/B/C Windows tests without new defect. Source-ground exact Git releases and consider smallest PT2D PURE OFFLINE versioned candidate-release/reconciliation contract plus negative tests as a new isolated feature ONLY if development continuation is approved. No actual installed profile reads, staging, backups, pointer, filesystem changes, network, PostgreSQL, credentials or provider calls. At first real protected write require independent focused source review, separately approved actual-read preflight, real rollback readiness and NEW specific user install consent. PT2A/B/C independent reviews remain NOT_RUN until genuinely safe hooks, not silently STATIC_ACCEPT. After material increments, docs-only new handoff+index single parent nonforced expected-old GitHub ref update/readback.
+
+METHODOLOGY: ChatGPT source-grounded minimal exact SHA/tree/parent/blob/allowlist commit; nonforced GitHub update/readback; user ONE complete atomic & { ... } PowerShell block for new clean SHA-pinned detached Windows worktree with Python3.12 -B -q -rA -p no:cacheprovider, plugin autoload off, process-only DB/PG vars cleared/restored, disposable AppData tripwire; count individual PASS, failure/STOP chronology, exits, pre/post Git clean; never execute commands past STOP or rerun old script. Commit canonical docs-only history after each gate. Do not restart Claude at this stage.
