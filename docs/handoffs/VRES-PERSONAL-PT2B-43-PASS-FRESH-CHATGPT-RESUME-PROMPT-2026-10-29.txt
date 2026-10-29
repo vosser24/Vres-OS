@@ -1,0 +1,26 @@
+RESUME VRES-OS — PERSONAL-FIRST PT2B 43/43 SELECTED WINDOWS TEST PASS EXIT0, SOURCE-ONLY NEXT
+
+Repo: vosser24/Vres-OS. Canonical docs branch: docs/chatgpt-continuity-20261023. Verify current docs HEAD fresh; do NOT assume an old SHA.
+
+READ FIRST:
+1. docs/handoffs/VRES-CHATGPT-CONTINUITY-INDEX.md
+2. docs/handoffs/VRES-PERSONAL-PT2B-43-PASSED-EXIT0-AND-SOURCE-ONLY-CONTINUATION-HANDOFF-2026-10-29.md
+3. docs/handoffs/VRES-PERSONAL-PT2B-WINDOWS-43-PASSED-EXIT0-CHAT-PASTED-OPERATOR-TRANSCRIPT-2026-10-29.txt
+4. docs/handoffs/VRES-PERSONAL-PT2B-OFFLINE-RECOVERY-SOURCE-COMMITTED-WINDOWS-TEST-NEXT-2026-10-29.md (historical test-pending)
+5. docs/handoffs/VRES-PERSONAL-PT2B-PROPOSED-GUARDED-WINDOWS-TEST-2026-10-29.ps1 (historical script, already executed by user, DO NOT rerun reflexively)
+6. docs/handoffs/VRES-PERSONAL-PT2A-213-PASS-PT1-ACCEPT-OPEN-ISSUES-AND-FRESH-CHATGPT-HANDOFF-2026-10-29.md
+7. docs/handoffs/VRES-PERSONAL-PT1-R1-INDEPENDENT-CLAUDE-STATIC-ACCEPT-AND-HOOK-REFUSALS-REPORT-2026-10-29.txt
+8. docs/architecture/VRES-PERSONAL-RISK-PROFILE-AND-CHAIRMAN-GOVERNED-MODEL-TRANSITION-V1-2026-10-27.md
+9. docs/roadmap/VRES-FULL-SCOPE-FUNCTIONALITY-REGISTER-2026-10-22.md
+
+SOURCE PINS:
+- PT2B feature/personal-governed-chairman-pt2b-offline-recovery-20261029 HEAD 361500291601e241b7c579012a25442ff4a95d7d, tree 903fa86fc9ee9548d20509a5485efa010ae4a3fe, single PT2A parent 22122047cc985ffc8fb3e5d0d30e3d68d8d57df9. Exactly TWO added paths: src/vres_os/personal_chairman_recovery_journal.py blob 5b9a0ed4f52a4e4d95201d48a131e2186f9c06c8; tests/test_personal_chairman_recovery_journal.py blob 0d6e5a8263dcdb8463d8a2794468c20a5b4f4aa4. Feature not merged, installed or changed since commit.
+- Prior PT2A SHA 22122047cc985ffc8fb3e5d0d30e3d68d8d57df9: 213 distinct selected Windows tests PASS / zero FAIL / exit0; INDEPENDENT PT2A SOURCE REVIEW NOT_RUN.
+- PT1 R1 SHA 7b6b7457236cf601fa056152b78713060fe0573e: 189 selected Windows tests PASS/exit0; independent Claude STATIC_ACCEPT zero blocking/five informationals, but seven automatic Claude hook DB-route attempts all refused; previous failed R0 results remain archived.
+- PT2B 2026-10-29 new user-pasted Windows console: 43 DISTINCT test names PASSED, zero FAILED, PYTEST_EXIT_CODE=0, PT2B_TEST_EXIT_CODE=0. Full initial SHA-pinned clean preflight and exact two-file allowlist, process-only PG/DB/integration environment disabled/restored, pytest plugin autoload disabled, AppData fence unexpected refusals0 / integration_opt_in=False, all eight protected blob checks, posttest HEAD/tree/blob/clean PASS, final VRES_PERSONAL_PT2B_WINDOWS_SELECTED_TEST_COMPLETE AFTER exit0/postchecks. LF-normalized ChatGPT copy Git blob c3342f2791b39cf96aff9e243b3a2cf96f4ef665. NO original Windows raw byte SHA or physical network attestation; DO NOT claim one. PT2B INDEPENDENT SOURCE REVIEW NOT_RUN. No live rollback or installation.
+
+ABSOLUTE HARD HOLDS: LIVE_SCHEMA_048_INCIDENT OPEN: NO PostgreSQL even SELECT, directly or via Vres MCP/CLI/task/bootstrap/doctor/health/hooks/F2/recovery. HOST_HOOK_DB_ROUTE_ATTEMPTED_AND_REFUSED OPEN: native Claude Read x4/Grep x3 posttool automatic Vres database route attempts, guard refused but no-attempt violated; do not run another unsafe hook-bearing Claude review or change installed/global hooks. VRES_REPLY_GUARD_WARNING and VRES_PERSISTENCE_WARNING open; no probes. Last observed original P2 Chairman Sonnet/high, Opus/medium UNINSTALLED, physical active model/effort UNKNOWN. NO actual Opus/medium activation without separate new specific user permission and demonstrated true reversible install. STRICT F1 externally rooted positive authority remains BLOCKED; keep separate from user-approved PERSONAL P0-P3. Fable/high validation/routing, worker/specialist pins, credentials/current-user secret handles, Visual Studio onboarding, full V-01..V-42 functionality register, E7/PA/F2/production holds preserved.
+
+NEXT SCOPE: no rerun of passed 43 PT2B/213 PT2A tests by default. First verify GitHub docs/feature refs and read new detailed handoff. For next DEVELOPMENT increment, consider narrowly scoped pure offline release-v2 coherence/reconciliation decision contract (PT2C) with negative tests, using immutable Git source only, no host or credential/DB. Alternatively perform focused PT2A+PT2B independent static review ONLY once separately authorized proven no-DB-attempt reviewer mode exists. Do NOT cross to actual read/backup/install/rollback/Opus without independent review, specific fresh user permission and real rollback evidence. All offline outputs non-authoritative.
+
+METHODOLOGY: ChatGPT source-grounded narrow smallest new branch, exact commit/parent/tree/blobs and allowlisted compare, nonforced remote ref readback; user ONE atomic PowerShell & { ... } guard in new detached clean SHA-pinned checkout; selected Python3.12 -B -q -rA -p no:cacheprovider with plugins off, process-only PG/DB variables cleared/restored, disposable AppData guard; preserve all named test lines, exit code and pre/post SHA checks. STOP on any unexpected hook/contact/check failure, avoid blind reruns, known ast.Import.name mistake and spurious success markers after STOP. After every material gate, canonical docs-only detailed handoff + read-first index nonforced expected-old SHA commit/readback. Do not invent an independent verdict or live model attestation.

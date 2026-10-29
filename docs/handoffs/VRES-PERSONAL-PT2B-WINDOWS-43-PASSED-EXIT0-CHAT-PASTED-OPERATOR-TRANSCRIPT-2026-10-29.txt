@@ -1,0 +1,104 @@
+=== PERSONAL PT2B ONE ATOMIC WINDOWS PREFLIGHT ===
+PASS: Original P2 anchor HEAD
+PASS: Original P2 anchor
+PASS: Accepted PT2A HEAD
+PASS: Accepted PT2A tree
+PASS: PT2A original review checkout
+PASS: Official GitHub origin
+PASS: Remote PT2B HEAD
+remote: Enumerating objects: 7, done.
+remote: Counting objects: 100% (7/7), done.
+remote: Compressing objects: 100% (6/6), done.
+remote: Total 7 (delta 0), reused 0 (delta 0), pack-reused 0 (from 0)
+Unpacking objects: 100% (7/7), 15.79 KiB | 310.00 KiB/s, done.
+From https://github.com/vosser24/Vres-OS
+ * branch            feature/personal-governed-chairman-pt2b-offline-recovery-20261029 -> FETCH_HEAD
+ * [new branch]      feature/personal-governed-chairman-pt2b-offline-recovery-20261029 -> origin/feature/personal-governed-chairman-pt2b-offline-recovery-20261029
+PASS: Fetched PT2B HEAD
+Preparing worktree (detached HEAD 3615002)
+HEAD is now at 3615002 feat(personal): model PT2-B offline two-role recovery journal
+PASS: PT2B detached mode
+PASS: PT2B HEAD
+PASS: PT2B tree
+PASS: PT2B sole parent
+PASS: Git blob src/vres_os/personal_chairman_recovery_journal.py
+PASS: Git blob tests/test_personal_chairman_recovery_journal.py
+PASS: Git blob src/vres_os/personal_chairman_transition_plan.py
+PASS: Git blob tests/test_personal_chairman_transition_plan.py
+PASS: Git blob src/vres_os/personal_chairman_preview.py
+PASS: Git blob tests/test_personal_chairman_preview.py
+PASS: Git blob plugins/vres-os/agents/chairman.md
+PASS: Git blob tests/conftest.py
+PASS: exactly two PT2B added source/test files
+PASS: PT2B diff --check
+PASS: PT2B review clean before tests
+VRES_PERSONAL_PT2B_PREFLIGHT_PASS
+=== PERSONAL PT2B GUARDED OFFLINE SELECTED PYTEST ===
+PYTEST_PLUGIN_AUTOLOAD=DISABLED
+PASS: process database/PG/integration environment isolated
+TEST_COMMAND=py -3.12 -B -m pytest -q -rA -p no:cacheprovider tests/test_personal_chairman_recovery_journal.py
+...........................................                                                                      [100%]
+======================================================= PASSES ========================================================
+LIVE APP-DATA FENCE: unexpected refusals=0 protected=['c:\users\user\appdata\local\vresos', 'c:\users\user\appdata\roaming\vresos'] trusted_temp_base=C:\Users\User\AppData\Local\Temp session_root=C:\Users\User\AppData\Local\Temp\vres-pytest-app-data-tvsnbtyp\VresOS init_order=['validate-temp-base', 'create-session-directory', 'validate-session-directory', 'create-app-data-root', 'enable-isolation'] removed_env=[] integration_opt_in=False
+=============================================== short test summary info ===============================================
+PASSED tests/test_personal_chairman_recovery_journal.py::test_fresh_claims_are_always_simulation_only_not_host_install[lf]
+PASSED tests/test_personal_chairman_recovery_journal.py::test_fresh_claims_are_always_simulation_only_not_host_install[crlf]
+PASSED tests/test_personal_chairman_recovery_journal.py::test_missing_caller_before_bytes_blocks_even_assumed_release
+PASSED tests/test_personal_chairman_recovery_journal.py::test_unknown_release_v2_coherence_blocks_even_matching_snapshot_claims
+PASSED tests/test_personal_chairman_recovery_journal.py::test_missing_any_snapshot_digest_claim_blocks_forward_simulation[managed]
+PASSED tests/test_personal_chairman_recovery_journal.py::test_missing_any_snapshot_digest_claim_blocks_forward_simulation[distribution]
+PASSED tests/test_personal_chairman_recovery_journal.py::test_missing_any_snapshot_digest_claim_blocks_forward_simulation[both]
+PASSED tests/test_personal_chairman_recovery_journal.py::test_wrong_digest_or_length_backup_cannot_be_accepted[digest]
+PASSED tests/test_personal_chairman_recovery_journal.py::test_wrong_digest_or_length_backup_cannot_be_accepted[size]
+PASSED tests/test_personal_chairman_recovery_journal.py::test_divergent_or_old_claimed_baseline_needs_reconciliation_not_silent_replace
+PASSED tests/test_personal_chairman_recovery_journal.py::test_managed_distribution_divergence_from_pt2a_is_blocked
+PASSED tests/test_personal_chairman_recovery_journal.py::test_malformed_backup_digest_claim_is_rejected[other-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-1]
+PASSED tests/test_personal_chairman_recovery_journal.py::test_malformed_backup_digest_claim_is_rejected[managed-short-5]
+PASSED tests/test_personal_chairman_recovery_journal.py::test_malformed_backup_digest_claim_is_rejected[managed-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA-8]
+PASSED tests/test_personal_chairman_recovery_journal.py::test_malformed_backup_digest_claim_is_rejected[managed-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-0]
+PASSED tests/test_personal_chairman_recovery_journal.py::test_malformed_backup_digest_claim_is_rejected[managed-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-True]
+PASSED tests/test_personal_chairman_recovery_journal.py::test_malformed_backup_digest_claim_is_rejected[managed-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-524289]
+PASSED tests/test_personal_chairman_recovery_journal.py::test_swapped_roles_or_non_receipt_type_is_rejected
+PASSED tests/test_personal_chairman_recovery_journal.py::test_unknown_release_status_vocabulary_cannot_gain_authority[VERIFIED]
+PASSED tests/test_personal_chairman_recovery_journal.py::test_unknown_release_status_vocabulary_cannot_gain_authority[]
+PASSED tests/test_personal_chairman_recovery_journal.py::test_unknown_release_status_vocabulary_cannot_gain_authority[None]
+PASSED tests/test_personal_chairman_recovery_journal.py::test_unknown_release_status_vocabulary_cannot_gain_authority[True]
+PASSED tests/test_personal_chairman_recovery_journal.py::test_unknown_release_status_vocabulary_cannot_gain_authority[ASSUMED_COHERENT]
+PASSED tests/test_personal_chairman_recovery_journal.py::test_recovery_plan_fingerprint_is_raw_bytes_bound_and_not_a_proof_of_install
+PASSED tests/test_personal_chairman_recovery_journal.py::test_two_target_happy_simulation_stays_non_authoritative
+PASSED tests/test_personal_chairman_recovery_journal.py::test_failure_after_each_forward_boundary_is_deterministic_and_fail_closed[STAGE]
+PASSED tests/test_personal_chairman_recovery_journal.py::test_failure_after_each_forward_boundary_is_deterministic_and_fail_closed[PREPARE]
+PASSED tests/test_personal_chairman_recovery_journal.py::test_failure_after_each_forward_boundary_is_deterministic_and_fail_closed[WRITE_MANAGED]
+PASSED tests/test_personal_chairman_recovery_journal.py::test_failure_after_each_forward_boundary_is_deterministic_and_fail_closed[WRITE_DISTRIBUTION]
+PASSED tests/test_personal_chairman_recovery_journal.py::test_interrupted_recovery_is_restartable_with_idempotent_digest_states
+PASSED tests/test_personal_chairman_recovery_journal.py::test_abandon_is_only_allowed_before_writing_one_target
+PASSED tests/test_personal_chairman_recovery_journal.py::test_unknown_or_torn_boundary_halts_instead_of_fake_roll_back
+PASSED tests/test_personal_chairman_recovery_journal.py::test_illegal_forward_jump_or_backward_jump_refused[RECONCILE_AFTER]
+PASSED tests/test_personal_chairman_recovery_journal.py::test_illegal_forward_jump_or_backward_jump_refused[WRITE_DISTRIBUTION]
+PASSED tests/test_personal_chairman_recovery_journal.py::test_illegal_forward_jump_or_backward_jump_refused[RESTORE_MANAGED]
+PASSED tests/test_personal_chairman_recovery_journal.py::test_illegal_forward_jump_or_backward_jump_refused[RECONCILE_BEFORE]
+PASSED tests/test_personal_chairman_recovery_journal.py::test_illegal_forward_jump_or_backward_jump_refused[INJECT]
+PASSED tests/test_personal_chairman_recovery_journal.py::test_untrusted_after_digest_is_refused_not_silently_reconciled
+PASSED tests/test_personal_chairman_recovery_journal.py::test_corrupt_sequence_and_bound_plan_id_cannot_be_replayed
+PASSED tests/test_personal_chairman_recovery_journal.py::test_cross_source_event_replay_is_rejected
+PASSED tests/test_personal_chairman_recovery_journal.py::test_journal_event_cap_prevents_unbounded_recovery_retries
+PASSED tests/test_personal_chairman_recovery_journal.py::test_invalid_journal_entries_type_replay_fails
+PASSED tests/test_personal_chairman_recovery_journal.py::test_pt2b_source_is_pure_and_no_host_or_installer_surface
+PYTEST_EXIT_CODE=0
+PASS: PROCESS_ENVIRONMENT_RESTORED
+=== PERSONAL PT2B POSTTEST GIT INTEGRITY ===
+PASS: Posttest PT2B HEAD
+PASS: Posttest PT2B tree
+PASS: Posttest blob src/vres_os/personal_chairman_recovery_journal.py
+PASS: Posttest blob tests/test_personal_chairman_recovery_journal.py
+PASS: Posttest blob src/vres_os/personal_chairman_transition_plan.py
+PASS: Posttest blob tests/test_personal_chairman_transition_plan.py
+PASS: Posttest blob src/vres_os/personal_chairman_preview.py
+PASS: Posttest blob tests/test_personal_chairman_preview.py
+PASS: Posttest blob plugins/vres-os/agents/chairman.md
+PASS: Posttest blob tests/conftest.py
+PASS: PT2B checkout after selected test
+PASS: PT2A checkout still clean
+PT2B_TEST_EXIT_CODE=0
+VRES_PERSONAL_PT2B_WINDOWS_SELECTED_TEST_COMPLETE
+PS C:\Projects\Vres-ChatGPT-Review-Personal-PT1-R1-20261029>
