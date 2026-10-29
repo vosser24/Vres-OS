@@ -1,0 +1,39 @@
+RESUME VRES-OS — PERSONAL HOOK-R1 SOURCE-COMMITTED; ONE GUARDED WINDOWS SELECTED TEST NEXT
+
+Repository: vosser24/Vres-OS.
+Canonical docs branch: docs/chatgpt-continuity-20261023. VERIFY ACTUAL REMOTE HEAD FRESH before working; do not assume stale docs SHA.
+
+READ FIRST:
+1. docs/handoffs/VRES-CHATGPT-CONTINUITY-INDEX.md
+2. docs/handoffs/VRES-PERSONAL-HOOK-R1-READONLY-POSTTOOL-SOURCE-COMMITTED-WINDOWS-NEXT-2026-10-29.md
+3. docs/handoffs/VRES-PERSONAL-HOOK-R1-GUARDED-WINDOWS-SELECTED-TEST-NEXT-2026-10-29.ps1 (entire 171-line & { } block must be given INLINE as a PowerShell code block, not just linked)
+4. docs/roadmap/VRES-CHATGPT-LED-FULL-SCOPE-DELIVERY-PLAN-2026-10-22.md
+5. docs/roadmap/VRES-FULL-SCOPE-FUNCTIONALITY-REGISTER-2026-10-22.md
+6. docs/handoffs/VRES-PERSONAL-PT2D-50-PASS-EXIT0-INDEPENDENT-REVIEWS-OPEN-AND-NEXT-GATE-2026-10-29.md
+7. docs/handoffs/VRES-PERSONAL-PT1-R1-INDEPENDENT-STATIC-ACCEPT-AND-PT2-OFFLINE-NEXT-2026-10-29.md
+
+ORIGINAL ESTABLISHED WORKFLOW:
+ChatGPT architects+codes+tests in small isolated feature GitHub commits with exact SHA/parent/tree/blob/readback and docs-only continuity. User operates clean Windows detached Git worktrees and executes ONE atomic fail-fast scoped PowerShell test block. Claude Code with existing subscription is independent static reviewer when safe; user supplies response. Do NOT redirect into web Chat, API-key, tier, account, bare-mode ceremony or "safety check" loops. Do NOT simply start native Claude Code while automatic hooks may attempt held DB; identify and fix the real source bug under P0/P1, keep installed protected change separately gated. Continue actual V-01..V-42 product backlog, avoid unnecessary compliance theater.
+
+CURRENT NEW SOURCE:
+Branch feature/personal-hook-readonly-posttool-fence-20261029
+HEAD 891fb22287b6ee8b028eda7256c0b5639df40c04
+TREE 1b9d7ddcc4f6c8e0cafda8cea5e1c5d51e3ca9db
+SOLE PT2D PARENT a5913288b7748693adafc36c9c1cb35af3ea3949
+PARENT TREE d45ffc91781be6681124ff369af5df4d06300ce9
+EXACT TWO FILES:
+MODIFY plugins/vres-os/hooks/hooks.json old blob 5833973d9be6ccf4263dda2d461cc5994d30416c NEW blob e286e4be47d058ee6ed6a3169fc45803aedc0df1 (3 matcher edits).
+ADD tests/test_hook_readonly_posttool_fence.py blob 97c2bb75ae31ff98a5ce66c450d4f51d6e12f15a (141 source lines, ten parameterized functions).
+GitHub nonforced expected-old feature ref update, compare exactly one commit ahead / 0 behind, M+A allowlist, tree and file readback PASS. No installed source, product main, hooks configuration or model activation touched.
+
+CODE BEHAVIOR:
+The original PT1 independent Claude Read x4 + Grep x3 invoked automatic PostToolUse Vres MCP reply_activity_observe; seven attempted DB routes refused. New source excludes exact Read, Glob, Grep from ALL plugin-owned PostToolUse and PostToolUseFailure matcher rules (experience-observe command, MCP reply). Preserves PreToolUse exemptions, action-tool observers, special work-unit and AskUserQuestion hooks, MCP recursion exceptions, SubagentHandback skip and lifecycle registrations. New tests guard exact read exclusions and preserved actions. SOURCE proof of regex matching passed. IMPORTANT: this fixes only PostToolUse tool-name matches in FUTURE release; it does NOT affect installed plugin, SessionStart/UserPromptSubmit/Stop/managed hooks or guarantee a safe subscription Claude session. NO Claude launch yet. Hook-R1 Windows pytest NOT_RUN and independent review NOT_RUN.
+
+NEXT EXACT WINDOWS OPERATOR ACTION:
+Normal PowerShell in original C:\Projects\Vres-P2F-Postinstall-Hardening-20261022. Paste entire one-atomic 171-line guarded source checkout/test from docs .ps1 in ONE inline code block, NEVER break after preflight STOP. It verifies original P2 HEAD 82c82430b38f93bd6b9d5c3af3b5de9c1368af9c clean, prior PT2D C:\Projects\Vres-ChatGPT-Review-Personal-PT2D-20261029 HEAD a591... tree d45... clean, fresh NEW target C:\Projects\Vres-ChatGPT-Review-Personal-HOOK-R1-20261029 absent, official remote branch and expected SHA, fetch + detached worktree, source HEAD/tree/sole parent, 20 protected Git blobs, exact M hooks.json + A new test, diff--check and clean before pytest. Then selected Python3.12 offline pytest ONLY tests/test_hook_readonly_posttool_fence.py, tests/test_plugin_contract.py, tests/test_e6_reference_hooks.py::test_matcher_is_broadened_but_excludes_subagent_handback_and_keeps_the_launcher, tests/test_e6_observability_hook.py::test_hooks_json_registers_one_successful_posttooluse_observer. Plugin autoload off, process DB/PG/integration env isolated/restored, disposable AppData conftest fence, every named selected case via -rA and exact exit, posttest HEAD/tree/20 blobs/old+new clean, final VRES_PERSONAL_HOOK_R1_WINDOWS_SELECTED_TEST_COMPLETE ONLY when pytest exit0. User returns FULL console; no acceptance until observed.
+
+EXISTING TESTS: PT1 R1 189 Windows PASS/exit0+independent STATIC_ACCEPT zero blockers/five informationals but 7 automatic hook attempted/refused DB routes; PT2A 213 Windows PASS, PT2B 43 PASS, PT2C 54 PASS, PT2D 50 PASS, independently static NOT_RUN at respective SHAs. No reruns by default. PT2C alt unattached synthetic 88 cases not authoritative. No real release installed, Opus/medium UNINSTALLED, original P2 Chairman Sonnet/high last observed and live model UNKNOWN.
+
+ABSOLUTE HOLDS: LIVE_SCHEMA_048_INCIDENT=OPEN NO PostgreSQL EVEN SELECT direct/indirect Vres CLI/MCP/tasks/health/doctor/hooks/F2/recovery. HOST_HOOK_DB_ROUTE_ATTEMPTED_AND_REFUSED=OPEN. VRES_REPLY_GUARD_WARNING and VRES_PERSISTENCE_WARNING unresolved. No global/current-user profile/hook/credential change, no unapproved Opus activation, no protected F1 issuer. PERSONAL P0-P3, Fable/high arbiter/validator, worker model pins, full V-01..V-42, secure per-current-user secret handles/cross-project reuse, Visual Studio fresh+legacy onboarding, E7/PA/F2 and go-live holds preserved.
+
+AFTER WINDOWS OUTPUT: count individual case names, exits, appdata zero unexpected refusals, environment restoration, all Git pre/post checks; if failure source patch on new SHA and repeat bounded tests, preserve failure. If PASS commit docs-only full test transcript/decision/updated index; independent Claude review only in demonstrably safe no-hook/DB mode; continue meaningful functional delivery, not another speculative planning module. ALL commands/prompts in inline code blocks in chat, not just artifact files.
