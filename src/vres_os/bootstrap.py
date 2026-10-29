@@ -584,7 +584,27 @@ def start_for_project(project_root: str = ".") -> dict:
     # adoption, never reaches secure setup, migration or registration and is never READY.
     project = discover_project(project_root)
     adoption = _project_adoption(project)
-    summary = {k: adoption[k] for k in ("state", "changed", "pending", "blockers", "created", "error") if k in adoption}
+    summary = {k: adoption[k] for k in (
+        "state", "changed", "pending", "blockers", "created", "error",
+        "architecture_audit_digest", "architecture_profiles",
+        "architecture_plan_required", "architecture_audit_complete",
+        "architecture_limitation_count", "architecture_plan_status",
+        "required_validator",
+    ) if k in adoption}
+    if adoption.get("state") == "architecture_review_required":
+        return {
+            "status": "PROJECT_REVIEW_REQUIRED",
+            "project_adoption": summary,
+            "action": (
+                "Vres did not create project Claude instructions or activate this "
+                "established or incompletely audited codebase. Complete the read-only "
+                "architecture audit, prepare an incremental alignment plan bound to "
+                "its current digest, and obtain separate protected Fable/high validation "
+                "before any architecture-changing activation. This offline stage does "
+                "not authorize a project write or database setup."
+            ),
+            "prerequisites": prerequisite_status(),
+        }
     if adoption.get("state") != "active":
         recovery = adoption.get("state") == "recovery_required"
         return {

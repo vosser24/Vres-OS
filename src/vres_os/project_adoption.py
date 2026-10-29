@@ -1,8 +1,10 @@
 """Minimal personal-release project onboarding: fresh scaffold or reviewed legacy adoption.
 
-A project with no Claude configuration is fresh. Start writes one root CLAUDE.md that holds
-only facts detected from the project's own manifests; anything not detected is labelled
-unknown, never filled with invented commands. No other directory or file is created.
+A project with no Claude configuration first gets a static architecture audit.
+A genuinely fresh small project writes one root CLAUDE.md containing only facts
+detected from its manifests; unknown commands are labelled unknown, not invented.
+An established codebase or incomplete audit instead records architecture_review_required
+in Vres's separate state root without writing to or activating the project.
 
 A project with existing Claude configuration (CLAUDE.md files, AGENTS.md, .mcp.json or anything
 under .claude/) is legacy. Start inventories those surfaces read-only: nothing is executed,
@@ -44,7 +46,10 @@ Recovery and rollback restore a path only if it is still exactly in its pre-acti
 activation state; content created or edited by anyone in between is never overwritten. Once
 active, start rewrites nothing.
 
-States: fresh, legacy_pending, awaiting_operator, activating, active, recovery_required.
+States: fresh, architecture_review_required, legacy_pending, awaiting_operator, activating,
+active, recovery_required. A codebase without Claude configuration is not assumed to
+be a fresh empty project. The architecture audit is read-only; a protected alignment
+plan and Fable/high validation remain separately gated, never implicitly granted.
 Adoption never contacts PostgreSQL, the credential store or any model. Being adopted does
 not mean the project is operational: Vres setup and database approval are separate.
 """
@@ -72,7 +77,8 @@ from .sensitive_policy import (
 )
 
 VERSION = 1
-STATES = ("fresh", "legacy_pending", "awaiting_operator", "activating", "active", "recovery_required")
+STATES = ("fresh", "architecture_review_required", "legacy_pending",
+          "awaiting_operator", "activating", "active", "recovery_required")
 _ROOT_SURFACES = ("CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", ".mcp.json")
 _IGNORE_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache",
                 ".ruff_cache", "build", "dist", ".next", "site-packages", "coverage", ".vres"}
@@ -521,6 +527,31 @@ def start(project, *, data_root: Path | None = None) -> dict[str, Any]:
             return _set_state(sd, project, "active", created=["CLAUDE.md"]) | {"changed": False}
     inv = inventory(root)
     if not inv["items"]:
+        # #168: no Claude surfaces does not establish that source is a fresh project.
+        # Reuse the accepted static auditor; do not import project code or contact DB.
+        from .architecture_governance import audit_project
+
+        audit = audit_project(root)
+        limitations = audit["limitations"]
+        if audit["requires_alignment_plan"] or limitations:
+            # This is diagnostic structural evidence, not project source identity,
+            # independent Fable validation, consent, or an activation permission.
+            details = {
+                "architecture_audit_digest": audit["audit_digest"],
+                "architecture_profiles": list(audit["profiles"]),
+                "architecture_plan_required": bool(audit["requires_alignment_plan"]),
+                "architecture_audit_complete": not bool(limitations),
+                "architecture_limitation_count": len(limitations),
+                "required_validator": dict(audit["required_validator"]),
+                "architecture_plan_status": "NOT_SUBMITTED",
+            }
+            if record and record["state"] == "architecture_review_required" and all(
+                record.get(key) == value for key, value in details.items()
+            ):
+                return record | {"changed": False}
+            return _set_state(sd, project, "architecture_review_required", **details) | {
+                "changed": False
+            }
         text = scaffold_text(project.name, detect_facts(root)).encode("utf-8")
         _set_state(sd, project, "fresh", scaffold_sha256=hashlib.sha256(text).hexdigest())
         _write_new(root / "CLAUDE.md", text)
