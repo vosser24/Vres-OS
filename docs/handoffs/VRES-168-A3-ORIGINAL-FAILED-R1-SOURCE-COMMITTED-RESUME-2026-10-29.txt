@@ -1,0 +1,34 @@
+RESUME VRES-OS — #168 A3 ORIGINAL WINDOWS FAIL (16 PASS, 1 SKIP, 1 FAIL, exit1); CORRECTED A3 R1 SOURCE COMMITTED; ONE NEW GUARDED WINDOWS R1 TEST NEXT
+
+Repository vosser24/Vres-OS. Canonical docs branch docs/chatgpt-continuity-20261023; VERIFY latest GitHub ref SHA before action, DO NOT assume stale docs head. Read docs/handoffs/VRES-CHATGPT-CONTINUITY-INDEX.md first.
+
+READ FIRST:
+1. docs/handoffs/VRES-168-A3-WINDOWS-16-PASS-1-SKIP-1-FAIL-AND-R1-SOURCE-CORRECTION-WINDOWS-NEXT-2026-10-29.md
+2. docs/handoffs/VRES-168-A3-ORIGINAL-WINDOWS-16-PASS-1-SKIP-1-FAIL-EXIT1-OPERATOR-RAW-CRLF-2026-10-29.txt
+3. docs/handoffs/VRES-168-A3-R1-GUARDED-WINDOWS-SELECTED-TEST-NEXT-2026-10-29.ps1 — COMPLETE 172-line script MUST appear INLINE in a single PowerShell code block to operator, not file-only
+4. docs/handoffs/VRES-168-A2-17-PASS-AND-A3-PLAN-CHECK-CLI-SOURCE-COMMITTED-WINDOWS-NEXT-2026-10-29.md (HISTORICAL source A3 before FAILED test)
+5. docs/roadmap/VRES-CHATGPT-LED-FULL-SCOPE-DELIVERY-PLAN-2026-10-22.md
+6. docs/roadmap/VRES-FULL-SCOPE-FUNCTIONALITY-REGISTER-2026-10-22.md
+7. docs/handoffs/VRES-PERSONAL-HOOK-R1-WINDOWS-34-PASS-EXIT0-INDEPENDENT-REVIEW-AND-INSTALLED-HOOK-HOLDS-2026-10-29.md
+
+CURRENT CORRECTED SOURCE:
+Branch feature/168-personal-architecture-plan-cli-20261029
+R1 HEAD d0c688e89fba801c4a9919b6e2584d1d715cf4af
+TREE 498ad1ea5203e8e3fff0043eeddb6ed3a216b251
+SOLE PARENT REJECTED A3 ce324491a798e96f8e8fc2a1127e2178d229cb2e, tree f8eae53c8d318dfee1074dbb325ec0720ee467eb
+EXACT THREE MODIFIED files: src/vres_os/paths.py new blob 1456cf9c53ff18cfe950f63255956c17756a8620, src/vres_os/project_adoption.py blob 46d3c291e85a7b3f38496fff345ac618c4be1bce, tests/test_project_adoption_cli_plan.py blob 4c3b690a7730e8410e2b1f08a81b71410f4224ab (now 15 test functions, 4 filename parameter variants). GitHub expected-old nonforced branch update, head/tree/parent/three-path compare/readback PASS. No other source/installed/user/global change.
+
+WHAT FAILED:
+Original A3 on Windows: 16 individually named PASS, ONE SKIP (Windows symlink privilege unavailable), ONE FAILED test_no_saved_state_stays_missing_after_plan_check; PYTEST_EXIT_CODE=1, 168_A3_TEST_EXIT_CODE=1, correct ABORTED/STOP. Preflight passed original P2 and prior A2 clean, new detached A3 SHA/tree/sole parent, 17 source blobs/2 path allowlist/diff clean; AppData protected fixture unexpected refusals0, process DB/PG env isolated and restored; 17 posttest blob+new/prior clean PASS. The test failure was unexpected creation of missing VRES_DATA_DIR before refusing a plan. Original raw uploaded console exact UTF8 no BOM 10933 bytes/149 lines/148 CRLF/no final newline; SHA256 e89e0e0053ea739d13c7cf286491192b79f289a7de20ffee48d8802d7f3e2b2a; Git blob a944937dad561b5db751cb8544a02251c3bf9760; archived byte-for-byte. NEVER call original A3 PASS or rerun rejected source.
+
+ROOT CAUSE:
+Read-only assess_alignment_plan imported and called paths.data_dir(), whose mkdir(parents=True,exist_ok=True) creates the root, violating zero state writes when missing. R1 introduces paths.data_dir_path() no-create resolver reusing same config semantics, preserves old paths.data_dir() creating behavior for normal writes, and makes ONLY offline assess_alignment_plan use pure resolver. Four new tests: missing-state call tripwire forbids creating resolver, default and overridden root path resolver do not create directories, intentional data_dir creates when explicitly called, valid CLI plan check cannot invoke creating data_dir and leaves synthetic state/project bytes unchanged. Original A3 source cli.py is untouched by correction; R1 does NOT authorize installed CLI execution.
+
+NEXT ONE USER WINDOWS ACTION:
+Normal Windows PowerShell, NOT Claude Code or Vres CLI. Paste COMPLETE new 172-line guarded R1 Windows script inline from docs. Original P2 C:\Projects\Vres-P2F-Postinstall-Hardening-20261022 at 82c82430b38f93bd6b9d5c3af3b5de9c1368af9c clean; prior REJECTED A3 detached C:\Projects\Vres-ChatGPT-Review-168-Plan-CLI-20261029 HEAD ce324491... tree f8eae53... clean; NEW C:\Projects\Vres-ChatGPT-Review-168-Plan-CLI-R1-20261029 must be ABSENT. Official remote branch exact R1 HEAD, fetch, new detached worktree SHA/tree/sole parent, 18 Git blobs, exactly three M paths, diff --check clean. One only guarded Python3.12 -B pytest -q -rA -p no:cacheprovider tests/test_project_adoption_cli_plan.py (15 functions with 4 filename parameter variants) plus 5 selected A2/A1/CLI regressions including A2 missing-state. Plugin autoload disabled, process DB/PG/integration env cleared/restored, protected disposable AppData fixture, all named PASS/FAIL/SKIP, PYTEST_EXIT_CODE and after restore 18 post blobs, new/old worktrees clean, 168_A3_R1_TEST_EXIT_CODE. Final VRES_PERSONAL_168_A3_R1_WINDOWS_SELECTED_TEST_COMPLETE ONLY if exit0. No preclaimed success/test case count. If STOP/ABORT do not run individual commands. Return full original console text or upload.
+
+ABSOLUTE HOLDS:
+LIVE_SCHEMA_048_INCIDENT OPEN — NO PostgreSQL even SELECT via Vres MCP/CLI/hooks/bootstrap/tasks/doctor/health/F2/recovery/migrations. HOST_HOOK_DB_ROUTE_ATTEMPTED_AND_REFUSED OPEN — seven PT1 independent Claude Read/Grep automatic posttool DB-route attempts all refused; Hook-R1 source excluded read tools and had 34 Windows PASS but installed/global/managed/lifecycle hooks unchanged, normal native Claude source review still unsafe. Existing Claude Code subscription workflow is correct; no API-key/account-tier/web Chat diversion. Historical: PT1 R1 189 Windows PASS+independent STATIC_ACCEPT 0 blockers/5 info (7 refused hook routes), PT2A 213, PT2B 43, PT2C selected 54, PT2D 50 selected Windows PASS independently PT2A-D NOT_RUN; Hook-R1 34 PASS independent NOT_RUN; #168 A1 original FAILED 84 PASS/2 FAIL/exit1, A1 R1 88 PASS, A2 17 PASS, original A3 16 PASS/1 SKIP/1 FAIL, R1 WINDOWS NOT_RUN. Original installed P2 Chairman Sonnet/high last observed, desired Opus/medium UNINSTALLED, physically effective unknown, strict F1 positive authority BLOCKED, protected Fable/high router+validator and worker pins, PERSONAL P0–P3, per-user secure credential handles and cross-project approvals, E7/PA/F2/Visual Studio legacy/PRISM/go-live and V-01..V-42 scope retained.
+
+METHOD:
+ChatGPT authors source and exact SHA GitHub commits; operator executes ONE guarded fail-fast Windows PowerShell exact worktree script and sends full output; ChatGPT inspects actual test names/exit, persists raw-byte user uploaded evidence/sha and updates index/handoff via docs-only expected-old nonforced CAS; next functional increment only after R1 test verdict. Preserve failed SHAs/logs and avoid full reruns, installed writes, live DB contact or speculative model authority. All operator commands and Claude prompts IN CHAT code blocks, not a file-only handoff.
