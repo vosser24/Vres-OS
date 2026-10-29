@@ -1,0 +1,203 @@
+=== PERSONAL 168_A1 ONE ATOMIC WINDOWS PREFLIGHT ===
+PASS: Original P2 anchor HEAD
+PASS: Original P2 anchor checkout
+PASS: Prior Hook-R1 HEAD
+PASS: Prior Hook-R1 tree
+PASS: Prior Hook-R1 validation checkout
+PASS: Official GitHub origin
+PASS: Remote 168_A1 HEAD
+remote: Enumerating objects: 8, done.
+remote: Counting objects: 100% (8/8), done.
+remote: Compressing objects: 100% (7/7), done.
+remote: Total 8 (delta 0), reused 0 (delta 0), pack-reused 0 (from 0)
+Unpacking objects: 100% (8/8), 28.99 KiB | 503.00 KiB/s, done.
+From https://github.com/vosser24/Vres-OS
+ * branch            feature/168-personal-established-project-architecture-gate-20261029 -> FETCH_HEAD
+ * [new branch]      feature/168-personal-established-project-architecture-gate-20261029 -> origin/feature/168-personal-established-project-architecture-gate-20261029
+PASS: Fetched 168_A1 HEAD
+Preparing worktree (detached HEAD 2a21431)
+HEAD is now at 2a21431 feat(168): refuse auto-adoption of established projects without Claude config
+PASS: 168_A1 detached mode
+PASS: 168_A1 HEAD
+PASS: 168_A1 tree
+PASS: 168_A1 single parent
+PASS: Git blob src/vres_os/project_adoption.py
+PASS: Git blob src/vres_os/bootstrap.py
+PASS: Git blob tests/test_project_adoption_architecture_gate.py
+PASS: Git blob src/vres_os/architecture_governance.py
+PASS: Git blob src/vres_os/architecture_plan.py
+PASS: Git blob src/vres_os/architecture_policy.py
+PASS: Git blob tests/test_project_adoption.py
+PASS: Git blob tests/test_architecture_governance.py
+PASS: Git blob tests/conftest.py
+PASS: Git blob plugins/vres-os/hooks/hooks.json
+PASS: Git blob tests/test_hook_readonly_posttool_fence.py
+PASS: Git blob plugins/vres-os/agents/chairman.md
+PASS: Git blob install.ps1
+PASS: exactly two modified source files and one new test file
+PASS: 168_A1 git diff --check
+PASS: 168_A1 checkout before tests
+VRES_PERSONAL_168_A1_PREFLIGHT_PASS
+=== PERSONAL 168_A1 GUARDED OFFLINE SELECTED PYTEST ===
+PYTEST_PLUGIN_AUTOLOAD=DISABLED
+PASS: process DB/PG/integration variables isolated
+TEST_COMMAND=py -3.12 -B -m pytest -q -rA -p no:cacheprovider tests/test_project_adoption_architecture_gate.py tests/test_project_adoption.py tests/test_architecture_governance.py
+F....F................................................................................                           [100%]
+====================================================== FAILURES =======================================================
+________________________ test_established_source_without_claude_is_review_required_not_active _________________________
+
+tmp_path = WindowsPath('C:/Users/User/AppData/Local/Temp/pytest-of-User/pytest-1657/test_established_source_withou0')
+
+    def test_established_source_without_claude_is_review_required_not_active(tmp_path):
+        project = _project(tmp_path / "legacy-source")
+        _established(project.root)
+        data_root = tmp_path / "vres-data"
+        before = _files(project.root)
+
+        result = project_adoption.start(project, data_root=data_root)
+
+        assert result["state"] == "architecture_review_required"
+        assert result["changed"] is False
+        assert result["architecture_plan_required"] is True
+>       assert result["architecture_audit_complete"] is True
+E       assert False is True
+
+tests\test_project_adoption_architecture_gate.py:58: AssertionError
+_______________________________ test_genuinely_fresh_small_source_still_scaffolds_once ________________________________
+
+tmp_path = WindowsPath('C:/Users/User/AppData/Local/Temp/pytest-of-User/pytest-1657/test_genuinely_fresh_small_sou0')
+
+    def test_genuinely_fresh_small_source_still_scaffolds_once(tmp_path):
+        project = _project(tmp_path / "fresh")
+        (project.root / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
+        data_root = tmp_path / "state"
+
+        result = project_adoption.start(project, data_root=data_root)
+        again = project_adoption.start(project, data_root=data_root)
+
+>       assert result["state"] == "active" and result["changed"] is True
+E       AssertionError: assert ('architecture_review_required' == 'active'
+E
+E         - active
+E         + architecture_review_required)
+
+tests\test_project_adoption_architecture_gate.py:161: AssertionError
+======================================================= PASSES ========================================================
+LIVE APP-DATA FENCE: unexpected refusals=0 protected=['c:\\users\\user\\appdata\\local\\vresos', 'c:\\users\\user\\appdata\\roaming\\vresos'] trusted_temp_base=C:\Users\User\AppData\Local\Temp session_root=C:\Users\User\AppData\Local\Temp\vres-pytest-app-data-s0f2e7n2\VresOS init_order=['validate-temp-base', 'create-session-directory', 'validate-session-directory', 'create-app-data-root', 'enable-isolation'] removed_env=[] integration_opt_in=False
+=============================================== short test summary info ===============================================
+PASSED tests/test_project_adoption_architecture_gate.py::test_existing_project_with_single_source_and_manifest_still_needs_review
+PASSED tests/test_project_adoption_architecture_gate.py::test_existing_project_without_manifest_but_three_sources_still_needs_review
+PASSED tests/test_project_adoption_architecture_gate.py::test_architecture_hold_is_idempotent_and_rechecks_changed_source
+PASSED tests/test_project_adoption_architecture_gate.py::test_incomplete_architecture_audit_refuses_even_empty_project
+PASSED tests/test_project_adoption_architecture_gate.py::test_architecture_hold_cannot_be_activated_or_decided_as_legacy
+PASSED tests/test_project_adoption_architecture_gate.py::test_bootstrap_reports_review_gate_before_setup_migration_or_repository
+PASSED tests/test_project_adoption.py::test_fresh_project_gets_a_useful_scaffold_without_fabricated_commands
+PASSED tests/test_project_adoption.py::test_empty_project_labels_unknowns_and_repeat_start_is_idempotent
+PASSED tests/test_project_adoption.py::test_existing_project_is_legacy_and_inventory_changes_nothing
+PASSED tests/test_project_adoption.py::test_secrets_and_injection_shaped_material_never_become_instructions
+PASSED tests/test_project_adoption.py::test_decisions_need_operator_authority_and_respect_item_options
+PASSED tests/test_project_adoption.py::test_incomplete_or_stale_decisions_prevent_activation
+PASSED tests/test_project_adoption.py::test_activation_changes_only_approved_paths_then_rollback_restores_exact_bytes
+PASSED tests/test_project_adoption.py::test_rollback_refuses_when_activated_files_changed_afterwards
+PASSED tests/test_project_adoption.py::test_caught_activation_failure_restores_previous_exact_bytes
+PASSED tests/test_project_adoption.py::test_interrupted_activation_is_never_half_active_and_is_recoverable
+PASSED tests/test_project_adoption.py::test_another_project_stays_isolated
+PASSED tests/test_project_adoption.py::test_a_junctioned_directory_is_not_followed_during_inventory
+PASSED tests/test_project_adoption.py::test_pending_legacy_review_is_not_ready_and_reaches_no_setup_or_database
+PASSED tests/test_project_adoption.py::test_interrupted_adoption_is_recovery_required_and_never_operational
+PASSED tests/test_project_adoption.py::test_active_project_keeps_the_normal_secure_setup_path
+PASSED tests/test_project_adoption.py::test_secret_bearing_active_configuration_is_a_blocker_never_deleted
+PASSED tests/test_project_adoption.py::test_safe_prelaunch_inventory_runs_from_the_operator_terminal
+PASSED tests/test_project_adoption.py::test_recovery_refuses_to_overwrite_changes_made_after_the_interruption[recreated-dropped-file]
+PASSED tests/test_project_adoption.py::test_recovery_refuses_to_overwrite_changes_made_after_the_interruption[edited-new-scaffold]
+PASSED tests/test_project_adoption.py::test_recovery_after_an_untouched_interruption_restores_everything
+PASSED tests/test_project_adoption.py::test_inventory_limits_refuse_instead_of_returning_a_partial_inventory[directories]
+PASSED tests/test_project_adoption.py::test_inventory_limits_refuse_instead_of_returning_a_partial_inventory[items]
+PASSED tests/test_project_adoption.py::test_a_junction_inside_dot_claude_is_a_manual_review_blocker
+PASSED tests/test_project_adoption.py::test_executing_or_permission_granting_skills_and_commands_are_drop_only[skill-inline]
+PASSED tests/test_project_adoption.py::test_executing_or_permission_granting_skills_and_commands_are_drop_only[skill-fenced]
+PASSED tests/test_project_adoption.py::test_executing_or_permission_granting_skills_and_commands_are_drop_only[skill-allowed-tools]
+PASSED tests/test_project_adoption.py::test_executing_or_permission_granting_skills_and_commands_are_drop_only[command-allowed-tools]
+PASSED tests/test_project_adoption.py::test_executing_or_permission_granting_skills_and_commands_are_drop_only[command-inline]
+PASSED tests/test_project_adoption.py::test_plain_skill_text_stays_an_operator_keep_or_drop_decision
+PASSED tests/test_project_adoption.py::test_settings_that_claude_applies_are_not_inert[schema-only]
+PASSED tests/test_project_adoption.py::test_settings_that_claude_applies_are_not_inert[env]
+PASSED tests/test_project_adoption.py::test_settings_that_claude_applies_are_not_inert[model]
+PASSED tests/test_project_adoption.py::test_secret_bearing_active_files_are_blockers_left_untouched_and_never_copied[claude-md]
+PASSED tests/test_project_adoption.py::test_secret_bearing_active_files_are_blockers_left_untouched_and_never_copied[settings-env]
+PASSED tests/test_project_adoption.py::test_secret_bearing_active_files_are_blockers_left_untouched_and_never_copied[agent]
+PASSED tests/test_project_adoption.py::test_secret_bearing_active_files_are_blockers_left_untouched_and_never_copied[skill]
+PASSED tests/test_project_adoption.py::test_secret_bearing_active_files_are_blockers_left_untouched_and_never_copied[secret-named-command]
+PASSED tests/test_project_adoption.py::test_unrelated_sensitive_file_under_dot_claude_stays_keep_only
+PASSED tests/test_project_adoption.py::test_unreadable_directory_during_traversal_refuses_the_inventory
+PASSED tests/test_project_adoption.py::test_unreadable_dot_claude_directory_refuses_the_inventory
+PASSED tests/test_project_adoption.py::test_execution_or_permission_frontmatter_is_never_keepable[agent-accept-edits]
+PASSED tests/test_project_adoption.py::test_execution_or_permission_frontmatter_is_never_keepable[agent-bypass]
+PASSED tests/test_project_adoption.py::test_execution_or_permission_frontmatter_is_never_keepable[agent-hooks]
+PASSED tests/test_project_adoption.py::test_execution_or_permission_frontmatter_is_never_keepable[agent-inline-mcp]
+PASSED tests/test_project_adoption.py::test_execution_or_permission_frontmatter_is_never_keepable[agent-mcp-servers]
+PASSED tests/test_project_adoption.py::test_execution_or_permission_frontmatter_is_never_keepable[agent-unreadable-mode]
+PASSED tests/test_project_adoption.py::test_execution_or_permission_frontmatter_is_never_keepable[command-shell]
+PASSED tests/test_project_adoption.py::test_execution_or_permission_frontmatter_is_never_keepable[skill-block-allowed-tools]
+PASSED tests/test_project_adoption.py::test_execution_or_permission_frontmatter_is_never_keepable[skill-hooks]
+PASSED tests/test_project_adoption.py::test_descriptive_skill_and_agent_frontmatter_keeps_keep_or_drop[agent-descriptive]
+PASSED tests/test_project_adoption.py::test_descriptive_skill_and_agent_frontmatter_keeps_keep_or_drop[agent-default-mode]
+PASSED tests/test_project_adoption.py::test_descriptive_skill_and_agent_frontmatter_keeps_keep_or_drop[skill-descriptive]
+PASSED tests/test_architecture_governance.py::test_fresh_small_project_uses_minimal_profile_without_alignment_gate
+PASSED tests/test_architecture_governance.py::test_established_web_audit_detects_layer_module_private_and_local_contract_gaps
+PASSED tests/test_architecture_governance.py::test_audit_never_executes_project_python
+PASSED tests/test_architecture_governance.py::test_architecture_audit_skips_symlinked_source_content
+PASSED tests/test_architecture_governance.py::test_unsupported_source_language_is_explicit_audit_limitation
+PASSED tests/test_architecture_governance.py::test_supported_dependency_scans_report_their_analysis_limits
+PASSED tests/test_architecture_governance.py::test_dependency_cycle_is_reported_without_importing_modules
+PASSED tests/test_architecture_governance.py::test_pipeline_and_analytics_profiles_are_additive
+PASSED tests/test_architecture_governance.py::test_large_file_is_warning_not_automatic_material_violation
+PASSED tests/test_architecture_governance.py::test_clean_established_project_still_requires_fable_validated_plan
+PASSED tests/test_architecture_governance.py::test_complete_alignment_plan_is_ready_for_fable_but_never_activates
+PASSED tests/test_architecture_governance.py::test_plan_missing_material_finding_fails_closed
+PASSED tests/test_architecture_governance.py::test_plan_stale_audit_digest_fails_closed
+PASSED tests/test_architecture_governance.py::test_plan_dependency_cycle_fails_closed
+PASSED tests/test_architecture_governance.py::test_explicit_defer_can_cover_material_finding_but_still_requires_fable
+PASSED tests/test_architecture_governance.py::test_small_existing_python_utility_stays_minimal_but_requires_plan
+PASSED tests/test_architecture_governance.py::test_packaged_python_relative_imports_detect_sibling_private_coupling
+PASSED tests/test_architecture_governance.py::test_platform_cannot_import_business_domain_in_packaged_python
+PASSED tests/test_architecture_governance.py::test_javascript_side_effect_import_participates_in_layer_checks
+PASSED tests/test_architecture_governance.py::test_alignment_plan_cannot_omit_detected_architecture_profile
+PASSED tests/test_architecture_governance.py::test_alignment_plan_rejects_audit_from_old_constitution
+PASSED tests/test_architecture_governance.py::test_dependency_findings_have_unique_stable_ids_per_import
+PASSED tests/test_architecture_governance.py::test_audit_never_reads_vres_local_secrets_materialized_files
+PASSED tests/test_architecture_governance.py::test_vres_local_secrets_tree_has_zero_effect_on_audit_inventory_or_digest
+PASSED tests/test_architecture_governance.py::test_alignment_plan_digest_binds_exact_plan_content
+PASSED tests/test_architecture_governance.py::test_alignment_plan_rejects_unknown_top_level_fields
+FAILED tests/test_project_adoption_architecture_gate.py::test_established_source_without_claude_is_review_required_not_active - assert False is True
+FAILED tests/test_project_adoption_architecture_gate.py::test_genuinely_fresh_small_source_still_scaffolds_once - AssertionError: assert ('architecture_review_required' == 'active'
+PYTEST_EXIT_CODE=1
+PASS: PROCESS_ENVIRONMENT_RESTORED
+=== PERSONAL 168_A1 POSTTEST GIT INTEGRITY ===
+PASS: Posttest 168_A1 HEAD
+PASS: Posttest 168_A1 tree
+PASS: Posttest blob src/vres_os/project_adoption.py
+PASS: Posttest blob src/vres_os/bootstrap.py
+PASS: Posttest blob tests/test_project_adoption_architecture_gate.py
+PASS: Posttest blob src/vres_os/architecture_governance.py
+PASS: Posttest blob src/vres_os/architecture_plan.py
+PASS: Posttest blob src/vres_os/architecture_policy.py
+PASS: Posttest blob tests/test_project_adoption.py
+PASS: Posttest blob tests/test_architecture_governance.py
+PASS: Posttest blob tests/conftest.py
+PASS: Posttest blob plugins/vres-os/hooks/hooks.json
+PASS: Posttest blob tests/test_hook_readonly_posttool_fence.py
+PASS: Posttest blob plugins/vres-os/agents/chairman.md
+PASS: Posttest blob install.ps1
+PASS: 168_A1 worktree after selected test
+PASS: Prior Hook-R1 worktree unchanged
+168_A1_TEST_EXIT_CODE=1
+VRES_PERSONAL_168_A1_ABORTED: STOP: 168_A1 selected pytest exited with code 1
+STOP: 168_A1 selected pytest exited with code 1
+At line:159 char:32
++ ... it -ne 0) { throw "STOP: 168_A1 selected pytest exited with code $tes ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : OperationStopped: (STOP: 168_A1 se...ted with code 1:String) [], RuntimeException
+    + FullyQualifiedErrorId : STOP: 168_A1 selected pytest exited with code 1
+
+PS C:\Projects\Vres-ChatGPT-Review-Personal-PT2D-20261029>
