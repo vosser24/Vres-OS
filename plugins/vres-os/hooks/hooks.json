@@ -108,7 +108,7 @@
         ]
       },
       {
-        "matcher": "^(?!SubagentHandback$).+",
+        "matcher": "^(?!SubagentHandback$|Read$|Glob$|Grep$).+",
         "hooks": [
           {
             "type": "command",
@@ -142,7 +142,7 @@
         ]
       },
       {
-        "matcher": "^(?!mcp__plugin_vres-os_vres__(task_checkpoint|task_reply_gate|reply_activity_observe)$).+",
+        "matcher": "^(?!Read$|Glob$|Grep$|mcp__plugin_vres-os_vres__(task_checkpoint|task_reply_gate|reply_activity_observe)$).+",
         "hooks": [
           {
             "type": "mcp_tool",
@@ -162,7 +162,7 @@
     ],
     "PostToolUseFailure": [
       {
-        "matcher": "^(?!mcp__plugin_vres-os_vres__(task_checkpoint|task_reply_gate|reply_activity_observe)$).+",
+        "matcher": "^(?!Read$|Glob$|Grep$|mcp__plugin_vres-os_vres__(task_checkpoint|task_reply_gate|reply_activity_observe)$).+",
         "hooks": [
           {
             "type": "mcp_tool",
