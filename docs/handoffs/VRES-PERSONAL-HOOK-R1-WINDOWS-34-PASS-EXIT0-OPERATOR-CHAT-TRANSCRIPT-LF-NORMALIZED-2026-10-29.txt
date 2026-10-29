@@ -1,0 +1,119 @@
+=== PERSONAL HOOK_R1 ONE ATOMIC WINDOWS PREFLIGHT ===
+PASS: Original P2 anchor HEAD
+PASS: Original P2 anchor checkout
+PASS: Prior PT2D HEAD
+PASS: Prior PT2D tree
+PASS: Prior PT2D validation checkout
+PASS: Official GitHub origin
+PASS: Remote HOOK_R1 HEAD
+remote: Enumerating objects: 8, done.
+remote: Counting objects: 100% (8/8), done.
+remote: Compressing objects: 100% (6/6), done.
+remote: Total 8 (delta 0), reused 0 (delta 0), pack-reused 0 (from 0)
+Unpacking objects: 100% (8/8), 7.95 KiB | 254.00 KiB/s, done.
+From https://github.com/vosser24/Vres-OS
+ * branch            feature/personal-hook-readonly-posttool-fence-20261029 -> FETCH_HEAD
+ * [new branch]      feature/personal-hook-readonly-posttool-fence-20261029 -> origin/feature/personal-hook-readonly-posttool-fence-20261029
+PASS: Fetched HOOK_R1 HEAD
+Preparing worktree (detached HEAD 891fb22)
+HEAD is now at 891fb22 fix(personal): exclude read-only Claude tools from Vres post-tool observers
+PASS: HOOK_R1 detached mode
+PASS: HOOK_R1 HEAD
+PASS: HOOK_R1 tree
+PASS: HOOK_R1 single parent
+PASS: Git blob plugins/vres-os/hooks/hooks.json
+PASS: Git blob tests/test_hook_readonly_posttool_fence.py
+PASS: Git blob src/vres_os/personal_chairman_release_candidate.py
+PASS: Git blob tests/test_personal_chairman_release_candidate.py
+PASS: Git blob tests/test_plugin_contract.py
+PASS: Git blob tests/test_e6_reference_hooks.py
+PASS: Git blob tests/test_e6_observability_hook.py
+PASS: Git blob src/vres_os/personal_chairman_release_reconciliation.py
+PASS: Git blob tests/test_personal_chairman_release_reconciliation.py
+PASS: Git blob src/vres_os/personal_chairman_recovery_journal.py
+PASS: Git blob tests/test_personal_chairman_recovery_journal.py
+PASS: Git blob src/vres_os/personal_chairman_transition_plan.py
+PASS: Git blob tests/test_personal_chairman_transition_plan.py
+PASS: Git blob src/vres_os/personal_chairman_preview.py
+PASS: Git blob tests/test_personal_chairman_preview.py
+PASS: Git blob plugins/vres-os/agents/chairman.md
+PASS: Git blob tests/conftest.py
+PASS: Git blob src/vres_os/release_artifact.py
+PASS: Git blob src/vres_os/install_recovery.py
+PASS: Git blob install.ps1
+PASS: exactly one hook JSON modification and one new regression-test file
+PASS: HOOK_R1 git diff --check
+PASS: HOOK_R1 checkout before tests
+VRES_PERSONAL_HOOK_R1_PREFLIGHT_PASS
+=== PERSONAL HOOK_R1 GUARDED OFFLINE SELECTED PYTEST ===
+PYTEST_PLUGIN_AUTOLOAD=DISABLED
+PASS: process DB/PG/integration variables isolated
+TEST_COMMAND=py -3.12 -B -m pytest -q -rA -p no:cacheprovider tests/test_hook_readonly_posttool_fence.py tests/test_plugin_contract.py tests/test_e6_reference_hooks.py::test_matcher_is_broadened_but_excludes_subagent_handback_and_keeps_the_launcher tests/test_e6_observability_hook.py::test_hooks_json_registers_one_successful_posttooluse_observer
+..................................                                                                               [100%]
+======================================================= PASSES ========================================================
+LIVE APP-DATA FENCE: unexpected refusals=0 protected=['c:\\users\\user\\appdata\\local\\vresos', 'c:\\users\\user\\appdata\\roaming\\vresos'] trusted_temp_base=C:\Users\User\AppData\Local\Temp session_root=C:\Users\User\AppData\Local\Temp\vres-pytest-app-data-h4dt_iq5\VresOS init_order=['validate-temp-base', 'create-session-directory', 'validate-session-directory', 'create-app-data-root', 'enable-isolation'] removed_env=[] integration_opt_in=False
+=============================================== short test summary info ===============================================
+PASSED tests/test_hook_readonly_posttool_fence.py::test_plain_read_tools_trigger_no_posttool_hook[Read-PostToolUse]
+PASSED tests/test_hook_readonly_posttool_fence.py::test_plain_read_tools_trigger_no_posttool_hook[Read-PostToolUseFailure]
+PASSED tests/test_hook_readonly_posttool_fence.py::test_plain_read_tools_trigger_no_posttool_hook[Glob-PostToolUse]
+PASSED tests/test_hook_readonly_posttool_fence.py::test_plain_read_tools_trigger_no_posttool_hook[Glob-PostToolUseFailure]
+PASSED tests/test_hook_readonly_posttool_fence.py::test_plain_read_tools_trigger_no_posttool_hook[Grep-PostToolUse]
+PASSED tests/test_hook_readonly_posttool_fence.py::test_plain_read_tools_trigger_no_posttool_hook[Grep-PostToolUseFailure]
+PASSED tests/test_hook_readonly_posttool_fence.py::test_plain_read_tools_remain_exempt_from_control_preflight[Read]
+PASSED tests/test_hook_readonly_posttool_fence.py::test_plain_read_tools_remain_exempt_from_control_preflight[Glob]
+PASSED tests/test_hook_readonly_posttool_fence.py::test_plain_read_tools_remain_exempt_from_control_preflight[Grep]
+PASSED tests/test_hook_readonly_posttool_fence.py::test_action_tool_success_still_triggers_both_observers[Bash]
+PASSED tests/test_hook_readonly_posttool_fence.py::test_action_tool_success_still_triggers_both_observers[Write]
+PASSED tests/test_hook_readonly_posttool_fence.py::test_action_tool_success_still_triggers_both_observers[Edit]
+PASSED tests/test_hook_readonly_posttool_fence.py::test_action_tool_success_still_triggers_both_observers[mcp__plugin_vres-os_vres__experience_retrieve]
+PASSED tests/test_hook_readonly_posttool_fence.py::test_action_tool_failure_still_triggers_reply_observer[Bash]
+PASSED tests/test_hook_readonly_posttool_fence.py::test_action_tool_failure_still_triggers_reply_observer[Write]
+PASSED tests/test_hook_readonly_posttool_fence.py::test_action_tool_failure_still_triggers_reply_observer[Edit]
+PASSED tests/test_hook_readonly_posttool_fence.py::test_action_tool_failure_still_triggers_reply_observer[mcp__plugin_vres-os_vres__experience_retrieve]
+PASSED tests/test_hook_readonly_posttool_fence.py::test_previous_reply_mcp_recursion_exceptions_are_preserved[task_checkpoint-PostToolUse]
+PASSED tests/test_hook_readonly_posttool_fence.py::test_previous_reply_mcp_recursion_exceptions_are_preserved[task_checkpoint-PostToolUseFailure]
+PASSED tests/test_hook_readonly_posttool_fence.py::test_previous_reply_mcp_recursion_exceptions_are_preserved[task_reply_gate-PostToolUse]
+PASSED tests/test_hook_readonly_posttool_fence.py::test_previous_reply_mcp_recursion_exceptions_are_preserved[task_reply_gate-PostToolUseFailure]
+PASSED tests/test_hook_readonly_posttool_fence.py::test_previous_reply_mcp_recursion_exceptions_are_preserved[reply_activity_observe-PostToolUse]
+PASSED tests/test_hook_readonly_posttool_fence.py::test_previous_reply_mcp_recursion_exceptions_are_preserved[reply_activity_observe-PostToolUseFailure]
+PASSED tests/test_hook_readonly_posttool_fence.py::test_orchestration_work_unit_completion_special_hook_is_preserved
+PASSED tests/test_hook_readonly_posttool_fence.py::test_ask_user_question_special_hook_is_preserved
+PASSED tests/test_hook_readonly_posttool_fence.py::test_subagent_handback_is_still_not_experience_observed
+PASSED tests/test_hook_readonly_posttool_fence.py::test_exemption_is_exact_not_a_broad_read_name_prefix
+PASSED tests/test_hook_readonly_posttool_fence.py::test_review_fence_does_not_remove_lifecycle_hooks
+PASSED tests/test_plugin_contract.py::test_all_agents_have_unique_names_and_valid_frontmatter
+PASSED tests/test_plugin_contract.py::test_all_skills_have_valid_frontmatter
+PASSED tests/test_plugin_contract.py::test_hook_commands_resolve_to_shipped_wrappers
+PASSED tests/test_plugin_contract.py::test_mcp_wrapper_is_shipped
+PASSED tests/test_e6_reference_hooks.py::test_matcher_is_broadened_but_excludes_subagent_handback_and_keeps_the_launcher
+PASSED tests/test_e6_observability_hook.py::test_hooks_json_registers_one_successful_posttooluse_observer
+PYTEST_EXIT_CODE=0
+PASS: PROCESS_ENVIRONMENT_RESTORED
+=== PERSONAL HOOK_R1 POSTTEST GIT INTEGRITY ===
+PASS: Posttest HOOK_R1 HEAD
+PASS: Posttest HOOK_R1 tree
+PASS: Posttest blob plugins/vres-os/hooks/hooks.json
+PASS: Posttest blob tests/test_hook_readonly_posttool_fence.py
+PASS: Posttest blob src/vres_os/personal_chairman_release_candidate.py
+PASS: Posttest blob tests/test_personal_chairman_release_candidate.py
+PASS: Posttest blob tests/test_plugin_contract.py
+PASS: Posttest blob tests/test_e6_reference_hooks.py
+PASS: Posttest blob tests/test_e6_observability_hook.py
+PASS: Posttest blob src/vres_os/personal_chairman_release_reconciliation.py
+PASS: Posttest blob tests/test_personal_chairman_release_reconciliation.py
+PASS: Posttest blob src/vres_os/personal_chairman_recovery_journal.py
+PASS: Posttest blob tests/test_personal_chairman_recovery_journal.py
+PASS: Posttest blob src/vres_os/personal_chairman_transition_plan.py
+PASS: Posttest blob tests/test_personal_chairman_transition_plan.py
+PASS: Posttest blob src/vres_os/personal_chairman_preview.py
+PASS: Posttest blob tests/test_personal_chairman_preview.py
+PASS: Posttest blob plugins/vres-os/agents/chairman.md
+PASS: Posttest blob tests/conftest.py
+PASS: Posttest blob src/vres_os/release_artifact.py
+PASS: Posttest blob src/vres_os/install_recovery.py
+PASS: Posttest blob install.ps1
+PASS: HOOK_R1 worktree after selected test
+PASS: Prior PT2D worktree unchanged
+HOOK_R1_TEST_EXIT_CODE=0
+VRES_PERSONAL_HOOK_R1_WINDOWS_SELECTED_TEST_COMPLETE
+PS C:\Projects\Vres-ChatGPT-Review-Personal-PT2D-20261029>

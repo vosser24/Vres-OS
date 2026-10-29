@@ -1,0 +1,54 @@
+RESUME VRES-OS — HOOK-R1 34 DISTINCT GUARDED WINDOWS TESTS PASS/EXIT0; SOURCE-ONLY FIX, INSTALLED HOOKS STILL UNCHANGED; CONTINUE FULL PRODUCT BACKLOG
+
+REPO: vosser24/Vres-OS.
+CANONICAL DOCS: docs/chatgpt-continuity-20261023. VERIFY NEWEST REMOTE HEAD; do not assume an earlier commit.
+
+READ FIRST:
+1. docs/handoffs/VRES-CHATGPT-CONTINUITY-INDEX.md
+2. docs/handoffs/VRES-PERSONAL-HOOK-R1-WINDOWS-34-PASS-EXIT0-INDEPENDENT-REVIEW-AND-INSTALLED-HOOK-HOLDS-2026-10-29.md
+3. docs/handoffs/VRES-PERSONAL-HOOK-R1-WINDOWS-34-PASS-EXIT0-OPERATOR-CHAT-TRANSCRIPT-LF-NORMALIZED-2026-10-29.txt
+4. docs/handoffs/VRES-PERSONAL-HOOK-R1-READONLY-POSTTOOL-SOURCE-COMMITTED-WINDOWS-NEXT-2026-10-29.md (HISTORICAL pretest)
+5. docs/handoffs/VRES-PERSONAL-HOOK-R1-GUARDED-WINDOWS-SELECTED-TEST-NEXT-2026-10-29.ps1 (ALREADY EXECUTED; DO NOT RERUN)
+6. docs/roadmap/VRES-CHATGPT-LED-FULL-SCOPE-DELIVERY-PLAN-2026-10-22.md
+7. docs/roadmap/VRES-FULL-SCOPE-FUNCTIONALITY-REGISTER-2026-10-22.md
+8. docs/handoffs/VRES-PERSONAL-PT2D-50-PASS-EXIT0-INDEPENDENT-REVIEWS-OPEN-AND-NEXT-GATE-2026-10-29.md
+9. docs/handoffs/VRES-PERSONAL-PT1-R1-INDEPENDENT-STATIC-ACCEPT-AND-PT2-OFFLINE-NEXT-2026-10-29.md
+
+LATEST PUBLISHED HOOK SOURCE:
+Branch feature/personal-hook-readonly-posttool-fence-20261029
+HEAD 891fb22287b6ee8b028eda7256c0b5639df40c04
+TREE 1b9d7ddcc4f6c8e0cafda8cea5e1c5d51e3ca9db
+SINGLE PT2D PARENT a5913288b7748693adafc36c9c1cb35af3ea3949
+EXACT TWO PATHS: MODIFY plugins/vres-os/hooks/hooks.json new Git blob e286e4be47d058ee6ed6a3169fc45803aedc0df1 (old blob 5833973d9be6ccf4263dda2d461cc5994d30416c), ADD tests/test_hook_readonly_posttool_fence.py new blob 97c2bb75ae31ff98a5ce66c450d4f51d6e12f15a. No inherited source/installer/main changes. GitHub ref/commit/tree/parent/compare readback PASS.
+
+LATEST GUARDED WINDOWS OPERATOR EVIDENCE:
+Full chat-pasted PowerShell, not raw Windows upload. LF-normalized CHAT transcription 9,180 text characters / 119 lines, Git blob 78122ee0fbc75b9020bd19cf590c8e96d42162e5; do NOT claim original raw file-byte SHA256 or independent physical network audit.
+Original P2 C:\Projects\Vres-P2F-Postinstall-Hardening-20261022 HEAD 82c824... clean reported PASS.
+Prior PT2D C:\Projects\Vres-ChatGPT-Review-Personal-PT2D-20261029 exact SHA a591... tree d45... clean PASS.
+New HOOK-R1 C:\Projects\Vres-ChatGPT-Review-Personal-HOOK-R1-20261029 created detached exact HEAD 891fb..., tree 1b9..., single parent a591..., exactly 20 pretest Git blobs, one modified hook JSON and one added regression test, diff--check clean, test checkout clean, VRES_PERSONAL_HOOK_R1_PREFLIGHT_PASS before pytest.
+Python3.12 -B -q -rA -p no:cacheprovider selected ONLY new 28-case hook read-only module, existing 4-case plugin contract module, TWO specific E6 hook matcher regression tests: **34 DISTINCT individual PASSED** / 0 FAILED / PYTEST_EXIT_CODE=0. Pytest plugin autoload disabled, process DB/PG/integration vars isolated, AppData fence unexpected refusals=0/integration_opt_in=False, env restored, posttest HEAD/tree/20 blobs/new HOOK-R1 clean and prior PT2D clean PASS. HOOK_R1_TEST_EXIT_CODE=0 and final VRES_PERSONAL_HOOK_R1_WINDOWS_SELECTED_TEST_COMPLETE after postcheck. Final PowerShell prompt in prior PT2D checkout is not error: Git -C and Push/Pop retained the caller CWD. Verdict scoped offline tests PASS at SHA 891fb..., no independent Claude static review and no host hook update.
+
+FEATURE BEHAVIOR:
+Earlier PT1 Claude source Read x4 and Grep x3 triggered SEVEN automatic Vres PostToolUse DB-route attempts (refused). New Git SOURCE excludes exact Read, Glob, Grep from PostToolUse experience-observe command, PostToolUse reply_activity_observe MCP, and PostToolUseFailure reply MCP. Preserves all action-tool observers and special work-unit/AskUserQuestion rules, PreToolUse read exemptions, self-MCP recursion exceptions, SubagentHandback experience skip, and other lifecycle hooks. Does NOT modify the installed plugin; DOES NOT remove SessionStart/UserPromptSubmit/Stop/managed hooks; DOES NOT certify safe new normal Claude Code session. Do NOT start Claude Code yet, do not modify installed/global user hooks or call DB. No model activation.
+
+PRIOR WINDOWS/CLAUDE EVIDENCE:
+PT1 R1 HEAD 7b6b7457236cf601fa056152b78713060fe0573e 189 selected Windows PASS/exit0; INDEPENDENT STATIC_ACCEPT 0 blockers/5 informational despite automatic 7 hook attempts refused.
+PT2A HEAD 22122047cc985ffc8fb3e5d0d30e3d68d8d57df9 213 selected Windows PASS/exit0, independent reviewer NOT_RUN.
+PT2B HEAD 361500291601e241b7c579012a25442ff4a95d7d 43 PASS, independent NOT_RUN.
+PT2C selected HEAD 81149beab52750c93db91453e18efbd5f7a21da4 54 PASS, independent NOT_RUN. Unselected alternative 59d811... was synthetic only, not Windows acceptance.
+PT2D HEAD a5913288b7748693adafc36c9c1cb35af3ea3949 50 PASS, independent NOT_RUN.
+HOOK-R1 HEAD 891fb... 34 PASS, independent NOT_RUN.
+All old failed R0/ancillary acceptance chain remains immutable.
+
+ABSOLUTE HOLDS:
+LIVE_SCHEMA_048_INCIDENT=OPEN NO PostgreSQL even SELECT (direct or via Vres MCP/task/CLI/bootstrap/doctor/health/hooks/F2/migration/recovery).
+HOST_HOOK_DB_ROUTE_ATTEMPTED_AND_REFUSED=OPEN seven automatic hook attempts all REFUSED. No attempt-free safe reviewer session established yet.
+VRES_REPLY_GUARD_WARNING and VRES_PERSISTENCE_WARNING unresolved; no probes.
+Last observed original P2 installed Chairman Sonnet/high, proposed Opus/medium UNINSTALLED and physical loaded model/effort UNKNOWN. No v2 active pointer or host backup/release actual attestation, no protected installation consent. Strict F1 independently rooted positive authority BLOCKED, separate proportional PERSONAL P0/P1/P2/P3.
+Protected Fable/high validator/arbiter and Sonnet/Opus worker model pins unchanged, current-user local secret handles and explicit cross-project binding, full V-01..V-42 roadmap, Visual Studio fresh/legacy onboarding, E7/PA/F2 and production readiness holds remain.
+
+METHOD:
+ChatGPT owns architecture/source/test/Git commits/continuity; user is Windows operator and authorizes consequential actions; independent Claude Code with existing subscription when genuinely no-hook/DB-safe, not Claude web Chat or API-key/account-tier excursion. One atomic SHA-pinned offline Windows PowerShell validation for a new feature, selected tests only, process environment isolated/restored, Git pre/post exact SHA/blob and clean, count individual named cases; fix real defects in new bounded source revision and never claim PASS from synthetic tests. Preserve meaningful handoffs with single-parent nonforced expected-old GitHub docs ref update/readback. All operator commands and Claude prompts INLINE as code blocks.
+
+NEXT RECOMMENDATION:
+Do not rerun passing HOOK-R1 tests or attempt ordinary Claude Code review/install. Source-level direct defect validated at 891fb...; installed/SessionStart/managed hook safety remains open. Continue the smallest useful non-DB, no-installed-write source-only PERSONAL functionality from the full V-01..V-42 backlog. Select feature based on latest accepted source, implement on a NEW dedicated Git branch with precise SHA/tree/changed-file allowlist and negative tests; prepare one Windows guarded test gate. Independently reviewed protected write remains separately BLOCKED until safe hook environment and actual rollback/consent exist. Avoid more speculative PT2E/model-switch planning.
