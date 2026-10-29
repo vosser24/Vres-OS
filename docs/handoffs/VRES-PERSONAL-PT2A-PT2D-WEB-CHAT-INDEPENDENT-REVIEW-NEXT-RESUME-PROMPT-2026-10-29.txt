@@ -1,0 +1,35 @@
+RESUME VRES-OS — PERSONAL PT2A–PT2D SOURCE REVIEW: GITHUB HOOK AUDIT COMPLETE / SAFE WEB-CHAT REVIEW OPERATOR ACTION NEXT
+
+Repo: vosser24/Vres-OS.
+Canonical docs branch: docs/chatgpt-continuity-20261023. Verify latest HEAD fresh, do NOT assume old SHA.
+
+READ FIRST:
+1. docs/handoffs/VRES-CHATGPT-CONTINUITY-INDEX.md
+2. docs/handoffs/VRES-PERSONAL-PT2A-PT2D-GITHUB-ONLY-HOOK-AUDIT-AND-WEB-CHAT-REVIEW-PREFLIGHT-2026-10-29.md
+3. docs/handoffs/VRES-PERSONAL-PT2A-PT2D-INDEPENDENT-STATIC-REVIEW-EXACT-SOURCE-PACKET-2026-10-29.txt
+4. docs/handoffs/VRES-PERSONAL-PT2D-50-PASS-EXIT0-INDEPENDENT-REVIEWS-OPEN-AND-NEXT-GATE-2026-10-29.md
+5. docs/handoffs/VRES-PERSONAL-PT1-R1-INDEPENDENT-CLAUDE-STATIC-ACCEPT-AND-HOOK-REFUSALS-REPORT-2026-10-29.txt
+6. docs/architecture/VRES-PERSONAL-RISK-PROFILE-AND-CHAIRMAN-GOVERNED-MODEL-TRANSITION-V1-2026-10-27.md
+7. docs/roadmap/VRES-FULL-SCOPE-FUNCTIONALITY-REGISTER-2026-10-22.md
+
+SOURCE PIN:
+PT2D feature/personal-governed-chairman-pt2d-offline-release-candidate-20261029 HEAD a5913288b7748693adafc36c9c1cb35af3ea3949, tree d45ffc91781be6681124ff369af5df4d06300ce9, PT2C parent 81149beab52750c93db91453e18efbd5f7a21da4. Exactly two PT2D added source/test paths, source blob 2f6d69508e0dceb68e45610d2c3dd59565232c1a and test blob 28ab0476f1a82bc4e875d7500eff6d4d07744291. Other source unchanged.
+Historical selected Windows TEST evidence: PT1 R1 189 PASS/exit0 with independent STATIC_ACCEPT 0 blockers/5 informationals; PT2A 213 PASS/exit0 independent review NOT_RUN; PT2B 43 PASS/exit0 independent NOT_RUN; PT2C 54 PASS/exit0 independent NOT_RUN; PT2D 50 PASS/exit0 independent NOT_RUN. Each at own exact published SHA. PT2C unselected unattached alternative 59d811... remains historical only. No full suite, no real backup, no physical Opus/medium attestation or active install.
+
+CURRENT GITHUB-ONLY HOOK AUDIT:
+Pinned PT2D hook config hooks.json blob 5833973d9be6ccf4263dda2d461cc5994d30416c has broad PostToolUse/PostToolUseFailure mcp_tool reply_activity_observe matcher including Read/Grep/Glob, plus broad PostToolUse CLI experience observer. SessionStart/UserPromptSubmit/Stop/compact/session-end also local-hook entrypoints. Original PT1 independent Claude Read x4/Grep x3 PostToolUse auto DB-route attempts were all REFUSED by guard. Thus NATIVE CLAUDE CODE NO-DB-ATTEMPT REVIEW SAFE MODE IS NOT ESTABLISHED. Neither a changed folder nor "no DB" prompt fixes that. Do not start native Claude Code/Cowork/Desktop agent, inspect installed/global hooks or run any local hook/DB probes. GitHub source audit did not read installed user profile.
+
+NEW SOURCE REVIEW PACKET:
+GitHub docs-only blob 7eb30e0ef2f2288e4e5951da4057352f256091d5, single UTF-8 text source packet, exactly ten FULL source/test files at pinned GitHub SHA: PT2A source/test 0aa49e.../463f6c..., PT2B 5b9a0ed.../0d6e5a..., PT2C 68b0f430.../6459dfff..., PT2D 2f6d695.../28ab047..., dependencies PT1 preview 045969... and chairman_policy 36e62.... All exact file Git blobs verified by GitHub before bundle creation. Packet prepared by authoring ChatGPT, not an independent source-publisher attestation. No installed pointer, backup, current-user credentials or PostgreSQL state fetched.
+
+NEXT ONE OPERATOR ACTION:
+Open a NEW **plain browser Claude web CHAT** (NOT Claude Code, Cowork, Desktop or project/local tool session). Do not start, stop, close or restart an existing native Claude Code/Desktop session, because its lifecycle hooks may run; if the browser chat would be desktop-connected, STOP. Use no tools, connectors, MCP, browser/computer use, code execution, host file access, database or Vres task call. If connectors/tools cannot be confirmed off, STOP. Download only the source packet from GitHub docs link using ordinary browser and upload that packet as attachment to the plain web chat. The explicit upload shares repo source with Claude provider; user controls it. Copy the full independent reviewer prompt from the handoff section 5 AS A CODE BLOCK in the user-visible ChatGPT response, not only a file. Reviewer must read all 10 exact file blocks and issue per-PT2A/B/C/D STATIC_ACCEPT/STATIC_REVISE/EVIDENCE_BLOCKED with BLOCKING vs INFO findings and a no-tools/source-provenance limitation. Never claim independent cryptographic Git hash validation from ChatGPT-supplied packet; no tests rerun or Opus installation. Return complete reviewer response plus operator confirmation that web plain chat had no desktop/local hooks/tools/connectors. If any tool or hook attempts, STOP and report EVIDENCE_BLOCKED. PT2A–D independent review remains NOT_RUN until real reviewed output is assessed.
+
+SAFETY:
+LIVE_SCHEMA_048_INCIDENT=OPEN: NO PostgreSQL even SELECT, directly or via Vres MCP/CLI/tasks/hooks/bootstrap/doctor/health/F2/recovery.
+HOST_HOOK_DB_ROUTE_ATTEMPTED_AND_REFUSED=OPEN (7 automatic DB-route attempts REFUSED). VRES_REPLY_GUARD_WARNING / VRES_PERSISTENCE_WARNING remain unresolved, no probes. Installed original P2 Chairman last observed Sonnet/high, requested Opus/medium UNINSTALLED, effective model/effort UNKNOWN. Strict F1 independently rooted positive authority BLOCKED. PERSONAL P0-P3 policy, Fable/high router/validator and worker pins, credentials and per-current-user cross-project handles, Visual Studio onboarding, full V-01..V-42 roadmap, E7/PA/F2 release holds preserved. No protected write without separate user consent, independent write-code review, real release-v2 provenance and rollback readiness.
+
+METHODOLOGY:
+ChatGPT architects minimal changes; exact Git HEAD/tree/parent/file SHA and two-file allowlist per source increment; nonforced ref CAS/readback, user single atomic fail-fast Windows pytest in detached SHA checkout with process DB/PG env isolation/restore and AppData fence, named cases/exits/pre/post clean; independent review must not trigger any DB route; after each material gate docs-only detailed handoff, exact four-file allowlist, single-parent nonforced GitHub update/readback. No blind reruns, no silent installation, no false reviewer acceptance, preserve historical evidence. Prior "ast.Import.name" bug and incorrectly continued scripts after STOP must not recur.
+
+STATE: SOURCE REVIEW PACKET PREPARED, BROWSER REVIEW OPERATOR ACTION PENDING, NATIVE CODE REVIEW BLOCKED, INDEPENDENT PT2A/B/C/D NOT_RUN.
