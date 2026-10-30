@@ -1,0 +1,99 @@
+=== PERSONAL 168_A6 ONE ATOMIC WINDOWS PREFLIGHT ===
+PASS: Original P2 anchor HEAD
+PASS: Original P2 anchor checkout
+PASS: Prior tested #168 A5 HEAD
+PASS: Prior tested #168 A5 tree
+PASS: Prior tested #168 A5 validation checkout
+PASS: Official GitHub origin
+PASS: Remote 168_A6 HEAD
+remote: Enumerating objects: 8, done.
+remote: Counting objects: 100% (8/8), done.
+remote: Compressing objects: 100% (7/7), done.
+remote: Total 8 (delta 0), reused 0 (delta 0), pack-reused 0 (from 0)
+Unpacking objects: 100% (8/8), 32.27 KiB | 600.00 KiB/s, done.
+From https://github.com/vosser24/Vres-OS
+ * branch            feature/168-personal-legacy-claude-architecture-activation-fence-20261030 -> FETCH_HEAD
+ * [new branch]      feature/168-personal-legacy-claude-architecture-activation-fence-20261030 -> origin/feature/168-personal-legacy-claude-architecture-activation-fence-20261030
+PASS: Fetched 168_A6 HEAD
+Preparing worktree (detached HEAD e190e82)
+HEAD is now at e190e82 fix(168): prevent legacy Claude KEEP/DROP from bypassing architecture hold
+PASS: 168_A6 detached mode
+PASS: 168_A6 HEAD
+PASS: 168_A6 tree
+PASS: 168_A6 single parent
+PASS: Git blob src/vres_os/project_adoption.py
+PASS: Git blob src/vres_os/bootstrap.py
+PASS: Git blob tests/test_project_adoption_legacy_architecture_fence.py
+PASS: Git blob src/vres_os/cli.py
+PASS: Git blob tests/test_project_adoption_plan_template.py
+PASS: Git blob tests/test_project_adoption_cli_plan.py
+PASS: Git blob src/vres_os/paths.py
+PASS: Git blob tests/test_project_adoption_alignment.py
+PASS: Git blob tests/test_project_adoption_architecture_gate.py
+PASS: Git blob src/vres_os/architecture_governance.py
+PASS: Git blob src/vres_os/architecture_plan.py
+PASS: Git blob src/vres_os/architecture_policy.py
+PASS: Git blob tests/test_project_adoption.py
+PASS: Git blob tests/test_architecture_governance.py
+PASS: Git blob tests/test_cli_status_json.py
+PASS: Git blob tests/conftest.py
+PASS: Git blob plugins/vres-os/hooks/hooks.json
+PASS: Git blob tests/test_hook_readonly_posttool_fence.py
+PASS: Git blob plugins/vres-os/agents/chairman.md
+PASS: Git blob install.ps1
+PASS: exactly two modified A6 source files and one added legacy architecture regression test
+PASS: 168_A6 git diff --check
+PASS: 168_A6 checkout before tests
+VRES_PERSONAL_168_A6_PREFLIGHT_PASS
+=== PERSONAL 168_A6 GUARDED OFFLINE SELECTED PYTEST ===
+PYTEST_PLUGIN_AUTOLOAD=DISABLED
+PASS: process DB/PG/integration variables isolated
+TEST_COMMAND=py -3.12 -B -m pytest -q -rA -p no:cacheprovider tests/test_project_adoption_legacy_architecture_fence.py tests/test_project_adoption.py::test_existing_project_is_legacy_and_inventory_changes_nothing tests/test_project_adoption.py::test_activation_changes_only_approved_paths_then_rollback_restores_exact_bytes tests/test_project_adoption.py::test_interrupted_activation_is_never_half_active_and_is_recoverable tests/test_project_adoption.py::test_pending_legacy_review_is_not_ready_and_reaches_no_setup_or_database tests/test_project_adoption_architecture_gate.py::test_established_source_without_claude_is_review_required_not_active tests/test_project_adoption_plan_template.py::test_draft_is_exact_schema_but_deliberately_contract_invalid
+..............                                                                                                   [100%]
+======================================================= PASSES ========================================================
+LIVE APP-DATA FENCE: unexpected refusals=0 protected=['c:\\users\\user\\appdata\\local\\vresos', 'c:\\users\\user\\appdata\\roaming\\vresos'] trusted_temp_base=C:\Users\User\AppData\Local\Temp session_root=C:\Users\User\AppData\Local\Temp\vres-pytest-app-data-rfkb286g\VresOS init_order=['validate-temp-base', 'create-session-directory', 'validate-session-directory', 'create-app-data-root', 'enable-isolation'] removed_env=[] integration_opt_in=False
+=============================================== short test summary info ===============================================
+PASSED tests/test_project_adoption_legacy_architecture_fence.py::test_established_legacy_claude_inventory_exposes_separate_architecture_hold
+PASSED tests/test_project_adoption_legacy_architecture_fence.py::test_keep_drop_decisions_remain_usable_but_cannot_activate_established_legacy
+PASSED tests/test_project_adoption_legacy_architecture_fence.py::test_old_saved_unprotected_decision_record_still_cannot_activate_after_source_growth
+PASSED tests/test_project_adoption_legacy_architecture_fence.py::test_start_refreshes_architecture_hold_if_source_changes_without_claude_changes
+PASSED tests/test_project_adoption_legacy_architecture_fence.py::test_unknown_or_unparseable_source_blocks_legacy_with_claude
+PASSED tests/test_project_adoption_legacy_architecture_fence.py::test_bootstrap_returns_legacy_architecture_hold_before_any_setup_or_db
+PASSED tests/test_project_adoption_legacy_architecture_fence.py::test_small_legacy_keeps_prior_authorized_activation_and_does_not_refactor
+PASSED tests/test_project_adoption_legacy_architecture_fence.py::test_pending_established_legacy_cannot_use_unrelated_plan_template_gate
+PASSED tests/test_project_adoption.py::test_existing_project_is_legacy_and_inventory_changes_nothing
+PASSED tests/test_project_adoption.py::test_activation_changes_only_approved_paths_then_rollback_restores_exact_bytes
+PASSED tests/test_project_adoption.py::test_interrupted_activation_is_never_half_active_and_is_recoverable
+PASSED tests/test_project_adoption.py::test_pending_legacy_review_is_not_ready_and_reaches_no_setup_or_database
+PASSED tests/test_project_adoption_architecture_gate.py::test_established_source_without_claude_is_review_required_not_active
+PASSED tests/test_project_adoption_plan_template.py::test_draft_is_exact_schema_but_deliberately_contract_invalid
+PYTEST_EXIT_CODE=0
+PASS: PROCESS_ENVIRONMENT_RESTORED
+=== PERSONAL 168_A6 POSTTEST GIT INTEGRITY ===
+PASS: Posttest 168_A6 HEAD
+PASS: Posttest 168_A6 tree
+PASS: Posttest blob src/vres_os/project_adoption.py
+PASS: Posttest blob src/vres_os/bootstrap.py
+PASS: Posttest blob tests/test_project_adoption_legacy_architecture_fence.py
+PASS: Posttest blob src/vres_os/cli.py
+PASS: Posttest blob tests/test_project_adoption_plan_template.py
+PASS: Posttest blob tests/test_project_adoption_cli_plan.py
+PASS: Posttest blob src/vres_os/paths.py
+PASS: Posttest blob tests/test_project_adoption_alignment.py
+PASS: Posttest blob tests/test_project_adoption_architecture_gate.py
+PASS: Posttest blob src/vres_os/architecture_governance.py
+PASS: Posttest blob src/vres_os/architecture_plan.py
+PASS: Posttest blob src/vres_os/architecture_policy.py
+PASS: Posttest blob tests/test_project_adoption.py
+PASS: Posttest blob tests/test_architecture_governance.py
+PASS: Posttest blob tests/test_cli_status_json.py
+PASS: Posttest blob tests/conftest.py
+PASS: Posttest blob plugins/vres-os/hooks/hooks.json
+PASS: Posttest blob tests/test_hook_readonly_posttool_fence.py
+PASS: Posttest blob plugins/vres-os/agents/chairman.md
+PASS: Posttest blob install.ps1
+PASS: 168_A6 worktree after selected test
+PASS: Prior tested #168 A5 worktree unchanged
+168_A6_TEST_EXIT_CODE=0
+VRES_PERSONAL_168_A6_WINDOWS_SELECTED_TEST_COMPLETE
+PS C:\Projects\Vres-ChatGPT-Review-Personal-PT2D-20261029>
