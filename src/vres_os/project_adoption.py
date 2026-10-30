@@ -533,6 +533,21 @@ def _record_ancestor_identity(path: Path) -> tuple[tuple[str, int, int, int, int
     return tuple(stamps)
 
 
+def _unambiguous_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Refuse duplicate decoded members anywhere within a saved JSON record."""
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicated adoption JSON member")
+        result[key] = value
+    return result
+
+
+def _refuse_nonfinite_json_constant(_value: str) -> Any:
+    """NaN/Infinity are non-standard JSON and must not enter saved state."""
+    raise ValueError("Unsupported nonfinite adoption JSON constant")
+
+
 def _read_json(path: Path) -> Any:
     """Bounded, non-following persisted JSON read with ancestor reparse checks.
 
@@ -599,7 +614,11 @@ def _read_json(path: Path) -> Any:
         text = raw.decode("utf-8")
         if not _bounded_json_structure(text):
             raise ValueError("Malformed or excessively nested adoption JSON")
-        return json.loads(text)
+        return json.loads(
+            text,
+            object_pairs_hook=_unambiguous_json_object,
+            parse_constant=_refuse_nonfinite_json_constant,
+        )
     except AdoptionError:
         raise
     except (OSError, UnicodeError, ValueError, TypeError, RecursionError, OverflowError):
