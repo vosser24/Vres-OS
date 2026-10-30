@@ -1,0 +1,142 @@
+=== PERSONAL 168_A4 ONE ATOMIC WINDOWS PREFLIGHT ===
+PASS: Original P2 anchor HEAD
+PASS: Original P2 anchor checkout
+PASS: Prior tested #168 A3 R1 HEAD
+PASS: Prior tested #168 A3 R1 tree
+PASS: Prior tested #168 A3 R1 validation checkout
+PASS: Official GitHub origin
+PASS: Remote 168_A4 HEAD
+remote: Enumerating objects: 7, done.
+remote: Counting objects: 100% (7/7), done.
+remote: Compressing objects: 100% (6/6), done.
+remote: Total 7 (delta 0), reused 0 (delta 0), pack-reused 0 (from 0)
+Unpacking objects: 100% (7/7), 21.70 KiB | 505.00 KiB/s, done.
+From https://github.com/vosser24/Vres-OS
+ * branch            feature/168-personal-plan-path-ancestor-hardening-20261030 -> FETCH_HEAD
+ * [new branch]      feature/168-personal-plan-path-ancestor-hardening-20261030 -> origin/feature/168-personal-plan-path-ancestor-hardening-20261030
+PASS: Fetched 168_A4 HEAD
+Preparing worktree (detached HEAD fa68ff0)
+HEAD is now at fa68ff0 fix(168): reject linked plan-path ancestors and sensitive aliases in offline CLI
+PASS: 168_A4 detached mode
+PASS: 168_A4 HEAD
+PASS: 168_A4 tree
+PASS: 168_A4 single parent
+PASS: Git blob src/vres_os/cli.py
+PASS: Git blob tests/test_project_adoption_cli_plan.py
+PASS: Git blob src/vres_os/paths.py
+PASS: Git blob src/vres_os/project_adoption.py
+PASS: Git blob tests/test_project_adoption_alignment.py
+PASS: Git blob src/vres_os/bootstrap.py
+PASS: Git blob tests/test_project_adoption_architecture_gate.py
+PASS: Git blob src/vres_os/architecture_governance.py
+PASS: Git blob src/vres_os/architecture_plan.py
+PASS: Git blob src/vres_os/architecture_policy.py
+PASS: Git blob tests/test_project_adoption.py
+PASS: Git blob tests/test_architecture_governance.py
+PASS: Git blob tests/test_cli_status_json.py
+PASS: Git blob tests/conftest.py
+PASS: Git blob plugins/vres-os/hooks/hooks.json
+PASS: Git blob tests/test_hook_readonly_posttool_fence.py
+PASS: Git blob plugins/vres-os/agents/chairman.md
+PASS: Git blob install.ps1
+PASS: exactly two A4 modifications (CLI loader and CLI tests)
+PASS: 168_A4 git diff --check
+PASS: 168_A4 checkout before tests
+VRES_PERSONAL_168_A4_PREFLIGHT_PASS
+=== PERSONAL 168_A4 GUARDED OFFLINE SELECTED PYTEST ===
+PYTEST_PLUGIN_AUTOLOAD=DISABLED
+PASS: process DB/PG/integration variables isolated
+TEST_COMMAND=py -3.12 -B -m pytest -q -rA -p no:cacheprovider tests/test_project_adoption_cli_plan.py tests/test_project_adoption_alignment.py::test_valid_plan_is_ready_for_protected_validation_but_never_activates tests/test_project_adoption_alignment.py::test_missing_state_refuses_without_creating_any_state_directories tests/test_cli_status_json.py::test_status_serializes_nested_database_datetimes_and_redacts
+............s............                                                                                        [100%]
+======================================================= PASSES ========================================================
+_____________________________ test_plan_inside_project_is_rejected_before_any_processing ______________________________
+------------------------------------------------ Captured stderr call -------------------------------------------------
+Plan file must be outside the project to avoid changing its audit
+__________________________________ test_secret_looking_plan_paths_are_refused[.env] ___________________________________
+------------------------------------------------ Captured stderr call -------------------------------------------------
+Plan must be an explicitly supplied non-sensitive JSON document
+______________________________ test_secret_looking_plan_paths_are_refused[secrets.json] _______________________________
+------------------------------------------------ Captured stderr call -------------------------------------------------
+Plan must be an explicitly supplied non-sensitive JSON document
+____________________________ test_secret_looking_plan_paths_are_refused[credentials.json] _____________________________
+------------------------------------------------ Captured stderr call -------------------------------------------------
+Plan must be an explicitly supplied non-sensitive JSON document
+________________________________ test_secret_looking_plan_paths_are_refused[auth.json] ________________________________
+------------------------------------------------ Captured stderr call -------------------------------------------------
+Plan must be an explicitly supplied non-sensitive JSON document
+_____________________________ test_too_large_plan_file_is_refused_and_never_read_as_json ______________________________
+------------------------------------------------ Captured stderr call -------------------------------------------------
+Plan file must contain 2 to 65536 bytes
+_____________________________ test_invalid_json_is_rejected_without_printing_source_text ______________________________
+------------------------------------------------ Captured stderr call -------------------------------------------------
+Plan file is not valid UTF-8 JSON
+_________________________________ test_no_saved_state_stays_missing_after_plan_check __________________________________
+------------------------------------------------ Captured stderr call -------------------------------------------------
+A previously created ordinary adoption state directory is required
+_____________________ test_directory_symlink_ancestor_is_denied_without_windows_symlink_privilege _____________________
+------------------------------------------------ Captured stderr call -------------------------------------------------
+Plan path must not traverse links or junctions
+___________________________ test_windows_junction_reparse_ancestor_denied_without_privilege ___________________________
+------------------------------------------------ Captured stderr call -------------------------------------------------
+Plan path must not traverse links or junctions
+_____________________________ test_canonicalized_sensitive_alias_is_rejected_without_read _____________________________
+------------------------------------------------ Captured stderr call -------------------------------------------------
+Plan must be an explicitly supplied non-sensitive JSON document
+_____________________________ test_parent_dotdot_path_refused_without_input_content_read ______________________________
+------------------------------------------------ Captured stderr call -------------------------------------------------
+Plan file path must not traverse parent directories
+LIVE APP-DATA FENCE: unexpected refusals=0 protected=['c:\\users\\user\\appdata\\local\\vresos', 'c:\\users\\user\\appdata\\roaming\\vresos'] trusted_temp_base=C:\Users\User\AppData\Local\Temp session_root=C:\Users\User\AppData\Local\Temp\vres-pytest-app-data-oe91w0gx\VresOS init_order=['validate-temp-base', 'create-session-directory', 'validate-session-directory', 'create-app-data-root', 'enable-isolation'] removed_env=[] integration_opt_in=False
+=============================================== short test summary info ===============================================
+PASSED tests/test_project_adoption_cli_plan.py::test_cli_plan_check_command_is_registered_without_running_it
+PASSED tests/test_project_adoption_cli_plan.py::test_valid_plan_command_only_prints_non_authorizing_readonly_result
+PASSED tests/test_project_adoption_cli_plan.py::test_typer_command_uses_existing_project_state_without_db_setup
+PASSED tests/test_project_adoption_cli_plan.py::test_invalid_proposal_never_echoes_unknown_user_supplied_field
+PASSED tests/test_project_adoption_cli_plan.py::test_stale_plan_digest_is_rejected_without_activation
+PASSED tests/test_project_adoption_cli_plan.py::test_plan_inside_project_is_rejected_before_any_processing
+PASSED tests/test_project_adoption_cli_plan.py::test_secret_looking_plan_paths_are_refused[.env]
+PASSED tests/test_project_adoption_cli_plan.py::test_secret_looking_plan_paths_are_refused[secrets.json]
+PASSED tests/test_project_adoption_cli_plan.py::test_secret_looking_plan_paths_are_refused[credentials.json]
+PASSED tests/test_project_adoption_cli_plan.py::test_secret_looking_plan_paths_are_refused[auth.json]
+PASSED tests/test_project_adoption_cli_plan.py::test_too_large_plan_file_is_refused_and_never_read_as_json
+PASSED tests/test_project_adoption_cli_plan.py::test_invalid_json_is_rejected_without_printing_source_text
+PASSED tests/test_project_adoption_cli_plan.py::test_no_saved_state_stays_missing_after_plan_check
+PASSED tests/test_project_adoption_cli_plan.py::test_data_dir_path_override_does_not_create_state_root
+PASSED tests/test_project_adoption_cli_plan.py::test_data_dir_path_default_does_not_create_state_root
+PASSED tests/test_project_adoption_cli_plan.py::test_existing_state_creation_remains_explicit
+PASSED tests/test_project_adoption_cli_plan.py::test_valid_plan_check_does_not_call_creating_data_dir
+PASSED tests/test_project_adoption_cli_plan.py::test_directory_symlink_ancestor_is_denied_without_windows_symlink_privilege
+PASSED tests/test_project_adoption_cli_plan.py::test_windows_junction_reparse_ancestor_denied_without_privilege
+PASSED tests/test_project_adoption_cli_plan.py::test_canonicalized_sensitive_alias_is_rejected_without_read
+PASSED tests/test_project_adoption_cli_plan.py::test_parent_dotdot_path_refused_without_input_content_read
+PASSED tests/test_project_adoption_alignment.py::test_valid_plan_is_ready_for_protected_validation_but_never_activates
+PASSED tests/test_project_adoption_alignment.py::test_missing_state_refuses_without_creating_any_state_directories
+PASSED tests/test_cli_status_json.py::test_status_serializes_nested_database_datetimes_and_redacts
+SKIPPED [1] tests\test_project_adoption_cli_plan.py:243: Windows symlink privilege unavailable
+PYTEST_EXIT_CODE=0
+PASS: PROCESS_ENVIRONMENT_RESTORED
+=== PERSONAL 168_A4 POSTTEST GIT INTEGRITY ===
+PASS: Posttest 168_A4 HEAD
+PASS: Posttest 168_A4 tree
+PASS: Posttest blob src/vres_os/cli.py
+PASS: Posttest blob tests/test_project_adoption_cli_plan.py
+PASS: Posttest blob src/vres_os/paths.py
+PASS: Posttest blob src/vres_os/project_adoption.py
+PASS: Posttest blob tests/test_project_adoption_alignment.py
+PASS: Posttest blob src/vres_os/bootstrap.py
+PASS: Posttest blob tests/test_project_adoption_architecture_gate.py
+PASS: Posttest blob src/vres_os/architecture_governance.py
+PASS: Posttest blob src/vres_os/architecture_plan.py
+PASS: Posttest blob src/vres_os/architecture_policy.py
+PASS: Posttest blob tests/test_project_adoption.py
+PASS: Posttest blob tests/test_architecture_governance.py
+PASS: Posttest blob tests/test_cli_status_json.py
+PASS: Posttest blob tests/conftest.py
+PASS: Posttest blob plugins/vres-os/hooks/hooks.json
+PASS: Posttest blob tests/test_hook_readonly_posttool_fence.py
+PASS: Posttest blob plugins/vres-os/agents/chairman.md
+PASS: Posttest blob install.ps1
+PASS: 168_A4 worktree after selected test
+PASS: Prior tested #168 A3 R1 worktree unchanged
+168_A4_TEST_EXIT_CODE=0
+VRES_PERSONAL_168_A4_WINDOWS_SELECTED_TEST_COMPLETE
+PS C:\Projects\Vres-ChatGPT-Review-Personal-PT2D-20261029>
