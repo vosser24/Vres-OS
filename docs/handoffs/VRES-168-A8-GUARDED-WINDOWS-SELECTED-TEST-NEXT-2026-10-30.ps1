@@ -99,13 +99,10 @@
         }
 
         $changed = @(& git -C $review diff --no-ext-diff --name-status --no-renames $parent HEAD --)
-        $expectedChanges = @(
-            ("M" + [char]9 + 'src/vres_os/cli.py'),
-            ("M" + [char]9 + 'src/vres_os/project_adoption.py'),
-            ("A" + [char]9 + 'tests/test_project_adoption_plan_findings.py')
-        )
         if ($LASTEXITCODE -ne 0 -or $changed.Count -ne 3 -or
-            ($changed -join [char]10) -cne ($expectedChanges -join [char]10)) {
+            $changed[0] -cne ("M" + [char]9 + 'src/vres_os/cli.py') -or
+            $changed[1] -cne ("M" + [char]9 + 'src/vres_os/project_adoption.py') -or
+            $changed[2] -cne ("A" + [char]9 + 'tests/test_project_adoption_plan_findings.py')) {
             throw 'STOP: A8 exact three-path change allowlist mismatch'
         }
         Write-Host 'PASS: A8 exactly M CLI + M adoption + A new regression tests'
