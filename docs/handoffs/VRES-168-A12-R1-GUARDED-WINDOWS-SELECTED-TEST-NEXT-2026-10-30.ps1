@@ -114,7 +114,7 @@
         if ($LASTEXITCODE -ne 0 -or $changed.Count -ne 2 -or
             $changed[0] -cne ("M" + [char]9 + 'src/vres_os/project_adoption.py') -or
             $changed[1] -cne ("M" + [char]9 + 'tests/test_project_adoption_record_read_fence.py')) {
-            throw 'STOP: A12_R1 exact M/A two-file allowlist mismatch'
+            throw 'STOP: A12_R1 exact M/M two-file allowlist mismatch'
         }
         Write-Host 'PASS: A12_R1 exactly two modified files versus rejected original A12'
         $diffCheck = @(& git -C $review diff --no-ext-diff --check $failedHead HEAD --)
