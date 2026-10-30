@@ -1,0 +1,92 @@
+VRES M2-HOST USER-PASTED WINDOWS SELECTED TEST EVIDENCE — 2026-10-30
+SOURCE: user's inline pasted console excerpt in this ChatGPT conversation; NOT a file-attested raw original transcript.
+IMPORTANT: This is a faithful transcription of 63 test ID rows and salient wrapper observations; original console preflight is NOT present in user's excerpt. Do not treat this as cryptographically identical raw Windows output.
+REFERENCE M2 SOURCE COMMIT: 526fb9d61e4a61c26c19931f9adf2d68eecd1bc8
+REFERENCE M2 TREE: 9919f363a8608e31e4c5a6f66adb765c7021b484
+REFERENCE SCRIPT: docs/handoffs/VRES-PERSONAL-M2-HOST-UPDATE-OFFLINE-WINDOWS-SELECTED-TEST-2026-10-30.ps1
+
+======================================================= PASSES ========================================================
+LIVE APP-DATA FENCE: unexpected refusals=0 protected=['c:\\users\\user\\appdata\\local\\vresos', 'c:\\users\\user\\appdata\\roaming\\vresos'] trusted_temp_base=C:\Users\User\AppData\Local\Temp session_root=C:\Users\User\AppData\Local\Temp\vres-pytest-app-data-d19f1ls8\VresOS init_order=['validate-temp-base', 'create-session-directory', 'validate-session-directory', 'create-app-data-root', 'enable-isolation'] removed_env=[] integration_opt_in=False
+=============================================== short test summary info ===============================================
+PASSED tests/test_install_contract.py::test_installer_defers_credentials_and_requires_operator_consent
+PASSED tests/test_install_contract.py::test_python_runtime_staged_before_active_pointer_changes
+PASSED tests/test_install_contract.py::test_atomic_pointer_replace_uses_real_backup_path_on_windows_powershell
+PASSED tests/test_install_contract.py::test_statusline_install_is_transactional_and_uses_staged_runtime
+PASSED tests/test_install_contract.py::test_uninstall_removes_only_vres_owned_statusline_before_runtime_removal
+PASSED tests/test_install_contract.py::test_update_uses_same_transaction_implementation
+PASSED tests/test_install_contract.py::test_maintenance_update_refuses_missing_active_release_before_native_commands
+PASSED tests/test_install_contract.py::test_maintenance_update_never_acquires_external_packages_or_checks_postgres_service
+PASSED tests/test_install_contract.py::test_maintenance_update_preserves_current_user_path_from_recovery_gap
+PASSED tests/test_install_contract.py::test_uninstall_is_owned_paths_only_and_preserves_data_by_default
+PASSED tests/test_install_contract.py::test_launchers_isolate_python_and_preserve_unicode
+PASSED tests/test_install_contract.py::test_windows_cli_launcher_preserves_unbound_multi_token_argv
+PASSED tests/test_install_contract.py::test_static_windows_release_path_cannot_be_parent_traversal
+PASSED tests/test_install_contract.py::test_static_python_discovery_checks_supported_side_by_side_versions
+PASSED tests/test_install_contract.py::test_static_python_probe_treats_missing_selector_as_dependency_absence
+PASSED tests/test_install_contract.py::test_static_windows_import_smoke_avoids_nested_native_quoting
+PASSED tests/test_install_contract.py::test_installer_manages_native_autocompact_conservatively_and_transactionally
+PASSED tests/test_install_contract.py::test_uninstall_removes_only_recorded_vres_owned_autocompact_before_runtime_removal
+PASSED tests/test_install_contract.py::test_personal_windows_launchers_use_process_only_remotesigned_not_bypass
+PASSED tests/test_install_contract.py::test_postinstall_python_imports_disable_bytecode_and_are_rechecked_last
+PASSED tests/test_install_preflight.py::test_skip_database_never_connects_or_reads_a_credential[args0]
+PASSED tests/test_install_preflight.py::test_skip_database_never_connects_or_reads_a_credential[args1]
+PASSED tests/test_install_preflight.py::test_skip_database_still_fails_on_every_other_missing_prerequisite[git]
+PASSED tests/test_install_preflight.py::test_skip_database_still_fails_on_every_other_missing_prerequisite[claude]
+PASSED tests/test_install_preflight.py::test_skip_database_still_fails_on_every_other_missing_prerequisite[psycopg]
+PASSED tests/test_install_preflight.py::test_skip_database_still_fails_on_every_other_missing_prerequisite[mcp]
+PASSED tests/test_install_preflight.py::test_skip_database_still_fails_on_every_other_missing_prerequisite[keyring]
+PASSED tests/test_install_preflight.py::test_ordinary_doctor_still_contacts_through_the_guard_and_fails_on_refusal
+PASSED tests/test_install_preflight.py::test_skip_database_does_not_change_the_unconfigured_rules
+PASSED tests/test_install_preflight.py::test_skip_database_shows_not_checked_for_an_unconfigured_installation_too[args0-0]
+PASSED tests/test_install_preflight.py::test_skip_database_shows_not_checked_for_an_unconfigured_installation_too[args1-2]
+PASSED tests/test_install_preflight.py::test_installer_preflight_never_contacts_the_database_and_keeps_its_integrity_gates
+PASSED tests/test_install_preflight.py::test_update_asks_an_accurate_question_that_defaults_to_no
+PASSED tests/test_install_preflight.py::test_installer_import_smoke_and_skipped_doctor_make_no_database_or_secret_contact
+PASSED tests/test_install_preflight.py::test_the_dependency_report_is_validated_and_counts_entries_without_an_archive_hash
+PASSED tests/test_install_preflight.py::test_an_unusable_dependency_report_stops_the_installation[not-json]
+PASSED tests/test_install_preflight.py::test_an_unusable_dependency_report_stops_the_installation[not-object]
+PASSED tests/test_install_preflight.py::test_an_unusable_dependency_report_stops_the_installation[wrong-version]
+PASSED tests/test_install_preflight.py::test_an_unusable_dependency_report_stops_the_installation[empty]
+PASSED tests/test_install_preflight.py::test_an_unusable_dependency_report_stops_the_installation[no-install]
+PASSED tests/test_install_preflight.py::test_an_unusable_dependency_report_stops_the_installation[no-name]
+PASSED tests/test_install_preflight.py::test_an_unusable_dependency_report_stops_the_installation[not-entry]
+PASSED tests/test_install_preflight.py::test_only_a_well_formed_recorded_sha256_counts_as_hash_evidence[sha256]
+PASSED tests/test_install_preflight.py::test_only_a_well_formed_recorded_sha256_counts_as_hash_evidence[sha256-upper]
+PASSED tests/test_install_preflight.py::test_only_a_well_formed_recorded_sha256_counts_as_hash_evidence[no-hashes]
+PASSED tests/test_install_preflight.py::test_only_a_well_formed_recorded_sha256_counts_as_hash_evidence[empty-map]
+PASSED tests/test_install_preflight.py::test_only_a_well_formed_recorded_sha256_counts_as_hash_evidence[md5-only]
+PASSED tests/test_install_preflight.py::test_only_a_well_formed_recorded_sha256_counts_as_hash_evidence[short]
+PASSED tests/test_install_preflight.py::test_only_a_well_formed_recorded_sha256_counts_as_hash_evidence[non-hex]
+PASSED tests/test_install_preflight.py::test_only_a_well_formed_recorded_sha256_counts_as_hash_evidence[non-string]
+PASSED tests/test_install_preflight.py::test_only_a_well_formed_recorded_sha256_counts_as_hash_evidence[hashes-not-map]
+PASSED tests/test_install_preflight.py::test_only_a_well_formed_recorded_sha256_counts_as_hash_evidence[local-source]
+PASSED tests/test_install_preflight.py::test_the_pip_gate_requires_installation_report_schema_1_support[22.2-False]
+PASSED tests/test_install_preflight.py::test_the_pip_gate_requires_installation_report_schema_1_support[22.3.1-False]
+PASSED tests/test_install_preflight.py::test_the_pip_gate_requires_installation_report_schema_1_support[21.0-False]
+PASSED tests/test_install_preflight.py::test_the_pip_gate_requires_installation_report_schema_1_support[not-a-version-False]
+PASSED tests/test_install_preflight.py::test_the_pip_gate_requires_installation_report_schema_1_support[23.0-True]
+PASSED tests/test_install_preflight.py::test_the_pip_gate_requires_installation_report_schema_1_support[23.2.1-True]
+PASSED tests/test_install_preflight.py::test_the_pip_gate_requires_installation_report_schema_1_support[24.1b1-True]
+PASSED tests/test_install_preflight.py::test_the_pip_gate_requires_installation_report_schema_1_support[25.0.1-True]
+PASSED tests/test_install_preflight.py::test_no_unverified_claim_that_the_whole_installer_avoids_the_database
+PASSED tests/test_install_preflight.py::test_installer_records_the_dependency_report_without_claiming_reproducibility
+PASSED tests/test_install_preflight.py::test_docs_explain_the_database_free_installation_preflight_and_operator_update
+PYTEST_EXIT_CODE=0
+PASS: PROCESS_ENVIRONMENT_RESTORED_AND_VERIFIED
+PASS: POST M2 HEAD
+PASS: POST M2 tree
+PASS: POST install.ps1
+PASS: POST tests/test_install_contract.py
+PASS: POST tests/test_install_preflight.py
+PASS: POST tests/conftest.py
+PASS: POST src/vres_os/install_recovery.py
+PASS: POST src/vres_os/release_artifact.py
+PASS: POST src/vres_os/release_inputs.py
+PASS: POST plugins/vres-os/hooks/hooks.json
+PASS: POST src/vres_os/database_targets.py
+PASS: DETACHED_WORKTREE_CLEAN
+M2_HOST_OFFLINE_TEST_EXIT_CODE=0
+VRES_PERSONAL_M2_HOST_WINDOWS_SELECTED_TEST_COMPLETE_PENDING_EVALUATION
+NO installed Vres, native Claude Code, hook, credential or PostgreSQL operation authorized.
+
+NOTE: Source pasted excerpt also displays PowerShell post-test commands with caller directory C:\Projects\Vres-ChatGPT-Review-Personal-PT2D-20261029. This was the restored PowerShell prompt; do NOT confuse it with the tested M2 detached checkout. Script contains separate M2 checkout path, not independently echoed in excerpt.
