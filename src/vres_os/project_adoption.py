@@ -465,6 +465,39 @@ def _write_json(path: Path, value: Any) -> None:
 
 
 _MAX_ADOPTION_RECORD_BYTES = 2 * 1024 * 1024
+_MAX_ADOPTION_JSON_DEPTH = 128
+
+
+def _bounded_json_structure(text: str) -> bool:
+    """Screen nesting before json.loads, independent of parser recursion limits.
+
+    Scan iteratively and ignore braces/brackets within JSON strings, including
+    escaped quotes and backslashes. Leave full JSON syntax validation to
+    json.loads. Malformed delimiters and excessive nesting refuse as a single
+    generic record-read error.
+    """
+    containers: list[str] = []
+    in_string = False
+    escaped = False
+    for char in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char in "[{":
+            if len(containers) >= _MAX_ADOPTION_JSON_DEPTH:
+                return False
+            containers.append(char)
+        elif char in "]}":
+            if not containers or (char == "]") != (containers[-1] == "["):
+                return False
+            containers.pop()
+    return not in_string and not containers
 
 
 def _read_json(path: Path) -> Any:
@@ -526,7 +559,10 @@ def _read_json(path: Path) -> Any:
                 raise AdoptionError(
                     f"Adoption record {path.name} changed during inspection; recovery is required"
                 )
-        return json.loads(raw.decode("utf-8"))
+        text = raw.decode("utf-8")
+        if not _bounded_json_structure(text):
+            raise ValueError("Malformed or excessively nested adoption JSON")
+        return json.loads(text)
     except AdoptionError:
         raise
     except (OSError, UnicodeError, ValueError, TypeError, RecursionError, OverflowError):

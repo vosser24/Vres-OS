@@ -163,3 +163,41 @@ def test_lstat_permission_error_returns_redacted_recovery_denial(
     with pytest.raises(AdoptionError, match="unreadable; recovery") as exc:
         project_adoption._read_json(target)
     assert "synthetic sensitive target name" not in str(exc.value)
+
+
+def test_json_depth_exact_policy_limit_is_accepted(tmp_path):
+    depth = project_adoption._MAX_ADOPTION_JSON_DEPTH
+    target = _file(tmp_path, ("[" * depth + "0" + "]" * depth).encode("utf-8"))
+    nested = project_adoption._read_json(target)
+    for _ in range(depth):
+        assert isinstance(nested, list) and len(nested) == 1
+        nested = nested[0]
+    assert nested == 0
+
+
+def test_json_depth_one_beyond_policy_limit_fails_closed(tmp_path):
+    depth = project_adoption._MAX_ADOPTION_JSON_DEPTH + 1
+    target = _file(tmp_path, ("[" * depth + "0" + "]" * depth).encode("utf-8"))
+    previous = target.read_bytes()
+    with pytest.raises(AdoptionError, match="unreadable; recovery"):
+        project_adoption._read_json(target)
+    assert target.read_bytes() == previous
+
+
+def test_quoted_brackets_and_escaped_quotes_do_not_count_as_depth(tmp_path):
+    payload = {
+        "text": "[" * 500 + "}" * 500,
+        "escaped": 'A literal quote " and backslash \\ then more [{]}',
+        "ordinary": [{"fine": True}],
+    }
+    target = _file(tmp_path, json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+    before = target.read_bytes()
+    assert project_adoption._read_json(target) == payload
+    assert target.read_bytes() == before
+
+
+def test_mismatched_delimiters_refuse_without_echoing_contents(tmp_path):
+    target = _file(tmp_path, b'{"unsafe":[} ')
+    with pytest.raises(AdoptionError, match="unreadable; recovery") as error:
+        project_adoption._read_json(target)
+    assert "unsafe" not in str(error.value)
