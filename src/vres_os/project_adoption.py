@@ -794,16 +794,9 @@ def status(project, *, data_root: Path | None = None) -> dict[str, Any]:
 
 # ----------------------------------------------------------------------- offline architecture plan check
 
-def assess_alignment_plan(project, plan: Any, *, data_root: Path | None = None) -> dict[str, Any]:
-    """Assess a proposed existing-project plan without approval, activation or writes.
-
-    This consumes only an existing architecture_review_required record and a
-    fresh deterministic project audit. It does not edit the project, write
-    adoption state, invoke Claude/Fable, start any process or contact Vres DB.
-    A valid contract is still only ready for separate protected review.
-    """
+def _current_architecture_review(project, *, data_root: Path | None = None) -> dict[str, Any]:
+    """Strict, no-create review of the saved state and current project audit."""
     from .architecture_governance import audit_project
-    from .architecture_plan import check_alignment_plan
     from .paths import data_dir_path
 
     root = Path(project.root).resolve(strict=True)
@@ -840,6 +833,21 @@ def assess_alignment_plan(project, plan: Any, *, data_root: Path | None = None) 
         or record.get("architecture_audit_complete") is not True
     ):
         raise AdoptionError("Architecture audit differs from the recorded review; run start again")
+
+    return audit
+
+
+def assess_alignment_plan(project, plan: Any, *, data_root: Path | None = None) -> dict[str, Any]:
+    """Assess a proposed existing-project plan without approval, activation or writes.
+
+    This consumes only an existing architecture_review_required record and a
+    fresh deterministic project audit. It does not edit the project, write
+    adoption state, invoke Claude/Fable, start any process or contact Vres DB.
+    A valid contract is still only ready for separate protected review.
+    """
+    from .architecture_plan import check_alignment_plan
+
+    audit = _current_architecture_review(project, data_root=data_root)
 
     rejected = None
     if not isinstance(plan, dict):
@@ -899,4 +907,53 @@ def assess_alignment_plan(project, plan: Any, *, data_root: Path | None = None) 
             "This offline plan assessment is not user consent, independently "
             "protected Fable validation, project activation or a release warrant"
         ),
+    }
+
+def draft_alignment_plan(project, *, data_root: Path | None = None) -> dict[str, Any]:
+    """Return an intentionally incomplete plan skeleton, NEVER an approved plan."""
+    from .architecture_plan import check_alignment_plan
+    from .architecture_policy import PLAN_VERSION
+
+    audit = _current_architecture_review(project, data_root=data_root)
+    material_ids = sorted({
+        row["finding_id"] for row in audit["findings"]
+        if isinstance(row, dict) and row.get("material") is True
+    })
+    if len(material_ids) > 128:
+        raise AdoptionError("Too many material findings to draft a bounded plan")
+    template = {
+        "version": PLAN_VERSION,
+        "constitution_version": audit["constitution_version"],
+        "audit_digest": audit["audit_digest"],
+        "target_profiles": list(audit["profiles"]),
+        "non_goals": [],
+        "tranches": [{
+            "key": "T1",
+            "title": "",
+            "addresses": material_ids,
+            "depends_on": [],
+            "scope": [],
+            "target_boundary": "",
+            "compatibility_strategy": "",
+            "rollback": "",
+            "acceptance_criteria": [],
+            "non_goals": [],
+        }],
+        "exceptions": [],
+    }
+    canonical = json.dumps(
+        template, sort_keys=True, separators=(",", ":"),
+        ensure_ascii=False, allow_nan=False,
+    ).encode("utf-8")
+    if len(canonical) > 65536:
+        raise AdoptionError("Architecture plan template exceeds the 65536-byte limit")
+    if check_alignment_plan(template, audit)["contract_valid"] is not False:
+        raise AdoptionError("Plan template unexpectedly satisfied acceptance contract")
+    return {
+        "template": template,
+        "draft_status": "NEEDS_OPERATOR_DETAILS",
+        "material_finding_count": len(material_ids),
+        "protected_validation_required": True,
+        "activation_allowed": False,
+        "project_write_permitted": False,
     }

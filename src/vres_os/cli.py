@@ -901,5 +901,31 @@ def project_plan_check(
     if not result.get("plan_contract_valid"):
         raise typer.Exit(2)
 
+@project_app.command("plan-template")
+def project_plan_template(
+    project: Path = typer.Option(
+        Path("."), "--project", help="Established project with pending architecture review."
+    ),
+) -> None:
+    """Print an INCOMPLETE JSON plan skeleton. No files written, no approval."""
+    from .project_adoption import AdoptionError, draft_alignment_plan
+
+    try:
+        identity = discover_project(project)
+        result = draft_alignment_plan(identity)
+    except (AdoptionError, OSError, ValueError) as exc:
+        raise _recovery_exit(exc) from exc
+
+    # stdout is a schema-correct but intentionally INVALID proposal: leave
+    # non_goals, scope, rollback and acceptance empty for the operator to fill.
+    # No Fable attestation or project activation is performed.
+    console.print_json(data=result["template"])
+    typer.echo(
+        "NEEDS_OPERATOR_DETAILS: edit outside the project; run plan-check; "
+        "Fable/high approval and activation are separate blocked operations.",
+        err=True,
+    )
+
+
 if __name__ == "__main__":
     app()
