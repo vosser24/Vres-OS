@@ -500,24 +500,49 @@ def _bounded_json_structure(text: str) -> bool:
     return not in_string and not containers
 
 
-def _read_json(path: Path) -> Any:
-    """Bounded, non-following readback of a persisted adoption JSON record.
+def _record_ancestor_identity(path: Path) -> tuple[tuple[str, int, int, int, int], ...] | None:
+    """Inspect every ancestor from volume/filesystem root before opening a record.
 
-    A missing record remains absent. An existing record must be a regular
-    non-linked file under an ordinary immediate parent directory, and must
-    retain its filesystem identity across opening and reading. Corruption
-    refuses without exposing the underlying record's content or target.
+    This is a snapshot-style check of static links and simple replacements,
+    not a directory-descriptor chain proving freedom from all TOCTOU races.
+    A missing ancestor means the record is absent, with no directory creation.
+    """
+    stamps: list[tuple[str, int, int, int, int]] = []
+    for directory in reversed(path.parents):
+        info = _lstat(directory)
+        if info is None:
+            return None
+        if _is_link(info) or not stat.S_ISDIR(info.st_mode):
+            raise AdoptionError(
+                f"Adoption record {path.name} has an unsafe ancestor directory; recovery is required"
+            )
+        stamps.append((
+            str(directory),
+            info.st_dev,
+            info.st_ino,
+            info.st_mode,
+            getattr(info, "st_file_attributes", 0),
+        ))
+    return tuple(stamps)
+
+
+def _read_json(path: Path) -> Any:
+    """Bounded, non-following persisted JSON read with ancestor reparse checks.
+
+    Scan ancestors root-first before accessing the record and after its bounded
+    read; refuse changed ancestors, links, malformed JSON and unsafe records.
+    This is not atomic openat-style directory traversal on all platforms.
     """
     path = Path(path)
     try:
+        ancestors = _record_ancestor_identity(path)
+        if ancestors is None:
+            return None
         initial = _lstat(path)
         if initial is None:
             return None
-        parent = _lstat(path.parent)
         if (
-            parent is None or _is_link(parent)
-            or not stat.S_ISDIR(parent.st_mode)
-            or _is_link(initial)
+            _is_link(initial)
             or not stat.S_ISREG(initial.st_mode)
             or initial.st_size < 0
             or initial.st_size > _MAX_ADOPTION_RECORD_BYTES
@@ -559,6 +584,11 @@ def _read_json(path: Path) -> Any:
                 raise AdoptionError(
                     f"Adoption record {path.name} changed during inspection; recovery is required"
                 )
+        after_ancestors = _record_ancestor_identity(path)
+        if after_ancestors is None or after_ancestors != ancestors:
+            raise AdoptionError(
+                f"Adoption record {path.name} ancestry changed during inspection; recovery is required"
+            )
         text = raw.decode("utf-8")
         if not _bounded_json_structure(text):
             raise ValueError("Malformed or excessively nested adoption JSON")
