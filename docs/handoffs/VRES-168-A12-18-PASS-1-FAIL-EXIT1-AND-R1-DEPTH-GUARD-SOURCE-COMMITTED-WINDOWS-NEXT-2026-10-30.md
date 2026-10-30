@@ -21,7 +21,7 @@ Do not confuse an intermediate source commit with final R1; the final commit als
 
 ## 3. Next exactly ONE operator action: A12 R1 guarded selected Windows
 
-Complete archived [A12 R1 one-atomic Windows script](VRES-168-A12-R1-GUARDED-WINDOWS-SELECTED-TEST-NEXT-2026-10-30.ps1), Git blob **a08ac411be2fd9e69c2a1b3b2073c38fb1cb2da7**. Always give operator entire script INLINE in exactly ONE PowerShell code block, never fragments/file-only.
+Complete archived [A12 R1 one-atomic Windows script](VRES-168-A12-R1-GUARDED-WINDOWS-SELECTED-TEST-NEXT-2026-10-30.ps1), Git blob **a3422e55388271dc87bcda8bbe34a88735c1d4db**. Always give operator entire script INLINE in exactly ONE PowerShell code block, never fragments/file-only.
 
 Preconditions: original P2 clean at exact HEAD; prior accepted A11 worktree clean; original rejected A12 worktree `C:\Projects\Vres-ChatGPT-Review-168-Record-Read-A12-20261030` clean and preserved at rejected SHA/tree. NEW detached review destination `C:\Projects\Vres-ChatGPT-Review-168-Record-Read-A12-R1-20261030` MUST NOT EXIST.
 
