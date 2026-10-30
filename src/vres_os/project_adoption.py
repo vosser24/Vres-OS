@@ -58,6 +58,7 @@ from __future__ import annotations
 import getpass
 import hashlib
 import json
+import math
 import os
 import re
 import stat
@@ -548,6 +549,19 @@ def _refuse_nonfinite_json_constant(_value: str) -> Any:
     raise ValueError("Unsupported nonfinite adoption JSON constant")
 
 
+def _finite_json_float(number: str) -> float:
+    """Refuse legal JSON exponent notation that overflows binary float.
+
+    Python json.loads accepts 1e999 as an IEEE infinity without invoking
+    parse_constant, so saved adoption records must check parse_float too.
+    Finite values keep the platform's ordinary float semantics.
+    """
+    value = float(number)
+    if not math.isfinite(value):
+        raise ValueError("Nonfinite adoption JSON numeric exponent")
+    return value
+
+
 def _read_json(path: Path) -> Any:
     """Bounded, non-following persisted JSON read with ancestor reparse checks.
 
@@ -618,6 +632,7 @@ def _read_json(path: Path) -> Any:
             text,
             object_pairs_hook=_unambiguous_json_object,
             parse_constant=_refuse_nonfinite_json_constant,
+            parse_float=_finite_json_float,
         )
     except AdoptionError:
         raise
