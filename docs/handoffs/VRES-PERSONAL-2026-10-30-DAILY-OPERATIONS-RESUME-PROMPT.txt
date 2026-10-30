@@ -1,0 +1,32 @@
+RESUME VRES-OS — PERSONAL DAILY OPERATIONS MILESTONE PROGRAM
+Date of continuity checkpoint: 2026-10-30 (Europe/Athens)
+Repository: vosser24/Vres-OS
+Canonical docs branch: docs/chatgpt-continuity-20261023
+Product main at checkpoint: 9a8acc5d464b96432a93cb95daa9581412fb07ee
+
+MANDATORY READ FIRST (GitHub canonical docs, not stale chat snippets):
+1. docs/handoffs/VRES-CHATGPT-CONTINUITY-INDEX.md — latest READ FIRST item is authoritative.
+2. docs/handoffs/VRES-PERSONAL-2026-10-30-COMPLETE-DAILY-OPERATIONS-RESUME-HANDOFF.md — full technical/test/installed/incident state.
+3. docs/architecture/VRES-PERSONAL-SINGLE-USER-PRODUCT-CHARTER-AND-METHOD-2026-10-30.md — HARD OWNER RULE: PERSONAL, ONE WINDOWS USER, NOT AN ENTERPRISE PLATFORM.
+4. docs/roadmap/VRES-PERSONAL-DAILY-OPERATIONS-DELIVERY-PLAN-2026-10-30.md — complete M0..M8 path to daily usage, V-01..V-42 traceability.
+5. docs/handoffs/VRES-2026-10-30-STAGE6-RELEASE-PROVENANCE-PASS-AND-MILESTONE-DEVELOPMENT-RESET.md
+6. docs/handoffs/VRES-168-A18-WINDOWS-49-PASS-EXIT0-ACCEPTANCE-2026-10-30.md
+7. Historical docs/roadmap/VRES-FULL-SCOPE-FUNCTIONALITY-REGISTER-2026-10-22.md and docs/roadmap/VRES-CHATGPT-LED-FULL-SCOPE-DELIVERY-PLAN-2026-10-22.md.
+
+SOURCE TRUTH: latest Windows SELECTED-accepted A18 branch feature/168-personal-record-leaf-rebind-a18-20261030 HEAD 7bace7758e5c7f9a00f26179eb741ef3a319bc77, tree 4d17344a9510de6394840092cf33729ab153fbb5, 49 individually named PASS/exit0, 33 pinned Git blobs pre/post and verified Windows process environment. A18 is 74 commits ahead of main in the last GitHub compare (111 changed paths), but NOT merged/installed. Original installed P2 release is source commit 82c82430b38f93bd6b9d5c3af3b5de9c1368af9c, tree 205c081277ece483c634e1c801c39595abd4549c. Its installed and staged hook files match its original release-manifest SHA256; a one-file hotpatch would BREAK release integrity. Stages 3/4/5 proved three matcher-only differences and a successful IN-MEMORY read-hook 9-to-0 simulation, not an installed fix; Stage 6 pinned installed P2 release provenance PASS. A19 source writes previously blocked; A19 is UNCOMMITTED and untested.
+
+ABSOLUTE HOLDS: LIVE_SCHEMA_048_INCIDENT=OPEN — NO PostgreSQL contact of any kind, EVEN SELECT, directly or indirectly through Vres CLI/MCP/bootstrap/hooks/doctor/recovery/migrations/F2. HOST_HOOK_DB_ROUTE_ATTEMPTED_AND_REFUSED=OPEN — seven earlier native Claude Code automatic post-tool DB-route attempts refused. DO NOT launch ordinary native Claude Code, review via hooks, run installed Vres installer or change current-user/global plugins/credentials/settings. F1 trusted positive issuer/Fable-high protected actual use not approved; real PRISM and legacy Visual Studio project activation, main PR/merge and production go-live NOT approved. No secret values in chat/source.
+
+HARD PRODUCT AND METHOD RULE: Vres is a PERSONAL current-user Windows tool for dependable daily work, not a hosted multi-user enterprise system. Retain all 42 original V features but prioritize one Chairman, project/task continuity, secure reusable same-user credential handles, real project adoption, sourced experience and rollback. Use P0 fast trivial, P1 reversible project work, P2 explicit approval + safe rollback for installed/credential/protected changes, P3 STOP for active incidents. No enterprise IAM, signature theater, endless tiny branches/diagnostics or repeated full suites without relevant changes.
+
+WORKFLOW: ChatGPT is primary source/test/docs author using GitHub exact-parent feature branches and nonforce updates. Windows operator runs ONE complete SHA-pinned guarded PowerShell block per substantive integrated milestone when ready. Keep immutable rejected original test branches/worktrees; preserve A12 18PASS/1FAIL original, A13 28PASS/1FAIL original and corrected R1s, A16 script-copy environment restoration caveat, all A1–A18 and PT/Hook-R1 acceptance history. Do not claim GitHub commits ran Windows tests or that selected PASS equals installed readiness. Independent Claude reviewer only when host-hook safety cleared; no installed change without new exact user permission.
+
+START THE NEW SESSION BY ACTING, NOT ASKING ALREADY-ANSWERED QUESTIONS:
+A. Verify CURRENT GitHub canonical docs HEAD and source refs, installed P2 identity as recorded, original main and A18 parent/ancestry; read the new charter, roadmap, full handoff and relevant actual source (release_inputs.py, release_artifact.py, install.ps1, install_recovery.py, hooks, model/Chairman, task/adoption/credential boundaries). Do not run any live/unsafe tool.
+B. PERFORM M0 release-compatibility/changed-files/risks assessment immediately, then prepare M1: ONE VERSIONED, SHA-PINNED, INTEGRITY-PRESERVING PERSONAL UPGRADE-CANDIDATE source/test package with actual disposable non-DB artifact/install/rollback rehearsal, rather than a redundant Stage7 or micro A19 test.
+C. Preserve P2 release and original manifests, ensure source release migrations only 001-041, no C2B/R0/F2/048 contamination, include accepted read-hook exemptions, exact backup/restore/journal, process env and temp AppData guards. Do not execute install.ps1 (which calls Claude) under incidents.
+D. Commit permissible code/docs in GitHub with exact SHA/tree/parent/allowlist, report true NOT_RUN versus PASS. If any repository source-write action is blocked by safety, stop that action, report blocker and provide the safe remainder; never bypass.
+E. Only when M1 candidate is committed and ready, provide the WHOLE self-contained PowerShell validation script INLINE IN ONE CODE BLOCK, never fragments or a file-only link, then assess the user's complete Windows console.
+F. Next after M1: separately clear host-hook/DB incidents through approved evidence and explicit user authorizations, finish #165/#166/#167/#168/#176, conduct #169 integrated Windows Visual Studio/PRISM/real legacy onboarding and #170 personal readiness pilot. Do NOT report production or daily-use readiness prematurely.
+
+I expect ChatGPT to move toward the actual personal product, with clear milestones and materially useful delivery, while preserving every security hold, original acceptance/rejection and the full user functionality roadmap.
