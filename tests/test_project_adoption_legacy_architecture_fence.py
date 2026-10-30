@@ -242,17 +242,22 @@ def test_small_legacy_keeps_prior_authorized_activation_and_does_not_refactor(tm
     assert project_adoption.status(project, data_root=data)["state"] == "active"
 
 
-def test_pending_established_legacy_cannot_use_unrelated_plan_template_gate(tmp_path):
+def test_pending_established_legacy_can_draft_only_unapproved_plan(tmp_path):
     project = _project(tmp_path / "legacy")
     _legacy(project.root)
     data = tmp_path / "state"
     project_adoption.start(project, data_root=data)
-    before = _files(project.root)
+    before_project, before_state = _files(project.root), _files(data)
 
-    with pytest.raises(AdoptionError, match="not awaiting established-source"):
-        project_adoption.draft_alignment_plan(project, data_root=data)
+    draft = project_adoption.draft_alignment_plan(project, data_root=data)
 
-    assert _files(project.root) == before
+    assert draft["project_adoption_state"] == "awaiting_operator"
+    assert draft["draft_status"] == "NEEDS_OPERATOR_DETAILS"
+    assert draft["activation_allowed"] is False
+    assert draft["protected_validation_required"] is True
+    assert draft["template"]["non_goals"] == []
+    assert _files(project.root) == before_project
+    assert _files(data) == before_state
     assert project_adoption.status(project, data_root=data)["state"] == (
         "awaiting_operator"
     )

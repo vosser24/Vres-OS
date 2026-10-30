@@ -850,8 +850,15 @@ def status(project, *, data_root: Path | None = None) -> dict[str, Any]:
 
 # ----------------------------------------------------------------------- offline architecture plan check
 
-def _current_architecture_review(project, *, data_root: Path | None = None) -> dict[str, Any]:
-    """Strict, no-create review of the saved state and current project audit."""
+def _current_architecture_review(
+    project, *, data_root: Path | None = None
+) -> tuple[dict[str, Any], str]:
+    """Strict read-only review of an established project, including held legacy.
+
+    The legacy inventory and saved KEEP/DROP snapshot stay independent from the
+    architectural review; neither plan checking nor template drafting invokes
+    decision authorization or grants an activation state transition.
+    """
     from .architecture_governance import audit_project
     from .paths import data_dir_path
 
@@ -866,13 +873,27 @@ def _current_architecture_review(project, *, data_root: Path | None = None) -> d
         if info is None or _is_link(info) or not stat.S_ISDIR(info.st_mode):
             raise AdoptionError("A previously created ordinary adoption state directory is required")
     record = _state(sd, project)
-    if not record or record.get("state") != "architecture_review_required":
+    held_no_claude = record is not None and record.get("state") == "architecture_review_required"
+    held_legacy = (
+        record is not None
+        and record.get("state") == "awaiting_operator"
+        and record.get("architecture_review_required") is True
+        and record.get("architecture_plan_required") is True
+    )
+    if not held_no_claude and not held_legacy:
         raise AdoptionError("Project is not awaiting established-source architecture review")
     recorded_root = record.get("project_root")
     if not isinstance(recorded_root, str) or Path(recorded_root).resolve(strict=True) != root:
         raise AdoptionError("Architecture review record belongs to a different project root")
     if _lstat(sd / "journal.json") is not None:
         raise AdoptionError("An interrupted adoption journal prevents plan assessment")
+    if held_legacy:
+        version = record.get("inventory_version")
+        if not isinstance(version, str) or re.fullmatch(r"[0-9a-f]{64}", version) is None:
+            raise AdoptionError("Legacy Claude inventory identity is invalid; re-inventory required")
+        # _current_inventory checks the exact previously saved inventory version
+        # against the live, no-execution Claude surface scan; no writes/authority.
+        _current_inventory(sd, project)
 
     audit = audit_project(root)
     blocking = [
@@ -890,7 +911,7 @@ def _current_architecture_review(project, *, data_root: Path | None = None) -> d
     ):
         raise AdoptionError("Architecture audit differs from the recorded review; run start again")
 
-    return audit
+    return audit, str(record["state"])
 
 
 def assess_alignment_plan(project, plan: Any, *, data_root: Path | None = None) -> dict[str, Any]:
@@ -903,7 +924,7 @@ def assess_alignment_plan(project, plan: Any, *, data_root: Path | None = None) 
     """
     from .architecture_plan import check_alignment_plan
 
-    audit = _current_architecture_review(project, data_root=data_root)
+    audit, adoption_state = _current_architecture_review(project, data_root=data_root)
 
     rejected = None
     if not isinstance(plan, dict):
@@ -945,7 +966,7 @@ def assess_alignment_plan(project, plan: Any, *, data_root: Path | None = None) 
             }
     accepted = contract.get("contract_valid") is True
     return {
-        "project_adoption_state": "architecture_review_required",
+        "project_adoption_state": adoption_state,
         "audit_digest": audit["audit_digest"],
         "audit_digest_scope": "structural_findings_not_all_project_file_bytes",
         "plan_digest": contract.get("plan_digest"),
@@ -970,7 +991,7 @@ def draft_alignment_plan(project, *, data_root: Path | None = None) -> dict[str,
     from .architecture_plan import check_alignment_plan
     from .architecture_policy import PLAN_VERSION
 
-    audit = _current_architecture_review(project, data_root=data_root)
+    audit, adoption_state = _current_architecture_review(project, data_root=data_root)
     material_ids = sorted({
         row["finding_id"] for row in audit["findings"]
         if isinstance(row, dict) and row.get("material") is True
@@ -1008,6 +1029,7 @@ def draft_alignment_plan(project, *, data_root: Path | None = None) -> dict[str,
     return {
         "template": template,
         "draft_status": "NEEDS_OPERATOR_DETAILS",
+        "project_adoption_state": adoption_state,
         "material_finding_count": len(material_ids),
         "protected_validation_required": True,
         "activation_allowed": False,
