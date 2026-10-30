@@ -600,6 +600,44 @@ def test_ambiguous_recovery_is_refused_without_any_change(interrupted_install, a
     assert {p: p.read_bytes() for p in env.base.rglob("*") if p.is_file()} == before
 
 
+@pytest.mark.parametrize("damage", ["modified", "added", "removed"])
+def test_v2_plugin_backup_must_match_snapshot_before_any_recovery(interrupted_install, damage):
+    """A Vres-managed backup is not sufficient evidence that its content is intact."""
+    env = interrupted_install
+    backup = env.root / "backups" / "R1"
+    if damage == "modified":
+        (backup / "plugin.json").write_bytes(b'{"version":"wrong-source"}')
+    elif damage == "added":
+        (backup / "unexpected-hook.txt").write_bytes(b"unexpected")
+    else:
+        (backup / "plugin.json").unlink()
+    before = {p.relative_to(env.base): p.read_bytes() for p in env.base.rglob("*") if p.is_file()}
+
+    plan = install_recovery.inspect(env.root)
+    assert plan["recoverable"] is False
+    assert any("plugin backup fails pre-install snapshot identity" in r for r in plan["refusals"])
+    with pytest.raises(InstallRecoveryError, match="manual recovery"):
+        install_recovery.recover(env.root, confirm=True)
+    assert (env.root / "pending-install.json").exists()
+    assert {p.relative_to(env.base): p.read_bytes() for p in env.base.rglob("*") if p.is_file()} == before
+
+
+def test_v2_backup_missing_digest_is_refused_without_recovery(interrupted_install):
+    env = interrupted_install
+    snapshot = env.root / "install-recovery" / "R1" / "snapshot.json"
+    body = json.loads(snapshot.read_text(encoding="utf-8"))
+    body["plugin"]["tree_sha256"] = None
+    snapshot.write_text(json.dumps(body), encoding="utf-8")
+    before = {p.relative_to(env.base): p.read_bytes() for p in env.base.rglob("*") if p.is_file()}
+
+    plan = install_recovery.inspect(env.root)
+    assert plan["recoverable"] is False
+    assert any("plugin backup fails pre-install snapshot identity" in r for r in plan["refusals"])
+    with pytest.raises(InstallRecoveryError, match="manual recovery"):
+        install_recovery.recover(env.root, confirm=True)
+    assert {p.relative_to(env.base): p.read_bytes() for p in env.base.rglob("*") if p.is_file()} == before
+
+
 def test_interruption_right_after_the_journal_only_clears_the_journal(tmp_path):
     root, home = tmp_path / "VresOS", tmp_path / "claude"
     root.mkdir()

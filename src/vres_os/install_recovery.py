@@ -290,7 +290,23 @@ def inspect(install_root: Path) -> dict[str, Any]:
                         if not _managed(backup):
                             refusals.append("the plugin backup is not a Vres-managed plugin")
                         else:
-                            actions.append({"action": "restore_plugin_from_backup", "remove_current": has_target})
+                            # A version-2 snapshot digests the exact pre-install plugin tree.
+                            # Restoring a merely managed backup without comparing its bytes
+                            # would silently accept a corrupted/incorrect old hook set.
+                            # Keep the historical v1 backup behavior; v1 cannot prove a
+                            # no-backup original and is separately refused below.
+                            proof = (manifest or {}).get("plugin") or {}
+                            if manifest["version"] >= 2 and (
+                                proof.get("existed") is not True
+                                or not isinstance(proof.get("tree_sha256"), str)
+                                or _tree_digest(backup) != proof["tree_sha256"]
+                            ):
+                                refusals.append(
+                                    "plugin backup fails pre-install snapshot identity; "
+                                    "manual recovery required"
+                                )
+                            else:
+                                actions.append({"action": "restore_plugin_from_backup", "remove_current": has_target})
                     elif not has_target:
                         refusals.append("neither the previous plugin nor its backup exists")
                     else:
