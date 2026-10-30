@@ -901,6 +901,24 @@ def project_plan_check(
     if not result.get("plan_contract_valid"):
         raise typer.Exit(2)
 
+
+@project_app.command("plan-findings")
+def project_plan_findings(
+    project: Path = typer.Option(
+        Path("."), "--project", help="Established project with pending architecture review."
+    ),
+) -> None:
+    """Explain the exact material finding IDs in a plan-template; never authorize."""
+    from .project_adoption import AdoptionError, describe_alignment_findings
+
+    try:
+        identity = discover_project(project)
+        result = describe_alignment_findings(identity)
+    except (AdoptionError, OSError, ValueError) as exc:
+        raise _recovery_exit(exc) from exc
+    console.print_json(data=result)
+
+
 @project_app.command("plan-template")
 def project_plan_template(
     project: Path = typer.Option(

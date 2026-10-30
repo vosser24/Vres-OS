@@ -914,6 +914,65 @@ def _current_architecture_review(
     return audit, str(record["state"])
 
 
+
+def describe_alignment_findings(
+    project, *, data_root: Path | None = None
+) -> dict[str, Any]:
+    """Read-only bounded explanation of the material IDs in a draft plan.
+
+    Uses the identical current hold, project, Claude inventory and #174 audit
+    checks as template and plan-check. Returns no file contents, snippets,
+    approval or activation; no adoption record or project file is written.
+    """
+    audit, adoption_state = _current_architecture_review(project, data_root=data_root)
+    material = {}
+    for finding in audit["findings"]:
+        if finding.get("material") is not True:
+            continue
+        finding_id = finding["finding_id"]
+        if finding_id in material and material[finding_id] != finding:
+            raise AdoptionError("Conflicting architecture finding identifiers")
+        material[finding_id] = finding
+
+    if len(material) > 128:
+        raise AdoptionError("Too many material findings for a bounded offline review")
+
+    # Deliberately omit the auditor's raw 'evidence' field: project source
+    # literals/imports must not become a new operator-output channel.
+    rows = [
+        {
+            "finding_id": finding_id,
+            "rule_id": material[finding_id]["rule_id"],
+            "severity": material[finding_id]["severity"],
+            "title": material[finding_id]["title"],
+            "recommendation": material[finding_id]["recommendation"],
+            "paths": list(material[finding_id]["paths"]),
+        }
+        for finding_id in sorted(material)
+    ]
+    output = {
+        "project_adoption_state": adoption_state,
+        "audit_digest": audit["audit_digest"],
+        "audit_digest_scope": "structural_findings_not_all_project_file_bytes",
+        "material_finding_count": len(rows),
+        "findings": rows,
+        "report_status": "FINDINGS_FOR_OPERATOR_PLAN_ONLY",
+        "required_validator": dict(audit["required_validator"]),
+        "protected_validation_required": True,
+        "activation_allowed": False,
+        "project_write_permitted": False,
+    }
+    try:
+        size = len(json.dumps(
+            output, sort_keys=True, separators=(",", ":"),
+            ensure_ascii=False, allow_nan=False,
+        ).encode("utf-8"))
+    except (TypeError, ValueError, UnicodeError, OverflowError, RecursionError):
+        raise AdoptionError("Architecture findings cannot be represented safely") from None
+    if size > 65536:
+        raise AdoptionError("Architecture findings report exceeds the 65536-byte limit")
+    return output
+
 def assess_alignment_plan(project, plan: Any, *, data_root: Path | None = None) -> dict[str, Any]:
     """Assess a proposed existing-project plan without approval, activation or writes.
 
