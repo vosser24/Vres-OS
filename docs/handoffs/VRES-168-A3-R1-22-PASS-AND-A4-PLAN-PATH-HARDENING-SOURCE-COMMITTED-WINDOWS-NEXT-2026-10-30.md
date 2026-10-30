@@ -27,7 +27,7 @@ Four NEW deterministic source-only negative test functions simulate (without req
 
 ## 3. Exact next ONE operator Windows gate
 
-Full one-atomic Windows SHA-pinned script at [A4 guarded selected Windows test](VRES-168-A4-GUARDED-WINDOWS-SELECTED-TEST-NEXT-2026-10-30.ps1), Git blob **8cd37d8f973c94d7040b25bdd2d2f66d34f4eb2c**, **169 LF lines**. The user requires the **ENTIRE script INLINE in a PowerShell code block**, never a file-only link. Do not run from Claude Code or installed Vres CLI.
+Full one-atomic Windows SHA-pinned script at [A4 guarded selected Windows test](VRES-168-A4-GUARDED-WINDOWS-SELECTED-TEST-NEXT-2026-10-30.ps1), Git blob **e7fc82ee04e3a38829abf04f4c5cc0c3e7ed9720**, **169 LF lines**. The user requires the **ENTIRE script INLINE in a PowerShell code block**, never a file-only link. Do not run from Claude Code or installed Vres CLI.
 
 Preflight verifies original clean P2 anchor at C:\Projects\Vres-P2F-Postinstall-Hardening-20261022 exact HEAD 82c82430b38f93bd6b9d5c3af3b5de9c1368af9c and prior Windows-tested A3 R1 worktree C:\Projects\Vres-ChatGPT-Review-168-Plan-CLI-R1-20261029 at parent HEAD d0c688e... / parent tree 498ad1e... clean. New destination C:\Projects\Vres-ChatGPT-Review-168-Plan-Path-A4-20261030 must NOT exist. Official GitHub origin, remote exact A4 SHA, fetch and create fresh detached worktree. Assert HEAD/tree/sole parent, **18 protected Git blobs**, exactly TWO MODIFIED paths (cli.py and its test), diff --check and clean.
 

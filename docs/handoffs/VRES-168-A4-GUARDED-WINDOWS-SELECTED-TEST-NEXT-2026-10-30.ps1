@@ -100,7 +100,7 @@
         if ($LASTEXITCODE -ne 0 -or $changed.Count -ne 2 -or
             $changed[0] -cne ("M" + [char]9 + $cli) -or
             $changed[1] -cne ("M" + [char]9 + $newtest)) {
-            throw 'STOP: 168_A4 three-file allowlist mismatch'
+            throw 'STOP: 168_A4 two-file allowlist mismatch'
         }
         Write-Host 'PASS: exactly two A4 modifications (CLI loader and CLI tests)'
         $diffCheck = @(& git -C $review diff --no-ext-diff --check $parent HEAD --)
