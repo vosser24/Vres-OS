@@ -1,0 +1,214 @@
+{
+  "candidate_commit": "28120eb49b6b950c7402455db19dcbdcf6d991a6",
+  "candidate_tree": "815fce697f16509bae150729891738d879d6ca9c",
+  "exact_p2_rollback": "PASS_DISPOSABLE_ONLY",
+  "installer": "NOT_RUN",
+  "native_claude": "NOT_RUN",
+  "package_files": 160,
+  "pip_install": "NOT_RUN",
+  "plugin_files": 40,
+  "postgresql": "NOT_CONTACTED_BY_THIS_SCRIPT",
+  "previous_hook_sha256": "700bf6ad711212c3a3a22419e42e0e5d62a491a7454c55c07afed8409f0c34f7",
+  "previous_plugin_files": 40,
+  "previous_source": "82c82430b38f93bd6b9d5c3af3b5de9c1368af9c",
+  "real_installation": "UNTOUCHED",
+  "release_files": 207,
+  "status": "OFFLINE_REHEARSAL_PASS",
+  "tampered_backup_refused_without_mutation": "PASS_DISPOSABLE_ONLY"
+}
+PASS: actual pinned release stage, staged package/plugin verification, synthetic P2 restore and corrupt-backup refusal
+................................................................................................                 [100%]
+======================================================= PASSES ========================================================
+_________________________________ test_the_cli_refuses_to_stage_without_a_commit_pin __________________________________
+------------------------------------------------ Captured stderr call -------------------------------------------------
+usage: __main__.py stage [-h] --root ROOT --out OUT --manifest MANIFEST
+                         --source-commit SOURCE_COMMIT
+__main__.py stage: error: the following arguments are required: --source-commit
+______________________________ test_non_git_sources_and_the_manifest_command_are_refused ______________________________
+------------------------------------------------ Captured stderr call -------------------------------------------------
+personal-release artifact refused: The source is not a git checkout; source ZIPs and other copies without git objects are refused. Clone the release git bundle and check out the commit
+usage: __main__.py [-h] {check,stage,verify-installed,verify-tree} ...
+__main__.py: error: argument command: invalid choice: 'manifest' (choose from check, stage, verify-installed, verify-tree)
+_______________________________ test_unmanifested_installed_files_are_refused[evil.pyd] _______________________________
+------------------------------------------------ Captured stderr call -------------------------------------------------
+personal-release artifact refused: The installed vres_os package does not match the release manifest (unexpected ['evil.pyd'], missing [])
+______________________________ test_unmanifested_installed_files_are_refused[extra.pyc] _______________________________
+------------------------------------------------ Captured stderr call -------------------------------------------------
+personal-release artifact refused: The installed vres_os package does not match the release manifest (unexpected ['extra.pyc'], missing [])
+___________________ test_unmanifested_installed_files_are_refused[__pycache__/cli.cpython-312.pyc] ____________________
+------------------------------------------------ Captured stderr call -------------------------------------------------
+personal-release artifact refused: The installed vres_os package does not match the release manifest (unexpected directories ['__pycache__'])
+__________________ test_unmanifested_installed_files_are_refused[__pycache__/orphan.cpython-312.pyc] __________________
+------------------------------------------------ Captured stderr call -------------------------------------------------
+personal-release artifact refused: The installed vres_os package does not match the release manifest (unexpected directories ['__pycache__'])
+______________________________ test_unmanifested_installed_files_are_refused[native.so] _______________________________
+------------------------------------------------ Captured stderr call -------------------------------------------------
+personal-release artifact refused: The installed vres_os package does not match the release manifest (unexpected ['native.so'], missing [])
+______________________________ test_unmanifested_installed_files_are_refused[helper.dll] ______________________________
+------------------------------------------------ Captured stderr call -------------------------------------------------
+personal-release artifact refused: The installed vres_os package does not match the release manifest (unexpected ['helper.dll'], missing [])
+______________________________ test_unmanifested_installed_files_are_refused[hooks.pth] _______________________________
+------------------------------------------------ Captured stderr call -------------------------------------------------
+personal-release artifact refused: The installed vres_os package does not match the release manifest (unexpected ['hooks.pth'], missing [])
+________________________ test_unmanifested_installed_files_are_refused[migrations/README.txt] _________________________
+------------------------------------------------ Captured stderr call -------------------------------------------------
+personal-release artifact refused: The installed vres_os package does not match the release manifest (unexpected ['migrations/README.txt'], missing [])
+_____________________________ test_unmanifested_installed_files_are_refused[__pycache__/] _____________________________
+------------------------------------------------ Captured stderr call -------------------------------------------------
+personal-release artifact refused: The installed vres_os package does not match the release manifest (unexpected directories ['__pycache__'])
+____________________ test_installed_package_that_differs_from_the_artifact_is_refused[altered-py] _____________________
+------------------------------------------------ Captured stderr call -------------------------------------------------
+personal-release artifact refused: The installed vres_os package differs from the release manifest: ['cli.py']
+_____________________ test_installed_package_that_differs_from_the_artifact_is_refused[extra-py] ______________________
+------------------------------------------------ Captured stderr call -------------------------------------------------
+personal-release artifact refused: The installed vres_os package does not match the release manifest (unexpected ['experience_benchmark_runtime.py'], missing [])
+____________________ test_installed_package_that_differs_from_the_artifact_is_refused[missing-sql] ____________________
+------------------------------------------------ Captured stderr call -------------------------------------------------
+personal-release artifact refused: The installed vres_os package does not match the release manifest (unexpected [], missing ['migrations/041_experience_retrieval_observability.sql'])
+___________________ test_installed_package_that_differs_from_the_artifact_is_refused[migration-048] ___________________
+------------------------------------------------ Captured stderr call -------------------------------------------------
+personal-release artifact refused: The installed vres_os package does not match the release manifest (unexpected ['migrations/048_source_effective_trust.sql'], missing [])
+___________________ test_installed_package_that_differs_from_the_artifact_is_refused[stale-module] ____________________
+------------------------------------------------ Captured stderr call -------------------------------------------------
+personal-release artifact refused: The installed vres_os package does not match the release manifest (unexpected ['old_module.py'], missing [])
+LIVE APP-DATA FENCE: unexpected refusals=0 protected=['c:\\users\\user\\appdata\\local\\vresos', 'c:\\users\\user\\appdata\\roaming\\vresos'] trusted_temp_base=C:\Users\User\AppData\Local\Temp session_root=C:\Users\User\AppData\Local\Temp\vres-pytest-app-data-fuw6qezx\VresOS init_order=['validate-temp-base', 'create-session-directory', 'validate-session-directory', 'create-app-data-root', 'enable-isolation'] removed_env=[] integration_opt_in=False
+=============================================== short test summary info ===============================================
+PASSED tests/test_release_artifact.py::test_valid_artifact_is_bound_to_the_pinned_commit_objects
+PASSED tests/test_release_artifact.py::test_the_installer_runs_the_tool_as_a_plain_file_under_isolated_python
+PASSED tests/test_release_artifact.py::test_staging_never_overwrites_an_existing_release
+PASSED tests/test_release_artifact.py::test_a_working_tree_change_after_the_clean_check_cannot_reach_the_artifact
+PASSED tests/test_release_artifact.py::test_a_commit_landing_after_resolution_cannot_reach_the_artifact
+PASSED tests/test_release_artifact.py::test_a_crlf_checkout_stages_the_exact_committed_bytes
+PASSED tests/test_release_artifact.py::test_an_object_whose_content_does_not_match_its_id_is_refused[blob]
+PASSED tests/test_release_artifact.py::test_an_object_whose_content_does_not_match_its_id_is_refused[tree]
+PASSED tests/test_release_artifact.py::test_an_object_whose_content_does_not_match_its_id_is_refused[commit]
+PASSED tests/test_release_artifact.py::test_symlink_and_submodule_entries_in_scope_are_refused[symlink]
+PASSED tests/test_release_artifact.py::test_symlink_and_submodule_entries_in_scope_are_refused[submodule]
+PASSED tests/test_release_artifact.py::test_a_staging_tool_that_differs_from_the_pinned_commit_is_refused
+PASSED tests/test_release_artifact.py::test_the_bootstrap_self_check_accepts_only_the_exact_crlf_checkout_transform[a\nb\n-a\nb\n-True]
+PASSED tests/test_release_artifact.py::test_the_bootstrap_self_check_accepts_only_the_exact_crlf_checkout_transform[a\r\nb\r\n-a\nb\n-True]
+PASSED tests/test_release_artifact.py::test_the_bootstrap_self_check_accepts_only_the_exact_crlf_checkout_transform[a\r\nb\n-a\nb\n-False]
+PASSED tests/test_release_artifact.py::test_the_bootstrap_self_check_accepts_only_the_exact_crlf_checkout_transform[a\r\r\nb\r\r\n-a\r\nb\r\n-False]
+PASSED tests/test_release_artifact.py::test_the_bootstrap_self_check_accepts_only_the_exact_crlf_checkout_transform[a\nb\n-a\r\nb\r\n-False]
+PASSED tests/test_release_artifact.py::test_the_bootstrap_self_check_accepts_only_the_exact_crlf_checkout_transform[a\r\nb\r\n -a\nb\n-False]
+PASSED tests/test_release_artifact.py::test_the_bootstrap_self_check_accepts_only_the_exact_crlf_checkout_transform[a\nb-a\nb\n-False]
+PASSED tests/test_release_artifact.py::test_invalid_sources_are_refused_and_nothing_is_staged[no-pin-commit pin is required]
+PASSED tests/test_release_artifact.py::test_invalid_sources_are_refused_and_nothing_is_staged[short-pin-full 40-hex]
+PASSED tests/test_release_artifact.py::test_invalid_sources_are_refused_and_nothing_is_staged[other-commit-not the requested]
+PASSED tests/test_release_artifact.py::test_invalid_sources_are_refused_and_nothing_is_staged[head-moved-not the requested]
+PASSED tests/test_release_artifact.py::test_invalid_sources_are_refused_and_nothing_is_staged[dirty-differs from commit]
+PASSED tests/test_release_artifact.py::test_invalid_sources_are_refused_and_nothing_is_staged[untracked-differs from commit]
+PASSED tests/test_release_artifact.py::test_invalid_sources_are_refused_and_nothing_is_staged[migration-042-above 041]
+PASSED tests/test_release_artifact.py::test_invalid_sources_are_refused_and_nothing_is_staged[edited-001-differs from its pinned]
+PASSED tests/test_release_artifact.py::test_invalid_sources_are_refused_and_nothing_is_staged[experimental-F2 experimental file]
+PASSED tests/test_release_artifact.py::test_invalid_sources_are_refused_and_nothing_is_staged[c2b-C2B/R0 experimental file]
+PASSED tests/test_release_artifact.py::test_invalid_sources_are_refused_and_nothing_is_staged[unsafe-name-Unsafe release path]
+PASSED tests/test_release_artifact.py::test_invalid_sources_are_refused_and_nothing_is_staged[unpackaged-not a package module or migration]
+PASSED tests/test_release_artifact.py::test_the_cli_refuses_to_stage_without_a_commit_pin
+PASSED tests/test_release_artifact.py::test_a_zip_with_a_self_consistent_manifest_claiming_a_real_commit_is_refused
+PASSED tests/test_release_artifact.py::test_non_git_sources_and_the_manifest_command_are_refused
+PASSED tests/test_release_artifact.py::test_unmanifested_installed_files_are_refused[evil.pyd]
+PASSED tests/test_release_artifact.py::test_unmanifested_installed_files_are_refused[extra.pyc]
+PASSED tests/test_release_artifact.py::test_unmanifested_installed_files_are_refused[__pycache__/cli.cpython-312.pyc]
+PASSED tests/test_release_artifact.py::test_unmanifested_installed_files_are_refused[__pycache__/orphan.cpython-312.pyc]
+PASSED tests/test_release_artifact.py::test_unmanifested_installed_files_are_refused[native.so]
+PASSED tests/test_release_artifact.py::test_unmanifested_installed_files_are_refused[helper.dll]
+PASSED tests/test_release_artifact.py::test_unmanifested_installed_files_are_refused[hooks.pth]
+PASSED tests/test_release_artifact.py::test_unmanifested_installed_files_are_refused[migrations/README.txt]
+PASSED tests/test_release_artifact.py::test_unmanifested_installed_files_are_refused[__pycache__/]
+PASSED tests/test_release_artifact.py::test_installed_package_that_differs_from_the_artifact_is_refused[altered-py]
+PASSED tests/test_release_artifact.py::test_installed_package_that_differs_from_the_artifact_is_refused[extra-py]
+PASSED tests/test_release_artifact.py::test_installed_package_that_differs_from_the_artifact_is_refused[missing-sql]
+PASSED tests/test_release_artifact.py::test_installed_package_that_differs_from_the_artifact_is_refused[migration-048]
+PASSED tests/test_release_artifact.py::test_installed_package_that_differs_from_the_artifact_is_refused[stale-module]
+PASSED tests/test_release_artifact.py::test_plugin_tree_that_differs_from_the_artifact_is_refused[altered]
+PASSED tests/test_release_artifact.py::test_plugin_tree_that_differs_from_the_artifact_is_refused[extra]
+PASSED tests/test_release_artifact.py::test_plugin_tree_that_differs_from_the_artifact_is_refused[marker-not-allowed]
+PASSED tests/test_release_artifact.py::test_plugin_tree_that_differs_from_the_artifact_is_refused[link]
+PASSED tests/test_release_artifact.py::test_a_tampered_release_manifest_is_refused[symbolic-commit]
+PASSED tests/test_release_artifact.py::test_a_tampered_release_manifest_is_refused[version-1]
+PASSED tests/test_release_artifact.py::test_a_tampered_release_manifest_is_refused[object-format]
+PASSED tests/test_release_artifact.py::test_a_tampered_release_manifest_is_refused[short-tree]
+PASSED tests/test_release_artifact.py::test_a_tampered_release_manifest_is_refused[duplicate]
+PASSED tests/test_release_artifact.py::test_a_tampered_release_manifest_is_refused[traversal]
+PASSED tests/test_release_artifact.py::test_a_tampered_release_manifest_is_refused[out-of-scope]
+PASSED tests/test_release_artifact.py::test_a_tampered_release_manifest_is_refused[format]
+PASSED tests/test_release_artifact.py::test_a_tampered_release_manifest_is_refused[short-hash]
+PASSED tests/test_release_artifact.py::test_a_tampered_release_manifest_is_refused[short-blob]
+PASSED tests/test_release_artifact.py::test_a_tampered_release_manifest_is_refused[symlink-mode]
+PASSED tests/test_release_artifact.py::test_a_tampered_release_manifest_is_refused[no-blob-id]
+PASSED tests/test_release_artifact.py::test_installer_installs_only_from_the_verified_staged_artifact
+PASSED tests/test_release_artifact.py::test_the_documented_release_path_is_a_pinned_git_checkout_not_a_zip
+PASSED tests/test_release_artifact.py::test_every_documented_install_or_update_command_passes_the_commit_pin
+PASSED tests/test_release_artifact.py::test_the_documented_bundle_checkout_sequence_runs_as_written
+PASSED tests/test_release_artifact.py::test_every_operational_install_or_update_command_carries_the_commit_pin[README.md]
+PASSED tests/test_release_artifact.py::test_every_operational_install_or_update_command_carries_the_commit_pin[CLAUDE.md]
+PASSED tests/test_release_artifact.py::test_every_operational_install_or_update_command_carries_the_commit_pin[docs/INSTALL-WINDOWS.md]
+PASSED tests/test_release_artifact.py::test_every_operational_install_or_update_command_carries_the_commit_pin[docs/LIVE-VERIFICATION.md]
+PASSED tests/test_release_artifact.py::test_every_operational_install_or_update_command_carries_the_commit_pin[docs/RELEASE-VALIDATION.md]
+PASSED tests/test_release_artifact.py::test_no_operational_doc_describes_installing_from_a_source_zip[README.md]
+PASSED tests/test_release_artifact.py::test_no_operational_doc_describes_installing_from_a_source_zip[CLAUDE.md]
+PASSED tests/test_release_artifact.py::test_no_operational_doc_describes_installing_from_a_source_zip[docs/INSTALL-WINDOWS.md]
+PASSED tests/test_release_artifact.py::test_no_operational_doc_describes_installing_from_a_source_zip[docs/LIVE-VERIFICATION.md]
+PASSED tests/test_release_artifact.py::test_no_operational_doc_describes_installing_from_a_source_zip[docs/RELEASE-VALIDATION.md]
+PASSED tests/test_release_artifact.py::test_docs_route_installs_through_a_pinned_bundle_checkout_and_keep_zips_review_only
+PASSED tests/test_install_contract.py::test_installer_defers_credentials_and_requires_operator_consent
+PASSED tests/test_install_contract.py::test_python_runtime_staged_before_active_pointer_changes
+PASSED tests/test_install_contract.py::test_atomic_pointer_replace_uses_real_backup_path_on_windows_powershell
+PASSED tests/test_install_contract.py::test_statusline_install_is_transactional_and_uses_staged_runtime
+PASSED tests/test_install_contract.py::test_uninstall_removes_only_vres_owned_statusline_before_runtime_removal
+PASSED tests/test_install_contract.py::test_update_uses_same_transaction_implementation
+PASSED tests/test_install_contract.py::test_uninstall_is_owned_paths_only_and_preserves_data_by_default
+PASSED tests/test_install_contract.py::test_launchers_isolate_python_and_preserve_unicode
+PASSED tests/test_install_contract.py::test_windows_cli_launcher_preserves_unbound_multi_token_argv
+PASSED tests/test_install_contract.py::test_static_windows_release_path_cannot_be_parent_traversal
+PASSED tests/test_install_contract.py::test_static_python_discovery_checks_supported_side_by_side_versions
+PASSED tests/test_install_contract.py::test_static_python_probe_treats_missing_selector_as_dependency_absence
+PASSED tests/test_install_contract.py::test_static_windows_import_smoke_avoids_nested_native_quoting
+PASSED tests/test_install_contract.py::test_installer_manages_native_autocompact_conservatively_and_transactionally
+PASSED tests/test_install_contract.py::test_uninstall_removes_only_recorded_vres_owned_autocompact_before_runtime_removal
+PASSED tests/test_install_contract.py::test_personal_windows_launchers_use_process_only_remotesigned_not_bypass
+PASSED tests/test_install_contract.py::test_postinstall_python_imports_disable_bytecode_and_are_rechecked_last
+..............                                                                                                   [100%]
+======================================================= PASSES ========================================================
+LIVE APP-DATA FENCE: unexpected refusals=0 protected=['c:\\users\\user\\appdata\\local\\vresos', 'c:\\users\\user\\appdata\\roaming\\vresos'] trusted_temp_base=C:\Users\User\AppData\Local\Temp session_root=C:\Users\User\AppData\Local\Temp\vres-pytest-app-data-bugtfm0l\VresOS init_order=['validate-temp-base', 'create-session-directory', 'validate-session-directory', 'create-app-data-root', 'enable-isolation'] removed_env=[] integration_opt_in=False
+=============================================== short test summary info ===============================================
+PASSED tests/test_backup_recovery.py::test_interrupted_install_recovers_exactly_from_the_persisted_snapshot
+PASSED tests/test_backup_recovery.py::test_recovery_never_touches_native_claude_authentication_or_other_plugins
+PASSED tests/test_backup_recovery.py::test_ambiguous_recovery_is_refused_without_any_change[unmanaged-plugin]
+PASSED tests/test_backup_recovery.py::test_ambiguous_recovery_is_refused_without_any_change[third-release]
+PASSED tests/test_backup_recovery.py::test_ambiguous_recovery_is_refused_without_any_change[tampered-snapshot]
+PASSED tests/test_backup_recovery.py::test_ambiguous_recovery_is_refused_without_any_change[old-journal]
+PASSED tests/test_backup_recovery.py::test_v2_plugin_backup_must_match_snapshot_before_any_recovery[modified]
+PASSED tests/test_backup_recovery.py::test_v2_plugin_backup_must_match_snapshot_before_any_recovery[added]
+PASSED tests/test_backup_recovery.py::test_v2_plugin_backup_must_match_snapshot_before_any_recovery[removed]
+PASSED tests/test_backup_recovery.py::test_v2_backup_missing_digest_is_refused_without_recovery
+PASSED tests/test_backup_recovery.py::test_interruption_before_the_plugin_moved_is_proven_by_the_snapshot_digest
+PASSED tests/test_backup_recovery.py::test_missing_backup_with_an_unprovable_plugin_refuses_and_keeps_the_journal[edited]
+PASSED tests/test_backup_recovery.py::test_missing_backup_with_an_unprovable_plugin_refuses_and_keeps_the_journal[replaced-by-new-copy]
+PASSED tests/test_backup_recovery.py::test_version_1_snapshot_cannot_prove_plugin_identity
+PASS: release + installer contract modules and selected recovery negatives
+PASS: PROCESS_ENVIRONMENT_RESTORED_AND_VERIFIED
+PS C:\Projects\Vres-ChatGPT-Review-Personal-PT2D-20261029> Assert-SHA (Run-Git $checkout @('rev-parse','HEAD')) $candidate 'POST M1 HEAD'
+PASS: POST M1 HEAD
+PS C:\Projects\Vres-ChatGPT-Review-Personal-PT2D-20261029> Assert-SHA (Run-Git $checkout @('rev-parse','HEAD^{tree}')) $tree 'POST M1 tree'
+PASS: POST M1 tree
+PS C:\Projects\Vres-ChatGPT-Review-Personal-PT2D-20261029> Assert-TreeBlobs 'POST'
+PASS: POST install.ps1
+PASS: POST src/vres_os/release_inputs.py
+PASS: POST src/vres_os/release_artifact.py
+PASS: POST src/vres_os/install_recovery.py
+PASS: POST plugins/vres-os/hooks/hooks.json
+PASS: POST scripts/personal_upgrade_rehearsal.py
+PASS: POST tests/test_backup_recovery.py
+PASS: POST src/vres_os/database_targets.py
+PASS: POST src/vres_os/chairman_policy.py
+PS C:\Projects\Vres-ChatGPT-Review-Personal-PT2D-20261029> if (Run-Git $checkout @('status','--porcelain=v1','--untracked-files=all')) {
+>>     throw 'M1 detached checkout changed during validation.'
+>> }
+PS C:\Projects\Vres-ChatGPT-Review-Personal-PT2D-20261029> Write-Host ('M1 OFFLINE RESULTS: stage={0}; rollback={1}; tests={2}; no actual installation or PostgreSQL contact requested' -f $stage,$rollback,$tests)
+M1 OFFLINE RESULTS: stage=PASS; rollback=PASS; tests=PASS; no actual installation or PostgreSQL contact requested
+PS C:\Projects\Vres-ChatGPT-Review-Personal-PT2D-20261029> Write-Host 'VRES_PERSONAL_M1_WINDOWS_OFFLINE_EXECUTION_PASS_PENDING_EVIDENCE_EVALUATION'
+VRES_PERSONAL_M1_WINDOWS_OFFLINE_EXECUTION_PASS_PENDING_EVIDENCE_EVALUATION
+PS C:\Projects\Vres-ChatGPT-Review-Personal-PT2D-20261029>
+PS C:\Projects\Vres-ChatGPT-Review-Personal-PT2D-20261029>
