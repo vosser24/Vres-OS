@@ -1,0 +1,20 @@
+VRES-OS PROJECT INSTRUCTIONS — HARD AUTO-CHECKPOINT RULE
+Effective 2026-10-30. Applies to every active ChatGPT session in this Vres-OS Project.
+
+HARD TRIGGER — whichever happens first:
+(A) At or before the 20th completed assistant reply after the last verified GitHub continuity checkpoint / start of a new session.
+(B) When context-window consumption is reliably reported or conservatively estimated to EXCEED 50%. If the precise token/window meter is unavailable, never claim to know an exact percentage; checkpoint early when large inputs/tool results or compaction risk suggest approaching half capacity. If reply count or context state is uncertain, perform a checkpoint immediately.
+
+CHECKPOINT PROCEDURE — do not wait for the user to request it:
+1. Stop starting new feature phases. Safely finish or halt only the current atomic permitted action, and record unfinished commands, tests and decisions as PENDING or NOT_RUN. Never leave a claimed asynchronous handoff.
+2. Reverify actual GitHub canonical docs branch, product main, active feature branch, exact HEAD/tree/parent and current installation identity as available; do not infer changes to the local Windows PC. Compare intended/observed file changes.
+3. Commit and publish ALL authorized, completed GitHub source/tests/documentation changes on their correct dedicated feature/docs branches using exact parents, non-force update and expected-SHA lease; verify remote readback. Do NOT claim inaccessible, unpushed Windows files are committed. If no authorized changes exist, record a no-change checkpoint; if a repository write is blocked, report it accurately without bypass.
+4. Create a dated detailed continuity handoff in docs/handoffs/ and update docs/handoffs/VRES-CHATGPT-CONTINUITY-INDEX.md as the newest READ FIRST entry. Preserve source/install/branch SHAs, test PASS/FAIL/NOT_RUN provenance, original rejected attempts, protected worktrees, open incidents, user decisions and approvals, current roadmap V-01..V-42, #165–170/#174/#176, exact next operation, files and safety restrictions. No fabricated tests or incident clearance.
+5. Supply an actionable FULL fresh-chat resume prompt in ONE complete inline fenced code block, as well as the GitHub handoff/commit links, exact verified docs SHA/tree and the next milestone. Never provide the resume prompt only as a link or file.
+6. End the current session's work at this checkpoint and explicitly recommend starting the next ChatGPT chat. In the new chat, verify latest GitHub continuity before resuming. Reset reply counting only after the checkpoint is verified.
+
+BINDING PRODUCT/SCOPE: Vres-OS is a practical PERSONAL one-Windows-user daily-operations application, NOT an enterprise IAM/multi-tenant product. Use proportional P0/P1/P2/P3 approvals and integrated useful milestones, not endless microtests. Preserve all original V-01..V-42 requirements. User consent is required before installed/user-profile/credential/external changes.
+
+ABSOLUTE HOLDS (until separately cleared by evidence and user authorization): LIVE_SCHEMA_048_INCIDENT=OPEN (NO PostgreSQL even SELECT, direct or indirect), HOST_HOOK_DB_ROUTE_ATTEMPTED_AND_REFUSED=OPEN (NO ordinary native Claude Code/hook execution), independently trusted F1/Fable positive authority not granted. Do not merge product main, overwrite installed P2, touch real credentials or real legacy project under this checkpoint instruction.
+
+LIMITS: This rule operates only while a ChatGPT turn is active, not as a background timer or guaranteed automatic future job. Precise context percent, local unpushed changes and ChatGPT Project settings are not directly visible/editable unless a supported tool explicitly provides them; never claim otherwise. When tools are unavailable, provide the handoff and copyable prompt inline, mark repository commits UNVERIFIED, and prioritize safety.

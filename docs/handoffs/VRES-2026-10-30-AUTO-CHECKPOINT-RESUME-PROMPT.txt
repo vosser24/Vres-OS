@@ -1,0 +1,45 @@
+RESUME VRES-OS — PERSONAL DAILY-OPERATIONS PROGRAM, AUTOMATIC CHECKPOINT HANDOFF
+Checkpoint date: 2026-10-30 (Europe/Athens)
+Repository: vosser24/Vres-OS
+Canonical docs branch: docs/chatgpt-continuity-20261023
+Previous verified docs HEAD (parent of new auto-checkpoint): 0ece9b94ef60cf7765cc60de3d91f99dc6eb9839
+FIRST ACTION: read actual CURRENT docs HEAD remotely and its latest READ FIRST before trusting any SHA in this prompt.
+
+MANDATORY READ FIRST:
+1. docs/handoffs/VRES-CHATGPT-CONTINUITY-INDEX.md — newest READ FIRST entry is binding.
+2. docs/handoffs/VRES-2026-10-30-AUTO-CHECKPOINT-20-REPLIES-50PCT-HANDOFF.md — new 15k-char complete handoff.
+3. docs/handoffs/VRES-CHATGPT-PROJECT-INSTRUCTIONS-20-REPLIES-50PCT-CHECKPOINT-RULE-2026-10-30.txt — exact Project instructions rule to keep for subsequent sessions.
+4. docs/architecture/VRES-PERSONAL-SINGLE-USER-PRODUCT-CHARTER-AND-METHOD-2026-10-30.md — hard PERSONAL product/methodology.
+5. docs/roadmap/VRES-PERSONAL-DAILY-OPERATIONS-DELIVERY-PLAN-2026-10-30.md — M0–M8 and V-01..V-42 full scope.
+6. docs/handoffs/VRES-PERSONAL-2026-10-30-COMPLETE-DAILY-OPERATIONS-RESUME-HANDOFF.md — prior detailed source/test/historical boundary.
+7. docs/handoffs/VRES-2026-10-30-STAGE6-RELEASE-PROVENANCE-PASS-AND-MILESTONE-DEVELOPMENT-RESET.md — installed release P2 provenance.
+8. docs/handoffs/VRES-168-A18-WINDOWS-49-PASS-EXIT0-ACCEPTANCE-2026-10-30.md — source acceptance.
+9. docs/roadmap/VRES-FULL-SCOPE-FUNCTIONALITY-REGISTER-2026-10-22.md — 42 original requirements.
+
+OWNER HARD AUTO-CHECKPOINT RULE:
+At or before assistant reply 20 since last verified checkpoint / chat start, OR when reliable/estimated active context use exceeds 50%, WHICHEVER FIRST, stop new work; commit all authorized and completed GitHub source/tests/docs with SHA/tree/parent verification and nonforce CAS; update canonical continuity index; produce a dated complete handoff and ONE fully inline fenced-code-block resume prompt; recommend a NEW CHAT. No exact context meter is available by default: estimate conservatively and checkpoint early; never assert precise percent or promise a background action. If tools unavailable, handoff inline with unverified-commit status, never invent a GitHub commit. Track counting from this chat, reset only after real checkpoint.
+
+PRODUCT HARD RULE:
+Vres-OS is PERSONAL software for one Windows user's actual daily engineering, projects, research, docs, credentials, continuity and safely governed agents. NOT an enterprise/multi-tenant IAM/corporate-signing product. Use P0 low ceremony, P1 scoped reversible work, P2 explicit user approval/rollback for installed/credentials/critical actions, P3 incident STOP. Preserve all V-01..V-42 requirements and keep M0–M8 integrated milestones instead of another regex/Axx micro-gate treadmill.
+
+ABSOLUTE CURRENT HOLDS:
+LIVE_SCHEMA_048_INCIDENT=OPEN — NO PostgreSQL contact EVEN SELECT directly or via Vres CLI/MCP/bootstrap/doctor/hooks/F2/migrations/recovery.
+HOST_HOOK_DB_ROUTE_ATTEMPTED_AND_REFUSED=OPEN — seven historical native Claude Code Read/Grep automatic post-tool DB route attempts refused; NO ordinary native Claude Code startup or hook execution, no installed plugin modification.
+F1 trusted independent positive issuer / protected Fable-high not authorized. No actual model switch, installed Vres/Claude/PRISM config, credential values, real legacy Visual Studio project, main PR/merge or go-live without separate explicit user approval and evidence.
+
+SOURCE + INSTALLED VERSION TRUTH:
+GitHub main: 9a8acc5d464b96432a93cb95daa9581412fb07ee.
+Latest Windows-selected accepted A18 feature HEAD: 7bace7758e5c7f9a00f26179eb741ef3a319bc77, tree 4d17344a9510de6394840092cf33729ab153fbb5; 49 PASS/exit0, 33 protected Git blobs pre/post, saved-value process environment restored. NOT installed/merged; main→A18 ahead74/behind0 with 111 changed paths at last compare.
+Original P2 installed release source: 82c82430b38f93bd6b9d5c3af3b5de9c1368af9c, tree 205c081277ece483c634e1c801c39595abd4549c, hooks SHA256 700BF6AD711212C3A3A22419E42E0E5D62A491A7454C55C07AFED8409F0C34F7. Stage6 installed/staged P2 hooks match P2 release manifest; DO NOT HOT-PATCH.
+Source A18 hooks SHA256 88EA7AE078821A2DE85693DF0EE785EEEA847EA100469818DD0FBE0E4F1142B2. Stage3 installed Read/Glob/Grep posthook declarations 9 vs source0; Stage4 17 groups, precisely three matcher differences, zero nonmatcher differences; Stage5 IN-MEMORY three-substitution full structural equality/30 checks, 9→0, on-disk unchanged. Incidents OPEN.
+Original rejected A12 345a568b551ac23183c54f10611335adee903b96: 18PASS/1FAIL/exit1; original rejected A13 cdaa39aaa774cef88a4831bf6b157e380fbb69d9: 28PASS/1FAIL/exit1. Corrected R1s kept. A16 env script-copy ambiguity retained. A19 source writes blocked, NOT COMMITTED, NOT TESTED. PT1/PT2A–D/Hook-R1 and E7/E8 and #165 full history in index.
+
+REAL ROADMAP:
+Closed source dependencies #163/#164/#174, OPEN #165 Chairman, #166 current-user Claude/PRISM adoption, #167 same-user data source registry, #168 full project adoption, #176 experience memory, #169 integrated Visual Studio/real legacy physical gate, #170 daily readiness. Preserve every V-01..V-42 goal; no fake enterprise obligations.
+
+START WORK IMMEDIATELY:
+Do M0 read-only source/release compatibility assessment: actual A18 code and release_inputs.py, release_artifact.py, install.ps1, install_recovery.py, hooks, Chairman/task/adoption/credential/boundaries; reconcile main and P2; pin release migrations 001–041 with no C2B/R0/F2/048 experimental inputs. Then design/author M1 ONE integrity-preserving PERSONAL versioned upgrade-candidate on a dedicated GitHub branch, source/tests and disposable non-DB artifact/install/update/rollback failure-injection rehearsal. Avoid the real installer while incidents open. Don't request Stage7 hook comparisons or revive A19 micro-tests. No installed change until separately authorized.
+When a substantive source candidate is COMMITTED and ready, provide ONE complete SHA-pinned guarded Windows PowerShell validation script IN A SINGLE inline code block (never file only), solicit full console, distinguish measured PASS vs NOT_RUN. Use exact-parent nonforce GitHub commits. Do not run unauthorized native Claude/DB/provider operations. If tool write blocked, report it without bypass.
+No extra questions for already known project facts.
+
+First response: summarize verified current GitHub refs and blockers in brief, then actually proceed into M0/M1 work under the new personal methodology.
