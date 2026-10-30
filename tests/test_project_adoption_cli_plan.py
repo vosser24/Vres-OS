@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
+import stat
 
 import pytest
 import typer
@@ -303,3 +305,96 @@ def test_valid_plan_check_does_not_call_creating_data_dir(checked, monkeypatch):
     assert "PLAN_READY_FOR_PROTECTED_VALIDATION" in sink.getvalue()
     assert _tree(state) == before_state
     assert _tree(project.root) == before_project
+
+
+def test_directory_symlink_ancestor_is_denied_without_windows_symlink_privilege(
+    checked, monkeypatch
+):
+    project, state, audit, sink, work = checked
+    parent = work / "ordinary-parent"
+    parent.mkdir()
+    selected = _write_plan(parent, _proposal(audit))
+    before_state, before_project = _tree(state), _tree(project.root)
+    real_lstat = cli.os.lstat
+    def fake_lstat(path, *args, **kwargs):
+        if Path(path) == parent:
+            return SimpleNamespace(st_mode=stat.S_IFLNK | 0o777, st_file_attributes=0)
+        return real_lstat(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(cli.os, "lstat", fake_lstat)
+        with pytest.raises(typer.Exit) as refusal:
+            cli.project_plan_check(selected, project=project.root)
+
+    assert refusal.value.exit_code == 2
+    assert sink.getvalue() == ""
+    assert _tree(state) == before_state
+    assert _tree(project.root) == before_project
+
+
+def test_windows_junction_reparse_ancestor_denied_without_privilege(
+    checked, monkeypatch
+):
+    project, state, audit, sink, work = checked
+    parent = work / "junction-lookalike"
+    parent.mkdir()
+    selected = _write_plan(parent, _proposal(audit))
+    real_lstat = cli.os.lstat
+    reparse = 0x400
+
+    def fake_lstat(path, *args, **kwargs):
+        if Path(path) == parent:
+            return SimpleNamespace(
+                st_mode=stat.S_IFDIR | 0o755,
+                st_file_attributes=reparse,
+            )
+        return real_lstat(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(cli.stat, "FILE_ATTRIBUTE_REPARSE_POINT", reparse, raising=False)
+        patch.setattr(cli.os, "lstat", fake_lstat)
+        with pytest.raises(typer.Exit) as refusal:
+            cli.project_plan_check(selected, project=project.root)
+
+    assert refusal.value.exit_code == 2
+    assert sink.getvalue() == ""
+
+
+def test_canonicalized_sensitive_alias_is_rejected_without_read(
+    checked, monkeypatch
+):
+    project, state, audit, sink, work = checked
+    selected = _write_plan(work, _proposal(audit), "innocent-plan.json")
+    secret_alias = work / ".vres" / "local-secrets" / "innocent-plan.json"
+    previous_state = _tree(state)
+    original_resolve = Path.resolve
+
+    def fake_resolve(path, *args, **kwargs):
+        if path == selected.absolute():
+            return secret_alias
+        return original_resolve(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "resolve", fake_resolve)
+        with pytest.raises(typer.Exit) as refusal:
+            cli.project_plan_check(selected, project=project.root)
+
+    assert refusal.value.exit_code == 2
+    assert sink.getvalue() == ""
+    assert _tree(state) == previous_state
+    assert selected.exists()
+
+
+def test_parent_dotdot_path_refused_without_input_content_read(checked):
+    project, state, audit, sink, work = checked
+    intermediate = work / "ordinary"
+    intermediate.mkdir()
+    good = _write_plan(work, _proposal(audit), "alignment-plan.json")
+    unsafe_spelling = intermediate / ".." / "alignment-plan.json"
+    assert good.is_file()
+
+    with pytest.raises(typer.Exit) as refusal:
+        cli.project_plan_check(unsafe_spelling, project=project.root)
+
+    assert refusal.value.exit_code == 2
+    assert sink.getvalue() == ""

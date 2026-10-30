@@ -818,25 +818,46 @@ def _operator_architecture_plan(path: Path, project_root: Path):
 
     if path.suffix.lower() != ".json" or sensitive_path_reason(path):
         raise ValueError("Plan must be an explicitly supplied non-sensitive JSON document")
+    if ".." in path.parts:
+        raise ValueError("Plan file path must not traverse parent directories")
+
+    # Absolute path is used consistently for lstat, resolution and open. Walk
+    # from the filesystem root BEFORE visiting the final file, so a symlinked
+    # directory or Windows junction cannot hide a sensitive destination.
+    candidate = path.absolute()
+    if os.name == "nt" and candidate.drive.startswith("\\"):
+        raise ValueError("Plan file must reside on a local filesystem")
     try:
-        before = os.lstat(path)
+        before = None
+        ancestors = (*reversed(candidate.parents), candidate)
+        for component in ancestors:
+            info = os.lstat(component)
+            if stat.S_ISLNK(info.st_mode) or bool(
+                getattr(info, "st_file_attributes", 0)
+                & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+            ):
+                raise ValueError("Plan path must not traverse links or junctions")
+            if component != candidate and not stat.S_ISDIR(info.st_mode):
+                raise ValueError("Plan ancestor must be a real directory")
+            if component == candidate:
+                before = info
         root = Path(project_root).resolve(strict=True)
-        resolved = path.resolve(strict=True)
+        resolved = candidate.resolve(strict=True)
     except OSError as exc:
         raise ValueError("Plan document cannot be inspected safely") from exc
+
+    # Recheck sensitive-path rules after canonicalization as a separate denial
+    # layer (for example, platform-specific aliases for private directories).
+    if sensitive_path_reason(resolved):
+        raise ValueError("Plan must be an explicitly supplied non-sensitive JSON document")
     if resolved.is_relative_to(root):
         raise ValueError("Plan file must be outside the project to avoid changing its audit")
-    if (
-        not stat.S_ISREG(before.st_mode)
-        or stat.S_ISLNK(before.st_mode)
-        or bool(getattr(before, "st_file_attributes", 0)
-                & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
-    ):
+    if before is None or not stat.S_ISREG(before.st_mode):
         raise ValueError("Plan file must be a regular file without links or junctions")
     if before.st_size < 2 or before.st_size > 65536:
         raise ValueError("Plan file must contain 2 to 65536 bytes")
     try:
-        with path.open("rb") as stream:
+        with candidate.open("rb") as stream:
             observed = os.fstat(stream.fileno())
             if (
                 not stat.S_ISREG(observed.st_mode)
