@@ -58,6 +58,44 @@ def test_update_uses_same_transaction_implementation():
     assert "install.ps1') -Update" in text
     assert 'pip install' not in text and 'Remove-Item' not in text
 
+def test_maintenance_update_refuses_missing_active_release_before_native_commands():
+    """Update cannot silently become an initial install or create a partial Vres plugin."""
+    text = (ROOT / 'install.ps1').read_text(encoding='utf-8')
+    start = text.index('if ($Update -and (-not (Test-Path -LiteralPath $ActivePath -PathType Leaf)')
+    native = text.index('$cv = & claude --version')
+    mutation = text.index('New-Item -ItemType Directory -Force -Path $InstallRoot,$ReleaseRoot')
+    assert start < native < mutation
+    assert '-not (Test-Path -LiteralPath $PluginTarget -PathType Container)' in text[start:native]
+    assert 'Update requires an existing active Vres release and installed managed plugin' in text[start:native]
+
+
+def test_maintenance_update_never_acquires_external_packages_or_checks_postgres_service():
+    """No winget/npm/PG prerequisite checks are reachable on the Update path."""
+    text = (ROOT / 'install.ps1').read_text(encoding='utf-8')
+    prereqs = text.split('foreach ($item in @(', 1)[1].split('# Personal-release inputs', 1)[0]
+    assert 'if ($Update) { throw "Update refused: missing $($item[0])' in prereqs
+    assert "if ($Update) { throw 'Update refused: compatible Python is missing" in prereqs
+    assert prereqs.index('if ($Update) { throw "Update refused: missing') < prereqs.index('Winget-Install $item[1]')
+    assert prereqs.index("if ($Update) { throw 'Update refused: compatible Python") < prereqs.index("Winget-Install 'Python.Python.3.12'")
+    postgres = text.split('# Maintenance updates never inspect/provision local PostgreSQL', 1)[1]
+    assert "if (-not $Update -and -not $UseRemotePostgres" in postgres.split("if ($WithCodex", 1)[0]
+    codex = text.split("if ($WithCodex -and -not (Have 'codex'))", 1)[1].split('# Personal plugin discovery', 1)[0]
+    assert codex.index("if ($Update) { throw 'Update refused: optional Codex is missing") < codex.index("Run 'npm'")
+
+
+def test_maintenance_update_preserves_current_user_path_from_recovery_gap():
+    """Update leaves the registry-backed user PATH untouched, even if Vres bin is absent."""
+    text = (ROOT / 'install.ps1').read_text(encoding='utf-8')
+    section = text.split("    $userPath=[Environment]::GetEnvironmentVariable('Path','User')", 1)[1]
+    section = section.split("    Remove-Item -LiteralPath (Join-Path $InstallRoot 'pending-install.json')", 1)[0]
+    assert 'if ($Update) {' in section
+    update, initial_install = section.split('} elseif ($parts -notcontains $Bin) {', 1)
+    assert "SetEnvironmentVariable('Path'" not in update
+    assert 'will not modify PATH' in update
+    assert "[Environment]::SetEnvironmentVariable('Path', (($parts+$Bin)-join ';'), 'User')" in initial_install
+
+
+
 
 def test_uninstall_is_owned_paths_only_and_preserves_data_by_default():
     text=(ROOT/'uninstall.ps1').read_text()

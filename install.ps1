@@ -128,6 +128,12 @@ if (-not (Test-Path (Join-Path $RepoRoot '.git')) -or
 if (Get-Process -Name 'claude','codex' -ErrorAction SilentlyContinue) {
     throw 'Close Claude Code and Codex sessions first, then run the installer in a separate PowerShell window.'
 }
+# Update mode is maintenance of an existing managed current-user release, never an implicit
+# fresh installation. Refuse missing pointers/plugins before any external prerequisite command.
+if ($Update -and (-not (Test-Path -LiteralPath $ActivePath -PathType Leaf) -or
+                  -not (Test-Path -LiteralPath $PluginTarget -PathType Container))) {
+    throw 'Update requires an existing active Vres release and installed managed plugin. No new installation was started.'
+}
 if (Test-Path $ActivePath) {
     if (-not $Update -and -not (Confirm-Choice 'Vres is already installed. Stage an updated runtime?' $false)) { exit 0 }
 }
@@ -146,12 +152,14 @@ if ($Update) {
 }
 foreach ($item in @(@('git','Git.Git'), @('claude','Anthropic.ClaudeCode'))) {
     if (-not (Have $item[0])) {
+        if ($Update) { throw "Update refused: missing $($item[0]); no prerequisite package will be installed during a Vres update." }
         if (-not (Confirm-Choice "$($item[0]) is missing. Install its Windows package?" $true)) { throw "$($item[0]) is required." }
         Winget-Install $item[1]
     }
 }
 $Python = Find-Python
 if (-not $Python) {
+    if ($Update) { throw 'Update refused: compatible Python is missing; no prerequisite package will be installed during a Vres update.' }
     if (-not (Confirm-Choice 'Python 3.12 or 3.13 is missing. Install Python 3.12?' $true)) { throw 'Compatible Python is required.' }
     Winget-Install 'Python.Python.3.12'
     $Python = Find-Python
@@ -166,11 +174,14 @@ Run $Python @('-I','-X','utf8',(Join-Path $RepoRoot 'src\vres_os\release_artifac
 $cv = & claude --version
 if ($LASTEXITCODE -ne 0 -or "$cv" -notmatch '(\d+\.\d+\.\d+)') { throw 'Could not determine Claude Code version.' }
 if ([version]$Matches[1] -lt [version]'2.1.246') { throw 'Update Claude Code to 2.1.246 or newer, then rerun. This preview does not emulate older plugin APIs.' }
-if (-not $UseRemotePostgres -and -not (Have 'psql') -and -not (Get-Service -Name 'postgresql*' -ErrorAction SilentlyContinue)) {
+# Maintenance updates never inspect/provision local PostgreSQL, even to check whether
+# an executable/service exists. DB-dependent behavior stays disabled under the incident.
+if (-not $Update -and -not $UseRemotePostgres -and -not (Have 'psql') -and -not (Get-Service -Name 'postgresql*' -ErrorAction SilentlyContinue)) {
     if (Confirm-Choice 'Local PostgreSQL was not detected. Install PostgreSQL 17?' $true) { Winget-Install 'PostgreSQL.PostgreSQL.17' }
     else { throw 'Install PostgreSQL, or rerun with -UseRemotePostgres for an existing server.' }
 }
 if ($WithCodex -and -not (Have 'codex')) {
+    if ($Update) { throw 'Update refused: optional Codex is missing; no npm/global package changes during a Vres update.' }
     if (-not (Have 'npm')) { Winget-Install 'OpenJS.NodeJS.LTS' }
     Run 'npm' @('install','-g','@openai/codex')
     Refresh-Path
@@ -304,7 +315,15 @@ try {
     Run $Python @('-I','-B','-X','utf8',$ArtifactTool,'verify-installed','--manifest',$ReleaseManifest,'--package-dir',$PackageDir)
     $userPath=[Environment]::GetEnvironmentVariable('Path','User')
     $parts=@($userPath -split ';' | Where-Object { $_ })
-    if ($parts -notcontains $Bin) { [Environment]::SetEnvironmentVariable('Path', (($parts+$Bin)-join ';'), 'User') }
+    if ($Update) {
+        # Original P2 user PATH is an independent protected surface, absent from the
+        # existing recovery snapshot. A maintenance update must not change its value.
+        if ($parts -notcontains $Bin) {
+            Write-Warning 'Vres bin is absent from your user PATH. This update will not modify PATH; request a separately approved fix if launcher discovery fails.'
+        }
+    } elseif ($parts -notcontains $Bin) {
+        [Environment]::SetEnvironmentVariable('Path', (($parts+$Bin)-join ';'), 'User')
+    }
     Remove-Item -LiteralPath (Join-Path $InstallRoot 'pending-install.json') -ErrorAction SilentlyContinue
     Write-Host 'Vres preview installed. This does not certify Windows live behavior.' -ForegroundColor Green
     Write-Host 'Database health was not checked: the doctor preflight skipped database contact. No PostgreSQL access is authorized; check database health separately with vres doctor only after approving a non-incident database target.' -ForegroundColor Yellow
