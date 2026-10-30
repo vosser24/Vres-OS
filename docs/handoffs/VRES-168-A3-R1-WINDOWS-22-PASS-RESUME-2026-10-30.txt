@@ -1,0 +1,23 @@
+RESUME VRES-OS — #168 A3 R1 WINDOWS 22 DISTINCT PASS / 1 WINDOWS SYMLINK SKIP / EXIT0; CONTINUE BOUNDED PROJECT ADOPTION HARDENING
+
+Repo vosser24/Vres-OS. Canonical docs branch docs/chatgpt-continuity-20261023 — verify latest remote SHA before changing docs.
+
+READ FIRST:
+1. docs/handoffs/VRES-CHATGPT-CONTINUITY-INDEX.md
+2. docs/handoffs/VRES-168-A3-R1-WINDOWS-22-PASS-1-SKIP-EXIT0-AND-NEXT-BOUNDARY-2026-10-30.md
+3. docs/handoffs/VRES-168-A3-R1-WINDOWS-22-PASS-1-SKIP-EXIT0-OPERATOR-CHAT-LF-NORMALIZED-2026-10-30.txt
+4. docs/handoffs/VRES-168-A3-WINDOWS-16-PASS-1-SKIP-1-FAIL-AND-R1-SOURCE-CORRECTION-WINDOWS-NEXT-2026-10-29.md
+5. docs/roadmap/VRES-CHATGPT-LED-FULL-SCOPE-DELIVERY-PLAN-2026-10-22.md
+6. docs/roadmap/VRES-FULL-SCOPE-FUNCTIONALITY-REGISTER-2026-10-22.md
+7. docs/handoffs/VRES-PERSONAL-HOOK-R1-WINDOWS-34-PASS-EXIT0-INDEPENDENT-REVIEW-AND-INSTALLED-HOOK-HOLDS-2026-10-29.md
+
+TESTED SOURCE: feature/168-personal-architecture-plan-cli-20261029 HEAD d0c688e89fba801c4a9919b6e2584d1d715cf4af; TREE 498ad1ea5203e8e3fff0043eeddb6ed3a216b251; sole parent rejected A3 ce324491a798e96f8e8fc2a1127e2178d229cb2e.
+R1 exact 3 M files src/vres_os/paths.py blob 1456cf9c53ff18cfe950f63255956c17756a8620, src/vres_os/project_adoption.py blob 46d3c291e85a7b3f38496fff345ac618c4be1bce, tests/test_project_adoption_cli_plan.py blob 4c3b690a7730e8410e2b1f08a81b71410f4224ab.
+
+WINDOWS OPERATOR EVIDENCE pasted directly to chat: full LF-normalized copy Git blob 5af350de31eab7df0bd941dcc05113a540846140 (128 logical lines/9852 chars), NOT raw Windows stdout SHA. 17 new CLI/path cases PASS, 5 older targeted cases PASS; total 22 DISTINCT NAMED PASS, ONE physical symlink case SKIPPED Windows privilege unavailable, zero failed; PYTEST_EXIT_CODE=0, 168_A3_R1_TEST_EXIT_CODE=0 and VRES_PERSONAL_168_A3_R1_WINDOWS_SELECTED_TEST_COMPLETE. Clean original P2 and rejected A3, new detached R1 SHA/tree/one parent, 18 pre/post Git blob identities, exact 3M diff and clean before/after PASS; AppData fence unexpected refusals0/integration opt-in False, process DB/PG env isolated/restored. Original A3 rejected 16 pass 1 skip 1 fail exit1 and raw console Git blob a944937dad561b5db751cb8544a02251c3bf9760, exact SHA preserved. No independent source review or installed activation.
+
+NEXT SUGGESTED SOURCE INCREMENT: selected plan-file path currently checks final-file symlink/reparse, but not linked/junctioned directory ancestors or resolved sensitive-path alias. Add tiny fail-closed no-follow ancestor/path checks and deterministic Windows mock-based symlink/reparse tests that DO NOT require symlink privilege; retain original physical symlink SKIP as separate missing integration coverage. Implement in a NEW branch directly parented at validated A3 R1 SHA and selected offline synthetic negative tests. Avoid unnecessary duplicate full suites and product ceremony.
+
+ABSOLUTE HOLDS: LIVE_SCHEMA_048_INCIDENT OPEN NO PostgreSQL even SELECT including installed Vres CLI/MCP/hooks/bootstrap/doctor/F2. HOST_HOOK_DB_ROUTE_ATTEMPTED_AND_REFUSED OPEN 7 refused automatic Claude Read/Grep posttool DB routes; Git source Hook-R1 34 Windows PASS not installed and lifecycle/managed hooks remain unverified. Do not launch native Claude review now. Original installed P2 Chairman Sonnet/high last observed; Opus/medium UNINSTALLED; strict F1 independently rooted positive issuer BLOCKED. PERSONAL P0-P3, Fable/high router+validator and worker pins, secure current-user cross-project credential handles, full 42 requirements, #166/#167/#168, E7/E8, Visual Studio legacy PRISM and production/go-live holds preserved. PT1 R1 189 Windows PASS + independent STATIC_ACCEPT but 7 refused hook attempts; PT2A 213/PT2B 43/PT2C selected 54/PT2D 50 Windows PASS independently NOT_RUN; Hook-R1 34 PASS review NOT_RUN; A1 rejected 84 PASS/2 FAIL; A1 R1 88 PASS, A2 17 PASS, A3 rejected 16 PASS/1 SKIP/1 FAIL, A3 R1 22 PASS/1 SKIP. Every result is pinned to its own SHA.
+
+METHOD: ChatGPT leads actual narrow implementation/source/test/GitHub commits; user runs ONE full atomic PowerShell exact SHA clean new detached checkout/selected offline pytest/environment restoration/pre-post Git verification and returns full output; Claude Code existing subscription only in genuine no-auto-DB-attempt mode. All scripts and prompts are shown INLINE code blocks, not file-only. Source commits separate from docs-only handoff commits, single-parent nonforced GitHub ref CAS/readback. Never overstate tested, security, provider or production state.
