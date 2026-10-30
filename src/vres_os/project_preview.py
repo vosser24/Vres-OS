@@ -42,7 +42,26 @@ def preview_project(project) -> dict[str, Any]:
     blocked_items = sum(bool(row["blocked"]) for row in items)
     legacy = bool(items)
     established = bool(audit["requires_alignment_plan"])
-    if legacy:
+
+    # These are independent review obligations, not a grant or ordered
+    # activation procedure. Show ALL applicable holds; an incomplete
+    # architecture scan must never be hidden behind legacy KEEP/DROP status.
+    required_gates = {
+        "ARCHITECTURE_AUDIT_INCOMPLETE": bool(blocked_audit),
+        "CLAUDE_MANUAL_REVIEW": legacy and bool(blocked_items),
+        "ARCHITECTURE_ALIGNMENT_PLAN": established,
+        "CLAUDE_KEEP_DROP_REVIEW": legacy,
+    }
+    gate_priority = (
+        "ARCHITECTURE_AUDIT_INCOMPLETE",
+        "CLAUDE_MANUAL_REVIEW",
+        "ARCHITECTURE_ALIGNMENT_PLAN",
+        "CLAUDE_KEEP_DROP_REVIEW",
+    )
+    review_gates = [gate for gate in gate_priority if required_gates[gate]]
+    if legacy and blocked_audit:
+        classification = "LEGACY_ARCHITECTURE_SCAN_INCOMPLETE"
+    elif legacy:
         classification = (
             "LEGACY_MANUAL_REVIEW_REQUIRED" if blocked_items
             else "LEGACY_KEEP_DROP_REVIEW_REQUIRED"
@@ -56,6 +75,9 @@ def preview_project(project) -> dict[str, Any]:
 
     report = {
         "preview_status": classification,
+        "required_review_gates": review_gates,
+        "priority_review_gate": review_gates[0] if review_gates else "NONE",
+        "review_gates_are_non_authorizing": True,
         "snapshot_status": "NOT_SAVED_OR_AUTHORIZED",
         "recorded_adoption_state_inspected": False,
         "claude_configuration_present": legacy,
@@ -75,8 +97,10 @@ def preview_project(project) -> dict[str, Any]:
         "project_write_permitted": False,
         "state_write_permitted": False,
         "note": (
-            "Read-only preview, not the current adoption state. "
-            "Start must rescan and separately enforce operator/protected gates."
+            "Read-only scan-time preview, not current adoption state. "
+            "All listed review gates remain independently required; priority "
+            "is display-only, not a grant or sequence. Actual start must "
+            "rescan and enforce operator/protected gates separately."
         ),
     }
     try:
