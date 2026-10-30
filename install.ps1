@@ -141,6 +141,9 @@ if (Test-Path (Join-Path $InstallRoot 'venv')) {
     throw 'A legacy in-place Vres runtime exists. Preserve its config/credential and follow the migration section in docs/INSTALL-WINDOWS.md; it will not be overwritten.'
 }
 Assert-Managed $PluginTarget
+# Capture pre-existing surfaces BEFORE any newly staged bin/plugin is created.
+$HadPluginBefore = Test-Path -LiteralPath $PluginTarget -PathType Container
+$BinExistedBefore = Test-Path -LiteralPath $Bin -PathType Container
 Write-Host 'Vres-OS controlled-live-test preview. Not production-verified.' -ForegroundColor Yellow
 if ($Update) {
     Write-Host "Update target: the existing Vres installation for this Windows user, from pinned commit $SourceCommit." -ForegroundColor Yellow
@@ -255,7 +258,7 @@ try {
     # before the journal and before any mutation, so an interrupted install can be recovered exactly.
     Run $Python @('-I','-X','utf8',(Join-Path $StagedSource 'src\vres_os\install_recovery.py'),'snapshot','--install-root',$InstallRoot,'--claude-home',$ClaudeHome,'--release',$ReleaseId)
     $ClaudeSnapshot = Join-Path $InstallRoot "install-recovery\$ReleaseId"
-    Write-JsonAtomic (Join-Path $InstallRoot 'pending-install.json') @{ product='Vres-OS'; new_release=$ReleaseId; previous=$oldPointer; plugin_backup=$PluginBackup; plugin_path=$PluginTarget; had_plugin=(Test-Path $PluginTarget); claude_snapshot=$ClaudeSnapshot; claude_home=$ClaudeHome }
+    Write-JsonAtomic (Join-Path $InstallRoot 'pending-install.json') @{ product='Vres-OS'; new_release=$ReleaseId; previous=$oldPointer; plugin_backup=$PluginBackup; plugin_path=$PluginTarget; had_plugin=$HadPluginBefore; claude_snapshot=$ClaudeSnapshot; claude_home=$ClaudeHome }
     # Only now change the selected runtime/plugin. Roll back both on failure.
     if (Test-Path $PluginTarget) { Move-Item -LiteralPath $PluginTarget -Destination $PluginBackup; $pluginMoved=$true }
     Copy-Item -Recurse -LiteralPath $StagedPlugin -Destination $PluginTarget
@@ -336,11 +339,20 @@ try {
         elseif (Test-Path $ActivePath) { Remove-Item -LiteralPath $ActivePath }
     }
     if (Test-Path (Join-Path $NewRelease 'previous-bin')) {
-        Remove-Item -LiteralPath $Bin -Recurse -Force
-        Copy-Item -Recurse -LiteralPath (Join-Path $NewRelease 'previous-bin') -Destination $Bin
+        if (Test-Path $Bin) { Remove-Item -LiteralPath $Bin -Recurse -Force }
+        # A brand-new install had no bin directory before this transaction.
+        # Never replace that absence with a newly copied empty directory.
+        if ($BinExistedBefore) {
+            Copy-Item -Recurse -LiteralPath (Join-Path $NewRelease 'previous-bin') -Destination $Bin
+        }
     }
     if (Test-Path (Join-Path $InstallRoot 'pending-install.json')) {
-        if (Test-Path $PluginTarget) { Assert-Managed $PluginTarget; Remove-Item -LiteralPath $PluginTarget -Recurse -Force }
+        # If the journal was written but the old plugin was NOT yet moved,
+        # it is still the user's original plugin. Do not delete it.
+        # For a fresh install without an old plugin, remove only our copy.
+        if ($pluginMoved -or -not $HadPluginBefore) {
+            if (Test-Path $PluginTarget) { Assert-Managed $PluginTarget; Remove-Item -LiteralPath $PluginTarget -Recurse -Force }
+        }
         if ($pluginMoved -and (Test-Path $PluginBackup)) { Move-Item -LiteralPath $PluginBackup -Destination $PluginTarget }
     }
     if ($null -eq $GlobalClaudeBefore) {
@@ -361,8 +373,14 @@ try {
         New-Item -ItemType Directory -Force -Path $ClaudeHome | Out-Null
         [IO.File]::WriteAllBytes($ClaudeSettingsPath, $ClaudeSettingsBefore)
     }
-    if (Test-Path (Join-Path $InstallRoot 'pending-install.json')) { Remove-Item -LiteralPath (Join-Path $InstallRoot 'pending-install.json') }
-    Write-Warning 'Installation failed. Previous runtime/plugin/global Claude contract/status-line/auto-compaction settings restored where they existed. A failed staged release is retained for diagnosis. No database migration was performed by this installer.'
+    if (Test-Path (Join-Path $InstallRoot 'pending-install.json')) {
+        # A successful *attempt* at restoration is insufficient: verify the exact
+        # preinstall v2 plugin, active pointer, launcher and Claude file bytes.
+        # On failure, retain the journal for explicit reviewed recovery.
+        Run $Python @('-I','-X','utf8',(Join-Path $StagedSource 'src\vres_os\install_recovery.py'),'verify-restored','--install-root',$InstallRoot,'--claude-home',$ClaudeHome,'--release',$ReleaseId)
+        Remove-Item -LiteralPath (Join-Path $InstallRoot 'pending-install.json') -ErrorAction Stop
+    }
+    Write-Warning 'Installation failed. Previous runtime/plugin/global Claude contract/status-line/auto-compaction settings restored and byte-verified when a recovery journal existed. A failed staged release is retained for diagnosis. No database migration was performed by this installer.'
     throw
 } finally {
     $installLock.Dispose()

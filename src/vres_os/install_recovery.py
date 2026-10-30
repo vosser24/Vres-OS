@@ -28,6 +28,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import stat
 import sys
@@ -349,6 +350,90 @@ def inspect(install_root: Path) -> dict[str, Any]:
             "recoverable": not refusals}
 
 
+def verify_restored(install_root: Path, claude_home: Path, release: str) -> dict[str, Any]:
+    """Read-only v2 post-rollback proof. Never accept a journal removal on a mere attempted restore.
+
+    Check only Vres-owned plugin, launchers, pointer, and the three user Claude files
+    named in the original snapshot. Never inspect credentials, other plugins or a DB.
+    A v1 snapshot cannot prove the prior plugin tree; fail closed for this new gate.
+    """
+    install_root, claude_home = Path(install_root), Path(claude_home)
+    if not isinstance(release, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", release):
+        raise InstallRecoveryError("Rollback verification requires a safe release identifier")
+    if not _plain_dir(install_root) or not _plain_dir(claude_home):
+        raise InstallRecoveryError("Rollback verification needs ordinary installation and Claude roots")
+    snapshot = install_root / SNAPSHOTS / release
+    manifest = _load_snapshot(snapshot)
+    if manifest["version"] != 2:
+        raise InstallRecoveryError("Rollback verification requires a version-2 pre-install snapshot")
+    if manifest.get("claude_home") != str(claude_home):
+        raise InstallRecoveryError("Rollback snapshot does not belong to this Claude home")
+
+    journal_raw = _file(install_root / JOURNAL)
+    if journal_raw is None:
+        raise InstallRecoveryError("Rollback verification requires the pending installation journal")
+    try:
+        journal = json.loads(journal_raw.decode("utf-8-sig"))
+    except (ValueError, UnicodeDecodeError):
+        raise InstallRecoveryError("Rollback journal is unreadable") from None
+    plugin = claude_home / "skills" / "vres-os"
+    backup = install_root / "backups" / release
+    if not isinstance(journal, dict) or (
+        journal.get("product") != "Vres-OS"
+        or journal.get("new_release") != release
+        or journal.get("claude_home") != str(claude_home)
+        or journal.get("claude_snapshot") != str(snapshot)
+        or journal.get("plugin_path") != str(plugin)
+        or journal.get("plugin_backup") != str(backup)
+    ):
+        raise InstallRecoveryError("Rollback journal does not match the original release and protected paths")
+    if _lstat(backup) is not None:
+        raise InstallRecoveryError("Rollback backup remains at the pre-restoration location")
+
+    saved_pointer = _file(snapshot / ACTIVE)
+    try:
+        original_pointer = json.loads(saved_pointer.decode("utf-8-sig")) if saved_pointer is not None else None
+    except (ValueError, UnicodeDecodeError):
+        raise InstallRecoveryError("Original active pointer was not valid JSON") from None
+    if journal.get("previous") != original_pointer:
+        raise InstallRecoveryError("Rollback journal does not match the original active pointer")
+    if _file(install_root / ACTIVE) != saved_pointer:
+        raise InstallRecoveryError("Restored active pointer does not match its saved bytes")
+
+    expected_bin = manifest["bin"]
+    if not isinstance(expected_bin, dict) or type(expected_bin.get("existed")) is not bool:
+        raise InstallRecoveryError("Original launcher snapshot is malformed")
+    actual_bin = _dir_files(install_root / "bin")
+    if (actual_bin is not None) != expected_bin["existed"]:
+        raise InstallRecoveryError("Restored launcher directory existence differs from the snapshot")
+    expected_files = {name: _file(snapshot / "bin" / name) for name in expected_bin["files"]}
+    if (actual_bin or {}) != expected_files:
+        raise InstallRecoveryError("Restored launchers differ from their saved files")
+
+    for name in CLAUDE_FILES:
+        if _file(claude_home / name) != _file(snapshot / "claude" / name):
+            raise InstallRecoveryError(f"Restored {name} differs from its saved bytes")
+
+    previous_plugin = manifest.get("plugin")
+    if not isinstance(previous_plugin, dict) or type(previous_plugin.get("existed")) is not bool:
+        raise InstallRecoveryError("Original plugin snapshot is malformed")
+    if previous_plugin["existed"]:
+        digest = previous_plugin.get("tree_sha256")
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise InstallRecoveryError("Original plugin digest is missing or malformed")
+        if not _managed(plugin) or _tree_digest(plugin) != digest:
+            raise InstallRecoveryError("Restored Vres plugin differs from original snapshot identity")
+    elif _lstat(plugin) is not None:
+        raise InstallRecoveryError("A Vres plugin exists although none existed before the installation")
+
+    return {
+        "verified": True,
+        "release": release,
+        "version": 2,
+        "surfaces": ["active_pointer", "launchers", "claude_files", "vres_plugin", "plugin_backup_absent"],
+    }
+
+
 def recover(install_root: Path, *, confirm: bool) -> dict[str, Any]:
     """Carry out the inspected plan; refuse on any ambiguity or without explicit confirmation."""
     install_root = Path(install_root)
@@ -411,6 +496,10 @@ def recover(install_root: Path, *, confirm: bool) -> dict[str, Any]:
             else:
                 (claude_home / name).unlink(missing_ok=True)
         elif kind == "remove_journal":
+            # Never discard the only recovery marker before checking the exact
+            # restored v2 bytes. Historical v1 recovery remains legacy behavior.
+            if manifest["version"] == 2:
+                verify_restored(install_root, claude_home, str(journal["new_release"]))
             (install_root / JOURNAL).unlink()
         done.append(step)
     return {"status": "recovered", "actions": done, "pre_recovery_copy": str(keep)}
@@ -428,12 +517,18 @@ def main(argv: list[str] | None = None) -> int:
         cmd.add_argument("--install-root", type=Path, required=True)
         if name == "recover":
             cmd.add_argument("--confirm", action="store_true")
+    proof = commands.add_parser("verify-restored")
+    proof.add_argument("--install-root", type=Path, required=True)
+    proof.add_argument("--claude-home", type=Path, required=True)
+    proof.add_argument("--release", required=True)
     args = parser.parse_args(argv)
     try:
         if args.command == "snapshot":
             result: Any = {"snapshot": str(snapshot(args.install_root, args.claude_home, args.release))}
         elif args.command == "inspect":
             result = inspect(args.install_root)
+        elif args.command == "verify-restored":
+            result = verify_restored(args.install_root, args.claude_home, args.release)
         else:
             result = recover(args.install_root, confirm=args.confirm)
     except (InstallRecoveryError, OSError, ValueError) as exc:
