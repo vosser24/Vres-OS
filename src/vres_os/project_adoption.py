@@ -618,9 +618,25 @@ def _set_state(sd: Path, project, state: str, **extra: Any) -> dict[str, Any]:
 
 
 def _state(sd: Path, project) -> dict[str, Any] | None:
+    """Fail closed on malformed or cross-root adoption state.
+
+    The project key can be shared by cloned working trees with the same Git
+    remote. A saved adoption is still bound to its original canonical root:
+    never reuse its KEEP/DROP decisions, active state or recovery history for
+    a different checkout. No automatic migration or state rewrite is allowed.
+    """
     record = _read_json(sd / "state.json")
-    if record is not None and record.get("project_key") != project.key:
+    if record is None:
+        return None
+    if not isinstance(record, dict):
+        raise AdoptionError("Adoption state record has an invalid structure; manual review required")
+    if record.get("project_key") != project.key:
         raise AdoptionError("Adoption state belongs to a different project")
+    recorded_root = record.get("project_root")
+    if not isinstance(recorded_root, str) or recorded_root != str(project.root):
+        raise AdoptionError("Adoption state belongs to a different project root; manual review required")
+    if record.get("version") != VERSION or record.get("state") not in STATES:
+        raise AdoptionError("Adoption state record has an unsupported version or state; manual review required")
     return record
 
 
