@@ -1,0 +1,30 @@
+RESUME VRES-OS — A3 R1 WINDOWS 22 PASS / 1 SYMLINK SKIP EXIT0; #168 A4 PATH ANCESTOR HARDENING COMMITTED, ONE WINDOWS TEST NEXT
+
+Repository vosser24/Vres-OS; canonical docs branch docs/chatgpt-continuity-20261023; check latest remote HEAD. READ docs/handoffs/VRES-CHATGPT-CONTINUITY-INDEX.md first.
+
+READ:
+1. docs/handoffs/VRES-168-A3-R1-22-PASS-AND-A4-PLAN-PATH-HARDENING-SOURCE-COMMITTED-WINDOWS-NEXT-2026-10-30.md
+2. docs/handoffs/VRES-168-A4-GUARDED-WINDOWS-SELECTED-TEST-NEXT-2026-10-30.ps1 (169-line PowerShell, give ENTIRE block INLINE in a code block, not only a file)
+3. docs/handoffs/VRES-168-A3-R1-WINDOWS-22-PASS-1-SKIP-EXIT0-AND-NEXT-BOUNDARY-2026-10-30.md
+4. docs/handoffs/VRES-168-A3-R1-WINDOWS-22-PASS-1-SKIP-EXIT0-OPERATOR-CHAT-LF-NORMALIZED-2026-10-30.txt
+5. docs/roadmap/VRES-CHATGPT-LED-FULL-SCOPE-DELIVERY-PLAN-2026-10-22.md
+6. docs/roadmap/VRES-FULL-SCOPE-FUNCTIONALITY-REGISTER-2026-10-22.md
+7. docs/handoffs/VRES-PERSONAL-HOOK-R1-WINDOWS-34-PASS-EXIT0-INDEPENDENT-REVIEW-AND-INSTALLED-HOOK-HOLDS-2026-10-29.md
+
+WINDOWS ACCEPTED PREDECESSOR: feature/168-personal-architecture-plan-cli-20261029 HEAD d0c688e89fba801c4a9919b6e2584d1d715cf4af, tree 498ad1ea5203e8e3fff0043eeddb6ed3a216b251, exactly 3M source files versus rejected original A3. User normal Windows PowerShell log 22 DISTINCT named PASS, 1 SKIPPED physical symlink case (Windows privilege unavailable), 0 FAIL, PYTEST_EXIT_CODE=0, 168_A3_R1_TEST_EXIT_CODE=0, final VRES_PERSONAL_168_A3_R1_WINDOWS_SELECTED_TEST_COMPLETE; 18 exact pre/post protected blob checks, proper env restoration, AppData unexpected refusals0. Entire chat text LF-normalized Git blob 5af350de31eab7df0bd941dcc05113a540846140 (not raw Windows byte hash or physical database trace). Rejected original A3 HEAD ce324491... 16 PASS/1 SKIP/1 FAIL/exit1 remains immutable.
+
+NEW A4 SOURCE (WINDOWS NOT RUN):
+Feature branch feature/168-personal-plan-path-ancestor-hardening-20261030
+HEAD fa68ff005d29852e6970fd58fdbf013e7939291f
+TREE ef3a477e4cd7e60a44ec31630bfa858a68ce6231
+ONE direct parent accepted A3 R1 d0c688e89fba801c4a9919b6e2584d1d715cf4af
+EXACT TWO M files: src/vres_os/cli.py blob 32e919c20e935b466f8a0fdff2d9ea7a89029a65 and tests/test_project_adoption_cli_plan.py blob 7ff102421584c86b1ffcb898e888b17294d2151b. GitHub nonforced expected-old ref update/tree/parent/two-path compare/readback verified.
+
+SECURITY/FUNCTIONALITY GAP: CLI plan-check previously rejected symlink final JSON file but not regular JSON file under symlinked or Windows junctioned parent directories, potentially resolving hidden sensitive path. New source normalizes absolute path for stat/resolve/open, rejects lexical parent traversal and Windows UNC, scans every ancestor from root using lstat and refuses symlink/junction/reparse, re-checks canonical sensitive-path policy, keeps file regular/size/identity checks and A2 current audit-bound no-activation. Four new deterministic Windows privilege-free simulated link/junction, resolved sensitive alias and traversal tests; old physical symlink test may still SKIP and must be recorded honestly. A4 Windows tests not run; independent Claude code review not run; no installed Vres/Claude/user project/main changes.
+
+ONE NEXT USER WINDOWS ACTION:
+Normal Windows PowerShell, not Claude Code and not installed Vres CLI. Paste complete source-controlled 169-line A4 script in ONE code block. Preflight original P2 C:\Projects\Vres-P2F-Postinstall-Hardening-20261022 HEAD 82c82430b38f93bd6b9d5c3af3b5de9c1368af9c clean; prior accepted A3 R1 worktree C:\Projects\Vres-ChatGPT-Review-168-Plan-CLI-R1-20261029 HEAD d0c688..., tree 498ad1..., clean; NEW detached target C:\Projects\Vres-ChatGPT-Review-168-Plan-Path-A4-20261030 absent. Official remote/fetch exact SHA, checkout HEAD/tree/one parent/18 blobs, exact M CLI and M CLI tests, diff --check and clean. Selected Python3.12 -B pytest -q -rA -p no:cacheprovider new CLI test module + 2 A2 compatibility + 1 CLI redaction; plugin autoload disabled, process PG/DB/integration env isolated/restored, protected test fixture AppData; actual named pass/fail/skip and exit0, posttest head/tree/18 blob/clean new/old. Final VRES_PERSONAL_168_A4_WINDOWS_SELECTED_TEST_COMPLETE only if all guards PASS and PYTEST_EXIT_CODE=0. If STOP/ABORT, never execute fragments. Return complete console, not a summary; fix demonstrated defects in fresh commit, not a rerun of rejected SHA.
+
+ABSOLUTE HOLDS: LIVE_SCHEMA_048_INCIDENT OPEN, absolutely no PostgreSQL even SELECT through Vres CLI/MCP/hooks/doctor/bootstrap/task/F2/migration/recovery. HOST_HOOK_DB_ROUTE_ATTEMPTED_AND_REFUSED OPEN: 7 refused auto DB routing attempts during prior native Claude PT1 Read/Grep review. Hook-R1 source matcher correction 34 Windows PASS, but installed/global/managed/session hooks unverified and NOT updated; do not launch normal Claude Code reviewer yet. Existing Claude subscription is the intended review route once safe; no API-key/account-tier/browser Chat detours. PT1 189 Windows PASS + independently STATIC_ACCEPT but seven hook attempts; PT2A 213/PT2B 43/PT2C 54/PT2D 50 Windows PASS but independent PT2A-D NOT_RUN. #168 A1 rejected 84PASS/2FAIL, A1 R1 88PASS, A2 17PASS, original A3 rejected 16PASS/1SKIP/1FAIL, A3 R1 22PASS/1SKIP; A4 NOT_RUN. Original installed Chairman P2 Sonnet/high last observed, Opus/medium UNINSTALLED, F1 strict positive issuer BLOCKED, PERSONAL P0-P3 and Fable/high router/validator, secure current-user reusable credentials, full V-01..V-42, #166/#167/#168, E7/E8, Visual Studio legacy/PRISM, E7/PA/F2/go-live all retained.
+
+METHOD: ChatGPT is lead source developer/GitHub committer; user executes ONE exact SHA-pinned Windows PowerShell selected offline test and sends full evidence; independent Claude Code with existing subscription only when no automatic prohibited DB attempt can occur. Preserve source SHAs, test counts and all failed history, one docs-only nonforced GitHub handoff seal per material gate. All operator scripts and prompts INLINE in code blocks, never file-only.
