@@ -1,0 +1,34 @@
+# Vres-OS PERSONAL #168 — A12 original Windows 18 PASS / 1 FAIL REJECTED; corrected R1 depth-guard source committed; R1 Windows NEXT
+
+**Date:** 2026-10-30, Europe/Athens. **Repository:** vosser24/Vres-OS.
+**Current:** A11_WINDOWS_SELECTED_ACCEPTED / A12_ORIGINAL_WINDOWS_REJECTED_18PASS_1FAIL_EXIT1 / A12_R1_SOURCE_COMMITTED / A12_R1_WINDOWS_NOT_RUN / CLAUDE_INDEPENDENT_NOT_RUN / NO_INSTALLED_OR_REAL_PROJECT_CHANGE / POSTGRESQL_AND_NATIVE_CLAUDE_HOOK_INCIDENTS_OPEN.
+
+## 1. Original A12 Windows rejection — preserve exactly
+
+Original A12 feature HEAD **345a568b551ac23183c54f10611335adee903b96**, tree **0851934f4a79e297e136d512f6ae6d1e6f707e2d**, sole previously Windows-accepted A11 parent **d58db1b5cea0c74040f1d25a219e80e0180c8efd**, tree **ffd65c706e1a42c04a3c687918925082eb19d607**. Operator tested in fresh detached `C:\Projects\Vres-ChatGPT-Review-168-Record-Read-A12-20261030`; the original P2 anchor at `C:\Projects\Vres-P2F-Postinstall-Hardening-20261022` HEAD `82c82430b38f93bd6b9d5c3af3b5de9c1368af9c` clean and accepted A11 `C:\Projects\Vres-ChatGPT-Review-168-Decision-Integrity-A11-20261030` clean.
+
+Exact remote/fetched original SHA, HEAD/tree/parent, **27 pinned Git blobs before AND after**, exact modified adoption reader + new test module allowlist, diff--check and checkout clean all PASS. One Python3.12 guarded offline selected pytest of 12 new A12 + seven inherited A11/P2-D/A7 functions reported **18 PASSED / ONE FAILED**. Failed `tests/test_project_adoption_record_read_fence.py::test_deeply_nested_json_refused_without_unbounded_parser_recursion`: 1,500-deep valid JSON arrays parsed without `AdoptionError` on the operator's Windows Python. `PYTEST_EXIT_CODE=1`, `168_A12_TEST_EXIT_CODE=1`, final **VRES_PERSONAL_168_A12_ABORTED / STOP**; **no success/completion**. In-process pytest plugin autoload disabled, DB/PG/integration env isolated and finally restored (`PROCESS_ENVIRONMENT_RESTORED`), disposable AppData fixture `unexpected refusals=0 / integration_opt_in=False`; posttest HEAD/tree/27 blobs clean, prior A11 clean. The correct status is **A12 ORIGINAL REJECTED**. Do not reclassify the 18 passing tests as A12 accepted, reset it, remove the worktree, or run fragments.
+
+Provenance: complete-looking original PowerShell console user pasted into ChatGPT (not raw byte-original Windows stdout, independently SHA-256 attested transcript, or packet-level TCP/SQL tracing). No native Claude independent review.
+
+## 2. Corrected R1 source on SAME feature branch — Windows NOT_RUN
+
+Branch `feature/168-personal-adoption-record-read-fence-a12-20261030`; final published R1 HEAD **80cee6fe9f0f0dbe55c70d2103e54c1d9bc5b966**, tree **259e507b79dd7a2034ba9c9350f943665df13fbe**. Sole direct parent `6730da195ba3d4e4bb62841e7c03ee11ec0e004a` (intermediate correction NOT Windows-run), whose sole parent is original failed A12 `345a568b551ac23183c54f10611335adee903b96`. GitHub exact comparison from original failed HEAD: **two commits ahead / zero behind**, net EXACTLY TWO MODIFIED paths:
+- M `src/vres_os/project_adoption.py` blob **3fe1680ece8676bd743337f37b20ae50df611089**. Add `_MAX_ADOPTION_JSON_DEPTH=128` and iterative quote-/escape-aware bracket/brace scanning before JSON parsing; reject excessive/malformed nesting with existing redacted recovery error. Existing 2MiB limit, file/reparse/identity and UTF-8 safeguards remain.
+- M `tests/test_project_adoption_record_read_fence.py` blob **b0a2fae7875049a37a3420e5b3f63905229c9f75**. Retain original 12 regression functions including the actual failing case; add four new boundary cases: exactly 128 depth permitted, 129 denied, brackets and escaped quotes within strings ignored, mismatched delimiters denied. Total 16 authored (NOT RUN on Windows).
+
+Do not confuse an intermediate source commit with final R1; the final commit also fixes the scanner's escaped-backslash Python literal, before any R1 Windows test. R1 is only a SOURCE COMMIT, NOT ACCEPTED.
+
+## 3. Next exactly ONE operator action: A12 R1 guarded selected Windows
+
+Complete archived [A12 R1 one-atomic Windows script](VRES-168-A12-R1-GUARDED-WINDOWS-SELECTED-TEST-NEXT-2026-10-30.ps1), Git blob **a08ac411be2fd9e69c2a1b3b2073c38fb1cb2da7**. Always give operator entire script INLINE in exactly ONE PowerShell code block, never fragments/file-only.
+
+Preconditions: original P2 clean at exact HEAD; prior accepted A11 worktree clean; original rejected A12 worktree `C:\Projects\Vres-ChatGPT-Review-168-Record-Read-A12-20261030` clean and preserved at rejected SHA/tree. NEW detached review destination `C:\Projects\Vres-ChatGPT-Review-168-Record-Read-A12-R1-20261030` MUST NOT EXIST.
+
+Atomic script checks official GitHub origin, remote/fetched exact final R1 SHA, new HEAD/tree, chain through intermediate/failed A12 to accepted A11, **27 SHA-pinned protected blobs** before/after, exact TWO MODIFIED files net vs rejected A12, diff--check and cleanliness. One process-only isolated Python3.12 pytest selected 16 current R1 record-read functions + seven prior accepted A11/P2-D/A7 functions (**23 planned tests, no result preclaimed**), pytest plugin autoload disabled, disposable AppData test fence, process DB/PG/integration env scrubbed and finally restored; post SHA/tree/blobs and clean prior/failed/current worktrees. Successful result requires zero failures/unexpected skips, `PYTEST_EXIT_CODE=0`, `168_A12_R1_TEST_EXIT_CODE=0`, final `VRES_PERSONAL_168_A12_R1_WINDOWS_SELECTED_TEST_COMPLETE`. STOP/ABORT: preserve output, do not manually repair or run fragments.
+
+## 4. Hard holds / complete program unchanged
+
+**LIVE_SCHEMA_048_INCIDENT=OPEN: NO PostgreSQL even SELECT** via Vres hooks/MCP/CLI/task/doctor/bootstrap/migration/F2/recovery. **HOST_HOOK_DB_ROUTE_ATTEMPTED_AND_REFUSED=OPEN** with seven earlier refused native Claude Code post-tool automatic DB routing attempts; Hook-R1 34 selected Windows source PASS is NOT installed/managed/lifecycle clearance. Prior accidentally opened Claude Code `--safe-mode` in PT2D was not an independent A7–A12 review or Vres Chairman model switch. Previously installed P2 Chairman Sonnet/high last observed; desired Opus/medium not installed. Positive F1 independently rooted issuer blocked, protected Fable/high not granted. No live project/global config/credentials, model, installed release, PostgreSQL, product-main merge, PR or real legacy activation authorized.
+
+Preserve PT1/PT2A–D/Hook-R1, #168 A1–A11 SHA-specific accepted/rejected/skipped evidence, rejected original A12 18/1, full V-01..V-42, PERSONAL P0–P3, #165–170, #174, #176 E7/E8, current-user credentials, #166 global Claude/PRISM, #167 Data Source Registry, Visual Studio #169 and go-live #170. Continue ChatGPT code/GitHub, operator SHA-pinned Windows offline tests, evidence reconciliation, docs-only seal, Claude independent reviewer only after hook safety clearance.
