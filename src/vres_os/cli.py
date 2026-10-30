@@ -757,6 +757,24 @@ def _adoption(action, path: Path = Path(".")):
         raise _recovery_exit(exc) from exc
 
 
+@project_app.command("preview")
+def project_preview(
+    project: Path = typer.Option(
+        Path("."), "--project", help="Project to inspect before starting any Vres adoption."
+    ),
+) -> None:
+    """Stateless source/Claude configuration preview, not activation or approval."""
+    from .project_adoption import AdoptionError
+    from .project_preview import preview_project
+
+    try:
+        identity = discover_project(project)
+        result = preview_project(identity)
+    except (AdoptionError, OSError, ValueError) as exc:
+        raise _recovery_exit(exc) from exc
+    console.print_json(data=result)
+
+
 @project_app.command("inventory")
 def project_inventory(path: Path = Path(".")) -> None:
     """Safe prelaunch review: inventory a project's Claude configuration BEFORE launching Claude Code there.
