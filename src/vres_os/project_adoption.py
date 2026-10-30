@@ -516,6 +516,41 @@ def _snapshot(sd: Path, root: Path, inv: dict[str, Any]) -> None:
     _write_json(snap.parent / f"{inv['version']}.json", inv)
 
 
+
+
+def _legacy_architecture_hold(root: Path) -> dict[str, Any]:
+    """Read-only #174 audit for legacy Claude projects, never an approval.
+
+    Existing Claude surfaces must still be inventoried and may be reviewed
+    individually. Established source or an incomplete static audit cannot be
+    activated merely because KEEP/DROP decisions were confirmed.
+    """
+    from .architecture_governance import audit_project
+
+    audit = audit_project(root)
+    limitations = list(audit["limitations"])
+    blocking = [
+        value for value in limitations
+        if value not in _ARCHITECTURE_ANALYSIS_ADVISORIES
+    ]
+    if not audit["requires_alignment_plan"] and not blocking:
+        return {}
+    return {
+        "architecture_review_required": True,
+        "architecture_audit_digest": audit["audit_digest"],
+        "architecture_profiles": list(audit["profiles"]),
+        "architecture_plan_required": bool(audit["requires_alignment_plan"]),
+        "architecture_audit_complete": not bool(blocking),
+        "architecture_limitation_count": len(limitations),
+        "architecture_blocking_limitation_count": len(blocking),
+        "architecture_analysis_advisories": sorted(
+            item for item in limitations
+            if item in _ARCHITECTURE_ANALYSIS_ADVISORIES
+        ),
+        "architecture_plan_status": "NOT_SUBMITTED",
+        "required_validator": dict(audit["required_validator"]),
+    }
+
 # ------------------------------------------------------------------------------------------- operations
 
 def start(project, *, data_root: Path | None = None) -> dict[str, Any]:
@@ -574,12 +609,24 @@ def start(project, *, data_root: Path | None = None) -> dict[str, Any]:
         _set_state(sd, project, "fresh", scaffold_sha256=hashlib.sha256(text).hexdigest())
         _write_new(root / "CLAUDE.md", text)
         return _set_state(sd, project, "active", created=["CLAUDE.md"]) | {"changed": True}
-    if record and record["state"] == "awaiting_operator" and record.get("inventory_version") == inv["version"]:
+    # An existing Claude configuration is not evidence that the software
+    # architecture itself is fresh. Keep the existing numbered inventory and
+    # decision flow, but expose a separate, non-authorizing architecture hold.
+    architecture_hold = _legacy_architecture_hold(root)
+    if (
+        record and record["state"] == "awaiting_operator"
+        and record.get("inventory_version") == inv["version"]
+        and all(record.get(key) == value for key, value in architecture_hold.items())
+        and (architecture_hold or not record.get("architecture_review_required"))
+    ):
         return record | {"changed": False, "pending": _pending(sd, inv), "blockers": _blockers(inv)}
-    _set_state(sd, project, "legacy_pending", inventory_version=inv["version"])
+    _set_state(sd, project, "legacy_pending", inventory_version=inv["version"],
+               **architecture_hold)
     _snapshot(sd, root, inv)
-    return _set_state(sd, project, "awaiting_operator", inventory_version=inv["version"]) | {
-        "changed": True, "items": inv["items"], "pending": _pending(sd, inv), "blockers": _blockers(inv)}
+    return _set_state(sd, project, "awaiting_operator", inventory_version=inv["version"],
+                      **architecture_hold) | {
+        "changed": True, "items": inv["items"], "pending": _pending(sd, inv),
+        "blockers": _blockers(inv)}
 
 
 def _current_inventory(sd: Path, project) -> dict[str, Any]:
@@ -696,6 +743,15 @@ def activate(project, *, authority: Authority, data_root: Path | None = None) ->
     root = Path(project.root).resolve(strict=True)
     sd = _state_dir(project, data_root)
     inv = _current_inventory(sd, project)
+    # Recheck current project source immediately before any authority prompt,
+    # journal creation or project write. This also protects records saved by
+    # earlier Vres versions without an architecture hold attached.
+    if _legacy_architecture_hold(root):
+        raise AdoptionError(
+            "Legacy project architecture needs an incremental alignment plan "
+            "and separate protected Fable/high validation before activation; "
+            "KEEP/DROP decisions alone do not authorize architecture changes"
+        )
     blockers = _blockers(inv)
     if blockers:
         raise AdoptionError(f"Items {blockers} need manual review (Vres will not delete or keep them active as "

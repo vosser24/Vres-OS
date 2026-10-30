@@ -587,6 +587,7 @@ def start_for_project(project_root: str = ".") -> dict:
     summary = {k: adoption[k] for k in (
         "state", "changed", "pending", "blockers", "created", "error",
         "architecture_audit_digest", "architecture_profiles",
+        "architecture_review_required",
         "architecture_plan_required", "architecture_audit_complete",
         "architecture_limitation_count", "architecture_blocking_limitation_count",
         "architecture_analysis_advisories", "architecture_plan_status",
@@ -603,6 +604,23 @@ def start_for_project(project_root: str = ".") -> dict:
                 "its current digest, and obtain separate protected Fable/high validation "
                 "before any architecture-changing activation. This offline stage does "
                 "not authorize a project write or database setup."
+            ),
+            "prerequisites": prerequisite_status(),
+        }
+    if adoption.get("state") == "awaiting_operator" and adoption.get(
+        "architecture_review_required"
+    ) is True:
+        return {
+            "status": "PROJECT_REVIEW_REQUIRED",
+            "project_adoption": summary,
+            "action": (
+                "Existing Claude project configuration is still subject to "
+                "numbered KEEP/DROP and manual blocker review, but an established "
+                "or incompletely audited codebase cannot activate on those decisions "
+                "alone. Prepare a current-digest architecture alignment plan and "
+                "obtain separately protected Fable/high validation before any "
+                "architecture-changing activation. No project setup, database or "
+                "automatic activation is authorized by this report."
             ),
             "prerequisites": prerequisite_status(),
         }
