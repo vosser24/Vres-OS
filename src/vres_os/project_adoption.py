@@ -483,7 +483,7 @@ def _bounded_json_structure(text: str) -> bool:
         if in_string:
             if escaped:
                 escaped = False
-            elif char == "\":
+            elif char == "\\":
                 escaped = True
             elif char == '"':
                 in_string = False
