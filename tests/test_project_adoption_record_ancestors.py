@@ -194,3 +194,73 @@ def test_unsafe_ancestor_error_does_not_reveal_path_content(tmp_path, monkeypatc
     with pytest.raises(AdoptionError, match="unreadable; recovery") as exc:
         project_adoption._read_json(target)
     assert "private credential location" not in str(exc.value)
+
+
+def test_immediate_parent_junction_preserves_a12_diagnostic_before_leaf(
+    tmp_path, monkeypatch
+):
+    target = _record(tmp_path)
+    original = project_adoption._lstat
+    leaf_inspected = []
+
+    def linked(path):
+        if Path(path) == target:
+            leaf_inspected.append(True)
+            pytest.fail("Immediate-parent junction must refuse before leaf inspection")
+        info = original(path)
+        if Path(path) == target.parent:
+            return _fake(info, st_file_attributes=(
+                getattr(info, "st_file_attributes", 0)
+                | stat.FILE_ATTRIBUTE_REPARSE_POINT
+            ))
+        return info
+
+    monkeypatch.setattr(project_adoption, "_lstat", linked)
+    with pytest.raises(AdoptionError, match="not a bounded ordinary file"):
+        project_adoption._read_json(target)
+    assert leaf_inspected == []
+
+
+def test_immediate_parent_nondirectory_preserves_a12_diagnostic(
+    tmp_path, monkeypatch
+):
+    target = _record(tmp_path)
+    before = target.read_bytes()
+    original = project_adoption._lstat
+
+    def unexpected_parent(path):
+        info = original(path)
+        if Path(path) == target.parent:
+            return _fake(info, st_mode=stat.S_IFREG | 0o600)
+        return info
+
+    monkeypatch.setattr(project_adoption, "_lstat", unexpected_parent)
+    with pytest.raises(AdoptionError, match="not a bounded ordinary file"):
+        project_adoption._read_json(target)
+    assert target.read_bytes() == before
+
+
+def test_immediate_parent_turns_link_during_read_preserves_denial(
+    tmp_path, monkeypatch
+):
+    target = _record(tmp_path)
+    before = target.read_bytes()
+    original = project_adoption._lstat
+    seen = [0]
+
+    def switched(path):
+        info = original(path)
+        if Path(path) == target.parent:
+            seen[0] += 1
+            if seen[0] == 2:
+                return _fake(info, st_file_attributes=(
+                    getattr(info, "st_file_attributes", 0)
+                    | stat.FILE_ATTRIBUTE_REPARSE_POINT
+                ))
+        return info
+
+    monkeypatch.setattr(project_adoption, "_lstat", switched)
+    with pytest.raises(AdoptionError, match="not a bounded ordinary file"):
+        project_adoption._read_json(target)
+    assert seen[0] == 2
+    assert target.read_bytes() == before

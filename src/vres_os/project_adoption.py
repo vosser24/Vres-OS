@@ -513,6 +513,13 @@ def _record_ancestor_identity(path: Path) -> tuple[tuple[str, int, int, int, int
         if info is None:
             return None
         if _is_link(info) or not stat.S_ISDIR(info.st_mode):
+            # A12 already exposed this generic redacted denial for the immediate
+            # parent. Preserve that contract while separately identifying unsafe
+            # higher ancestors; in both cases refuse before touching the leaf.
+            if directory == path.parent:
+                raise AdoptionError(
+                    f"Adoption record {path.name} is not a bounded ordinary file; recovery is required"
+                )
             raise AdoptionError(
                 f"Adoption record {path.name} has an unsafe ancestor directory; recovery is required"
             )
