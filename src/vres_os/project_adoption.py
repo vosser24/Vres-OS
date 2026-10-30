@@ -642,11 +642,51 @@ def _current_inventory(sd: Path, project) -> dict[str, Any]:
 
 
 def _decisions(sd: Path, inv: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    stored = _read_json(sd / "decisions.json") or {}
+    """Fail-closed readback of saved choices, not a trust-signature verifier.
+
+    A matching inventory hash alone cannot authorize a KEEP option that was
+    never offered for an executable Claude surface, nor a DROP of a protected
+    sensitive path. Every saved choice must still match its item number, path,
+    source fingerprint, allowed options and basic operator evidence shape.
+    """
+    stored = _read_json(sd / "decisions.json")
+    if stored is None:
+        return {}
+    if not isinstance(stored, dict):
+        raise AdoptionError("Stored decisions record has an invalid structure; manual review required")
     if stored.get("inventory_version") != inv["version"]:
-        return {}  # decisions bound to another inventory are stale and void
-    shas = {str(i["number"]): i["sha256"] for i in inv["items"]}
-    return {n: d for n, d in stored.get("decisions", {}).items() if shas.get(n, "missing") == d.get("sha256")}
+        return {}  # Decisions for a different inventory remain void.
+    raw = stored.get("decisions", {})
+    if not isinstance(raw, dict):
+        raise AdoptionError("Stored decisions record has an invalid structure; manual review required")
+
+    by_number = {str(item["number"]): item for item in inv["items"]}
+    if set(raw) - set(by_number):
+        raise AdoptionError("Stored decisions contain unknown inventory numbers; manual review required")
+
+    checked: dict[str, dict[str, Any]] = {}
+    for number, value in raw.items():
+        item = by_number[number]
+        if not isinstance(value, dict):
+            raise AdoptionError("Stored decision integrity check failed; manual review required")
+        evidence = value.get("authority")
+        choice = value.get("decision")
+        if (
+            not {"path", "sha256", "decision", "authority", "at"}.issubset(value)
+            or value.get("path") != item["path"]
+            or value.get("sha256") != item["sha256"]
+            or not isinstance(choice, str)
+            or choice not in item["options"]
+            or not isinstance(evidence, dict)
+            or evidence.get("confirmed") is not True
+            or not isinstance(evidence.get("kind"), str)
+            or not evidence["kind"].strip()
+            or not isinstance(value.get("at"), str)
+            or not value["at"].strip()
+        ):
+            raise AdoptionError("Stored decision integrity check failed; manual review required")
+        checked[number] = value
+    return checked
 
 
 def _pending(sd: Path, inv: dict[str, Any]) -> list[int]:
