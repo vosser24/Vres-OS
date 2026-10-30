@@ -625,6 +625,24 @@ def _read_json(path: Path) -> Any:
             raise AdoptionError(
                 f"Adoption record {path.name} ancestry changed during inspection; recovery is required"
             )
+        # fstat protects the opened descriptor, not necessarily the pathname:
+        # a directory entry may have been replaced after open while the old
+        # descriptor still reads normally. Refuse an observable leaf rebind.
+        current_leaf = _lstat(path)
+        if (
+            current_leaf is None
+            or _is_link(current_leaf)
+            or not stat.S_ISREG(current_leaf.st_mode)
+            or (
+                current_leaf.st_dev,
+                current_leaf.st_ino,
+                current_leaf.st_size,
+                current_leaf.st_mtime_ns,
+            ) != actual
+        ):
+            raise AdoptionError(
+                f"Adoption record {path.name} changed during inspection; recovery is required"
+            )
         text = raw.decode("utf-8")
         if not _bounded_json_structure(text):
             raise ValueError("Malformed or excessively nested adoption JSON")
