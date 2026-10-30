@@ -635,7 +635,12 @@ def _state(sd: Path, project) -> dict[str, Any] | None:
     recorded_root = record.get("project_root")
     if not isinstance(recorded_root, str) or recorded_root != str(project.root):
         raise AdoptionError("Adoption state belongs to a different project root; manual review required")
-    if record.get("version") != VERSION or record.get("state") not in STATES:
+    if (
+        type(record.get("version")) is not int
+        or record["version"] != VERSION
+        or type(record.get("state")) is not str
+        or record["state"] not in STATES
+    ):
         raise AdoptionError("Adoption state record has an unsupported version or state; manual review required")
     return record
 
