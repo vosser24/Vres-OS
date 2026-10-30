@@ -464,13 +464,75 @@ def _write_json(path: Path, value: Any) -> None:
         tmp.unlink(missing_ok=True)
 
 
+_MAX_ADOPTION_RECORD_BYTES = 2 * 1024 * 1024
+
+
 def _read_json(path: Path) -> Any:
+    """Bounded, non-following readback of a persisted adoption JSON record.
+
+    A missing record remains absent. An existing record must be a regular
+    non-linked file under an ordinary immediate parent directory, and must
+    retain its filesystem identity across opening and reading. Corruption
+    refuses without exposing the underlying record's content or target.
+    """
+    path = Path(path)
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return None
-    except ValueError:
-        raise AdoptionError(f"Adoption record {path.name} is unreadable; recovery is required") from None
+        initial = _lstat(path)
+        if initial is None:
+            return None
+        parent = _lstat(path.parent)
+        if (
+            parent is None or _is_link(parent)
+            or not stat.S_ISDIR(parent.st_mode)
+            or _is_link(initial)
+            or not stat.S_ISREG(initial.st_mode)
+            or initial.st_size < 0
+            or initial.st_size > _MAX_ADOPTION_RECORD_BYTES
+        ):
+            raise AdoptionError(
+                f"Adoption record {path.name} is not a bounded ordinary file; recovery is required"
+            )
+
+        # The no-follow open flag is enforced on platforms that support it;
+        # the lstat/fstat identity checks also cover Windows and open races.
+        def _open_no_follow(filename: str, flags: int) -> int:
+            return os.open(filename, flags | getattr(os, "O_NOFOLLOW", 0))
+
+        with open(path, "rb", opener=_open_no_follow) as handle:
+            opened = os.fstat(handle.fileno())
+            expected = (
+                initial.st_dev, initial.st_ino,
+                initial.st_size, initial.st_mtime_ns,
+            )
+            actual = (
+                opened.st_dev, opened.st_ino,
+                opened.st_size, opened.st_mtime_ns,
+            )
+            if not stat.S_ISREG(opened.st_mode) or actual != expected:
+                raise AdoptionError(
+                    f"Adoption record {path.name} changed during inspection; recovery is required"
+                )
+            raw = handle.read(_MAX_ADOPTION_RECORD_BYTES + 1)
+            finished = os.fstat(handle.fileno())
+            after = (
+                finished.st_dev, finished.st_ino,
+                finished.st_size, finished.st_mtime_ns,
+            )
+            if (
+                len(raw) != opened.st_size
+                or len(raw) > _MAX_ADOPTION_RECORD_BYTES
+                or after != actual
+            ):
+                raise AdoptionError(
+                    f"Adoption record {path.name} changed during inspection; recovery is required"
+                )
+        return json.loads(raw.decode("utf-8"))
+    except AdoptionError:
+        raise
+    except (OSError, UnicodeError, ValueError, TypeError, RecursionError, OverflowError):
+        raise AdoptionError(
+            f"Adoption record {path.name} is unreadable; recovery is required"
+        ) from None
 
 
 def _set_state(sd: Path, project, state: str, **extra: Any) -> dict[str, Any]:
