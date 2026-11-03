@@ -47,9 +47,12 @@ def _state(**updates):
     return value
 
 
-def _render(state=None, label="VRES CONTINUITY STATE"):
+_DEFAULT_STATE = object()
+
+
+def _render(state=_DEFAULT_STATE, label="VRES CONTINUITY STATE"):
     return render_personal_resume_briefing(
-        _state() if state is None else state, label=label
+        _state() if state is _DEFAULT_STATE else state, label=label
     )
 
 
