@@ -1,0 +1,50 @@
+VRES #167 CURRENT-USER OFFLINE STORE — 2026-11-03 OPERATOR WINDOWS RESULTS (SANITIZED EXCERPT)
+SOURCE: user-uploaded Windows PowerShell 5.1 transcript; this file contains selected output markers and is NOT original raw bytes.
+ORIGINAL PRIVATE TRANSCRIPT: 10,646 bytes; 205 text lines; SHA256 97750e8a761aba55cbdbe98374159d8fbf6e574a92617205ace4d771ce16eb46.
+ORIGINAL RAW GIT BLOB (NOT PUBLISHED): 1fcfe4c06f2c15621d4bf35393fb853fed4a2b3b.
+The raw transcript includes local machine/account identifiers and is retained only in conversation upload / user's machine, not committed here.
+IMPORTANT: PYTEST CASE IDS/PROGRESS/SUMMARY/SKIP COUNTS ARE ABSENT IN ORIGINAL START-TRANSCRIPT.
+RESULTS:
+=== VRES PERSONAL #167 STORE — EXACT GITHUB/WORKTREE PREFLIGHT ===
+PASS: original protected P2 HEAD
+PASS: official #167 store HEAD
+PASS: detached candidate HEAD
+PASS: detached candidate tree
+PASS: sole Windows-accepted #167 R1 parent
+PASS: original P2 source is an ancestor
+PASS: exact two added source/test paths
+PASS: diff whitespace integrity
+PASS: PRE src/vres_os/personal_data_source_store.py
+PASS: PRE tests/test_personal_data_source_store.py
+PASS: PRE src/vres_os/personal_data_sources.py
+PASS: PRE tests/test_personal_data_sources.py
+PASS: PRE src/vres_os/credential_broker.py
+PASS: PRE src/vres_os/project.py
+PASS: PRE src/vres_os/database_targets.py
+PASS: PRE plugins/vres-os/hooks/hooks.json
+PASS: PRE src/vres_os/release_inputs.py
+PASS: PRE install.ps1
+PASS: PRE tests/conftest.py
+PASS: PRE src/vres_os/install_recovery.py
+VRES_167_STORE_PRETEST_INTEGRITY_PASS
+EXECUTING ONLY OFFLINE PYTEST: personal data-source store and pure catalog
+PYTEST_EXIT_CODE=0
+PASS: PROCESS_ENVIRONMENT_RESTORED_AND_VERIFIED
+PASS: POST #167 store HEAD
+PASS: POST #167 store tree
+PASS: POST src/vres_os/personal_data_source_store.py
+PASS: POST tests/test_personal_data_source_store.py
+PASS: POST src/vres_os/personal_data_sources.py
+PASS: POST tests/test_personal_data_sources.py
+PASS: POST src/vres_os/credential_broker.py
+PASS: POST src/vres_os/project.py
+PASS: POST src/vres_os/database_targets.py
+PASS: POST plugins/vres-os/hooks/hooks.json
+PASS: POST src/vres_os/release_inputs.py
+PASS: POST install.ps1
+PASS: POST tests/conftest.py
+PASS: POST src/vres_os/install_recovery.py
+PASS: POST DETACHED WORKTREE CLEAN
+VRES_167_STORE_WINDOWS_OFFLINE_TEST_EXIT_CODE=0
+VRES_167_PERSONAL_OWNER_SCOPED_STORE_WINDOWS_SELECTED_TEST_COMPLETE_PENDING_EVALUATION
+No real Vres install, native Claude, PostgreSQL, real vault, user profile or credentials were authorized.
