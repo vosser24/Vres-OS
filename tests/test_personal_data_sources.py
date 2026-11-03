@@ -279,7 +279,7 @@ def test_failed_mutation_does_not_corrupt_active_document():
 
 
 def test_module_has_no_database_network_credential_or_file_io_surface():
-    path = Path(__file__).resolve().parents[1] / "vres_os" / "personal_data_sources.py"
+    path = Path(__file__).resolve().parents[1] / "src" / "vres_os" / "personal_data_sources.py"
     tree = ast.parse(path.read_text(encoding="utf-8"))
     imports = [n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)]
     imports.extend(alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names)
