@@ -17,6 +17,7 @@ from .reply_guard import begin_reply_turn, current_reply_turn, inspect_stop_guar
 from .repository import PendingValidationError, Repository
 from .session_contamination import contamination_notice, revoked_phrase
 from .session_lifecycle import (
+    AmbiguousReplacedSessionError,
     canonical_session_end_reason,
     cleanup_materialized_secrets_if_last_session,
     host_pid_from_env,
@@ -98,6 +99,16 @@ def _observe_session(project_id: int, sid: str | None, *, reconcile: bool = Fals
     return host_pid
 
 
+def _restore_session_focus(project_id: int, sid: str, host_pid: int | None) -> bool:
+    """Skip all implicit focus fallback when predecessor evidence conflicts."""
+    try:
+        inherit_replaced_session_task(project_id, sid, host_pid)
+    except AmbiguousReplacedSessionError:
+        return False
+    bind_session_to_project_focus(project_id, sid)
+    return True
+
+
 def _resume_message(state: dict[str, Any], *, label: str) -> str:
     if state.get("ambiguous"):
         return (
@@ -134,8 +145,7 @@ def session_start() -> None:
             if sid:
                 repo.open_session(project_id, sid)
                 host_pid = _observe_session(project_id, sid, reconcile=True)
-                inherit_replaced_session_task(project_id, sid, host_pid)
-                bind_session_to_project_focus(project_id, sid)
+                predecessor_unambiguous = _restore_session_focus(project_id, sid, host_pid)
             state = repo.resume_context(project_id, provider_session_id=sid)
             if state:
                 context = _resume_message(state, label="VRES CONTINUITY STATE")
@@ -149,6 +159,12 @@ def session_start() -> None:
                     )
             else:
                 context = "Vres-OS is active for this project. No unfinished persistent task exists."
+            if sid and not predecessor_unambiguous:
+                context = (
+                    "VRES_CONTINUITY_AMBIGUOUS: multiple recent replaced sessions could own this task. "
+                    "Do not infer the user's intended task from project focus; ask for an explicit task key.\n"
+                    + (context if state else "No task was selected; ask which unfinished task to resume.")
+                )
         except DatabaseUnavailable as exc:
             context = f"Vres-OS database is unavailable: {exc}. Do not invent prior task state."
         except Exception as exc:  # hooks fail open, but programming defects are logged.
@@ -238,8 +254,12 @@ def user_prompt() -> None:
             # UserPromptSubmit is also a safe recovery point if the host skipped SessionStart
             # for a provider-session replacement.
             host_pid = _observe_session(project_id, sid, reconcile=True)
-            inherit_replaced_session_task(project_id, sid, host_pid)
-            bind_session_to_project_focus(project_id, sid)
+            predecessor_unambiguous = _restore_session_focus(project_id, sid, host_pid)
+            if not predecessor_unambiguous:
+                context += (
+                    "\nVRES_CONTINUITY_AMBIGUOUS: multiple recent replaced sessions could own this task. "
+                    "Do not infer the user's intended task from project focus; ask for an explicit task key."
+                )
             # Do not attribute the prompt to the currently focused task yet. The model may
             # create/switch tasks during this turn; Stop commits it to the final binding.
             stage_user_instruction(project_id, sid, prompt)

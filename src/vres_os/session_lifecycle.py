@@ -12,6 +12,10 @@ from .db import connect
 from .local_secrets import LocalSecretManager
 from .project import ProjectIdentity
 
+class AmbiguousReplacedSessionError(RuntimeError):
+    """More than one recent, same-host session may supply a task; never guess."""
+
+
 _ACTIVE = {"active", "waiting_user", "blocked"}
 
 
@@ -139,8 +143,9 @@ def inherit_replaced_session_task(
     """Restore task binding from the same-host provider session replaced by /clear.
 
     This runs before project-focus fallback. It never overwrites an existing binding,
-    never touches another live session, and only inherits an unfinished task from a
-    recent predecessor durably classified as provider_session_replaced.
+    never touches another live session, and only inherits from ONE recent
+    predecessor durably classified as provider_session_replaced. Ambiguity is
+    reported to the host instead of choosing an arbitrary task.
     """
     if not provider_session_id or not host_pid:
         return None
@@ -165,7 +170,7 @@ def inherit_replaced_session_task(
             ).fetchone()
             return str(task["task_key"]) if task and task["status"] in _ACTIVE else None
 
-        predecessor = conn.execute(
+        predecessors = conn.execute(
             """
             SELECT s.id,s.provider_session_id,s.task_id,t.task_key
               FROM vres.sessions s
@@ -178,8 +183,9 @@ def inherit_replaced_session_task(
                AND t.project_id=%s
                AND t.status=ANY(%s)
                AND s.ended_at >= %s - interval '2 minutes'
+               AND s.ended_at <= %s + interval '2 minutes'
              ORDER BY s.ended_at DESC,s.id DESC
-             LIMIT 1
+             LIMIT 2
             """,
             (
                 project_id,
@@ -188,10 +194,18 @@ def inherit_replaced_session_task(
                 project_id,
                 list(_ACTIVE),
                 current["started_at"],
+                current["started_at"],
             ),
-        ).fetchone()
-        if not predecessor:
+        ).fetchall()
+        if len(predecessors) > 1:
+            # Do not infer the right thread from recency when the same host has
+            # replaced multiple unfinished sessions. Let the user select it.
+            raise AmbiguousReplacedSessionError(
+                "Multiple eligible replaced sessions; explicit task selection required"
+            )
+        if not predecessors:
             return None
+        predecessor = predecessors[0]
 
         task_id = int(predecessor["task_id"])
         task_key = str(predecessor["task_key"])
