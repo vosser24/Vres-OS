@@ -1,0 +1,74 @@
+# Vres-OS — 2026-11-03 PERSONAL #167 current-user offline catalog persistence, Linux 80 PASS / Windows next
+
+**Status:** one integrated P1 GitHub source-and-tests milestone is PUBLISHED with exact parent/tree/changed-path readback. Selected Linux development-container pytest **80 distinct PASS / exit0** at exact committed blob IDs (44 previously accepted pure catalog cases + 36 new store cases). New **Windows selected tests NOT_RUN**. No installed Vres, PostgreSQL even SELECT, native Claude/hook, actual Credential Locker, global Claude/PRISM/real project, Windows profile data or user credentials changed.
+
+**Product:** one Windows user's practical daily-operations assistant, not enterprise IAM. Current development authorization covers source, tests and documentation only. It is NOT blanket P2 consent for real local stored credentials/profile/installation or incident clearance. Full 42 V-01..V-42 requirements, M0–M8, issues #165–170/#174/#176 remain in the roadmap.
+
+## 1. Exact GitHub boundaries and previous evidence
+
+Repository: https://github.com/vosser24/Vres-OS
+Canonical docs: branch docs/chatgpt-continuity-20261023; prior docs HEAD at start of this part **0bc4ce4bd4d5ce210ed82ca26898b922bfe9f866**, tree **00b826d0bdfd3b1b93a434a39f8bbe651d6be1e7**. Every fresh chat must reverify ACTUAL docs HEAD and newest READ FIRST. Product main **9a8acc5d464b96432a93cb95daa9581412fb07ee** (not merged). Last Windows-locally-observed installed P2 source **82c82430b38f93bd6b9d5c3af3b5de9c1368af9c**, tree **205c081277ece483c634e1c801c39595abd4549c**; NOT rechecked locally in this turn.
+
+**Accepted #167 R1 parent:** feature/167-personal-offline-source-catalog-windows-path-r1-20261103 HEAD **f909f61ab95a25fdfae5fbe3412ba233165f15b7**, tree **ee0a5cabae177f8febd42fa06d6c450c7cfe7f3d**. Selected operator Windows offline suite **44 uniquely named PASS, exit0**, AppData fence and process env restored, nine posttest Git blobs PASS, initial console Git preflight not in supplied excerpt. The original rejected #167 HEAD **16f8df95a001527bdd1ed94dfd3a963016109384** remains immutable, original Windows 43P/1F exit1 preserved as 114-line 10,381-byte CRLF log blob **425b56761430de26ac0620aaaa9a730ebfa49717** with original SHA256 **52c544e875862a4a0db173a9e31e25ea38bd145e2e24a56eb9cbbcc49149b8e2**; original file path error corrected only on R1.
+
+**SEPARATE pending M2 rollback protection:** feature/personal-m2-integrated-rollback-verification-20261030 HEAD **a65215a3b8b91ad4ab374c928ae3cf667e5b0f95**, tree **942a4a4d29bdae64314de6490e4e8f99674dbf3e**, parent accepted M2-HOST. **M2 rollback Windows tests NOT_RUN**; full operator-gated Windows PowerShell script already archived at docs/handoffs/VRES-PERSONAL-M2-INTEGRATED-ROLLBACK-GUARDED-WINDOWS-2026-10-30.ps1, blob **b19642db12837f0e5866de463ecd23bfb83af848**. Neither this #167 feature nor pending M2 was merged or rebased with the other; the future release must reconcile only after independent evidence. Original M1 110 Windows selected PASS and M2-HOST 63 Windows selected PASS remain historical at their exact earlier SHAs.
+
+## 2. New GitHub feature EXACT HEAD/tree/parent/allowlist
+
+**Feature branch:** feature/167-personal-owner-scoped-catalog-store-20261103
+**NEW HEAD:** 2cb4f975e235a89fac5186e3529dbd492d8b6972
+**NEW TREE:** 697f6ce12eb3c9c23338e20180a6ffd204bac40e
+**SOLE PARENT:** already Windows-accepted #167 R1 **f909f61ab95a25fdfae5fbe3412ba233165f15b7**
+**Commit:** https://github.com/vosser24/Vres-OS/commit/2cb4f975e235a89fac5186e3529dbd492d8b6972
+
+Exactly TWO ADDED source/test paths; no existing source modification:
+1. A **src/vres_os/personal_data_source_store.py**, Git blob **debd4368428ca14273ad64a6c2d4f3c583ad92d2**, 316 lines, SHA256 **aae8e6671a2fc544e34837a6efd589802c9104d61d2a1fdd88cf260ca1adc043**.
+2. A **tests/test_personal_data_source_store.py**, Git blob **c3d901ca42f5f5ae66687e6ed194d3d14f60ac2f**, 377 lines, SHA256 **52893fbfb744a627b30afc36e7fdb915d9e2fb33d826b37eca8b2715f192d765**.
+
+GitHub source HEAD/tree/sole parent, two ADD-only path diff, each new blob SHA and all original catalog module/test blobs were independently fetched/read back after non-force expected-old-SHA publication. Original #167 catalog module blob **ad08616bf89d34c0c5f52affff30813562d7a2f7**, original corrected test blob **46c66bc83bac97e67ed7538f9413d871d04b2ee2** unchanged.
+
+## 3. What is actually built, and what is NOT
+
+New **CurrentUserDataSourceStore** composes existing pure **PersonalDataSources** and a CredentialBroker **metadata-only** user namespace/lookup. It does NOT create another secret vault, inspect a credential value or open a database. Construction and reading make no writes. The caller supplies an existing ordinary absolute Vres current-user data root (typically paths.data_dir_path() on a configured host), never implicitly creates the real user-profile root. It owns only **data-source-catalog/** beneath that root, not the entire VresOS home. On a trusted caller's explicit approved update, it creates/protects this one subdirectory, using existing local_secrets._restrict_directory/_restrict_file owner-only ACL helpers (lazily imported at WRITE time only). Tests inject synthetic protections on disposable paths; **real Windows icacls behavior was NOT_RUN**.
+
+One approved update requires exactly authorized=True, a previously observed integer revision and trusted application mutation (never prompt-supplied executable). Atomic per-catalog exclusive lock prevents two cooperating concurrent writers, stale revisions refuse rather than overwrite, interrupted leftover locks stay REVIEW_REQUIRED rather than automatically deleted. Every document is validated under the current-user namespace, strict structural metadata shape and canonical JSON before persistence; a changed catalog must increment revision. A complete preimage of the prior bytes is stored in owner-restricted **catalog-v1.previous.json** before replacing **catalog-v1.json** with protected temporary + fsync + atomic os.replace + exact byte readback. The prior copy is INSPECTION ONLY, not an automatically restored trust/approval receipt. Failure before current replacement retains old current bytes; corruption or uncertain states fail closed.
+
+Refuses malformed current/previous metadata, stale CAS, noncanonical JSON, symlink/Windows reparse or hard-linked catalog files/directories, unexpected root traversal, oversized documents and missing original current-user root. Never touches unrelated Vres files or Windows environment variables. First-install user metadata root setup, actual ACL/owner SID behavior, whole-user backup integration, automatic crash-lock recovery, cross-process physical Windows lock race, actual persistent CredentialBroker/Chairman flows and real data-source schema acquisition are STILL NOT_RUN/NOT_IMPLEMENTED. This code is SOURCE ONLY.
+
+Previously built pure #167 foundation still restricts schema to bounded table/column/PK/FK structural shapes, forbids raw rows/SQL/sample values and calls ALL caller-imported snapshots **caller_supplied_unverified**. Cross-project A/B reuse still requires each project explicitly bound; C denied. No database access permit emerges from a catalog or credential ID.
+
+## 4. Test provenance and partial development failures
+
+Isolated development container: Python **3.13.5**, pytest **9.0.2**, folder **/mnt/data/vres_167_store_20261103** created as isolated file-system fixture (NOT local Windows machine). The previous accepted R1 #167 catalog module and test files were copied to this disposable workspace and their Git hash-object checks matched canonical blobs. Two new files were built under src/vres_os and tests respectively; no live app modules were executed. First prepublication local exploratory pytest produced **35 passed, 2 failed** due to mismatched test expectations (one parametrized "revision=1" is a VALID integer but stale, and initial lock-permission failure was mapped to a generic message). This early uncommitted exploratory failure is NOT the final published test state; it was corrected before any GitHub source commit. The implementation now maps failed lock ACL to a specific bounded error; test excludes valid-but-stale revision from invalid-type parametrization. No original GitHub commit/result was replaced.
+
+Final prepublication and exact published bytes:
+- Git hash-object for new store **debd4368428ca14273ad64a6c2d4f3c583ad92d2**, for new tests **c3d901ca42f5f5ae66687e6ed194d3d14f60ac2f**, prior catalog **ad08616bf89d34c0c5f52affff30813562d7a2f7**, prior test **46c66bc83bac97e67ed7538f9413d871d04b2ee2**; GitHub create_blob returned the SAME new Git object IDs.
+- Executed: PYTHONPATH pointing ONLY at the fixture src, PYTEST_DISABLE_PLUGIN_AUTOLOAD=1, PYTHONDONTWRITEBYTECODE=1, **python -B -m pytest -q -ra -p no:cacheprovider tests/test_personal_data_source_store.py tests/test_personal_data_sources.py**.
+- Actual final result **80 passed in 0.36s, exit code 0**, 36 new persistent-store cases + 44 previously accepted catalog cases, zero printed FAIL/ERROR/SKIP.
+- Test areas: no-write reads, explicit approvals, JSON/namespace, project A+B persistent links / C denial, preimage byte comparison, CAS/stale lock conflicts, invalid/stale revision, directory and file mode (POSIX), symlink/reparse/hardlink refusals where OS supports them, malformed metadata, ACL protection failure, interrupted write before current replacement, immutable prior bytes, broker non-secret metadata-only composition and static no DB/network/secret-import gate.
+
+Original 179-byte development-container stdout is archived at **docs/handoffs/VRES-2026-11-03-167-STORE-LINUX-80PASS-OFFLINE-PYTEST.txt**, Git blob **aaead294c8affe566bf306081ec3260dbadefeea**, SHA256 **c12c4a6733bc9260cb5f958d10c581910947249cce97ba75b8352f9a2c851029**. This stdout file is not Windows evidence; exit0 came from the captured pipeline status shown separately.
+
+**Not a claim:** Windows selected test NOT_RUN. Physical Windows ACL and crash/host telemetry NOT_RUN. No direct/indirect database contact was requested by this code or tests, but no complete system-wide network capture/DB server log exists.
+
+## 5. One complete Windows validation script, no installation
+
+The full SHA-pinned PowerShell 5.1 script is committed at **docs/handoffs/VRES-167-PERSONAL-OWNER-SCOPED-STORE-WINDOWS-GATE-2026-11-03.ps1**, Git blob **4f0ec49011f27bb56c71c54b9869848a95af83b9**. Supply the ENTIRE script inline as one code block at operator execution time. It wraps everything in **one PowerShell & { ... } scriptblock** so error aborts before the final "pending evaluation" marker (fixing previous interactive-paste postfailure markers). It uses the exact original protected P2 worktree C:\Projects\Vres-P2F-Postinstall-Hardening-20261022, official origin, detached fresh source review directory C:\Projects\Vres-Review-167-Personal-Store-20261103 (refuses existing), exact HEAD/tree/Windows-accepted #167 R1 parent and P2 ancestry, two ADD-only allowlist, PRE/POST twelve protected Git blobs, process PG/DB/Claude/Python env scrub/restoration, isolated VRES_DATA_DIR, no plugin autoload or bytecode, one combined 80-case selected offline pytest. No user-profile installed state, real Credential Locker or PostgreSQL access.
+
+**Windows acceptance expected, NOT yet claimed:** PYTEST_EXIT_CODE=0, full 80 cases with any OS symlink privilege SKIPs accurately identified, LIVE APP-DATA FENCE, env restoration PASS, exact pre/post Git blobs/tree and clean worktree, VRES_167_PERSONAL_OWNER_SCOPED_STORE_WINDOWS_SELECTED_TEST_COMPLETE_PENDING_EVALUATION marker only on completed successful run. If Windows fails, preserve original failed source/worktree/output rather than repeating historically misleading "PASS" markers. If tests skip due to Windows symlink creation privilege, record precisely which negative cases were NOT executed rather than falsely calling them PASS.
+
+**Priority sequencing:** the existing M2 rollback offline Windows test is still an independent pending release-safety gate and should be the *next* operator action if only one test is to be run. The #167 store Windows test may be run as the subsequent single integrated feature acceptance. Neither branch is installed or merged into product main. Keep impact-driven cadence; do not rerun already accepted 44 #167 R1 or M1/M2 earlier selected tests for paperwork.
+
+## 6. P3 holds, original rejects and next functional work
+
+**LIVE_SCHEMA_048_INCIDENT=OPEN: NO PostgreSQL EVEN SELECT**, directly or indirectly by Vres CLI/MCP/bootstrap/doctor/installer/hooks/migrations/F2/recovery/catalog. #167 offline schema metadata is NOT actual database verification, and no connection request is authorized.
+
+**HOST_HOOK_DB_ROUTE_ATTEMPTED_AND_REFUSED=OPEN**, seven historical Claude Code Read/Grep post-hook attempted DB routes refused. No ordinary native Claude/hook/plugin execution, actual installer invocation or installed-state update. Stage3–6 source matcher/provenance evidence does not clear host lifecycle. No Stage7 matcher loop or hotpatch old P2 release.
+
+Independent F1 positive authority/Fable-high NOT GRANTED. No current-user Credential Locker real values, Claude/PRISM/profile, real legacy project, Chairman model switch, PR/main merge or go-live without separate specific P2 consent and incident closure. User command "continue the plan" is not consent to those protected actions.
+
+Preserve all V-01..V-42, original M0–M8 board, source issues #165–170/#174/#176; closed #163/#164/#174 as source but not installed acceptance; original rejected A12 345a568b551ac23183c54f10611335adee903b96 (18 PASS/1 FAIL exit1), original rejected A13 cdaa39aaa774cef88a4831bf6b157e380fbb69d9 (28 PASS/1 FAIL exit1), corrected R1s separately, A16 original environment-copy ambiguity, A19 blocked/uncommitted, PT1/PT2A–D, Hook-R1, Stage1–6 and E7/E8/C2B/R0/F2. No fabricated independent F1 or Windows PASS.
+
+**Next development part after safe offline acceptance:** integrate accepted M2 rollback proof and #167 store into a coherent release feature with full owner-path/manifest allowlist; complete remaining user-facing M3 Chairman/tasks/experience, M4 fresh/legacy/global Claude/PRISM, M5 real broker/catalog linking without DB, M6 Visual Studio #169 and M7 personal daily pilot #170. All actual protected local testing requires later relevant P2 approval and both incident dispositions. No further unrelated microtest rounds merely to pad evidence.
+
+**Automatic checkpoint** at/before 20 completed assistant replies or conservatively >50% context. When triggered stop new phases, verify docs/product/source HEAD/tree/parent and available installed identity, publish completed GitHub changes with non-force expected-SHA, update dated full docs/handoffs and READ FIRST, provide entire next-chat resume prompt in ONE inline fenced block, recommend fresh chat. No exact context-window meter is exposed here.
