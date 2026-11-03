@@ -1,0 +1,42 @@
+VRES-OS 2026-11-03 M3 R1 WIN OFFLINE — SANITIZED USER-PASTED PARTIAL EXCERPT (AUTHOR TRANSCRIPTION)
+NOT the complete original Windows console; NOT byte-identical to a supplied file or original stdout.
+USER SHARED only from === M3 SYNTHETIC OFFLINE PYTEST === through terminal marker.
+Original preflight console absent; see handoff for the bounded acceptance limitation.
+RUN SOURCE COMMIT=1469765d7403f1985aa9ba65978299fdaa32f941
+RUN SOURCE TREE=e05f4d632b5226d4f1946c1fa0da8c116c8c108f
+=== M3 SYNTHETIC OFFLINE PYTEST ===
+PYTEST_EXIT_CODE=0
+NAMED_PASSED_CASES=14
+NAMED_FAILED_ERROR_SKIPPED_CASES=0
+PASSED tests/test_personal_session_resume_ambiguity.py::test_exact_single_replaced_predecessor_can_restore_once
+PASSED tests/test_personal_session_resume_ambiguity.py::test_two_recent_sessions_with_distinct_tasks_refuse_without_any_write
+PASSED tests/test_personal_session_resume_ambiguity.py::test_two_recent_sessions_with_same_task_still_require_explicit_selection
+PASSED tests/test_personal_session_resume_ambiguity.py::test_no_matching_predecessor_leaves_binding_absent
+PASSED tests/test_personal_session_resume_ambiguity.py::test_existing_current_binding_wins_without_predecessor_search
+PASSED tests/test_personal_session_resume_ambiguity.py::test_missing_host_or_session_never_contacts_storage[missing0]
+PASSED tests/test_personal_session_resume_ambiguity.py::test_missing_host_or_session_never_contacts_storage[missing1]
+PASSED tests/test_personal_session_resume_ambiguity.py::test_missing_host_or_session_never_contacts_storage[missing2]
+PASSED tests/test_personal_session_resume_ambiguity.py::test_ambiguous_predecessor_never_falls_through_to_project_focus
+PASSED tests/test_personal_session_resume_ambiguity.py::test_nonambiguous_predecessor_preserves_explicit_focus_fallback
+PASSED tests/test_personal_session_resume_ambiguity.py::test_session_start_surfaces_ambiguity_instead_of_rehydrating_a_guessed_task
+PASSED tests/test_personal_session_resume_ambiguity.py::test_user_prompt_surfaces_ambiguity_before_staging_without_task_attribution
+PASSED tests/test_personal_session_resume_ambiguity.py::test_session_start_does_not_claim_no_unfinished_tasks_after_ambiguous_history
+PASSED tests/test_personal_session_resume_ambiguity.py::test_other_storage_errors_are_not_mistaken_for_a_safe_focus_fallback
+PASS: M3 selected synthetic offline pytest
+PASS: PROCESS_ENVIRONMENT_RESTORED_AND_VERIFIED
+=== M3 GIT POSTFLIGHT ===
+PASS: POST review HEAD
+PASS: POST review TREE
+PASS: POST src/vres_os/session_lifecycle.py
+PASS: POST src/vres_os/hooks.py
+PASS: POST tests/test_personal_session_resume_ambiguity.py
+PASS: POST original P2 HEAD
+PASS: both Git checkouts clean and source identities preserved
+VRES_PERSONAL_M3_R1_OFFLINE_SESSION_RESUME_COMPLETE_PENDING_EVALUATION
+NO installed update, native Claude, PostgreSQL or credentials authorized.
+
+TRANSCRIPTION NOTES:
+- Operator message contains rendered shell prompts, backslash escaping and inline line continuations; this file normalizes display to the reported result markers.
+- The full preflight, original raw stdout/stderr bytes, sha256 of a native console file, independently observed host/network/DB activity and Windows P2 installed inspection were NOT supplied.
+- This is evidence of the bounded native pytest/postflight reported result, not absolute proof no prohibited DB contact or live runtime safety.
+- Original pre-R1 scope-compare refusal happened before worktree creation and pytest, with exactly the three intended status/path names shown; original failed wrapper remains historical REJECTED.
