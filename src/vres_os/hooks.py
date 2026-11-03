@@ -10,6 +10,7 @@ from .config import ConfigStore
 from .credential_broker import CredentialBroker, CredentialBrokerError, detect_high_confidence_credentials
 from .db import DatabaseUnavailable, connect
 from .paths import logs_dir
+from .personal_resume_briefing import render_personal_resume_briefing
 from .project import discover_project
 from .redaction import redact_text
 from . import experience_references
@@ -110,22 +111,8 @@ def _restore_session_focus(project_id: int, sid: str, host_pid: int | None) -> b
 
 
 def _resume_message(state: dict[str, Any], *, label: str) -> str:
-    if state.get("ambiguous"):
-        return (
-            f"{label}\nMultiple unfinished Vres tasks exist and no task is in focus. Do not guess. "
-            "Use the listed task keys/titles to resolve which thread the user intends before continuing.\n"
-            + json.dumps(state, ensure_ascii=False, indent=2, default=str)
-        )
-    return (
-        f"{label}\n"
-        + json.dumps(state, ensure_ascii=False, indent=2, default=str)
-        + "\nPostgreSQL task state/checkpoints are authoritative evidence. Treat top-level step/state/"
-        "next_action/pending as the live continuation projection. reviewed_state/reviewed_pending and "
-        "latest_checkpoint preserve the frozen reviewed/history view and may be superseded by structured "
-        "validation state. Transcript snippets are non-authoritative recovery hints. Continue from the top-level "
-        "next_action; do not reopen settled decisions without new evidence."
-    )
-
+    """Bounded PERSONAL briefing, not raw transcript or approval."""
+    return render_personal_resume_briefing(state, label=label)
 
 def session_start() -> None:
     payload = _input()
@@ -147,7 +134,19 @@ def session_start() -> None:
                 host_pid = _observe_session(project_id, sid, reconcile=True)
                 predecessor_unambiguous = _restore_session_focus(project_id, sid, host_pid)
             state = repo.resume_context(project_id, provider_session_id=sid)
-            if state:
+            if sid and not predecessor_unambiguous:
+                # A replaced-session collision overrides any inferred project focus.
+                # Do not expose a fallback task as an authoritative resume binding.
+                context = (
+                    "VRES_CONTINUITY_AMBIGUOUS: multiple recent replaced sessions "
+                    "could own this task. Do not infer the user\'s intended task "
+                    "from project focus; ask for an explicit task key."
+                )
+                if state and state.get("ambiguous"):
+                    context += "\n" + _resume_message(state, label="VRES CONTINUITY STATE")
+                else:
+                    context += "\nNo task was selected; ask which unfinished task to resume."
+            elif state:
                 context = _resume_message(state, label="VRES CONTINUITY STATE")
                 if not state.get("ambiguous"):
                     repo.record_event(
@@ -159,12 +158,6 @@ def session_start() -> None:
                     )
             else:
                 context = "Vres-OS is active for this project. No unfinished persistent task exists."
-            if sid and not predecessor_unambiguous:
-                context = (
-                    "VRES_CONTINUITY_AMBIGUOUS: multiple recent replaced sessions could own this task. "
-                    "Do not infer the user's intended task from project focus; ask for an explicit task key.\n"
-                    + (context if state else "No task was selected; ask which unfinished task to resume.")
-                )
         except DatabaseUnavailable as exc:
             context = f"Vres-OS database is unavailable: {exc}. Do not invent prior task state."
         except Exception as exc:  # hooks fail open, but programming defects are logged.
@@ -272,7 +265,8 @@ def user_prompt() -> None:
                     "or advances persisted next_action/pending_work; use advances_state=false only for a genuinely "
                     "non-material reply."
                 )
-        task = repo.active_task(project_id, sid)
+        # A replaced-session conflict cannot use a fallback-bound task as current.
+        task = None if sid and not predecessor_unambiguous else repo.active_task(project_id, sid)
         if not task:
             sys.stdout.write(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": context}}))
             return
