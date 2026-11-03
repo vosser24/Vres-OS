@@ -1,0 +1,54 @@
+# VRES M2 Windows guarded offline selected-test evidence — sanitized operator transcript excerpt
+# Date: 2026-11-03; PowerShell 5.1; source SHA: a65215a3b8b91ad4ab374c928ae3cf667e5b0f95
+# This file extracts the ORIGINAL 2026-11-03 10:38–10:41 console output from its first actual preflight marker
+# through its final success marker. It is an EXCERPT, not the original raw uploaded transcript.
+# Original Windows transcript: 13,689 bytes; 400 lines; SHA256 7938bc4aa3eaf5e34ca6257772d8cd031af89b7904124d4abb089d4d712b3f85.
+# Original raw Git-blob hash (not uploaded publicly): 751d962eb0e3dc834ce9175e45e51a317f4a5245.
+# Original contains operator machine/account fields; those private fields are deliberately not published.
+# IMPORTANT: Native pytest case listing, summary and individual PASS/SKIP counts are NOT in the original transcript.
+# This is SUCCESSFUL PYTEST EXECUTION (exit0) with TEST-CASE COUNTS UNOBSERVED; never fabricate a case count.
+=== VRES M2 INTEGRATED ROLLBACK PREFLIGHT ===
+PASS: original P2 anchor HEAD
+PASS: remote M2 rollback source
+PASS: detached M2 HEAD
+PASS: detached M2 tree
+PASS: single accepted M2 parent
+PASS: original P2 is ancestor of candidate
+PASS: M2 exact three-file change allowlist
+PASS: diff whitespace integrity
+PASS: PRE install.ps1
+PASS: PRE src/vres_os/install_recovery.py
+PASS: PRE tests/test_install_rollback_proof.py
+PASS: PRE tests/test_install_contract.py
+PASS: PRE tests/test_install_preflight.py
+PASS: PRE tests/test_backup_recovery.py
+PASS: PRE tests/test_release_artifact.py
+PASS: PRE tests/conftest.py
+PASS: PRE src/vres_os/release_inputs.py
+PASS: PRE src/vres_os/release_artifact.py
+PASS: PRE plugins/vres-os/hooks/hooks.json
+PASS: PRE src/vres_os/database_targets.py
+VRES_M2_ROLLBACK_PREFLIGHT_PASS
+EXECUTING ONLY OFFLINE SELECTED PYTEST:
+py -3.12 -B -m pytest -q -rA -p no:cacheprovider tests/test_install_rollback_proof.py tests/test_install_contract.py tests/test_install_preflight.py tests/test_release_artifact.py tests/test_backup_recovery.py::test_interrupted_install_recovers_exactly_from_the_persisted_snapshot tests/test_backup_recovery.py::test_recovery_never_touches_native_claude_authentication_or_other_plugins tests/test_backup_recovery.py::test_ambiguous_recovery_is_refused_without_any_change tests/test_backup_recovery.py::test_v2_plugin_backup_must_match_snapshot_before_any_recovery tests/test_backup_recovery.py::test_v2_backup_missing_digest_is_refused_without_recovery tests/test_backup_recovery.py::test_interruption_right_after_the_journal_only_clears_the_journal tests/test_backup_recovery.py::test_snapshot_is_never_overwritten_and_the_installer_takes_it_before_any_mutation tests/test_backup_recovery.py::test_interruption_before_the_plugin_moved_is_proven_by_the_snapshot_digest tests/test_backup_recovery.py::test_missing_backup_with_an_unprovable_plugin_refuses_and_keeps_the_journal tests/test_backup_recovery.py::test_version_1_snapshot_cannot_prove_plugin_identity
+
+PYTEST_EXIT_CODE=0
+PASS: PROCESS_ENVIRONMENT_RESTORED_AND_VERIFIED
+PASS: POST M2 HEAD
+PASS: POST M2 tree
+PASS: POST install.ps1
+PASS: POST src/vres_os/install_recovery.py
+PASS: POST tests/test_install_rollback_proof.py
+PASS: POST tests/test_install_contract.py
+PASS: POST tests/test_install_preflight.py
+PASS: POST tests/test_backup_recovery.py
+PASS: POST tests/test_release_artifact.py
+PASS: POST tests/conftest.py
+PASS: POST src/vres_os/release_inputs.py
+PASS: POST src/vres_os/release_artifact.py
+PASS: POST plugins/vres-os/hooks/hooks.json
+PASS: POST src/vres_os/database_targets.py
+PASS: POST M2 DETACHED WORKTREE CLEAN
+M2_ROLLBACK_OFFLINE_TEST_EXIT_CODE=0
+VRES_PERSONAL_M2_INTEGRATED_ROLLBACK_WINDOWS_TEST_COMPLETE_PENDING_EVALUATION
+No real installer, PostgreSQL, native Claude, installed hooks or credentials were authorized.
