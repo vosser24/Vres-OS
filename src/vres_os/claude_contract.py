@@ -4,12 +4,18 @@ import argparse
 import os
 from pathlib import Path
 
+from .global_claude_adoption_plan import plan_global_claude_adoption
+
 _BEGIN = "<!-- vres-os:begin -->"
 _END = "<!-- vres-os:end -->"
 _IMPORT = "@~/.claude/vres-rules.md"
 def _block(import_ref: str) -> str:
     return f"{_BEGIN}\n{import_ref}\n{_END}"
 
+
+def preview_user_global_claude_adoption(inventory: dict) -> dict:
+    """Pure unverified inventory preview; does not inspect or change Claude home."""
+    return plan_global_claude_adoption(inventory)
 
 def _atomic_write_bytes(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
