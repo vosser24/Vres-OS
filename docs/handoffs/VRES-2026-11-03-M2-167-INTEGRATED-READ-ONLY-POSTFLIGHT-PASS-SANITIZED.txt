@@ -1,0 +1,42 @@
+# VRES M2 + #167 INTEGRATED SOURCE — 2026-11-03 OPERATOR READ-ONLY POSTFLIGHT SUCCESS (SANITIZED EXCERPT)
+# Source: uploaded native Windows PowerShell 5.1 Start-Transcript VRES-M2-167-Postflight-20261103-130201.txt.
+# Original full private file: 9,298 bytes; 177 text lines; SHA256 1f97ed4794d3e64241b292b33a4a9c7d34fd2d7acbd5718c04d73bda18affa45.
+# Original raw Git blob ee8dbd58adc271d37c6ba140705d6db5b21cbca8 (NOT PUBLISHED: account/machine identifiers).
+# This GitHub blob is a SANITIZED 30-line actual result-marker excerpt, not an exact copy of the original private PowerShell transcript.
+# Original candidate source commit 7a1d2da36f9ef1475e7909ca8850b9b641380b1d; tree 98658c0270b65032f38ab38c0671c48b2a291bc1.
+# Underlying prior combined Windows source test: 254 unique PASSED, 3 symlink privilege SKIPPED, pytest exit0;
+# release-inputs exit0 for pinned migrations 001-041, original preflight 17 Git blobs PASS, process environment restore PASS.
+# Postflight reads existing logs SHA256, counts, protected P2 Git anchor, 17 POST Git blob identities and clean checkout;
+# NO Python/pytest rerun, real installation, ordinary Claude/hook, PostgreSQL contact or user-profile changes.
+
+=== VRES M2+#167 READ-ONLY POSTFLIGHT, NO PYTEST RERUN ===
+PASS: saved evidence SHA256 integrated-pytest-full.txt
+PASS: saved evidence SHA256 release-inputs.txt
+PASS: 254 unique passed test identities and 3 documented Windows symlink skips
+PASS: original protected P2 HEAD
+PASS: POST integrated HEAD
+PASS: POST integrated tree
+PASS: POST single M2 parent
+PASS: POST exact seven-file source change allowlist
+PASS: POST install.ps1
+PASS: POST src/vres_os/install_recovery.py
+PASS: POST tests/test_install_rollback_proof.py
+PASS: POST src/vres_os/personal_data_sources.py
+PASS: POST src/vres_os/personal_data_source_store.py
+PASS: POST tests/test_personal_data_sources.py
+PASS: POST tests/test_personal_data_source_store.py
+PASS: POST tests/test_install_contract.py
+PASS: POST tests/test_install_preflight.py
+PASS: POST tests/test_backup_recovery.py
+PASS: POST tests/test_release_artifact.py
+PASS: POST src/vres_os/release_inputs.py
+PASS: POST src/vres_os/release_artifact.py
+PASS: POST src/vres_os/database_targets.py
+PASS: POST src/vres_os/credential_broker.py
+PASS: POST plugins/vres-os/hooks/hooks.json
+PASS: POST tests/conftest.py
+PASS: POST integrated detached review worktree clean
+POSTFLIGHT_PASSED_CASES=254
+POSTFLIGHT_SKIPPED_CASES=3
+VRES_M2_167_INTEGRATED_READ_ONLY_POSTFLIGHT_COMPLETE_PENDING_EVALUATION
+No pytest rerun, native Claude, PostgreSQL, Vres installation or credential access.
