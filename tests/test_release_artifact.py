@@ -146,6 +146,44 @@ def _link_dir(link: Path, target: Path) -> None:
 
 # ---------------------------------------------------------------------------------- a valid artifact
 
+def test_release_git_children_discard_host_routes_and_disable_network_fallback(monkeypatch):
+    """No Git child inherits host DB/Claude paths or an ambient Git override."""
+    inherited = {
+        "GIT_CONFIG_NOSYSTEM": "0",
+        "GIT_CONFIG_GLOBAL": "unsafe-user-config",
+        "GIT_NO_LAZY_FETCH": "0",
+        "GIT_ALLOW_PROTOCOL": "https:ssh",
+        "GIT_CONFIG_COUNT": "1",
+        "GIT_CONFIG_KEY_0": "core.fsmonitor",
+        "GIT_CONFIG_VALUE_0": "external-helper",
+        "PGHOST": "live.example.invalid",
+        "PGPASSWORD": "synthetic-not-a-secret",
+        "VRES_DATABASE_URL": "postgresql://example.invalid/not-real",
+        "DATABASE_URL": "postgresql://example.invalid/not-real",
+        "POSTGRES_USER": "synthetic",
+        "SQLALCHEMY_DATABASE_URI": "postgresql://example.invalid/not-real",
+        "CLAUDE_CONFIG_DIR": "synthetic-host-claude",
+        "ANTHROPIC_API_KEY": "synthetic-not-a-secret",
+    }
+    for key, value in inherited.items():
+        monkeypatch.setenv(key, value)
+    env = release_artifact._git_env()
+    assert env["GIT_CONFIG_NOSYSTEM"] == "1"
+    assert env["GIT_CONFIG_GLOBAL"] == os.devnull
+    assert env["GIT_NO_LAZY_FETCH"] == "1"
+    assert env["GIT_ALLOW_PROTOCOL"] == "file"
+    assert env["GIT_NO_REPLACE_OBJECTS"] == "1"
+    assert env["GIT_TERMINAL_PROMPT"] == "0"
+    assert env["GIT_OPTIONAL_LOCKS"] == "0"
+    for key in inherited:
+        if key.startswith("GIT_") and key in env:
+            assert key in {
+                "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "GIT_NO_LAZY_FETCH",
+                "GIT_ALLOW_PROTOCOL",
+            }
+        else:
+            assert key not in env
+
 def test_valid_artifact_is_bound_to_the_pinned_commit_objects(staged, tmp_path):
     root, head, out, manifest_path, manifest = staged
 

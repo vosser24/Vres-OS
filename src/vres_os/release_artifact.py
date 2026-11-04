@@ -149,10 +149,23 @@ def _walk(directory: Path) -> tuple[list[str], list[str]]:
 
 
 def _git_env() -> dict[str, str]:
-    # No inherited GIT_* variable may point git at another repository, index or object store,
-    # and replacement refs must not substitute objects; nothing prompts and nothing takes locks.
-    env = {k: v for k, v in os.environ.items() if not k.upper().startswith("GIT_")}
-    env.update(GIT_NO_REPLACE_OBJECTS="1", GIT_TERMINAL_PROMPT="0", GIT_OPTIONAL_LOCKS="0")
+    """Constrain release Git children; do not inherit Git/DB overrides or lazy-fetch controls."""
+    # The caller's GIT_* settings are untrusted, even when intended as safety controls.
+    # Reassert the safety settings here so they survive the environment scrub.
+    env = {
+        key: value for key, value in os.environ.items()
+        if not key.upper().startswith(("GIT_", "PG", "POSTGRES", "VRES_", "CLAUDE_", "ANTHROPIC_"))
+        and key.upper() not in {"DATABASE_URL", "SQLALCHEMY_DATABASE_URI"}
+    }
+    env.update(
+        GIT_CONFIG_NOSYSTEM="1",
+        GIT_CONFIG_GLOBAL=os.devnull,
+        GIT_NO_LAZY_FETCH="1",
+        GIT_ALLOW_PROTOCOL="file",
+        GIT_NO_REPLACE_OBJECTS="1",
+        GIT_TERMINAL_PROMPT="0",
+        GIT_OPTIONAL_LOCKS="0",
+    )
     return env
 
 
