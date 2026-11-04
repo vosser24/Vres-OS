@@ -1,0 +1,37 @@
+# Vres-OS 2026-11-04 — Bundle B daily-use synthetic journey Windows 22 selected PASS: sanitized operator-pasted case roster
+
+ORIGIN: operator-pasted Windows PowerShell output in ChatGPT, 2026-11-04. This file is an assistant-authored sanitization, NOT original native transcript.txt, stdout.txt or stderr.txt; those native files were not uploaded. No native log SHA256 or physical host network/DB contact attestation is available.
+Source exact Git SHA 00ff9e1a03a652cfcb1fdcbd7a09e53bfc3af788; TREE 6816f280fd388f1921bcff235da97a68be87ede5; sole parent 2b51b3aa9e4fe40fce53ffd457e1d5f218443209; source blob be6de92eddc8ab10ebe5d38892d45dce2f144e81; test blob 3cb43cc88570394fbff85371a466064d3e439e79.
+Reported initial Git PRE passed: original protected P2 HEAD/TREE/clean official origin; remote feature HEAD/TREE/sole parent/parent TREE; exactly TWO A paths and both source Git blobs; newly detached review HEAD/TREE clean.
+Reported selected test results: PYTEST_EXIT_CODE=0; NAMED_PASSED_CASES=22; UNIQUE_PASSED_CASES=22; NAMED_FAILED_ERROR_SKIPPED_CASES=0. Each of the 22 named nodes in user-pasted output matched the selected test module. The parameter values below are intentionally omitted and replaced with stable within-test ordinals for safety and privacy.
+Reported process env restoration: PASS; reported Git POST review HEAD/TREE/both Git blobs, original P2 HEAD/TREE/clean PASS. Child stderr only showed normal Git fetch and worktree creation diagnostics; outer GATE_EXIT_CODE=0; OBSERVED_NAMED_PASS=22; OBSERVED_UNIQUE_PASS=22; OBSERVED_FAILED_ERROR_SKIPPED=0.
+Final internal marker: VRES_PERSONAL_BUNDLE_B_DAILY_JOURNEY_WINDOWS_22_POSTFLIGHT_COMPLETE_PENDING_EVALUATION. Outer marker: WINDOWS_22_GATE_COMPLETE_PENDING_CHATGPT_EVALUATION.
+**VERDICT: BUNDLE_B_DAILY_JOURNEY_WINDOWS_SELECTED_OFFLINE_22_ACCEPT_WITH_OPERATOR_PASTED_PROVENANCE_LIMIT.** Selected fixed synthetic user journey test only; NOT proof of installed Vres, real task persistence/real restart, external provider, actual native hook clearance, approved credentials, real PRISM/global migration, PostgreSQL, true F1/Fable positive validation or full repository integration.
+
+=== 22 SANITIZED DISTINCT PASS NODES; parameter values omitted ===
+PASSED tests/test_personal_disposable_daily_journey.py::test_one_integrated_personal_journey_yields_correct_honest_outcome
+PASSED tests/test_personal_disposable_daily_journey.py::test_complete_accepted_owner_workflow_repeats_deterministically
+PASSED tests/test_personal_disposable_daily_journey.py::test_operator_facing_result_is_bounded_and_explicitly_non_authorizing
+PASSED tests/test_personal_disposable_daily_journey.py::test_unauthorized_project_or_wrong_task_refused_before_temp_io[parameter_case_1]
+PASSED tests/test_personal_disposable_daily_journey.py::test_unauthorized_project_or_wrong_task_refused_before_temp_io[parameter_case_2]
+PASSED tests/test_personal_disposable_daily_journey.py::test_unauthorized_project_or_wrong_task_refused_before_temp_io[parameter_case_3]
+PASSED tests/test_personal_disposable_daily_journey.py::test_unauthorized_project_or_wrong_task_refused_before_temp_io[parameter_case_4]
+PASSED tests/test_personal_disposable_daily_journey.py::test_unauthorized_project_or_wrong_task_refused_before_temp_io[parameter_case_5]
+PASSED tests/test_personal_disposable_daily_journey.py::test_unauthorized_project_or_wrong_task_refused_before_temp_io[parameter_case_6]
+PASSED tests/test_personal_disposable_daily_journey.py::test_unauthorized_project_or_wrong_task_refused_before_temp_io[parameter_case_7]
+PASSED tests/test_personal_disposable_daily_journey.py::test_disposable_checkpoint_mutation_does_not_resume_wrong_work[parameter_case_1]
+PASSED tests/test_personal_disposable_daily_journey.py::test_disposable_checkpoint_mutation_does_not_resume_wrong_work[parameter_case_2]
+PASSED tests/test_personal_disposable_daily_journey.py::test_disposable_checkpoint_mutation_does_not_resume_wrong_work[parameter_case_3]
+PASSED tests/test_personal_disposable_daily_journey.py::test_disposable_checkpoint_mutation_does_not_resume_wrong_work[parameter_case_4]
+PASSED tests/test_personal_disposable_daily_journey.py::test_disposable_checkpoint_mutation_does_not_resume_wrong_work[parameter_case_5]
+PASSED tests/test_personal_disposable_daily_journey.py::test_wrong_checkpoint_binding_denied_even_when_checkpoint_bytes_unchanged
+PASSED tests/test_personal_disposable_daily_journey.py::test_disposable_fixture_temporary_roots_are_cleaned_after_return
+PASSED tests/test_personal_disposable_daily_journey.py::test_release_recovery_refusal_does_not_leak_into_installed_system
+PASSED tests/test_personal_disposable_daily_journey.py::test_a_forged_positive_authority_cannot_pass_the_operator_renderer
+PASSED tests/test_personal_disposable_daily_journey.py::test_missing_integration_proof_does_not_render_as_success
+PASSED tests/test_personal_disposable_daily_journey.py::test_module_does_not_own_a_second_task_store_model_or_credential_engine
+PASSED tests/test_personal_disposable_daily_journey.py::test_nested_forged_positive_evidence_does_not_render_as_success
+
+Unique PASS count: 22. No failures, skips, XFAIL or XPASS reported.
+Historical local isolated authoring check: 14 PASS / 8 FAIL from incorrect local M4 synthetic-plan stand-in (missing synthetic_plan_sha256); corrected stand-in only, then 22 PASS in Linux local stand-in; those checks are NOT Windows acceptance. Preserve original failure.
+All real actions remain held: LIVE_SCHEMA_048_INCIDENT=OPEN (no PostgreSQL even SELECT), HOST_HOOK_DB_ROUTE_ATTEMPTED_AND_REFUSED=OPEN (no native Claude/hooks), independently trusted F1/Fable positive authority NOT GRANTED.
