@@ -33,7 +33,7 @@ _GATES = frozenset({
     "ARCHITECTURE_AUDIT_INCOMPLETE", "CLAUDE_MANUAL_REVIEW",
     "ARCHITECTURE_ALIGNMENT_PLAN", "CLAUDE_KEEP_DROP_REVIEW",
 })
-_RISKS = frozenset({"executable", "active", "conflicting", "instructions", "inert", "other"})
+_RISKS = frozenset({"executable", "active", "conflicting", "instructions", "inert", "other", "unknown"})
 # Only stable, well-known surfaces are printed. Untrusted filenames may themselves
 # contain secrets, personal information, terminal control codes or instructions.
 _PUBLIC_NAMES = frozenset({"CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", ".mcp.json",
@@ -111,7 +111,7 @@ def render_personal_project_intake(report: Any) -> str:
     if blocked > 0 and "CLAUDE_MANUAL_REVIEW" not in gates:
         raise PersonalIntakeRefused("Blocked legacy items have no manual review gate")
     counts = ", ".join(f"{name} {risks[name]}" for name in (
-        "executable", "active", "conflicting", "instructions", "inert", "other"
+        "executable", "active", "conflicting", "instructions", "inert", "other", "unknown"
     ) if risks[name]) or "none"
     lines = [
         "Vres-OS PERSONAL — READ-ONLY PROJECT INTAKE",

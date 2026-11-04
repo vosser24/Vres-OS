@@ -27,7 +27,7 @@ def _snapshot(*, legacy=False, blocked=False, complete=True):
                      "status": "ok", "options": ["DROP"]})
     if blocked:
         gates.insert(1 if not complete else 0, "CLAUDE_MANUAL_REVIEW")
-        rows.append({"path": ".claude/TOKEN_SECRET.txt", "risk": "other", "blocked": True,
+        rows.append({"path": ".claude/TOKEN_SECRET.txt", "risk": "unknown", "blocked": True,
                      "status": "sensitive_path", "options": ["KEEP"]})
     state = ("LEGACY_ARCHITECTURE_SCAN_INCOMPLETE" if legacy and not complete else
              "LEGACY_MANUAL_REVIEW_REQUIRED" if blocked else
@@ -69,6 +69,7 @@ def test_blocked_private_path_and_values_are_not_rendered():
     message = intake.render_personal_project_intake(payload)
     assert "INTERNALSECRET" not in message
     assert "manual blockers: 1" in message
+    assert "unknown 1" in message
     assert "CLAUDE_MANUAL_REVIEW" in message
     assert "Resolve blocked legacy surfaces" in message
 
