@@ -40,6 +40,8 @@ Usage: python -I -S -B personal_desk_cli.py COMMAND [command options]
             [--show-selected-action] [--format text|json]
   undo      Delete ONLY an unchanged owned scratch draft with approval
             --workspace ABS --sha256 HEX --yes
+  desk      Portable daily desk: init/add/focus/open/remove without manual SHA
+            desk COMMAND --desk ABS-Vres-Desk-* [command options]
   help      Show this guide
 
 Only user-selected scratch directories are written or undone. The selected
@@ -60,7 +62,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     action, rest = args[0], args[1:]
     # Constant dispatch only. Never import arbitrary modules from operator data.
-    if action not in {"prepare", "create", "inspect", "open", "today", "today-here", "undo"}:
+    if action not in {"prepare", "create", "inspect", "open", "today", "today-here", "undo", "desk"}:
         print("VRES_DESK_REFUSED: unknown command; run 'help'.", file=sys.stderr)
         return 2
     try:
@@ -75,6 +77,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             outcome = owner.main(rest)
         elif action == "today-here":
             from vres_os import personal_scratch_discovery as owner
+            outcome = owner.main(rest)
+        elif action == "desk":
+            from vres_os import personal_portable_desk as owner
             outcome = owner.main(rest)
         else:  # today
             from vres_os import personal_daily_focus as owner
