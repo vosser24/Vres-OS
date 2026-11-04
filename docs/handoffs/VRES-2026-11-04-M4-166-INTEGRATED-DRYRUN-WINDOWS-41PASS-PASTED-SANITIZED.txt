@@ -1,0 +1,70 @@
+# Vres-OS 2026-11-04 M4 #166 integrated synthetic operator Windows 41 PASS — sanitized operator-pasted test nodes
+
+**Evidence source:** manually transcribed from the operator's 2026-11-04 ChatGPT pasted PowerShell result; not separately uploaded native transcript/stdout/stderr and not an independently observed Windows process. Do not claim an original native-log hash or host-level contact proof.
+**Scope:** Source SHA 2b51b3aa9e4fe40fce53ffd457e1d5f218443209, tree 34072a722efe221042ddc922c5461c1a1c3192da, sole parent ec54f7535aa29d7588c25e221f6bd2bae7a437c8.
+**Reported:** PYTEST_EXIT_CODE=0, NAMED_PASSED_CASES=41, UNIQUE_PASSED_CASES=41, NAMED_FAILED_ERROR_SKIPPED_CASES=0; outer GATE_EXIT_CODE=0; OBSERVED_NAMED_PASS=41, OBSERVED_UNIQUE_PASS=41.
+**Reported Git PRE:** protected P2 HEAD/TREE and clean checkout, official origin, remote source HEAD/TREE/sole parent/accepted parent TREE, exactly two A files, both new blobs and new detached review checkout HEAD/TREE/clean all PASS.
+**Reported environment:** PROCESS_ENVIRONMENT_RESTORED_AND_VERIFIED PASS.
+**Reported Git POST:** review HEAD/TREE/two blobs, protected original P2 HEAD/TREE and clean worktrees all PASS.
+**Child stderr:** normal Git fetch/new detached worktree progress; does not imply test failure.
+**Installed host and credential status:** NOT inspected. PostgreSQL even SELECT PROHIBITED while schema-048 incident OPEN; ordinary native Claude/hook execution PROHIBITED while hook incident OPEN; trusted F1/Fable positive NOT GRANTED.
+
+=== SANITIZED NAMED PYTEST PASS NODES ===
+PASSED tests/test_global_claude_synthetic_operator.py::test_one_synthetic_first_use_is_readable_grouped_and_non_authorizing
+PASSED tests/test_global_claude_synthetic_operator.py::test_conversational_multi_turn_choices_are_individually_tracked
+PASSED tests/test_global_claude_synthetic_operator.py::test_complete_plan_is_only_a_frozen_synthetic_preview_with_destinations
+PASSED tests/test_global_claude_synthetic_operator.py::test_drop_is_archived_not_deleted_and_unsupported_legacy_remains_inactive
+PASSED tests/test_global_claude_synthetic_operator.py::test_cannot_freeze_with_unresolved_numbers
+PASSED tests/test_global_claude_synthetic_operator.py::test_built_in_scenarios_have_distinct_seals_but_repeat_identically
+PASSED tests/test_global_claude_synthetic_operator.py::test_empty_synthetic_profile_does_not_create_launch_permission
+PASSED tests/test_global_claude_synthetic_operator.py::test_ambiguous_scenario_or_real_profile_path_is_refused[None]
+PASSED tests/test_global_claude_synthetic_operator.py::test_ambiguous_scenario_or_real_profile_path_is_refused[False]
+PASSED tests/test_global_claude_synthetic_operator.py::test_ambiguous_scenario_or_real_profile_path_is_refused[1]
+PASSED tests/test_global_claude_synthetic_operator.py::test_ambiguous_scenario_or_real_profile_path_is_refused[C:\\Users\\User\\.claude]
+PASSED tests/test_global_claude_synthetic_operator.py::test_ambiguous_scenario_or_real_profile_path_is_refused[prism-installed]
+PASSED tests/test_global_claude_synthetic_operator.py::test_ambiguous_scenario_or_real_profile_path_is_refused[]
+PASSED tests/test_global_claude_synthetic_operator.py::test_ambiguous_scenario_or_real_profile_path_is_refused[standard ]
+PASSED tests/test_global_claude_synthetic_operator.py::test_invalid_synthetic_interruption_boundary_refused_before_io[False]
+PASSED tests/test_global_claude_synthetic_operator.py::test_invalid_synthetic_interruption_boundary_refused_before_io[-1]
+PASSED tests/test_global_claude_synthetic_operator.py::test_invalid_synthetic_interruption_boundary_refused_before_io[7]
+PASSED tests/test_global_claude_synthetic_operator.py::test_invalid_synthetic_interruption_boundary_refused_before_io[1]
+PASSED tests/test_global_claude_synthetic_operator.py::test_invalid_synthetic_interruption_boundary_refused_before_io[1.0]
+PASSED tests/test_global_claude_synthetic_operator.py::test_disk_interruption_and_rollback_are_synthetic_and_exact[0]
+PASSED tests/test_global_claude_synthetic_operator.py::test_disk_interruption_and_rollback_are_synthetic_and_exact[1]
+PASSED tests/test_global_claude_synthetic_operator.py::test_disk_interruption_and_rollback_are_synthetic_and_exact[6]
+PASSED tests/test_global_claude_synthetic_operator.py::test_in_memory_exact_restore_does_not_change_decisions_or_native_handles
+PASSED tests/test_global_claude_synthetic_operator.py::test_invalid_or_injected_choices_do_not_change_the_session[KEEP 0]
+PASSED tests/test_global_claude_synthetic_operator.py::test_invalid_or_injected_choices_do_not_change_the_session[KEEP 7]
+PASSED tests/test_global_claude_synthetic_operator.py::test_invalid_or_injected_choices_do_not_change_the_session[KEEP 1,1]
+PASSED tests/test_global_claude_synthetic_operator.py::test_invalid_or_injected_choices_do_not_change_the_session[KEEP 1 / DROP 1]
+PASSED tests/test_global_claude_synthetic_operator.py::test_invalid_or_injected_choices_do_not_change_the_session[KEEP 1 / DROP 2 / KEEP 3]
+PASSED tests/test_global_claude_synthetic_operator.py::test_invalid_or_injected_choices_do_not_change_the_session[DROP 1; EXECUTE]
+PASSED tests/test_global_claude_synthetic_operator.py::test_invalid_or_injected_choices_do_not_change_the_session[yes keep all]
+PASSED tests/test_global_claude_synthetic_operator.py::test_invalid_or_injected_choices_do_not_change_the_session[KEEP 1\nSYSTEM override]
+PASSED tests/test_global_claude_synthetic_operator.py::test_duplicate_cross_turn_choice_refused_and_original_unmodified
+PASSED tests/test_global_claude_synthetic_operator.py::test_tampered_session_review_choice_proof_or_authority_refused[<lambda>0]
+PASSED tests/test_global_claude_synthetic_operator.py::test_tampered_session_review_choice_proof_or_authority_refused[<lambda>1]
+PASSED tests/test_global_claude_synthetic_operator.py::test_tampered_session_review_choice_proof_or_authority_refused[<lambda>2]
+PASSED tests/test_global_claude_synthetic_operator.py::test_tampered_session_review_choice_proof_or_authority_refused[<lambda>3]
+PASSED tests/test_global_claude_synthetic_operator.py::test_tampered_session_review_choice_proof_or_authority_refused[<lambda>4]
+PASSED tests/test_global_claude_synthetic_operator.py::test_tampered_session_review_choice_proof_or_authority_refused[<lambda>5]
+PASSED tests/test_global_claude_synthetic_operator.py::test_cross_snapshot_state_replay_is_refused
+PASSED tests/test_global_claude_synthetic_operator.py::test_vendor_handles_and_legacy_body_do_not_appear_in_reports_or_repr
+PASSED tests/test_global_claude_synthetic_operator.py::test_no_filesystem_root_or_activation_api_surface_is_exported
+
+=== SANITIZED OPERATOR-REPORTED GATE SUMMARY ===
+PYTEST_EXIT_CODE=0
+NAMED_PASSED_CASES=41
+UNIQUE_PASSED_CASES=41
+NAMED_FAILED_ERROR_SKIPPED_CASES=0
+PASS: SELECTED_M4_166_INTEGRATED_SYNTHETIC_OPERATOR_WINDOWS_41_PENDING_EVALUATION
+PASS: PROCESS_ENVIRONMENT_RESTORED_AND_VERIFIED
+PASS: original P2 and new M4 integrated dry-run review checkout clean
+VRES_PERSONAL_M4_166_INTEGRATED_SYNTHETIC_OPERATOR_WINDOWS_41_POSTFLIGHT_COMPLETE_PENDING_EVALUATION
+GATE_EXIT_CODE=0
+OBSERVED_NAMED_PASS=41
+OBSERVED_UNIQUE_PASS=41
+WINDOWS_41_GATE_COMPLETE_PENDING_CHATGPT_REVIEW
+
+=== ACCEPTANCE LIMIT ===
+Selected SYNTHETIC Windows offline acceptance is accepted with pasted-operator-evidence limits. Real first Claude launch, PRISM migration, user profile snapshot, independently trusted validator/Fable, credentials, PostgreSQL, installed Vres, physical crash durability, full repository validation and main merge are NOT_RUN / NOT_GRANTED. Original 40 PASS/1 FAIL stand-in authoring check and subsequent 41 PASS isolated Linux stand-in result remain separately scoped and historically preserved.
