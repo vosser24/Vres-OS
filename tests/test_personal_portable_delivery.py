@@ -56,8 +56,8 @@ def test_one_complete_portable_delivery_byte_integrity_and_fail_closed(tmp_path,
     zpath = out / 'Vres-PortableDesk.zip'
     assert hashlib.sha256(zpath.read_bytes()).hexdigest() == receipt['zip_sha256']
     manifest = json.loads((folder / 'SOURCE-MANIFEST.json').read_text())
-    assert manifest['source_commit'] == '39fb74b80c899cad9199f6225b39e103b99b4fc3'
-    assert manifest['source_tree'] == '73743daffa611062863d7ba9d9e0bab011e43007'
+    assert manifest['source_commit'] == 'b0e22725213f312773f36cd474f8cb277e453747'
+    assert manifest['source_tree'] == 'ba379f0a74838843709840b7821dc223a305cdaf'
     assert manifest['windows_integration'] == 'NOT_RUN_FOR_THIS_PACKAGE'
     assert len(manifest['runtime_files']) == 10
     assert 'src/vres_os/personal_task_lifecycle.py' in expected_blobs
@@ -65,13 +65,16 @@ def test_one_complete_portable_delivery_byte_integrity_and_fail_closed(tmp_path,
     assert {rel: source.joinpath(*rel.split('/')).read_bytes() for rel in source_original} == source_original
     script = (folder / 'Desk.ps1').read_text(encoding='ascii')
     for token in ('Get-AuthenticodeSignature', 'Get-FileHash', "'-I','-S','-B'",
-                  "'init','add','focus','open','remove','revise','complete','archive','history','reopen'",
+                  "'init','add','focus','open','remove','revise','complete','archive','history','reopen','review'",
                   '[switch]$ShowAction', '[string]$SnapshotSha256', '--from-state',
-                  "'revise' {", "'complete' {", "'archive' {", "'history' {", "'reopen' {",
+                  "'revise' {", "'complete' {", "'archive' {", "'history' {", "'reopen' {", "'review' {",
                   'exit $LASTEXITCODE'):
         assert token in script
     start_here = (folder / 'START-HERE.txt').read_text()
     assert 'If multiple snapshots match, supply -SnapshotSha256' in start_here
+    assert '-Operation review -PythonExe' in start_here
+    assert 'NEVER change execution policy' in start_here
+    assert 'desk review --desk $desk' in start_here
     assert start_here.index('-Operation revise ') < start_here.index('-Operation remove ')
     assert r'C:\Projects\my-revised-task.md' in start_here
     assert 'Snapshot selector must be a lowercase SHA-256' in script

@@ -18,9 +18,9 @@ SCHEMA = 'vres-personal-portable-delivery/1'
 # Exact runtime closure accepted on native Windows for portable desk P1.
 PINNED_BLOBS = {
     'src/vres_os/__init__.py': 'cae9ae5f04d1005900c8e82b1564abb164520851',
-    'src/vres_os/personal_desk_cli.py': '0836374306c8a8619ec82d5478f252de940ce5be',
-    'src/vres_os/personal_portable_desk.py': 'e762f6fc09bbd76a9ed77d47d6ece2d82a06691f',
-    'src/vres_os/personal_task_lifecycle.py': 'db57c3775ada08f311a36a8c7d58cb7ee1d68596',
+    'src/vres_os/personal_desk_cli.py': '686b016dbd286b696efea3061d1ef083d4724b70',
+    'src/vres_os/personal_portable_desk.py': '7b3fc31fd53b97ad0a19b89d88cac371bb822041',
+    'src/vres_os/personal_task_lifecycle.py': 'd202ace8d359543fda44be604e45890810072983',
     'src/vres_os/personal_offline_workbench.py': '636d40b7229d27da6442e8089120cad0c3840529',
     'src/vres_os/personal_task_continuity.py': '949993cb7b730712e600cd71dac6181e0dc7ef9a',
     'src/vres_os/personal_daily_focus.py': '7f66743a9ac305294a4e9a0b5a04c6fda89ebd0a',
@@ -95,7 +95,7 @@ LAUNCHER = r'''#requires -Version 5.1
 # Personal source-only Vres-OS desk launcher. NO installation, hooks or DB.
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('init','add','focus','open','remove','revise','complete','archive','history','reopen')][string]$Operation,
+    [Parameter(Mandatory=$true)][ValidateSet('init','add','focus','open','remove','revise','complete','archive','history','reopen','review')][string]$Operation,
     [Parameter(Mandatory=$true)][string]$PythonExe,
     [Parameter(Mandatory=$true)][string]$Desk,
     [string]$TaskKey,
@@ -130,7 +130,7 @@ __PINNED_SHA256_TABLE__
     if ($ShowAction -and $Operation -notin @('focus','open')) {
         throw 'Action disclosure applies only to focus/open'
     }
-    if ($Approve -and $Operation -in @('focus','open','history')) {
+    if ($Approve -and $Operation -in @('focus','open','history','review')) {
         throw 'Approval is not applicable to read-only operations'
     }
     if ($SnapshotSha256 -and $SnapshotSha256 -cnotmatch '^[0-9a-f]{64}$') {
@@ -179,6 +179,9 @@ __PINNED_SHA256_TABLE__
         'history' {
             # Read-only SHA/status inspection; no extra arguments.
         }
+        'review' {
+            # Read-only active receipts and completed history; no extra arguments.
+        }
         'reopen' {
             if (-not $Approve -or -not $TaskKey) { throw 'Explicit reopen approval required' }
             $argv += @('--task-key',$TaskKey,'--from-state',$FromState,'--yes')
@@ -223,6 +226,7 @@ Example commands (edit all paths; use approved NEW scratch locations):
   & $run -Operation open -PythonExe $py -Desk $desk -TaskKey TASK-01 -ShowAction
   & $run -Operation revise -PythonExe $py -Desk $desk -TaskKey TASK-01 -NoteFile 'C:\\Projects\\my-revised-task.md' -Approve
   & $run -Operation history -PythonExe $py -Desk $desk
+  & $run -Operation review -PythonExe $py -Desk $desk
   & $run -Operation complete -PythonExe $py -Desk $desk -TaskKey TASK-01 -Approve
   & $run -Operation reopen -PythonExe $py -Desk $desk -TaskKey TASK-01 -FromState completed -Approve
   & $run -Operation archive -PythonExe $py -Desk $desk -TaskKey TASK-01 -Approve
@@ -232,6 +236,12 @@ Example commands (edit all paths; use approved NEW scratch locations):
 APPROVAL: -Approve is required for init/add/remove/revise/complete/archive/reopen; never implicit.
 FOCUS: requires -TaskKey to select one task; shows no action by default.
 HISTORY: read-only SHA/status inventory; REVISE preserves previous exact bytes.
+REVIEW: read-only active receipts + completed snapshots, including zero active.
+Completion history has NO timestamps: the review does not mean "completed today".
+When Windows script execution is disabled, NEVER change execution policy.
+After independently checking all ten source SHA256 values in
+SOURCE-MANIFEST.json, use the same route with signed offline Python:
+  & $py -I -S -B 'C:\\Projects\\Vres-PortableDesk\\src\\vres_os\\personal_desk_cli.py' desk review --desk $desk
 COMPLETE/ARCHIVE: move verified scratch into bounded local history.
 REOPEN: copies one completed/archived snapshot and preserves history.
 If multiple snapshots match, supply -SnapshotSha256 from history exactly.
@@ -249,8 +259,8 @@ def _output_bytes(payloads: dict[str, bytes], sha: dict[str, str]) -> dict[str, 
     table = '\n'.join("        '%s' = '%s'" % (Path(key).name, sha[key]) for key in sorted(sha))
     launcher = LAUNCHER.replace('__PINNED_SHA256_TABLE__', table)
     manifest = {
-        'schema': SCHEMA, 'source_commit': '39fb74b80c899cad9199f6225b39e103b99b4fc3',
-        'source_tree': '73743daffa611062863d7ba9d9e0bab011e43007',
+        'schema': SCHEMA, 'source_commit': 'b0e22725213f312773f36cd474f8cb277e453747',
+        'source_tree': 'ba379f0a74838843709840b7821dc223a305cdaf',
         'runtime_files': [{'path': rel, 'git_blob_sha1': PINNED_BLOBS[rel], 'sha256': sha[rel]}
                           for rel in sorted(sha)],
         'installed_vres_modified': False, 'task_store_created': False,
@@ -296,7 +306,7 @@ def build(source_root: str, output_root: str, *, approved: bool = False) -> dict
             if z.read('Vres-PortableDesk/' + rel) != raw:
                 raise DeliveryRefused('ZIP failed exact readback')
     zip_sha = hashlib.sha256(archive.read_bytes()).hexdigest()
-    receipt = {'schema': SCHEMA, 'source_commit': '39fb74b80c899cad9199f6225b39e103b99b4fc3',
+    receipt = {'schema': SCHEMA, 'source_commit': 'b0e22725213f312773f36cd474f8cb277e453747',
                'zip_sha256': zip_sha, 'files_in_zip': len(output),
                'installed_vres_modified': False, 'task_store_created': False}
     receipt_bytes = (json.dumps(receipt, indent=2, sort_keys=True) + '\n').encode('ascii')
