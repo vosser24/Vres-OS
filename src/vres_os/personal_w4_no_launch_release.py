@@ -1,0 +1,349 @@
+"""W4: inert, reproducible original-owner source release; never install or launch.
+
+This *does not* resolve runtime dependencies or upgrade P2. The established
+release_artifact owner checks pinned git objects and stages the source. W4
+only composes an inspectable ZIP, negative capability contract and receipt.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import shutil
+import stat
+import sys
+import tomllib
+import zipfile
+from pathlib import Path
+from typing import Any
+
+if not __package__:  # isolated signed-Python direct-file entry, adjacent source only
+    sys.path.insert(0, str(Path(__file__).absolute().parent.parent))
+    from vres_os import release_artifact as release_owner
+else:
+    from . import release_artifact as release_owner
+
+SCHEMA = "vres-personal-w4-no-launch-source-release/1"
+DEPENDENCIES_SCHEMA = "vres-personal-w4-dependency-evidence/1"
+CAPABILITIES_SCHEMA = "vres-personal-w4-capability-holds/1"
+RECEIPT_SCHEMA = "vres-personal-w4-source-zip-receipt/1"
+STAGE_APPROVAL = "AUTHORIZE-W4-DISPOSABLE-NO-LAUNCH-STAGE"
+ROLLBACK_APPROVAL = "AUTHORIZE-W4-ROLLBACK-ABORTED-DISPOSABLE-STAGE"
+BASE_W3_R2 = "982e77f2f4974b4fbca5da91d3e11aeb56e40271"
+# The original accepted owners MUST remain identical across the first W4 branch.
+OWNER_BLOBS = {
+    "src/vres_os/personal_desk_cli.py": "686b016dbd286b696efea3061d1ef083d4724b70",
+    "src/vres_os/personal_portable_desk.py": "7b3fc31fd53b97ad0a19b89d88cac371bb822041",
+    "src/vres_os/personal_task_lifecycle.py": "d202ace8d359543fda44be604e45890810072983",
+    "src/vres_os/personal_portable_delivery.py": "79180e365179f53c74bc2f397c6b88f96805730c",
+    "src/vres_os/personal_desk_chairman_handoff.py": "6fdc51184c423e751232b31f9e01800b3d6057ea",
+    "src/vres_os/personal_w2_onboarding.py": "76acfcb1350a767fee216aaeb743cbf5066c07ba",
+    "src/vres_os/personal_w3_reuse.py": "db354a36328294003416903574cc201e01802462",
+    "src/vres_os/credential_broker.py": "41f1b83fca0b3245de392e688ed0ed895b1f1cd7",
+    "src/vres_os/release_artifact.py": "497fa3d96742a868f8b00b5dcb26e8afe03fd159",
+    "src/vres_os/release_inputs.py": "a0cdf3195f0cf0f2a61ce32521a74f78260832f7",
+    "pyproject.toml": "b2d5e30d10d7be0613e90bf3ed1e346be5678969",
+}
+_HOLDS = (
+    "LIVE_SCHEMA_048_INCIDENT_OPEN_NO_POSTGRESQL_EVEN_SELECT",
+    "HOST_HOOK_DB_ROUTE_ATTEMPTED_AND_REFUSED_OPEN_NO_NATIVE_CLAUDE",
+    "F1_FABLE_INDEPENDENT_POSITIVE_AUTHORITY_NOT_GRANTED",
+    "PROTECTED_P2_INSTALLATION_NOT_AUTHORIZED",
+    "REAL_CREDENTIALS_AND_PROFILE_NOT_AUTHORIZED",
+    "REAL_LEGACY_PROJECT_NOT_AUTHORIZED",
+    "WINDOWS_SANDBOX_R2_FIRST_LAUNCH_HELD",
+)
+_REPARSE = 0x400
+_NAME = re.compile(r"Vres-W4-NoLaunch-[0-9a-f]{8,16}\Z")
+_OID = re.compile(r"[0-9a-f]{40}\Z")
+_MAX_FILES = 350
+_MAX_SOURCE_BYTES = 15 * 1024 * 1024
+
+
+class W4Refused(ValueError):
+    """No real installed/user-state operation is authorized."""
+
+
+def _json(value: Any) -> bytes:
+    return (json.dumps(value, sort_keys=True, ensure_ascii=True, allow_nan=False,
+                       separators=(",", ":")) + "\n").encode("ascii")
+
+
+def _sha(raw: bytes) -> str:
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _ordinary(path: Path, *, directory: bool = True) -> os.stat_result:
+    try:
+        info = path.lstat()
+    except OSError as exc:
+        raise W4Refused("An explicit ordinary directory or source file is missing") from exc
+    if stat.S_ISLNK(info.st_mode) or bool(getattr(info, "st_file_attributes", 0) & _REPARSE):
+        raise W4Refused("Redirected paths are forbidden")
+    if not (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode)):
+        raise W4Refused("Unexpected source path type")
+    if not directory and getattr(info, "st_nlink", 1) != 1:
+        raise W4Refused("Hardlinked source files are forbidden")
+    return info
+
+
+def _path(value: str | Path, *, new: bool) -> Path:
+    raw = str(value)
+    p = Path(raw)
+    if not raw or "\x00" in raw or not p.is_absolute() or ".." in p.parts:
+        raise W4Refused("An explicit absolute non-traversing path is required")
+    for ancestor in reversed(p.parents):
+        _ordinary(ancestor)
+    if new:
+        if not _NAME.fullmatch(p.name) or os.path.lexists(p):
+            raise W4Refused("A new uniquely named W4 output root is required")
+        if os.name == "nt" and p.parent != Path("C:/Projects"):
+            raise W4Refused("Windows W4 output must be a new direct child of C:/Projects")
+        _ordinary(p.parent)
+    else:
+        _ordinary(p)
+    return p
+
+
+def _pin_owners(files: dict[str, tuple[str, str, bytes]]) -> None:
+    for path, oid in OWNER_BLOBS.items():
+        if path not in files or files[path][1] != oid:
+            raise W4Refused("An accepted original source owner changed; review before staging")
+    if not (0 < len(files) <= _MAX_FILES
+            and sum(len(record[2]) for record in files.values()) <= _MAX_SOURCE_BYTES):
+        raise W4Refused("The full source artifact exceeds its bounded profile")
+    if not any(p.startswith("src/vres_os/migrations/001_") for p in files):
+        raise W4Refused("The original inert migration inventory is incomplete")
+    if not any(p.startswith("src/vres_os/migrations/041_") for p in files):
+        raise W4Refused("The original inert migration inventory is incomplete")
+
+
+def _documentation(files: dict[str, tuple[str, str, bytes]]) -> tuple[bytes, bytes, bytes]:
+    try:
+        meta = tomllib.loads(files["pyproject.toml"][2].decode("utf-8"))
+        project = meta["project"]
+        required = project["dependencies"]
+        optional = project.get("optional-dependencies", {})
+    except (KeyError, ValueError, TypeError, UnicodeError) as exc:
+        raise W4Refused("Project runtime requirements cannot be audited") from exc
+    if (type(required) is not list or any(type(v) is not str for v in required)
+            or type(optional) is not dict):
+        raise W4Refused("Unexpected dependency declaration format")
+    deps = {
+        "schema": DEPENDENCIES_SCHEMA, "declaration_source": "pyproject.toml",
+        "pyproject_git_blob": OWNER_BLOBS["pyproject.toml"],
+        "declared_dependencies": required,
+        "declared_optional_groups": optional,
+        "resolver_status": "NOT_RUN", "resolved_wheel_sha256": [],
+        "runtime_dependency_closure_accepted": False,
+        "stdlib_no_launch_staging_needs_external_packages": False,
+        "license_or_runtime_activation_assessed": False,
+    }
+    caps = {
+        "schema": CAPABILITIES_SCHEMA,
+        "product": "PERSONAL_ONE_WINDOWS_USER_ONE_EXISTING_CHAIRMAN",
+        "p1_daily_review": "ACCEPTED_OWNER_REPORTED_PORTABLE_SCOPE_ONLY",
+        "w1_scratch_handoff": "ACCEPTED_NARROW_OFFLINE_WINDOWS_ONLY",
+        "w2_onboarding": "ACCEPTED_NARROW_OFFLINE_WINDOWS_ADAPTER_ONLY",
+        "w3_memory_resources": "ACCEPTED_NARROW_OFFLINE_WINDOWS_ADAPTER_ONLY",
+        "runtime_entrypoint_bundled_but_launch_authorized": False,
+        "db_migrations_001_041_present_as_INERT_source_data_only": True,
+        "db_migration_execution_allowed": False,
+        "native_claude_or_hooks_allowed": False,
+        "real_secret_resolution_allowed": False,
+        "installed_state_mutation_allowed": False,
+        "real_user_data_inspected": False,
+        "production_release_ready": False,
+        "open_holds": list(_HOLDS),
+        "future_UAT_169_170": "NOT_RUN_HELD",
+        "independent_second_agent_review": "NOT_RUN",
+    }
+    readme = (
+        "VRES-OS W4 PERSONAL NO-LAUNCH SOURCE CANDIDATE\n"
+        "INERT SOURCE ARCHIVE. DO NOT LAUNCH, INSTALL, IMPORT OR ACTIVATE.\n"
+        "DO NOT execute .ps1, SQL migration, Python entrypoint, plugin or hook.\n"
+        "Dependency versions/wheels are NOT locked. Runtime is NOT accepted.\n"
+        "The manifest asserts bytes only, not independent F1/Fable approval.\n"
+        "NO PostgreSQL (even SELECT), native Claude, installed P2, credential,\n"
+        "user-profile, legacy project or main merge is authorized.\n"
+    ).encode("ascii")
+    return _json(deps), _json(caps), readme
+
+
+def _zip(out: Path, records: dict[str, bytes]) -> str:
+    archive = out / "W4-SOURCE-ONLY-NO-LAUNCH.zip"
+    with zipfile.ZipFile(archive, "x", compression=zipfile.ZIP_STORED, allowZip64=False) as z:
+        for name, raw in sorted(records.items()):
+            info = zipfile.ZipInfo(name, date_time=(2020, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_STORED
+            info.create_system = 3
+            info.external_attr = (0o100644 << 16)
+            z.writestr(info, raw)
+    with zipfile.ZipFile(archive, "r") as z:
+        if sorted(z.namelist()) != sorted(records):
+            raise W4Refused("Reopened ZIP entries do not match the source manifest")
+        if any(z.read(name) != data for name, data in records.items()):
+            raise W4Refused("Reopened ZIP bytes do not match the manifest")
+    return _sha(archive.read_bytes())
+
+
+def build_no_launch(source_root: str | Path, output_root: str | Path, *,
+                    source_commit: str, approval: str) -> dict[str, Any]:
+    """One explicitly approved, new W4 root; no native/runtime/test execution."""
+    if approval != STAGE_APPROVAL or not _OID.fullmatch(source_commit):
+        raise W4Refused("Exact new-root approval and full source commit pin are required")
+    source = _path(source_root, new=False)
+    output = _path(output_root, new=True)
+    if source == output or source in output.parents or output in source.parents:
+        raise W4Refused("Source and new candidate root must remain separate")
+    # Original release owner uses no Vres runtime hooks; it checks exact git objects.
+    commit, tree, original = release_owner.verified_source(source, source_commit)
+    _pin_owners(original)
+    dependencies, capabilities, readme = _documentation(original)
+    created = False
+    try:
+        output.mkdir()  # exclusive create; never overwrite an existing candidate
+        created = True
+        (output / "W4-INCOMPLETE.json").write_bytes(_json({
+            "schema": SCHEMA, "state": "INCOMPLETE", "source_commit": commit,
+            "source_tree": tree, "output_name": output.name,
+            "expected_paths": sorted(original),
+        }))
+        manifest = release_owner.stage(source, output / "source", output / "SOURCE-MANIFEST.json",
+                                       source_commit=source_commit)
+        if manifest["source_commit"] != commit or manifest["source_tree"] != tree:
+            raise W4Refused("Original owner staging shifted source identity")
+        entry = {row["path"]: row for row in manifest["files"]}
+        if set(entry) != set(original) or any(
+                entry[rel]["git_blob"] != v[1] or entry[rel]["sha256"] != _sha(v[2])
+                for rel, v in original.items()):
+            raise W4Refused("Original owner staged a different source manifest")
+        for rel, value in original.items():
+            staged = output / "source" / rel
+            info = _ordinary(staged, directory=False)
+            if (info.st_size != len(value[2]) or _sha(staged.read_bytes()) != _sha(value[2])):
+                raise W4Refused("Staged on-disk original-owner bytes were changed")
+        records = {"source/" + rel: value[2] for rel, value in original.items()}
+        records.update({
+            "SOURCE-MANIFEST.json": (output / "SOURCE-MANIFEST.json").read_bytes(),
+            "W4-DEPENDENCIES.json": dependencies,
+            "W4-CAPABILITIES.json": capabilities,
+            "W4-READ-FIRST.txt": readme,
+        })
+        for name, raw in records.items():
+            if len(raw) > _MAX_SOURCE_BYTES:
+                raise W4Refused("An unbounded artifact entry was refused")
+        for name, raw in (("W4-DEPENDENCIES.json", dependencies),
+                          ("W4-CAPABILITIES.json", capabilities),
+                          ("W4-READ-FIRST.txt", readme)):
+            (output / name).write_bytes(raw)
+        zip_hash = _zip(output, records)
+        receipt = {
+            "schema": RECEIPT_SCHEMA, "source_commit": commit, "source_tree": tree,
+            "inherited_accepted_base_W3_R2": BASE_W3_R2,
+            "source_files": len(original), "archive_entries": len(records),
+            "zip_sha256": zip_hash,
+            "source_manifest_sha256": _sha(records["SOURCE-MANIFEST.json"]),
+            "dependency_evidence_sha256": _sha(dependencies),
+            "capability_holds_sha256": _sha(capabilities),
+            "runtime_ready": False, "launch_authorized": False,
+            "install_authorized": False, "db_contact": False,
+            "genuine_windows_pytest": "NOT_RUN",
+        }
+        (output / "W4-RECEIPT.json").write_bytes(_json(receipt))
+        (output / "W4-INCOMPLETE.json").unlink()
+        return receipt
+    except BaseException:
+        if created:
+            # This operation exclusively created the root. Never delete external roots.
+            try:
+                inspect_interrupted(output)
+                shutil.rmtree(output)
+            except OSError:
+                pass  # Must be reported as an incomplete owned root, not success.
+        raise
+
+
+def inspect_interrupted(output_root: str | Path) -> dict[str, Any]:
+    """Pure inventory; actual cross-session deletion requires a separate approval."""
+    root = _path(output_root, new=False)
+    if not _NAME.fullmatch(root.name):
+        raise W4Refused("Not an explicitly named W4 disposable stage")
+    if os.name == "nt" and root.parent != Path("C:/Projects"):
+        raise W4Refused("Only new direct C:/Projects W4 roots are eligible")
+    if (root / "W4-RECEIPT.json").exists():
+        raise W4Refused("Completed candidate must never be interruption-rolled-back")
+    marker = root / "W4-INCOMPLETE.json"
+    _ordinary(marker, directory=False)
+    try:
+        journal = json.loads(marker.read_text("ascii"))
+    except (ValueError, UnicodeError) as exc:
+        raise W4Refused("Interrupted marker invalid") from exc
+    if (type(journal) is not dict or journal.get("schema") != SCHEMA
+            or journal.get("state") != "INCOMPLETE"
+            or journal.get("output_name") != root.name
+            or not isinstance(journal.get("expected_paths"), list)
+            or not journal["expected_paths"]
+            or len(journal["expected_paths"]) > _MAX_FILES
+            or any(type(v) is not str or not v or v.startswith("/") or ".." in v.split("/")
+                   or "\\" in v or "\x00" in v for v in journal["expected_paths"])):
+        raise W4Refused("Interrupted ownership proof is incomplete")
+    expected = {"W4-INCOMPLETE.json", "SOURCE-MANIFEST.json", "W4-DEPENDENCIES.json",
+                "W4-CAPABILITIES.json", "W4-READ-FIRST.txt", "W4-SOURCE-ONLY-NO-LAUNCH.zip"}
+    expected.update("source/" + rel for rel in journal["expected_paths"])
+    observed = []
+    allowed_dirs = {"/".join(p.split("/")[:n]) for p in expected
+                    for n in range(1, len(p.split("/")))}
+    for here, dirs, names in os.walk(root, followlinks=False):
+        for name in dirs + names:
+            item = Path(here) / name
+            _ordinary(item, directory=name in dirs)
+            rel = item.relative_to(root).as_posix()
+            first, _, tail = rel.partition("/")
+            if re.fullmatch(r"\.source\.incomplete-[0-9a-f]{8}", first):
+                logical = "source" + ("/" + tail if tail else "")
+            elif re.fullmatch(r"\.SOURCE-MANIFEST\.json\.[0-9a-f]{32}\.tmp", rel):
+                logical = "SOURCE-MANIFEST.json"
+            else:
+                logical = rel
+            if name in dirs:
+                if logical not in allowed_dirs:
+                    raise W4Refused("Unexpected interruption-root directory; do not delete")
+            else:
+                if logical not in expected:
+                    raise W4Refused("Unexpected interruption-root file; do not delete")
+                observed.append(rel)
+    return {"schema": SCHEMA, "status": "INCOMPLETE_ONLY", "root": str(root),
+            "source_commit": journal.get("source_commit"),
+            "observed_files": sorted(observed), "removed": False}
+
+
+def rollback_interrupted(output_root: str | Path, *, approval: str) -> dict[str, Any]:
+    if approval != ROLLBACK_APPROVAL:
+        raise W4Refused("Independent interrupted-stage rollback approval required")
+    report = inspect_interrupted(output_root)
+    shutil.rmtree(Path(output_root))  # only the explicitly inspected incomplete W4 root
+    return {"schema": SCHEMA, "status": "ABORTED_W4_ROOT_REMOVED", "root": report["root"]}
+
+
+def main(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser(description="W4 deterministic inert source ZIP; never launches Vres")
+    p.add_argument("--source-root", required=True)
+    p.add_argument("--output-root", required=True)
+    p.add_argument("--source-commit", required=True)
+    p.add_argument("--approval", default="")
+    args = p.parse_args(argv)
+    try:
+        receipt = build_no_launch(args.source_root, args.output_root,
+                                  source_commit=args.source_commit, approval=args.approval)
+    except (W4Refused, release_owner.ReleaseArtifactError, OSError, KeyError) as exc:
+        print("W4_NO_LAUNCH_REFUSED: " + str(exc), file=sys.stderr)
+        return 2
+    print(json.dumps(receipt, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
