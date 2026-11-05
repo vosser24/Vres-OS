@@ -12,7 +12,7 @@ import json
 
 import pytest
 
-from vres_os.credential_broker import CredentialBroker
+from vres_os.credential_broker import CredentialBroker, normalize_service_identity
 from vres_os.project import ProjectIdentity
 from vres_os.personal_w3_reuse import (
     PersonalW3Refusal, preview_personal_w3_reuse, require_current_personal_w3_reuse,
@@ -79,14 +79,34 @@ def test_one_w3_integrated_personal_memory_and_resource_reuse_journey(tmp_path):
     c = project(tmp_path / "C", "project:w3:C")
     original = {p.key: list(p.root.iterdir()) for p in (a, b, c)}
     vault = SyntheticOnlyVault()
-    broker = CredentialBroker(store=vault,
-                              registry_path=tmp_path / "synthetic-broker-registry.json",
+    # Construct a synthetic metadata snapshot in tmp_path only. The original
+    # #163 broker SAVE/BIND owner would apply an actual Windows ACL via icacls;
+    # that is explicitly NOT invoked in this offline no-child-process gate.
+    registry_path = tmp_path / "synthetic-broker-registry.json"
+    broker = CredentialBroker(store=vault, registry_path=registry_path,
                               user_namespace="synthetic-windows-user-a")
+    credential = normalize_service_identity(
+        "postgresql", "postgresql://db.example.invalid/orders", "readonly",
+    )
+    stamp = "2026-11-05T00:00:00+00:00"
+    fixture = {
+        "version": 1, "user_namespace": "synthetic-windows-user-a",
+        "resources": {credential.resource_id: {
+            "service_type": credential.service_type, "origin": credential.origin,
+            "account": credential.account, "fields": ["password"],
+            "created_at": stamp, "updated_at": stamp,
+        }},
+        "bindings": {p.key: {"name": p.name, "root": str(p.root),
+                             "resources": {credential.resource_id: {"bound_at": stamp}}}
+                     for p in (a, b)},
+        "pending_captures": {},
+    }
+    registry_path.write_text(json.dumps(fixture, sort_keys=True), encoding="utf-8")
+    assert broker.lookup(credential.resource_id, a).bound_to_project is True
+    assert broker.lookup(credential.resource_id, b).bound_to_project is True
+    assert broker.lookup(credential.resource_id, c).bound_to_project is False
     fake_value = "SYNTHETIC_VALUE_NEVER_DISCLOSED_83921"
-    credential = broker.save("postgresql", "postgresql://db.example.invalid/orders",
-                             "readonly", {"password": fake_value},
-                             project=a, bind=True, authorized=True)
-    broker.bind(credential.resource_id, b, authorized=True)
+    vault.values["synthetic-test-only"] = fake_value
     vault.deny_reads = True
     read_count = vault.reads
     source_a = data_source(a, credential.resource_id)
