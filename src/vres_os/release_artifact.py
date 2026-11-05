@@ -56,7 +56,13 @@ except ImportError:  # run directly as a file by the installer (python -I, no pa
     sys.dont_write_bytecode = True  # never write a cache into the source checkout or the staged copy
     _spec = importlib.util.spec_from_file_location("_vres_release_inputs", Path(__file__).with_name("release_inputs.py"))
     _release_inputs = importlib.util.module_from_spec(_spec)
-    _spec.loader.exec_module(_release_inputs)
+    _prechecked = globals().get('_w4_prechecked_release_inputs')
+    if _prechecked is None:
+        _spec.loader.exec_module(_release_inputs)  # original installer default remains unchanged
+    else:
+        # W4 executes bytes authenticated before any sibling module import.
+        exec(compile(_prechecked, str(Path(__file__).with_name('release_inputs.py')), 'exec'),
+             _release_inputs.__dict__)
 release_input_problems = _release_inputs.release_input_problems
 
 FORMAT = "vres-personal-release-artifact"

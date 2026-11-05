@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import importlib.util
 import json
 import os
 import sys
+import threading
 import types
 import zipfile
 from pathlib import Path
@@ -278,40 +280,95 @@ def test_os_walk_error_must_refuse_advisory_inventory(monkeypatch, tmp_path):
         w4.inspect_interrupted(root)
     assert root.is_dir()
 
-def test_git_batch_timeout_kills_child_without_hanging(monkeypatch):
+def test_original_release_owner_in_memory_bootstrap_and_default_are_preserved():
+    owner_path = HERE.with_name('release_artifact.py')
+    inputs_path = HERE.with_name('release_inputs.py')
+    spec = importlib.util.spec_from_file_location('_vres_w4_pinned_release_owner', owner_path)
+    module = importlib.util.module_from_spec(spec)
+    module._w4_prechecked_release_inputs = inputs_path.read_bytes()
+    exec(compile(owner_path.read_bytes(), str(owner_path), 'exec'), module.__dict__)
+    assert module.release_input_problems is module._release_inputs.release_input_problems
+    assert module._release_inputs.__file__ == str(inputs_path)
+    assert inspect.signature(module.stage).parameters['preserve_failed_stage'].default is False
+
+
+def test_git_batch_timeout_does_not_close_locked_reader(monkeypatch):
     w4, _ = _module(monkeypatch)
+    entered, release = threading.Event(), threading.Event()
 
-    class DummyProcess:
-        killed = False
-        stdin = None
-        stdout = None
-        def poll(self):
-            return None
-        def kill(self):
-            self.killed = True
-        def wait(self, timeout):
-            return 0
+    class Stdin:
+        def write(self, data): return len(data)
+        def flush(self): pass
+        def close(self): pass
 
-    class TimedOutFuture:
-        def result(self, timeout):
-            assert timeout == 30
-            raise w4.concurrent.futures.TimeoutError()
+    class Stdout:
+        closed = False
+        def readline(self, limit):
+            entered.set()
+            release.wait(timeout=5)
+            return b''
+        def close(self):
+            self.closed = True
 
-    class TimedOutExecutor:
-        def submit(self, *args):
-            return TimedOutFuture()
-        def shutdown(self, *, wait, cancel_futures):
-            assert wait is False and cancel_futures is True
+    class Child:
+        def __init__(self):
+            self.stdin, self.stdout = Stdin(), Stdout()
+            self.killed = False
+        def poll(self): return None if not self.killed else -9
+        def kill(self): self.killed = True
+        def wait(self, timeout): return -9
 
-    process = DummyProcess()
-    monkeypatch.setattr(w4.subprocess, 'Popen', lambda *args, **kw: process)
-    monkeypatch.setattr(w4.concurrent.futures, 'ThreadPoolExecutor',
-                        lambda **kw: TimedOutExecutor())
+    child = Child()
+    monkeypatch.setattr(w4.subprocess, 'Popen', lambda *a, **kw: child)
+    monkeypatch.setattr(w4, '_GIT_READ_SECONDS', 0.05)
+    monkeypatch.setattr(w4, '_GIT_WORKER_JOIN_SECONDS', 0.05)
     reader = w4._PinnedGitObjects(Path('/git'), Path('/synthetic'), {})
-    with pytest.raises(w4.W4Refused, match='timed out'):
-        reader('a' * 40)
-    assert process.killed is True
+    try:
+        with pytest.raises(w4.W4Refused, match='timed out'):
+            reader('a' * 40)
+        assert entered.wait(timeout=1)
+        assert child.killed
+        with pytest.raises(w4.W4Refused, match='reader still blocked'):
+            reader.close()
+        assert child.stdout.closed is False
+    finally:
+        release.set()
+
+
+def test_git_batch_success_uses_one_verified_bounded_response(monkeypatch):
+    w4, _ = _module(monkeypatch)
+    oid = 'a' * 40
+
+    class Stdin:
+        def write(self, data):
+            assert data == oid.encode() + b'\n'
+        def flush(self): pass
+        def close(self): pass
+
+    class Stdout:
+        def __init__(self): self.calls = 0
+        def readline(self, limit):
+            assert limit == 128
+            return oid.encode() + b' blob 3\n'
+        def read(self, count):
+            self.calls += 1
+            return b'abc' if count == 3 else b'\n'
+        def close(self): pass
+
+    class Child:
+        stdin, stdout = Stdin(), Stdout()
+        killed = False
+        def poll(self): return None if not self.killed else -9
+        def kill(self): self.killed = True
+        def wait(self, timeout): return -9
+
+    child = Child()
+    monkeypatch.setattr(w4.subprocess, 'Popen', lambda *a, **kw: child)
+    reader = w4._PinnedGitObjects(Path('/git'), Path('/synthetic'), {})
+    assert reader(oid) == ('blob', b'abc')
+    assert child.stdout.calls == 2
     reader.close()
+    assert child.killed
 
 
 def test_windows_production_root_guard_is_not_disabled(monkeypatch, tmp_path):

@@ -7,7 +7,8 @@ only composes an inspectable ZIP, negative capability contract and receipt.
 from __future__ import annotations
 
 import argparse
-import concurrent.futures
+import queue
+import threading
 import configparser
 import importlib.util
 import hashlib
@@ -26,8 +27,9 @@ if not __package__:  # direct-file bootstrap: verify siblings BEFORE executing t
     if not sys.flags.isolated or not sys.flags.dont_write_bytecode:
         raise SystemExit("W4 direct-file bootstrap requires Python -I -B")
     _owner_dir = Path(__file__).absolute().parent
+    _verified_siblings: dict[str, bytes] = {}
     for _name, _expected in (
-        ("release_artifact.py", "c70009861e0e7af6eb07f07c38c54d532e40521c"),
+        ("release_artifact.py", "1d26d02dab7967f0e966bf26a757084669424b0b"),
         ("release_inputs.py", "a0cdf3195f0cf0f2a61ce32521a74f78260832f7"),
     ):
         _sibling = _owner_dir / _name
@@ -46,12 +48,16 @@ if not __package__:  # direct-file bootstrap: verify siblings BEFORE executing t
                                + b"\0" + _lf).hexdigest()
         if _raw_oid != _expected and (b"\r" in _lf or _lf_oid != _expected):
             raise SystemExit("W4 bootstrap source differs from accepted Git blob")
+        _verified_siblings[_name] = _bytes
     _spec = importlib.util.spec_from_file_location(
         "_vres_w4_pinned_release_owner", _owner_dir / "release_artifact.py")
     if _spec is None or _spec.loader is None:
         raise SystemExit("W4 original release owner cannot be loaded")
     release_owner = importlib.util.module_from_spec(_spec)
-    _spec.loader.exec_module(release_owner)
+    release_owner._w4_prechecked_release_inputs = _verified_siblings['release_inputs.py']
+    exec(compile(_verified_siblings['release_artifact.py'],
+                 str(_owner_dir / 'release_artifact.py'), 'exec'),
+         release_owner.__dict__)
 else:
     from . import release_artifact as release_owner
 
@@ -72,7 +78,7 @@ OWNER_BLOBS = {
     "src/vres_os/personal_w2_onboarding.py": "76acfcb1350a767fee216aaeb743cbf5066c07ba",
     "src/vres_os/personal_w3_reuse.py": "db354a36328294003416903574cc201e01802462",
     "src/vres_os/credential_broker.py": "41f1b83fca0b3245de392e688ed0ed895b1f1cd7",
-    "src/vres_os/release_artifact.py": "c70009861e0e7af6eb07f07c38c54d532e40521c",
+    "src/vres_os/release_artifact.py": "1d26d02dab7967f0e966bf26a757084669424b0b",
     "src/vres_os/release_inputs.py": "a0cdf3195f0cf0f2a61ce32521a74f78260832f7",
     "pyproject.toml": "b2d5e30d10d7be0613e90bf3ed1e346be5678969",
 }
@@ -92,6 +98,9 @@ _W4_REL = "src/vres_os/personal_w4_no_launch_release.py"
 _OID = re.compile(r"[0-9a-f]{40}\Z")
 _MAX_FILES = 350
 _MAX_SOURCE_BYTES = 15 * 1024 * 1024
+_GIT_READ_SECONDS = 30
+_GIT_WORKER_JOIN_SECONDS = 1.0
+_GIT_REAP_SECONDS = 10
 
 
 class W4Refused(ValueError):
@@ -180,12 +189,13 @@ def _disposable_source(value: str | Path) -> Path:
 
 
 class _PinnedGitObjects:
-    """Bounded Git batch object transport; original owner verifies Git object hashes."""
+    """Time-limited local Git object exchange with a non-blocking failure close."""
 
     def __init__(self, executable: Path, source: Path, environment: dict[str, str]):
         self.executable, self.source, self.environment = executable, source, environment
         self.process: subprocess.Popen[bytes] | None = None
-        self._worker: concurrent.futures.ThreadPoolExecutor | None = None
+        self._worker: threading.Thread | None = None
+        self._poisoned = False
 
     def _exchange(self, oid: str) -> tuple[str, bytes]:
         proc = self.process
@@ -194,22 +204,34 @@ class _PinnedGitObjects:
         try:
             proc.stdin.write(oid.encode("ascii") + b"\n")
             proc.stdin.flush()
-            header = proc.stdout.readline().split()
-            if len(header) != 3 or header[0] != oid.encode("ascii") or not header[2].isdigit():
+            header = proc.stdout.readline(128)
+            parts = header.split()
+            if (not header.endswith(b"\n") or len(parts) != 3
+                    or parts[0] != oid.encode("ascii") or
+                    not re.fullmatch(rb"[0-9]{1,9}", parts[2])):
                 raise W4Refused("Pinned Git returned invalid object header")
-            size = int(header[2])
+            size = int(parts[2])
             if size > 64 * 1024 * 1024:
                 raise W4Refused("Pinned Git object exceeds original owner bound")
             data = proc.stdout.read(size)
             if len(data) != size or proc.stdout.read(1) != b"\n":
                 raise W4Refused("Pinned Git object was truncated")
-            return header[1].decode("ascii"), data
+            return parts[1].decode("ascii"), data
         except (OSError, UnicodeError) as exc:
             raise W4Refused("Pinned Git object read failed") from exc
 
+    def _kill_child(self) -> None:
+        proc = self.process
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.kill()
+            except OSError as exc:
+                if proc.poll() is None:
+                    raise W4Refused("Pinned Git child could not be terminated") from exc
+
     def __call__(self, oid: str) -> tuple[str, bytes]:
-        if not _OID.fullmatch(oid):
-            raise W4Refused("Invalid Git object ID")
+        if not _OID.fullmatch(oid) or self._poisoned or self._worker is not None:
+            raise W4Refused("Git object transport unavailable or invalid object ID")
         if self.process is None:
             try:
                 self.process = subprocess.Popen(
@@ -220,36 +242,62 @@ class _PinnedGitObjects:
                     stderr=subprocess.DEVNULL, env=self.environment)
             except OSError as exc:
                 raise W4Refused("Pinned Git could not read local objects") from exc
-            self._worker = concurrent.futures.ThreadPoolExecutor(
-                max_workers=1, thread_name_prefix="vres-w4-git-read")
-        assert self._worker is not None
-        future = self._worker.submit(self._exchange, oid)
+        response: queue.Queue[tuple[bool, Any]] = queue.Queue(maxsize=1)
+
+        def read_once() -> None:
+            try:
+                response.put((True, self._exchange(oid)))
+            except BaseException as exc:
+                response.put((False, exc))
+
+        worker = threading.Thread(target=read_once, name="vres-w4-git-read", daemon=True)
+        self._worker = worker
+        worker.start()
         try:
-            return future.result(timeout=30)
-        except concurrent.futures.TimeoutError as exc:
-            if self.process is not None and self.process.poll() is None:
-                self.process.kill()
+            ok, result = response.get(timeout=_GIT_READ_SECONDS)
+        except queue.Empty as exc:
+            self._poisoned = True
+            self._kill_child()
             raise W4Refused("Pinned Git object transport timed out") from exc
+        worker.join(timeout=_GIT_WORKER_JOIN_SECONDS)
+        if worker.is_alive():
+            self._poisoned = True
+            self._kill_child()
+            raise W4Refused("Pinned Git object worker did not terminate")
+        self._worker = None
+        if not ok:
+            if isinstance(result, W4Refused):
+                raise result
+            raise W4Refused("Pinned Git object transfer failed") from result
+        return result
 
     def close(self) -> None:
         proc, self.process = self.process, None
+        problem: W4Refused | None = None
         if proc is not None:
             try:
                 if proc.poll() is None:
-                    proc.kill()  # no child is allowed to outlive this read-only phase
-                proc.wait(timeout=10)
+                    proc.kill()
+                proc.wait(timeout=_GIT_REAP_SECONDS)
             except (OSError, subprocess.TimeoutExpired) as exc:
-                raise W4Refused("Pinned Git object process could not be stopped") from exc
-            finally:
-                for stream in (proc.stdin, proc.stdout):
-                    if stream is not None:
-                        try:
-                            stream.close()
-                        except OSError:
-                            pass
-        if self._worker is not None:
-            self._worker.shutdown(wait=False, cancel_futures=True)
-            self._worker = None
+                problem = W4Refused("Pinned Git object process could not be reaped")
+                problem.__cause__ = exc
+        worker, self._worker = self._worker, None
+        if worker is not None:
+            worker.join(timeout=_GIT_WORKER_JOIN_SECONDS)
+            if worker.is_alive():
+                # Never close a buffered pipe while its blocked reader owns the lock.
+                # This daemon cannot prevent interpreter exit; retain descriptors.
+                raise W4Refused("Pinned Git reader still blocked; streams retained")
+        if proc is not None:
+            for stream in (proc.stdin, proc.stdout):
+                if stream is not None:
+                    try:
+                        stream.close()
+                    except OSError:
+                        pass
+        if problem is not None:
+            raise problem
 
 
 def _trusted_git(source: Path, executable: str | Path, expected_sha256: str):
