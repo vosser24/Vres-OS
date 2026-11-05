@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 import sys
 import types
 import zipfile
@@ -30,6 +31,23 @@ def _module(monkeypatch):
 
 def _synthetic(monkeypatch, tmp_path):
     w4, owner = _module(monkeypatch)
+    if os.name == 'nt':
+        # Author simulation uses pytest's disposable tmp_path, never a real W4 root.
+        # A separate guarded Windows gate tests the actual C:/Projects restriction.
+        def synthetic_root(value, *, new):
+            p = Path(value)
+            if not p.is_absolute() or '..' in p.parts:
+                raise w4.W4Refused('Invalid synthetic path')
+            for ancestor in reversed(p.parents):
+                w4._ordinary(ancestor)
+            if new:
+                if not w4._NAME.fullmatch(p.name) or os.path.lexists(p):
+                    raise w4.W4Refused('Existing or invalid synthetic candidate')
+                w4._ordinary(p.parent)
+            else:
+                w4._ordinary(p)
+            return p
+        monkeypatch.setattr(w4, '_path', synthetic_root)
     source = tmp_path / 'Vres-W4-Source-aaaaaaaa'
     source.mkdir()
     (source / '.git').mkdir()
@@ -49,8 +67,10 @@ def _synthetic(monkeypatch, tmp_path):
         assert commit == 'f' * 40
         return commit, 'e' * 40, files
 
-    def stage(src, out, manifest, *, source_commit, git, objects):
+    def stage(src, out, manifest, *, source_commit, git, objects,
+              preserve_failed_stage=False):
         assert src == source and source_commit == 'f' * 40
+        assert preserve_failed_stage is True
         out.mkdir()
         for rel, v in files.items():
             target = out / rel
@@ -134,7 +154,9 @@ def test_selected_root_cannot_be_overwritten_and_no_parent_escape(monkeypatch, t
 
 def test_staging_failure_preserves_partial_owned_root(monkeypatch, tmp_path):
     w4, owner, source, _ = _synthetic(monkeypatch, tmp_path)
-    def fail(_a, out, _m, *, source_commit, git, objects):
+    def fail(_a, out, _m, *, source_commit, git, objects,
+             preserve_failed_stage=False):
+        assert preserve_failed_stage is True
         out.mkdir()
         (out / 'src' / 'vres_os').mkdir(parents=True)
         (out / 'src' / 'vres_os' / 'personal_w3_reuse.py').write_text('disposable only')
@@ -255,3 +277,47 @@ def test_os_walk_error_must_refuse_advisory_inventory(monkeypatch, tmp_path):
     with pytest.raises(w4.W4Refused, match='scan failed'):
         w4.inspect_interrupted(root)
     assert root.is_dir()
+
+def test_git_batch_timeout_kills_child_without_hanging(monkeypatch):
+    w4, _ = _module(monkeypatch)
+
+    class DummyProcess:
+        killed = False
+        stdin = None
+        stdout = None
+        def poll(self):
+            return None
+        def kill(self):
+            self.killed = True
+        def wait(self, timeout):
+            return 0
+
+    class TimedOutFuture:
+        def result(self, timeout):
+            assert timeout == 30
+            raise w4.concurrent.futures.TimeoutError()
+
+    class TimedOutExecutor:
+        def submit(self, *args):
+            return TimedOutFuture()
+        def shutdown(self, *, wait, cancel_futures):
+            assert wait is False and cancel_futures is True
+
+    process = DummyProcess()
+    monkeypatch.setattr(w4.subprocess, 'Popen', lambda *args, **kw: process)
+    monkeypatch.setattr(w4.concurrent.futures, 'ThreadPoolExecutor',
+                        lambda **kw: TimedOutExecutor())
+    reader = w4._PinnedGitObjects(Path('/git'), Path('/synthetic'), {})
+    with pytest.raises(w4.W4Refused, match='timed out'):
+        reader('a' * 40)
+    assert process.killed is True
+    reader.close()
+
+
+def test_windows_production_root_guard_is_not_disabled(monkeypatch, tmp_path):
+    w4, _ = _module(monkeypatch)
+    if os.name != 'nt':
+        pytest.skip('Windows-specific C:/Projects guard')
+    dest = tmp_path / 'Vres-W4-NoLaunch-aaaaaaaa'
+    with pytest.raises(w4.W4Refused, match='Windows'):
+        w4._path(dest, new=True)

@@ -381,7 +381,8 @@ def load_manifest(path: Path) -> dict[str, Any]:
 
 
 def stage(root: Path, out: Path, manifest_path: Path, *, source_commit: str | None,
-          git: GitRunner | None = None, objects: ObjectReader | None = None) -> dict[str, Any]:
+          git: GitRunner | None = None, objects: ObjectReader | None = None,
+          preserve_failed_stage: bool = False) -> dict[str, Any]:
     """Copy the pinned commit's release files into the new directory out and record their manifest."""
     root, out, manifest_path = Path(root), Path(out), Path(manifest_path)
     if os.path.lexists(out) or os.path.lexists(manifest_path):
@@ -419,7 +420,8 @@ def stage(root: Path, out: Path, manifest_path: Path, *, source_commit: str | No
             tmp.unlink(missing_ok=True)
         os.rename(staging, out)
     except BaseException:
-        shutil.rmtree(staging, ignore_errors=True)  # only this call's own, never-published staging copy
+        if not preserve_failed_stage:
+            shutil.rmtree(staging, ignore_errors=True)  # original installer default remains unchanged
         raise
     return manifest
 

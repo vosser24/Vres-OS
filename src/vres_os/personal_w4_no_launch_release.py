@@ -7,7 +7,9 @@ only composes an inspectable ZIP, negative capability contract and receipt.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import configparser
+import importlib.util
 import hashlib
 import json
 import os
@@ -20,10 +22,36 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-if not __package__:  # isolated signed-Python direct-file entry, adjacent source only
-    sys.dont_write_bytecode = True
-    sys.path.insert(0, str(Path(__file__).absolute().parent.parent))
-    from vres_os import release_artifact as release_owner
+if not __package__:  # direct-file bootstrap: verify siblings BEFORE executing them
+    if not sys.flags.isolated or not sys.flags.dont_write_bytecode:
+        raise SystemExit("W4 direct-file bootstrap requires Python -I -B")
+    _owner_dir = Path(__file__).absolute().parent
+    for _name, _expected in (
+        ("release_artifact.py", "c70009861e0e7af6eb07f07c38c54d532e40521c"),
+        ("release_inputs.py", "a0cdf3195f0cf0f2a61ce32521a74f78260832f7"),
+    ):
+        _sibling = _owner_dir / _name
+        try:
+            _info, _bytes = _sibling.lstat(), _sibling.read_bytes()
+        except OSError as _exc:
+            raise SystemExit("W4 pinned release bootstrap source missing") from _exc
+        if (not stat.S_ISREG(_info.st_mode)
+                or bool(getattr(_info, "st_file_attributes", 0) & 0x400)
+                or getattr(_info, "st_nlink", 1) != 1):
+            raise SystemExit("W4 bootstrap source is redirected or hardlinked")
+        _lf = _bytes.replace(b"\r\n", b"\n")
+        _raw_oid = hashlib.sha1(b"blob " + str(len(_bytes)).encode("ascii")
+                                + b"\0" + _bytes).hexdigest()
+        _lf_oid = hashlib.sha1(b"blob " + str(len(_lf)).encode("ascii")
+                               + b"\0" + _lf).hexdigest()
+        if _raw_oid != _expected and (b"\r" in _lf or _lf_oid != _expected):
+            raise SystemExit("W4 bootstrap source differs from accepted Git blob")
+    _spec = importlib.util.spec_from_file_location(
+        "_vres_w4_pinned_release_owner", _owner_dir / "release_artifact.py")
+    if _spec is None or _spec.loader is None:
+        raise SystemExit("W4 original release owner cannot be loaded")
+    release_owner = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(release_owner)
 else:
     from . import release_artifact as release_owner
 
@@ -44,7 +72,7 @@ OWNER_BLOBS = {
     "src/vres_os/personal_w2_onboarding.py": "76acfcb1350a767fee216aaeb743cbf5066c07ba",
     "src/vres_os/personal_w3_reuse.py": "db354a36328294003416903574cc201e01802462",
     "src/vres_os/credential_broker.py": "41f1b83fca0b3245de392e688ed0ed895b1f1cd7",
-    "src/vres_os/release_artifact.py": "497fa3d96742a868f8b00b5dcb26e8afe03fd159",
+    "src/vres_os/release_artifact.py": "c70009861e0e7af6eb07f07c38c54d532e40521c",
     "src/vres_os/release_inputs.py": "a0cdf3195f0cf0f2a61ce32521a74f78260832f7",
     "pyproject.toml": "b2d5e30d10d7be0613e90bf3ed1e346be5678969",
 }
@@ -152,29 +180,18 @@ def _disposable_source(value: str | Path) -> Path:
 
 
 class _PinnedGitObjects:
-    """Read Git object transport only; original owner checks each object ID."""
+    """Bounded Git batch object transport; original owner verifies Git object hashes."""
 
     def __init__(self, executable: Path, source: Path, environment: dict[str, str]):
         self.executable, self.source, self.environment = executable, source, environment
         self.process: subprocess.Popen[bytes] | None = None
+        self._worker: concurrent.futures.ThreadPoolExecutor | None = None
 
-    def __call__(self, oid: str) -> tuple[str, bytes]:
-        if not _OID.fullmatch(oid):
-            raise W4Refused("Invalid Git object ID")
-        if self.process is None:
-            try:
-                self.process = subprocess.Popen(
-                    [str(self.executable), "-C", str(self.source),
-                     "-c", "core.fsmonitor=false", "-c", "core.quotepath=off",
-                     "cat-file", "--batch"],
-                    stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                    stderr=subprocess.DEVNULL, env=self.environment)
-            except OSError as exc:
-                raise W4Refused("Pinned Git could not read local objects") from exc
+    def _exchange(self, oid: str) -> tuple[str, bytes]:
         proc = self.process
+        if proc is None or proc.stdin is None or proc.stdout is None:
+            raise W4Refused("Pinned Git object transport is not available")
         try:
-            if proc.stdin is None or proc.stdout is None:
-                raise W4Refused("Pinned Git lacks object pipes")
             proc.stdin.write(oid.encode("ascii") + b"\n")
             proc.stdin.flush()
             header = proc.stdout.readline().split()
@@ -190,21 +207,49 @@ class _PinnedGitObjects:
         except (OSError, UnicodeError) as exc:
             raise W4Refused("Pinned Git object read failed") from exc
 
+    def __call__(self, oid: str) -> tuple[str, bytes]:
+        if not _OID.fullmatch(oid):
+            raise W4Refused("Invalid Git object ID")
+        if self.process is None:
+            try:
+                self.process = subprocess.Popen(
+                    [str(self.executable), "-C", str(self.source),
+                     "-c", "core.fsmonitor=false", "-c", "core.quotepath=off",
+                     "cat-file", "--batch"],
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL, env=self.environment)
+            except OSError as exc:
+                raise W4Refused("Pinned Git could not read local objects") from exc
+            self._worker = concurrent.futures.ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="vres-w4-git-read")
+        assert self._worker is not None
+        future = self._worker.submit(self._exchange, oid)
+        try:
+            return future.result(timeout=30)
+        except concurrent.futures.TimeoutError as exc:
+            if self.process is not None and self.process.poll() is None:
+                self.process.kill()
+            raise W4Refused("Pinned Git object transport timed out") from exc
+
     def close(self) -> None:
         proc, self.process = self.process, None
-        if proc is None:
-            return
-        for stream in (proc.stdin, proc.stdout):
-            if stream is not None:
-                try:
-                    stream.close()
-                except OSError:
-                    pass
-        try:
-            proc.wait(timeout=30)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
+        if proc is not None:
+            try:
+                if proc.poll() is None:
+                    proc.kill()  # no child is allowed to outlive this read-only phase
+                proc.wait(timeout=10)
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                raise W4Refused("Pinned Git object process could not be stopped") from exc
+            finally:
+                for stream in (proc.stdin, proc.stdout):
+                    if stream is not None:
+                        try:
+                            stream.close()
+                        except OSError:
+                            pass
+        if self._worker is not None:
+            self._worker.shutdown(wait=False, cancel_futures=True)
+            self._worker = None
 
 
 def _trusted_git(source: Path, executable: str | Path, expected_sha256: str):
@@ -219,10 +264,11 @@ def _trusted_git(source: Path, executable: str | Path, expected_sha256: str):
         raise W4Refused("Git executable bytes do not match the approved pin")
     if os.name == "nt":
         install = Path("C:/Program Files/Git")
-        if exe.name.casefold() != "git.exe" or install not in exe.parents:
-            raise W4Refused("Pinned Windows Git must be installed under Program Files/Git")
-        path = os.pathsep.join([str(exe.parent), str(install / "mingw64" / "bin"),
-                                "C:\\Windows\\System32"])
+        cores = {install / "ucrt64" / "bin" / "git.exe",
+                 install / "mingw64" / "bin" / "git.exe"}
+        if exe not in cores:
+            raise W4Refused("Pinned Git must be the direct core executable, not a launcher")
+        path = os.pathsep.join([str(exe.parent), "C:\\Windows\\System32"])
     else:
         path = str(exe.parent)
     # Do not inherit PATH, HOME, credential helpers, proxy, Git config or DB controls.
@@ -406,7 +452,8 @@ def build_no_launch(source_root: str | Path, output_root: str | Path, *,
         try:
             manifest = release_owner.stage(
                 source, output / "source", output / "SOURCE-MANIFEST.json",
-                source_commit=source_commit, git=git, objects=staging_reader)
+                source_commit=source_commit, git=git, objects=staging_reader,
+                preserve_failed_stage=True)
         finally:
             staging_reader.close()
         if manifest["source_commit"] != commit or manifest["source_tree"] != tree:
