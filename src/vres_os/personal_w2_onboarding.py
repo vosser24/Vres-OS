@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
 from typing import Any
 
 from .global_claude_synthetic_operator import (
@@ -19,6 +18,7 @@ from .global_claude_synthetic_operator import (
     inspect_synthetic_migration_dry_run,
     record_synthetic_migration_choices,
 )
+from .personal_project_intake import PersonalIntakeRefused, _plain_project_root
 from .project_preview import preview_project
 
 SCHEMA = "vres-personal-w2-onboarding-preflight/1"
@@ -51,7 +51,10 @@ def _canonical(value: Any) -> bytes:
 def _binding(project: Any) -> str:
     if not isinstance(getattr(project, "key", None), str) or not project.key:
         raise PersonalW2Refusal("A nonempty existing project key is required")
-    root = Path(project.root).resolve(strict=True)
+    try:
+        root = _plain_project_root(project.root)
+    except (PersonalIntakeRefused, OSError, ValueError, TypeError) as exc:
+        raise PersonalW2Refusal("An absolute, ordinary unlinked project directory is required") from exc
     if not root.is_dir():
         raise PersonalW2Refusal("An ordinary project directory is required")
     return hashlib.sha256(_canonical([project.key, str(root)])).hexdigest()
@@ -122,7 +125,7 @@ def require_current_personal_w2_onboarding(
     current = preview_personal_w2_onboarding(
         project, synthetic_global_session=synthetic_global_session,
     )
-    if packet != current:
+    if _canonical(packet) != _canonical(current):
         raise PersonalW2Refusal("W2 preflight is stale, cross-project or modified; re-review")
     return current
 

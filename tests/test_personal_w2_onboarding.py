@@ -46,6 +46,27 @@ def test_one_integrated_w2_fresh_legacy_global_stale_and_exact_rollback(tmp_path
     fresh = _project(tmp_path / "fresh", "project:w2:fresh")
     (fresh.root / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
     original_fresh = _files(fresh.root)
+    # A parent-traversal spelling must not be silently canonicalized.
+    aliased = ProjectIdentity(
+        root=fresh.root / ".." / fresh.root.name,
+        key=fresh.key, name=fresh.name, remote_url=None, branch=None,
+    )
+    with pytest.raises(PersonalW2Refusal, match="unlinked"):
+        preview_personal_w2_onboarding(aliased)
+    # When the host permits creating a directory symlink, reject it too.
+    linked_root = tmp_path / "linked-fresh"
+    try:
+        linked_root.symlink_to(fresh.root, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        print("W2_ROOT_SYMLINK_CASE=NOT_RUN_HOST_CREATION_REFUSED")
+    else:
+        linked = ProjectIdentity(
+            root=linked_root, key=fresh.key, name=fresh.name,
+            remote_url=None, branch=None,
+        )
+        with pytest.raises(PersonalW2Refusal, match="unlinked"):
+            preview_personal_w2_onboarding(linked)
+        print("W2_ROOT_SYMLINK_CASE=PASS")
     fresh_report = preview_personal_w2_onboarding(fresh)
     assert fresh_report == require_current_personal_w2_onboarding(fresh, fresh_report)
     assert fresh_report["project_preview"]["preview_status"] == "FRESH_SCAFFOLD_CANDIDATE"
@@ -99,6 +120,13 @@ def test_one_integrated_w2_fresh_legacy_global_stale_and_exact_rollback(tmp_path
     with pytest.raises(PersonalW2Refusal):
         require_current_personal_w2_onboarding(
             legacy, old, synthetic_global_session=global_demo,
+        )
+    # Python's False == 0 must not let a modified packet pass equality.
+    type_tampered = combined.copy()
+    type_tampered["activation_authorized"] = 0
+    with pytest.raises(PersonalW2Refusal, match="modified"):
+        require_current_personal_w2_onboarding(
+            legacy, type_tampered, synthetic_global_session=global_demo,
         )
     other = _project(tmp_path / "other", "project:w2:legacy")  # same key, different root
     with pytest.raises(PersonalW2Refusal):
