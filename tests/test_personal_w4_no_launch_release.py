@@ -32,19 +32,24 @@ def _synthetic(monkeypatch, tmp_path):
     w4, owner = _module(monkeypatch)
     source = tmp_path / 'Vres-W4-Source-aaaaaaaa'
     source.mkdir()
+    (source / '.git').mkdir()
+    (source / '.git' / 'config').write_text('[core]\nrepositoryformatversion = 0\n', encoding='utf-8')
     p = b'[project]\nname = "vres-os"\ndependencies = ["platformdirs>=4.2,<5", "psycopg[binary]>=3.2,<4"]\n'
     files = {rel: ('100644', sha, p if rel == 'pyproject.toml' else (rel + '\n').encode())
              for rel, sha in w4.OWNER_BLOBS.items()}
     files['src/vres_os/migrations/001_initial.sql'] = ('100644', '1' * 40, b'SELECT 1;\n')
     files['src/vres_os/migrations/041_last.sql'] = ('100644', '2' * 40, b'SELECT 2;\n')
     files['plugins/vres-os/README.txt'] = ('100644', '3' * 40, b'INERT\n')
+    entry = HERE.read_bytes()
+    entry_oid = hashlib.sha1(b'blob ' + str(len(entry)).encode() + b'\0' + entry).hexdigest()
+    files[w4._W4_REL] = ('100644', entry_oid, entry)
 
-    def verified(src, commit):
+    def verified(src, commit, *, git, objects):
         assert src == source
         assert commit == 'f' * 40
         return commit, 'e' * 40, files
 
-    def stage(src, out, manifest, *, source_commit):
+    def stage(src, out, manifest, *, source_commit, git, objects):
         assert src == source and source_commit == 'f' * 40
         out.mkdir()
         for rel, v in files.items():
@@ -58,7 +63,20 @@ def _synthetic(monkeypatch, tmp_path):
         return result
     owner.verified_source = verified
     owner.stage = stage
+
+    class DummyReader:
+        def close(self):
+            return None
+
+    monkeypatch.setattr(w4, '_trusted_git', lambda *a: (lambda args: '', lambda: DummyReader()))
+    monkeypatch.setattr(w4, '_verify_w3_ancestry', lambda *a: None)
     return w4, owner, source, files
+
+
+def _build(w4, source, dest, *, approval, source_commit='f' * 40):
+    return w4.build_no_launch(source, dest, source_commit=source_commit,
+                               approval=approval, git_executable=source.parent / 'git.exe',
+                               git_sha256='0' * 64)
 
 
 def test_accepted_owners_create_one_inert_deterministic_source_zip(monkeypatch, tmp_path):
@@ -66,8 +84,7 @@ def test_accepted_owners_create_one_inert_deterministic_source_zip(monkeypatch, 
     receipts = []
     for n in ['aaaaaaaa', 'bbbbbbbb']:
         dest = tmp_path / ('Vres-W4-NoLaunch-' + n)
-        result = w4.build_no_launch(source, dest, source_commit='f' * 40,
-                                    approval=w4.STAGE_APPROVAL)
+        result = _build(w4, source, dest, approval=w4.STAGE_APPROVAL)
         receipts.append(result)
         assert result['launch_authorized'] is False
         assert result['install_authorized'] is False
@@ -93,13 +110,13 @@ def test_no_preflight_approval_or_wrong_owner_writes(monkeypatch, tmp_path):
     w4, owner, source, files = _synthetic(monkeypatch, tmp_path)
     dest = tmp_path / 'Vres-W4-NoLaunch-aaaaaaaa'
     with pytest.raises(w4.W4Refused):
-        w4.build_no_launch(source, dest, source_commit='f' * 40, approval='yes')
+        _build(w4, source, dest, approval='yes')
     assert not dest.exists()
     modified = dict(files)
     modified['src/vres_os/personal_w3_reuse.py'] = ('100644', '0' * 40, b'BAD')
-    owner.verified_source = lambda a, b: (b, 'e' * 40, modified)
+    owner.verified_source = lambda a, b, **kw: (b, 'e' * 40, modified)
     with pytest.raises(w4.W4Refused):
-        w4.build_no_launch(source, dest, source_commit='f' * 40, approval=w4.STAGE_APPROVAL)
+        _build(w4, source, dest, approval=w4.STAGE_APPROVAL)
     assert not dest.exists()
 
 
@@ -108,17 +125,16 @@ def test_selected_root_cannot_be_overwritten_and_no_parent_escape(monkeypatch, t
     dest = tmp_path / 'Vres-W4-NoLaunch-aaaaaaaa'
     dest.mkdir()
     with pytest.raises(w4.W4Refused):
-        w4.build_no_launch(source, dest, source_commit='f' * 40, approval=w4.STAGE_APPROVAL)
+        _build(w4, source, dest, approval=w4.STAGE_APPROVAL)
     with pytest.raises(w4.W4Refused):
-        w4.build_no_launch(source, tmp_path / 'real-user-profile', source_commit='f' * 40,
-                           approval=w4.STAGE_APPROVAL)
+        _build(w4, source, tmp_path / 'real-user-profile', approval=w4.STAGE_APPROVAL)
     assert list(dest.iterdir()) == []
     assert not (tmp_path / 'real-user-profile').exists()
 
 
-def test_staging_failure_cleans_only_new_owned_root(monkeypatch, tmp_path):
+def test_staging_failure_preserves_partial_owned_root(monkeypatch, tmp_path):
     w4, owner, source, _ = _synthetic(monkeypatch, tmp_path)
-    def fail(_a, out, _m, *, source_commit):
+    def fail(_a, out, _m, *, source_commit, git, objects):
         out.mkdir()
         (out / 'src' / 'vres_os').mkdir(parents=True)
         (out / 'src' / 'vres_os' / 'personal_w3_reuse.py').write_text('disposable only')
@@ -126,8 +142,9 @@ def test_staging_failure_cleans_only_new_owned_root(monkeypatch, tmp_path):
     owner.stage = fail
     dest = tmp_path / 'Vres-W4-NoLaunch-aaaaaaaa'
     with pytest.raises(owner.ReleaseArtifactError):
-        w4.build_no_launch(source, dest, source_commit='f' * 40, approval=w4.STAGE_APPROVAL)
-    assert not dest.exists()
+        _build(w4, source, dest, approval=w4.STAGE_APPROVAL)
+    assert dest.is_dir()
+    assert (dest / 'W4-INCOMPLETE.json').is_file()
     assert source.is_dir()
 
 
@@ -144,6 +161,8 @@ def test_interruption_recovery_requires_explicit_permission_and_exact_inventory(
     (dest / 'source' / 'src' / 'vres_os' / 'personal_w3_reuse.py').write_text('synthetic')
     report = w4.inspect_interrupted(dest)
     assert report['removed'] is False
+    assert report['ownership_proven'] is False
+    assert report['rollback_authorized'] is False
     with pytest.raises(w4.W4Refused):
         w4.rollback_interrupted(dest, approval='yes')
     unwanted = dest / 'my-user-data.md'
@@ -152,8 +171,9 @@ def test_interruption_recovery_requires_explicit_permission_and_exact_inventory(
         w4.rollback_interrupted(dest, approval=w4.ROLLBACK_APPROVAL)
     assert unwanted.exists()
     unwanted.unlink()
-    w4.rollback_interrupted(dest, approval=w4.ROLLBACK_APPROVAL)
-    assert not dest.exists()
+    with pytest.raises(w4.W4Refused, match='disabled'):
+        w4.rollback_interrupted(dest, approval=w4.ROLLBACK_APPROVAL)
+    assert dest.is_dir()
     assert source.is_dir()
 
 
@@ -166,3 +186,72 @@ def test_complete_root_never_recovery_deleted(monkeypatch, tmp_path):
     with pytest.raises(w4.W4Refused):
         w4.rollback_interrupted(dest, approval=w4.ROLLBACK_APPROVAL)
     assert dest.is_dir()
+
+
+def test_disposable_source_rejects_executable_git_config_and_alternates(monkeypatch, tmp_path):
+    w4, _, source, _ = _synthetic(monkeypatch, tmp_path)
+    assert w4._disposable_source(source) == source
+    config = source / '.git' / 'config'
+    config.write_text('[filter "evil"]\nprocess = external-command\n', encoding='utf-8')
+    with pytest.raises(w4.W4Refused, match='configuration'):
+        w4._disposable_source(source)
+    config.write_text('[core]\nrepositoryformatversion = 0\n', encoding='utf-8')
+    alternates = source / '.git' / 'objects' / 'info'
+    alternates.mkdir(parents=True)
+    (alternates / 'alternates').write_text('untrusted-objects')
+    with pytest.raises(w4.W4Refused, match='Alternate'):
+        w4._disposable_source(source)
+
+
+def test_git_binary_hash_must_match_before_any_git_child(monkeypatch, tmp_path):
+    w4, _ = _module(monkeypatch)
+    fake_git = tmp_path / 'git.exe'
+    fake_git.write_bytes(b'not a trusted executable')
+    with pytest.raises(w4.W4Refused, match='approved pin'):
+        w4._trusted_git(tmp_path, fake_git, '0' * 64)
+
+
+def test_ancestry_requires_object_hash_and_sole_parent(monkeypatch):
+    w4, _ = _module(monkeypatch)
+
+    def commit(body):
+        raw = b'tree ' + b'0' * 40 + b'\nauthor test\ncommitter test\n' + body
+        oid = hashlib.sha1(b'commit ' + str(len(raw)).encode() + b'\0' + raw).hexdigest()
+        return oid, raw
+
+    base, base_raw = commit(b'\naccepted base\n')
+    head, head_raw = commit(b'parent ' + base.encode() + b'\n\nchild\n')
+    monkeypatch.setattr(w4, 'BASE_W3_R2', base)
+    data = {base: base_raw, head: head_raw}
+
+    class Reader:
+        def __call__(self, oid):
+            return 'commit', data[oid]
+
+    w4._verify_w3_ancestry(Reader(), head)
+    data[head] = head_raw + b'tampered'
+    with pytest.raises(w4.W4Refused, match='object verification'):
+        w4._verify_w3_ancestry(Reader(), head)
+    data[head] = head_raw
+    monkeypatch.setattr(w4, 'BASE_W3_R2', 'f' * 40)
+    with pytest.raises(w4.W4Refused):
+        w4._verify_w3_ancestry(Reader(), head)
+
+
+def test_os_walk_error_must_refuse_advisory_inventory(monkeypatch, tmp_path):
+    w4, _, _, _ = _synthetic(monkeypatch, tmp_path)
+    root = tmp_path / 'Vres-W4-NoLaunch-aaaaaaaa'
+    root.mkdir()
+    (root / 'W4-INCOMPLETE.json').write_bytes(w4._json({
+        'schema': w4.SCHEMA, 'state': 'INCOMPLETE', 'output_name': root.name,
+        'expected_paths': ['src/vres_os/personal_w3_reuse.py'],
+    }))
+
+    def fail_scan(root_path, *, followlinks, onerror):
+        onerror(PermissionError('forced enumeration error'))
+        yield root_path, [], []
+
+    monkeypatch.setattr(w4.os, 'walk', fail_scan)
+    with pytest.raises(w4.W4Refused, match='scan failed'):
+        w4.inspect_interrupted(root)
+    assert root.is_dir()
