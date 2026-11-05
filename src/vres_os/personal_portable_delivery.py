@@ -221,13 +221,13 @@ Example commands (edit all paths; use approved NEW scratch locations):
   & $run -Operation focus -PythonExe $py -Desk $desk -TaskKey TASK-01
   & $run -Operation focus -PythonExe $py -Desk $desk -TaskKey TASK-01 -ShowAction
   & $run -Operation open -PythonExe $py -Desk $desk -TaskKey TASK-01 -ShowAction
-  & $run -Operation remove -PythonExe $py -Desk $desk -TaskKey TASK-01 -Approve
-  & $run -Operation revise -PythonExe $py -Desk $desk -TaskKey TASK-01 -NoteFile 'C:\Projects\my-revised-task.md' -Approve
+  & $run -Operation revise -PythonExe $py -Desk $desk -TaskKey TASK-01 -NoteFile 'C:\\Projects\\my-revised-task.md' -Approve
   & $run -Operation history -PythonExe $py -Desk $desk
   & $run -Operation complete -PythonExe $py -Desk $desk -TaskKey TASK-01 -Approve
   & $run -Operation reopen -PythonExe $py -Desk $desk -TaskKey TASK-01 -FromState completed -Approve
   & $run -Operation archive -PythonExe $py -Desk $desk -TaskKey TASK-01 -Approve
   & $run -Operation reopen -PythonExe $py -Desk $desk -TaskKey TASK-01 -FromState archived -Approve
+  & $run -Operation remove -PythonExe $py -Desk $desk -TaskKey TASK-01 -Approve
 
 APPROVAL: -Approve is required for init/add/remove/revise/complete/archive/reopen; never implicit.
 FOCUS: requires -TaskKey to select one task; shows no action by default.

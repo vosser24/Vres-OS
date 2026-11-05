@@ -70,7 +70,10 @@ def test_one_complete_portable_delivery_byte_integrity_and_fail_closed(tmp_path,
                   "'revise' {", "'complete' {", "'archive' {", "'history' {", "'reopen' {",
                   'exit $LASTEXITCODE'):
         assert token in script
-    assert 'If multiple snapshots match, supply -SnapshotSha256' in (folder / 'START-HERE.txt').read_text()
+    start_here = (folder / 'START-HERE.txt').read_text()
+    assert 'If multiple snapshots match, supply -SnapshotSha256' in start_here
+    assert start_here.index('-Operation revise ') < start_here.index('-Operation remove ')
+    assert r'C:\Projects\my-revised-task.md' in start_here
     assert 'Snapshot selector must be a lowercase SHA-256' in script
     for rel, raw in source_original.items():
         assert folder.joinpath(*rel.split('/')).read_bytes() == raw
