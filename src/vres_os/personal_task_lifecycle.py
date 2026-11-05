@@ -123,6 +123,51 @@ def list_history(value: str | Path) -> dict[str, Any]:
             'authoritative_task_store': False}
 
 
+def read_daily_review(value: str | Path) -> dict[str, Any]:
+    """Read only the existing desk's active receipts and verified history.
+
+    This is a snapshot, NOT a "completed today" claim: history has no dates.
+    No task text, project, profile, credential, installed state or DB is used.
+    """
+    root = _root(value)
+    keys = sorted(desk._existing_tasks(root))
+    active = []
+    for key in keys:
+        _, receipt = _active(root, key)
+        active.append({'task_key_claimed': key, 'sha256': receipt['sha256'],
+                       'bytes': receipt['bytes']})
+    snapshots = _snapshots(_history(root, create=False))
+    completed = [
+        {'task_key_claimed': s['task_key_claimed'], 'sha256': s['sha256'],
+         'bytes': s['bytes']}
+        for s in snapshots if s['state'] == 'completed'
+    ]
+    return {'schema': SCHEMA, 'status': 'READ_ONLY_PERSONAL_DAILY_REVIEW',
+            'active_tasks': active, 'active_count': len(active),
+            'completed_snapshots': completed, 'completed_count': len(completed),
+            'archived_count': sum(s['state'] == 'archived' for s in snapshots),
+            'revision_count': sum(s['state'] == 'revisions' for s in snapshots),
+            'history_has_timestamps': False,
+            'task_binding_authoritative': False, 'writes_performed': False,
+            'installed_vres_modified': False}
+
+
+def render_daily_review(report: dict[str, Any]) -> str:
+    """Human-readable display of verified metadata; never disclose note text."""
+    lines = ['Vres-OS PERSONAL -- DAILY REVIEW (READ ONLY)',
+             'Active tasks: ' + str(report['active_count'])]
+    lines.extend('  ' + t['task_key_claimed'] + ' | sha256=' + t['sha256']
+                 for t in report['active_tasks'])
+    lines.append('Completed snapshots: ' + str(report['completed_count']))
+    lines.extend('  ' + t['task_key_claimed'] + ' | sha256=' + t['sha256']
+                 for t in report['completed_snapshots'])
+    lines.append('Archived snapshots: ' + str(report['archived_count']))
+    lines.append('Revision snapshots: ' + str(report['revision_count']))
+    lines.append('History has no timestamps; snapshots are not necessarily from today.')
+    lines.append('No note text disclosed; no writes performed.')
+    return '\n'.join(lines)
+
+
 def move_out(value: str | Path, key: str, *, state: str,
              approved: bool = False) -> dict[str, Any]:
     """Complete or archive one verified active task; preserve exact note bytes."""
@@ -235,12 +280,14 @@ def reopen(value: str | Path, key: str, *, state: str = 'completed',
 def main(argv: Sequence[str] | None = None) -> int:
     p = _SafeParser(description='Offline personal task lifecycle; verified scratch only')
     commands = p.add_subparsers(dest='command', required=True)
-    for name in ('revise', 'complete', 'archive', 'history', 'reopen'):
+    for name in ('revise', 'complete', 'archive', 'history', 'reopen', 'review'):
         sub = commands.add_parser(name)
         sub.add_argument('--desk', required=True)
-        if name != 'history':
+        if name not in ('history', 'review'):
             sub.add_argument('--task-key', required=True)
             sub.add_argument('--yes', action='store_true')
+        if name == 'review':
+            sub.add_argument('--format', choices=('text', 'json'), default='text')
         if name == 'revise':
             sub.add_argument('--note-file', required=True)
         if name == 'reopen':
@@ -250,6 +297,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         args = p.parse_args(argv)
         if args.command == 'history':
             result = list_history(args.desk)
+        elif args.command == 'review':
+            result = read_daily_review(args.desk)
         elif args.command == 'revise':
             result = revise(args.desk, args.task_key, args.note_file, approved=args.yes)
         elif args.command in ('complete', 'archive'):
@@ -260,7 +309,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     except Exception:
         print('VRES_PERSONAL_LIFECYCLE_REFUSED: check exact task, history and approved scope.', file=sys.stderr)
         return 2
-    print(json.dumps(result, sort_keys=True, ensure_ascii=True))
+    output = (render_daily_review(result)
+              if args.command == 'review' and args.format == 'text'
+              else json.dumps(result, sort_keys=True, ensure_ascii=True))
+    print(output)
     return 0
 
 

@@ -159,7 +159,7 @@ def remove_task(value: str | Path, task: str,
 
 def main(argv: Sequence[str] | None = None) -> int:
     args_list = list(sys.argv[1:] if argv is None else argv)
-    if args_list and args_list[0] in {'revise', 'complete', 'archive', 'history', 'reopen'}:
+    if args_list and args_list[0] in {'revise', 'complete', 'archive', 'history', 'reopen', 'review'}:
         # Delegate only known fixed routes to a source-local owner, never dynamic imports.
         from vres_os import personal_task_lifecycle as lifecycle
         return lifecycle.main(args_list)
