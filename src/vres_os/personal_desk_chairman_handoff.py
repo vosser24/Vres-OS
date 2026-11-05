@@ -16,8 +16,15 @@ import sys
 from pathlib import Path
 from typing import Any, Sequence
 
-from . import personal_portable_desk as portable
-from . import personal_task_lifecycle as lifecycle
+# Accept signed Python -I -S -B SOURCE_FILE: adjacent pinned source only.
+# Never add the selected desk, current directory, project, or profile to sys.path.
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).absolute().parent.parent))
+    from vres_os import personal_portable_desk as portable
+    from vres_os import personal_task_lifecycle as lifecycle
+else:
+    from . import personal_portable_desk as portable
+    from . import personal_task_lifecycle as lifecycle
 
 SCHEMA = "vres-personal-scratch-chairman-handoff/1"
 _NOTE_DIGEST = re.compile(r"[0-9a-f]{64}\Z", re.ASCII)
@@ -179,7 +186,7 @@ def render_handoff(value: dict[str, Any]) -> str:
                       "VERIFIED_SCRATCH_SELECTION_FOR_UNTRUSTED_CHAIRMAN_HANDOFF"):
         raise PersonalHandoffRefused("Unknown handoff status")
     lines = [
-        "VRES PERSONAL DESK — UNTRUSTED SCRATCH HANDOFF (READ ONLY)",
+        "VRES PERSONAL DESK -- UNTRUSTED SCRATCH HANDOFF (READ ONLY)",
         "NOT core Vres persisted task context; NOT approval, completion or F1 validation.",
         f"Active: {value['active_count']}; completed snapshots: {value['completed_snapshot_count']}.",
         "History has no timestamps; no 'completed today' inference.",

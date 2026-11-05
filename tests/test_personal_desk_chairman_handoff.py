@@ -192,3 +192,20 @@ def test_cli_selected_json_obeys_explicit_disclosure(desk_root, tmp_path, capsys
     assert bridge.main(args + ['--show-selected-action']) == 0
     report = json.loads(capsys.readouterr().out)
     assert report['selected_next_action_untrusted'] == 'Review the actual draft.'
+
+
+def test_direct_signed_python_isolated_entrypoint(desk_root):
+    # Real -I -S -B child of THIS isolated author environment; no Claude/DB.
+    import subprocess
+    import sys
+    from pathlib import Path
+    source = Path(bridge.__file__)
+    done = subprocess.run(
+        [sys.executable, '-I', '-S', '-B', str(source),
+         '--desk', str(desk_root), '--format', 'json'],
+        capture_output=True, text=True, check=False, timeout=15,
+    )
+    assert done.returncode == 0, done.stderr
+    report = json.loads(done.stdout)
+    assert report['status'] == 'NO_ACTIVE_SCRATCH_TASK_TO_HANDOFF'
+    assert report['native_claude_or_database_contact'] is False
