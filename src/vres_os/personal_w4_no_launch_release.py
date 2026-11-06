@@ -156,6 +156,10 @@ def _disposable_source(value: str | Path) -> Path:
     if os.name == "nt" and root.parent != Path("C:/Projects"):
         raise W4Refused("Windows W4 source must be a direct C:/Projects child")
     _ordinary(root / ".git")
+    # A .git/commondir file may redirect shared Git objects/config outside this root.
+    # Refuse linked common storage before running any Git process.
+    if os.path.lexists(root / ".git" / "commondir"):
+        raise W4Refused("Linked Git common directory redirection is forbidden")
 
     def reject_scan_failure(error: OSError) -> None:
         raise W4Refused("Disposable Git directory inventory is incomplete") from error

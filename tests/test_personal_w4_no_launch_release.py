@@ -227,6 +227,16 @@ def test_disposable_source_rejects_executable_git_config_and_alternates(monkeypa
         w4._disposable_source(source)
 
 
+def test_git_common_directory_redirection_is_refused_before_git(monkeypatch, tmp_path):
+    w4, _, source, _ = _synthetic(monkeypatch, tmp_path)
+    external = tmp_path / 'synthetic-unapproved-git-store'
+    external.mkdir()
+    (source / '.git' / 'commondir').write_text(str(external), encoding='utf-8')
+    with pytest.raises(w4.W4Refused, match='common directory'):
+        w4._disposable_source(source)
+    assert external.is_dir()
+
+
 def test_git_binary_hash_must_match_before_any_git_child(monkeypatch, tmp_path):
     w4, _ = _module(monkeypatch)
     fake_git = tmp_path / 'git.exe'
