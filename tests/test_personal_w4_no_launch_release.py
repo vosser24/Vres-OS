@@ -7,9 +7,9 @@ import importlib.util
 import json
 import os
 import sys
-import threading
 import types
 import zipfile
+import zlib
 from pathlib import Path
 
 import pytest
@@ -31,9 +31,22 @@ def _module(monkeypatch):
     return module, owner
 
 
+def _git_module():
+    path = HERE.with_name('personal_w4_inert_git.py')
+    spec = importlib.util.spec_from_file_location('_synthetic_w4_loose_git', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _synthetic(monkeypatch, tmp_path):
     w4, owner = _module(monkeypatch)
+    # Package-mode import never grants actual stage authority. Author simulation
+    # substitutes trusted fake owners and never creates a real Windows W4 stage.
+    monkeypatch.setattr(w4, '_W4_VERIFIED_DIRECT', True)
+    monkeypatch.setattr(w4, 'release_owner', owner)
     if os.name == 'nt':
+        monkeypatch.setattr(w4, '_require_trusted_windows_stage', lambda: None)
         # Author simulation uses pytest's disposable tmp_path, never a real W4 root.
         # A separate guarded Windows gate tests the actual C:/Projects restriction.
         def synthetic_root(value, *, new):
@@ -81,24 +94,33 @@ def _synthetic(monkeypatch, tmp_path):
         result = {'source_commit': source_commit, 'source_tree': 'e' * 40,
                   'files': [{'path': rel, 'git_blob': v[1], 'sha256': hashlib.sha256(v[2]).hexdigest()}
                             for rel, v in files.items()]}
-        manifest.write_text(json.dumps(result, sort_keys=True))
+        manifest.write_bytes(owner.source_manifest_bytes(source_commit, 'e' * 40, files))
         return result
     owner.verified_source = verified
     owner.stage = stage
+    owner.source_manifest_bytes = lambda commit, tree, files: json.dumps(
+        {'source_commit': commit, 'source_tree': tree,
+         'files': [{'path': rel, 'git_blob': v[1],
+                    'sha256': hashlib.sha256(v[2]).hexdigest()}
+                   for rel, v in files.items()]}, sort_keys=True).encode()
 
     class DummyReader:
-        def close(self):
-            return None
+        def close(self): pass
 
-    monkeypatch.setattr(w4, '_trusted_git', lambda *a: (lambda args: '', lambda: DummyReader()))
+    class DummyStore:
+        def __init__(self, *args, **kwargs): pass
+        def reader(self): return DummyReader()
+        def git_runner(self, args): return ''
+
+    monkeypatch.setattr(w4, 'git_source', types.SimpleNamespace(
+        LooseGitSource=DummyStore, LooseGitRefused=type('LooseGitRefused', (ValueError,), {})))
     monkeypatch.setattr(w4, '_verify_w3_ancestry', lambda *a: None)
     return w4, owner, source, files
 
 
 def _build(w4, source, dest, *, approval, source_commit='f' * 40):
     return w4.build_no_launch(source, dest, source_commit=source_commit,
-                               approval=approval, git_executable=source.parent / 'git.exe',
-                               git_sha256='0' * 64)
+                               approval=approval)
 
 
 def test_accepted_owners_create_one_inert_deterministic_source_zip(monkeypatch, tmp_path):
@@ -239,13 +261,13 @@ def test_git_common_directory_redirection_is_refused_before_git(monkeypatch, tmp
     assert external.is_dir()
 
 
-def test_git_binary_hash_must_match_before_any_git_child(monkeypatch, tmp_path):
+def test_r8_operational_entrypoint_exposes_no_git_executable_or_sha_arguments(monkeypatch):
     w4, _ = _module(monkeypatch)
-    fake_git = tmp_path / 'git.exe'
-    fake_git.write_bytes(b'not a trusted executable')
-    monkeypatch.setattr(w4, '_require_trusted_windows_stage', lambda: None)
-    with pytest.raises(w4.W4Refused, match='approved pin'):
-        w4._trusted_git(tmp_path, fake_git, '0' * 64)
+    signature = inspect.signature(w4.build_no_launch)
+    assert 'git_executable' not in signature.parameters
+    assert 'git_sha256' not in signature.parameters
+    assert w4._W4_VERIFIED_DIRECT is False
+    assert w4.release_owner is None
 
 
 def test_ancestry_requires_object_hash_and_sole_parent(monkeypatch):
@@ -303,188 +325,142 @@ def test_original_release_owner_in_memory_bootstrap_and_default_are_preserved():
     assert module.release_input_problems is module._release_inputs.release_input_problems
     assert module._release_inputs.__file__ == str(inputs_path)
     assert inspect.signature(module.stage).parameters['preserve_failed_stage'].default is False
+    records = {'README.md': ('100644', 'b' * 40, b'inert\\n')}
+    raw = module.source_manifest_bytes('a' * 40, 'c' * 40, records)
+    assert json.loads(raw) == module.source_manifest('a' * 40, 'c' * 40, records)
+    assert raw == module.source_manifest_bytes('a' * 40, 'c' * 40, records)
 
 
-def test_git_batch_timeout_does_not_close_locked_reader(monkeypatch):
-    w4, _ = _module(monkeypatch)
-    entered, release = threading.Event(), threading.Event()
+def _loose_fixture(tmp_path):
+    git = _git_module()
+    root = tmp_path / 'Vres-W4-Source-aaaaaaaa'
+    (root / '.git' / 'objects').mkdir(parents=True)
+    (root / '.git' / 'config').write_text('[core]\nrepositoryformatversion = 0\n')
+    content = b'hello immutable Git world\n'
+    def object_bytes(kind, body):
+        payload = kind.encode() + b' ' + str(len(body)).encode() + b'\0' + body
+        oid = hashlib.sha1(payload).hexdigest()
+        entry = root / '.git' / 'objects' / oid[:2] / oid[2:]
+        entry.parent.mkdir(exist_ok=True)
+        entry.write_bytes(zlib.compress(payload))
+        return oid, entry
+    blob, entry = object_bytes('blob', content)
+    commit, _ = object_bytes('commit', b'tree ' + b'a' * 40 + b'\n\nSynthetic\n')
+    (root / '.git' / 'HEAD').write_text(commit + '\n')
+    files = {}
+    paths = ('src/vres_os/demo.py', 'plugins/vres-os/demo.txt',
+             'scripts/windows/demo.ps1', 'pyproject.toml', 'README.md',
+             'LICENSE', 'rules/vres-rules.md')
+    for rel in paths:
+        p = root / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(content)
+        files[rel] = ('100644', blob, content)
 
-    class Stdin:
-        def write(self, data): return len(data)
-        def flush(self): pass
-        def close(self): pass
+    class Owner:
+        SCOPE_DIRS = ('src/vres_os/', 'plugins/vres-os/', 'scripts/windows/')
+        SCOPE_FILES = ('pyproject.toml', 'README.md', 'LICENSE', 'rules/vres-rules.md')
+        def _pathspecs(self):
+            return [p.rstrip('/') for p in self.SCOPE_DIRS] + list(self.SCOPE_FILES)
+        def _commit_files(self, objects, sha):
+            assert sha == commit
+            assert objects(blob) == ('blob', content)
+            return 'a' * 40, files
+        def _same_as_committed(self, running, committed):
+            return running == committed
 
-    class Stdout:
-        closed = False
-        def readline(self, limit):
-            entered.set()
-            release.wait(timeout=5)
-            return b''
-        def close(self):
-            self.closed = True
+    return git, root, commit, blob, entry, content, Owner()
 
-    class Child:
-        def __init__(self):
-            self.stdin, self.stdout = Stdin(), Stdout()
-            self.killed = False
-        def poll(self): return None if not self.killed else -9
-        def kill(self): self.killed = True
-        def wait(self, timeout): return -9
 
-    child = Child()
-    monkeypatch.setattr(w4.subprocess, 'Popen', lambda *a, **kw: child)
-    monkeypatch.setattr(w4, '_GIT_READ_SECONDS', 0.05)
-    monkeypatch.setattr(w4, '_GIT_WORKER_JOIN_SECONDS', 0.05)
-    reader = w4._PinnedGitObjects(Path('/git'), Path('/synthetic'), {})
-    try:
-        with pytest.raises(w4.W4Refused, match='timed out'):
-            reader('a' * 40)
-        assert entered.wait(timeout=1)
-        assert child.killed
-        with pytest.raises(w4.W4Refused, match='reader still blocked'):
-            reader.close()
-        assert child.stdout.closed is False
-        assert reader.process is child
-        assert reader._worker is not None
-    finally:
-        release.set()
-        if reader._worker is not None:
-            reader._worker.join(timeout=2)
+def test_strict_loose_git_source_runs_original_owner_interface_without_git_spawn(tmp_path, monkeypatch):
+    git, root, commit, blob, _, content, owner = _loose_fixture(tmp_path)
+    import subprocess
+    monkeypatch.setattr(subprocess, 'run', lambda *a, **kw: pytest.fail('No Git subprocess.run'))
+    monkeypatch.setattr(subprocess, 'Popen', lambda *a, **kw: pytest.fail('No Git Popen'))
+    store = git.LooseGitSource(root, commit, owner, max_files=350, max_bytes=10000)
+    reader = store.reader()
+    assert reader(blob) == ('blob', content)
     reader.close()
-    assert child.stdout.closed is True
-    assert reader.process is None and reader._worker is None
+    with pytest.raises(git.LooseGitRefused, match='Closed'):
+        reader(blob)
+    assert store.git_runner(['rev-parse', '--show-object-format']) == 'sha1\n'
+    assert store.git_runner(['rev-parse', '--show-toplevel']) == str(root) + '\n'
+    assert store.git_runner(['rev-parse', '--verify', '--end-of-options', 'HEAD^{commit}']) == commit + '\n'
+    assert store.git_runner(['status', '--porcelain=v1', '-z', '--untracked-files=all',
+                             '--', *owner._pathspecs()]) == ''
+    with pytest.raises(git.LooseGitRefused, match='Unrecognized'):
+        store.git_runner(['show', '--format'])
 
 
-def test_git_failed_reap_retains_child_handle_for_retry(monkeypatch):
+def test_strict_loose_git_rejects_packed_or_linked_storage(tmp_path):
+    git, root, commit, _, _, _, owner = _loose_fixture(tmp_path)
+    pack = root / '.git' / 'objects' / 'pack'
+    pack.mkdir()
+    (pack / 'pack-evil.idx').write_bytes(b'external')
+    with pytest.raises(git.LooseGitRefused, match='Packed'):
+        git.LooseGitSource(root, commit, owner, max_files=350, max_bytes=10000)
+    (pack / 'pack-evil.idx').unlink()
+    (root / '.git' / 'commondir').write_text('../outside')
+    with pytest.raises(git.LooseGitRefused, match='storage'):
+        git.LooseGitSource(root, commit, owner, max_files=350, max_bytes=10000)
+
+
+def test_strict_loose_git_rejects_unpinned_symbolic_head(tmp_path):
+    git, root, commit, _, _, _, owner = _loose_fixture(tmp_path)
+    (root / '.git' / 'HEAD').write_text('ref: refs/heads/main\n')
+    with pytest.raises(git.LooseGitRefused, match='detached'):
+        git.LooseGitSource(root, commit, owner, max_files=350, max_bytes=10000)
+
+
+def test_strict_loose_git_detects_corrupted_and_trailing_object(tmp_path):
+    git, root, commit, blob, entry, _, owner = _loose_fixture(tmp_path)
+    store = git.LooseGitSource(root, commit, owner, max_files=350, max_bytes=10000)
+    entry.write_bytes(zlib.compress(b'blob 3\0BAD'))
+    with pytest.raises(git.LooseGitRefused, match='SHA-1'):
+        store.read_object(blob)
+    entry.write_bytes(zlib.compress(b'blob 3\0BAD') + b'garbage')
+    with pytest.raises(git.LooseGitRefused, match='trailing'):
+        store.read_object(blob)
+
+
+def test_strict_loose_git_rejects_untracked_and_modified_release_scope(tmp_path):
+    git, root, commit, _, _, _, owner = _loose_fixture(tmp_path)
+    store = git.LooseGitSource(root, commit, owner, max_files=350, max_bytes=10000)
+    extra = root / 'src' / 'vres_os' / 'untracked.py'
+    extra.write_bytes(b'injected')
+    with pytest.raises(git.LooseGitRefused, match='differs'):
+        store.assert_clean_scope()
+    extra.unlink()
+    target = root / 'README.md'
+    target.write_bytes(b'untrusted modification')
+    with pytest.raises(git.LooseGitRefused, match='modified'):
+        store.assert_clean_scope()
+
+
+def test_original_owner_manifest_zip_cannot_accept_substituted_disk_bytes(monkeypatch, tmp_path):
+    w4, owner, source, _ = _synthetic(monkeypatch, tmp_path)
+    original_stage = owner.stage
+    def tamper(*args, **kwargs):
+        result = original_stage(*args, **kwargs)
+        # A substituted manifest is not allowed into a receipt or a ZIP.
+        args[2].write_bytes(b'{}')
+        return result
+    owner.stage = tamper
+    dest = tmp_path / 'Vres-W4-NoLaunch-aaaaaaaa'
+    with pytest.raises(w4.W4Refused, match='manifest changed'):
+        _build(w4, source, dest, approval=w4.STAGE_APPROVAL)
+    assert (dest / 'W4-INCOMPLETE.json').exists()
+    assert not (dest / 'W4-RECEIPT.json').exists()
+
+
+def test_windows_stage_block_precedes_source_root_access(monkeypatch, tmp_path):
     w4, _ = _module(monkeypatch)
-
-    class Stream:
-        def __init__(self): self.closed = False
-        def close(self): self.closed = True
-
-    class Child:
-        def __init__(self):
-            self.stdin, self.stdout = Stream(), Stream()
-            self.killed = False
-            self.allow_reap = False
-        def poll(self): return None if not self.killed else -9
-        def kill(self): self.killed = True
-        def wait(self, timeout):
-            if not self.allow_reap:
-                raise w4.subprocess.TimeoutExpired(cmd='git', timeout=timeout)
-            return -9
-
-    child = Child()
-    reader = w4._PinnedGitObjects(Path('/git'), Path('/synthetic'), {})
-    reader.process = child
-    with pytest.raises(w4.W4Refused, match='could not be reaped'):
-        reader.close()
-    assert reader.process is child
-    assert child.stdout.closed is False
-    child.allow_reap = True
-    reader.close()
-    assert reader.process is None
-    assert child.stdin.closed and child.stdout.closed
-
-
-def test_git_worker_start_failure_allows_safe_cleanup(monkeypatch):
-    w4, _ = _module(monkeypatch)
-
-    class Stream:
-        def __init__(self): self.closed = False
-        def close(self): self.closed = True
-
-    class Child:
-        def __init__(self):
-            self.stdin, self.stdout = Stream(), Stream()
-            self.killed = False
-        def poll(self): return None if not self.killed else -9
-        def kill(self): self.killed = True
-        def wait(self, timeout): return -9
-
-    child = Child()
-    monkeypatch.setattr(w4.subprocess, 'Popen', lambda *a, **kw: child)
-    monkeypatch.setattr(w4.threading.Thread, 'start',
-                        lambda self: (_ for _ in ()).throw(RuntimeError('no worker')))
-    reader = w4._PinnedGitObjects(Path('/git'), Path('/synthetic'), {})
-    with pytest.raises(RuntimeError, match='no worker'):
-        reader('a' * 40)
-    assert reader.process is child
-    assert reader._worker is not None and reader._worker.ident is None
-    reader.close()
-    assert reader.process is None
-    assert child.stdin.closed and child.stdout.closed
-
-
-def test_git_batch_success_uses_one_verified_bounded_response(monkeypatch):
-    w4, _ = _module(monkeypatch)
-    oid = 'a' * 40
-
-    class Stdin:
-        def write(self, data):
-            assert data == oid.encode() + b'\n'
-        def flush(self): pass
-        def close(self): pass
-
-    class Stdout:
-        def __init__(self): self.calls = 0
-        def readline(self, limit):
-            assert limit == 128
-            return oid.encode() + b' blob 3\n'
-        def read(self, count):
-            self.calls += 1
-            return b'abc' if count == 3 else b'\n'
-        def close(self): pass
-
-    class Child:
-        stdin, stdout = Stdin(), Stdout()
-        killed = False
-        def poll(self): return None if not self.killed else -9
-        def kill(self): self.killed = True
-        def wait(self, timeout): return -9
-
-    child = Child()
-    launches = []
-    monkeypatch.setattr(w4.subprocess, 'Popen',
-                        lambda *a, **kw: (launches.append(kw), child)[1])
-    reader = w4._PinnedGitObjects(Path('/git'), Path('/synthetic'), {})
-    assert reader(oid) == ('blob', b'abc')
-    assert launches[0]['cwd'] == str(reader.executable.parent)
-    assert child.stdout.calls == 2
-    reader.close()
-    assert child.killed
-
-
-def test_windows_staging_is_hard_held_without_independent_chain_of_trust(monkeypatch, tmp_path):
-    w4, _ = _module(monkeypatch)
-    with pytest.raises(w4.W4Refused, match='DLL/loader chain'):
+    monkeypatch.setattr(w4, '_W4_VERIFIED_DIRECT', True)
+    monkeypatch.setattr(w4, 'release_owner', types.SimpleNamespace())
+    monkeypatch.setattr(w4, 'git_source', types.SimpleNamespace())
+    with pytest.raises(w4.W4Refused, match='handle-bound'):
         w4._require_trusted_windows_stage(platform='nt')
-    w4._require_trusted_windows_stage(platform='posix')
-
-
-def test_failed_top_level_git_cleanup_keeps_live_reference_for_reap(monkeypatch):
-    w4, _ = _module(monkeypatch)
-
-    class Reader:
-        attempts = 0
-        def close(self):
-            self.attempts += 1
-            if self.attempts < 3:
-                raise w4.W4Refused('Synthetic child still alive')
-
-    reader = Reader()
-    with pytest.raises(w4.W4Refused, match='cleanup incomplete'):
-        with w4._GitReaderScope(lambda: reader) as scope:
-            scope.release(scope.acquire())  # first close failure; scope retries
-
-    assert reader.attempts == 2
-    assert reader in w4._PENDING_GIT_READERS
-    with pytest.raises(w4.W4Refused, match='previous Git child'):
-        with w4._GitReaderScope(lambda: reader):
-            pytest.fail('No second stage may start while cleanup is pending')
-    assert w4.reap_pending_git_readers() is True
-    assert reader.attempts == 3
-    assert not w4._PENDING_GIT_READERS
+    assert not (tmp_path / 'Vres-W4-NoLaunch-aaaaaaaa').exists()
 
 
 def test_output_root_identity_shift_refuses_staging(monkeypatch, tmp_path):

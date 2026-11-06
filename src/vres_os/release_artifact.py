@@ -386,6 +386,26 @@ def load_manifest(path: Path) -> dict[str, Any]:
     return manifest
 
 
+def source_manifest(commit: str, tree: str,
+                    files: dict[str, tuple[str, str, bytes]]) -> dict[str, Any]:
+    """Canonical manifest from the same validated original-owner source records."""
+    return {
+        "format": FORMAT, "version": VERSION, "object_format": OBJECT_FORMAT,
+        "source_origin": "git-objects", "source_commit": commit, "source_tree": tree,
+        "files": [{"path": rel, "mode": mode, "git_blob": oid,
+                   "bytes": len(data), "sha256": _sha256(data)}
+                  for rel, (mode, oid, data) in sorted(files.items())],
+        "dependencies": DEPENDENCIES_NOTE, "identity": IDENTITY_NOTE,
+    }
+
+
+def source_manifest_bytes(commit: str, tree: str,
+                          files: dict[str, tuple[str, str, bytes]]) -> bytes:
+    """Canonical byte identity for the staged manifest and W4 ZIP (no disk reread)."""
+    return json.dumps(source_manifest(commit, tree, files),
+                      indent=2, sort_keys=True).encode("utf-8")
+
+
 def stage(root: Path, out: Path, manifest_path: Path, *, source_commit: str | None,
           git: GitRunner | None = None, objects: ObjectReader | None = None,
           preserve_failed_stage: bool = False) -> dict[str, Any]:
@@ -396,13 +416,7 @@ def stage(root: Path, out: Path, manifest_path: Path, *, source_commit: str | No
     if not out.parent.is_dir() or _is_link(os.lstat(out.parent)):
         raise ReleaseArtifactError("The staging parent must be an existing ordinary directory")
     commit, tree, files = verified_source(root, source_commit, git=git, objects=objects)
-    manifest = {
-        "format": FORMAT, "version": VERSION, "object_format": OBJECT_FORMAT, "source_origin": "git-objects",
-        "source_commit": commit, "source_tree": tree,
-        "files": [{"path": rel, "mode": mode, "git_blob": oid, "bytes": len(data), "sha256": _sha256(data)}
-                  for rel, (mode, oid, data) in sorted(files.items())],
-        "dependencies": DEPENDENCIES_NOTE, "identity": IDENTITY_NOTE,
-    }
+    manifest = source_manifest(commit, tree, files)
     staging = out.with_name(f".{out.name}.incomplete-{uuid.uuid4().hex[:8]}")
     staging.mkdir()
     try:
@@ -420,10 +434,12 @@ def stage(root: Path, out: Path, manifest_path: Path, *, source_commit: str | No
             raise ReleaseArtifactError("The staged source is not a valid personal-release input: " + "; ".join(problems))
         tmp = manifest_path.with_name(f".{manifest_path.name}.{uuid.uuid4().hex}.tmp")
         try:
-            tmp.write_bytes(json.dumps(manifest, indent=2, sort_keys=True).encode("utf-8"))
+            tmp.write_bytes(source_manifest_bytes(commit, tree, files))
             os.rename(tmp, manifest_path)  # fails rather than replace a manifest that appeared meanwhile
         finally:
-            tmp.unlink(missing_ok=True)
+            if not preserve_failed_stage:
+                # Preserve W4 evidence; only the legacy installer default performs cleanup.
+                tmp.unlink(missing_ok=True)
         os.rename(staging, out)
     except BaseException:
         if not preserve_failed_stage:

@@ -7,9 +7,6 @@ only composes an inspectable ZIP, negative capability contract and receipt.
 from __future__ import annotations
 
 import argparse
-import atexit
-import queue
-import threading
 import configparser
 import importlib.util
 import hashlib
@@ -17,7 +14,6 @@ import json
 import os
 import re
 import stat
-import subprocess
 import sys
 import tomllib
 import zipfile
@@ -30,8 +26,9 @@ if not __package__:  # direct-file bootstrap: verify siblings BEFORE executing t
     _owner_dir = Path(__file__).absolute().parent
     _verified_siblings: dict[str, bytes] = {}
     for _name, _expected in (
-        ("release_artifact.py", "1d26d02dab7967f0e966bf26a757084669424b0b"),
+        ("release_artifact.py", "d786ca0b2dbf9b8eb77fb859eff1f71d4a4bde08"),
         ("release_inputs.py", "a0cdf3195f0cf0f2a61ce32521a74f78260832f7"),
+        ("personal_w4_inert_git.py", "aa97422dead3b89a289f7b842690931e87ff5806"),
     ):
         _sibling = _owner_dir / _name
         try:
@@ -59,8 +56,23 @@ if not __package__:  # direct-file bootstrap: verify siblings BEFORE executing t
     exec(compile(_verified_siblings['release_artifact.py'],
                  str(_owner_dir / 'release_artifact.py'), 'exec'),
          release_owner.__dict__)
+    _git_spec = importlib.util.spec_from_file_location(
+        "_vres_w4_verified_no_spawn_git", _owner_dir / "personal_w4_inert_git.py")
+    if _git_spec is None:
+        raise SystemExit("W4 no-spawn Git source cannot be loaded")
+    git_source = importlib.util.module_from_spec(_git_spec)
+    exec(compile(_verified_siblings['personal_w4_inert_git.py'],
+                 str(_owner_dir / 'personal_w4_inert_git.py'), 'exec'),
+         git_source.__dict__)
 else:
-    from . import release_artifact as release_owner
+    # Package imports may inspect declarations, but may not execute or stage
+    # an unverified release owner. No sibling module is imported here.
+    release_owner = None
+    git_source = None
+
+_W4_VERIFIED_DIRECT = not __package__
+_OWNER_EXCEPTION = (release_owner.ReleaseArtifactError
+                    if release_owner is not None else RuntimeError)
 
 SCHEMA = "vres-personal-w4-no-launch-source-release/1"
 DEPENDENCIES_SCHEMA = "vres-personal-w4-dependency-evidence/1"
@@ -79,8 +91,9 @@ OWNER_BLOBS = {
     "src/vres_os/personal_w2_onboarding.py": "76acfcb1350a767fee216aaeb743cbf5066c07ba",
     "src/vres_os/personal_w3_reuse.py": "db354a36328294003416903574cc201e01802462",
     "src/vres_os/credential_broker.py": "41f1b83fca0b3245de392e688ed0ed895b1f1cd7",
-    "src/vres_os/release_artifact.py": "1d26d02dab7967f0e966bf26a757084669424b0b",
+    "src/vres_os/release_artifact.py": "d786ca0b2dbf9b8eb77fb859eff1f71d4a4bde08",
     "src/vres_os/release_inputs.py": "a0cdf3195f0cf0f2a61ce32521a74f78260832f7",
+    "src/vres_os/personal_w4_inert_git.py": "aa97422dead3b89a289f7b842690931e87ff5806",
     "pyproject.toml": "b2d5e30d10d7be0613e90bf3ed1e346be5678969",
 }
 _HOLDS = (
@@ -99,10 +112,6 @@ _W4_REL = "src/vres_os/personal_w4_no_launch_release.py"
 _OID = re.compile(r"[0-9a-f]{40}\Z")
 _MAX_FILES = 350
 _MAX_SOURCE_BYTES = 15 * 1024 * 1024
-_GIT_READ_SECONDS = 30
-_GIT_WORKER_JOIN_SECONDS = 1.0
-_GIT_REAP_SECONDS = 10
-
 
 class W4Refused(ValueError):
     """No real installed/user-state operation is authorized."""
@@ -193,190 +202,13 @@ def _disposable_source(value: str | Path) -> Path:
     return root
 
 
-class _PinnedGitObjects:
-    """Time-limited local Git object exchange with a non-blocking failure close."""
-
-    def __init__(self, executable: Path, source: Path, environment: dict[str, str]):
-        self.executable, self.source, self.environment = executable, source, environment
-        self.process: subprocess.Popen[bytes] | None = None
-        self._worker: threading.Thread | None = None
-        self._poisoned = False
-
-    def _exchange(self, oid: str) -> tuple[str, bytes]:
-        proc = self.process
-        if proc is None or proc.stdin is None or proc.stdout is None:
-            raise W4Refused("Pinned Git object transport is not available")
-        try:
-            proc.stdin.write(oid.encode("ascii") + b"\n")
-            proc.stdin.flush()
-            header = proc.stdout.readline(128)
-            parts = header.split()
-            if (not header.endswith(b"\n") or len(parts) != 3
-                    or parts[0] != oid.encode("ascii") or
-                    not re.fullmatch(rb"[0-9]{1,9}", parts[2])):
-                raise W4Refused("Pinned Git returned invalid object header")
-            size = int(parts[2])
-            if size > 64 * 1024 * 1024:
-                raise W4Refused("Pinned Git object exceeds original owner bound")
-            data = proc.stdout.read(size)
-            if len(data) != size or proc.stdout.read(1) != b"\n":
-                raise W4Refused("Pinned Git object was truncated")
-            return parts[1].decode("ascii"), data
-        except (OSError, UnicodeError) as exc:
-            raise W4Refused("Pinned Git object read failed") from exc
-
-    def _kill_child(self) -> None:
-        proc = self.process
-        if proc is not None and proc.poll() is None:
-            try:
-                proc.kill()
-            except OSError as exc:
-                if proc.poll() is None:
-                    raise W4Refused("Pinned Git child could not be terminated") from exc
-
-    def __call__(self, oid: str) -> tuple[str, bytes]:
-        if not _OID.fullmatch(oid) or self._poisoned or self._worker is not None:
-            raise W4Refused("Git object transport unavailable or invalid object ID")
-        if self.process is None:
-            try:
-                self.process = subprocess.Popen(
-                    [str(self.executable), "-C", str(self.source),
-                     "-c", "core.fsmonitor=false", "-c", "core.quotepath=off",
-                     "cat-file", "--batch"],
-                    stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                    stderr=subprocess.DEVNULL, env=self.environment,
-                    cwd=str(self.executable.parent))
-            except OSError as exc:
-                raise W4Refused("Pinned Git could not read local objects") from exc
-        response: queue.Queue[tuple[bool, Any]] = queue.Queue(maxsize=1)
-
-        def read_once() -> None:
-            try:
-                response.put((True, self._exchange(oid)))
-            except BaseException as exc:
-                response.put((False, exc))
-
-        worker = threading.Thread(target=read_once, name="vres-w4-git-read", daemon=True)
-        self._worker = worker
-        worker.start()
-        try:
-            ok, result = response.get(timeout=_GIT_READ_SECONDS)
-        except queue.Empty as exc:
-            self._poisoned = True
-            self._kill_child()
-            raise W4Refused("Pinned Git object transport timed out") from exc
-        worker.join(timeout=_GIT_WORKER_JOIN_SECONDS)
-        if worker.is_alive():
-            self._poisoned = True
-            self._kill_child()
-            raise W4Refused("Pinned Git object worker did not terminate")
-        self._worker = None
-        if not ok:
-            if isinstance(result, W4Refused):
-                raise result
-            raise W4Refused("Pinned Git object transfer failed") from result
-        return result
-
-    def close(self) -> None:
-        # Keep both handles until reap AND reader join succeed.  An unsuccessful
-        # close must not look like successful cleanup on a subsequent attempt.
-        proc = self.process
-        problem: W4Refused | None = None
-        if proc is not None:
-            try:
-                if proc.poll() is None:
-                    proc.kill()
-                proc.wait(timeout=_GIT_REAP_SECONDS)
-            except (OSError, subprocess.TimeoutExpired) as exc:
-                problem = W4Refused("Pinned Git object process could not be reaped")
-                problem.__cause__ = exc
-        worker = self._worker
-        if worker is not None and worker.ident is not None:
-            worker.join(timeout=_GIT_WORKER_JOIN_SECONDS)
-            if worker.is_alive():
-                # Never close a buffered pipe while its blocked reader owns the lock.
-                # Retain handles for a later bounded cleanup attempt.
-                raise W4Refused("Pinned Git reader still blocked; streams retained")
-        if problem is not None:
-            # Child may still be alive; do not discard its process handle.
-            raise problem
-        if proc is not None:
-            for stream in (proc.stdin, proc.stdout):
-                if stream is not None:
-                    try:
-                        stream.close()
-                    except OSError:
-                        pass
-        self.process = None
-        self._worker = None
-
-
-# Strong references survive an exceptional close, including after the build's
-# local reader variables unwind. This is a bounded retry aid, NOT a promise that
-# an unkillable OS child can be contained or reaped.
-_PENDING_GIT_READERS: set[_PinnedGitObjects] = set()
-
-
-def reap_pending_git_readers() -> bool:
-    for reader in tuple(_PENDING_GIT_READERS):
-        try:
-            reader.close()
-        except Exception:
-            continue
-        _PENDING_GIT_READERS.discard(reader)
-    return not _PENDING_GIT_READERS
-
-
-atexit.register(reap_pending_git_readers)
-
-
-class _GitReaderScope:
-    """Own every transport through every success/failure exit from one stage."""
-
-    def __init__(self, factory: Any):
-        self.factory = factory
-        self.readers: list[_PinnedGitObjects] = []
-
-    def __enter__(self) -> "_GitReaderScope":
-        if _PENDING_GIT_READERS:
-            raise W4Refused("A previous Git child/reader has not been reaped; no new stage")
-        return self
-
-    def acquire(self) -> _PinnedGitObjects:
-        reader = self.factory()
-        self.readers.append(reader)
-        _PENDING_GIT_READERS.add(reader)
-        return reader
-
-    def release(self, reader: _PinnedGitObjects) -> None:
-        reader.close()
-        self.readers.remove(reader)
-        _PENDING_GIT_READERS.discard(reader)
-
-    def __exit__(self, _type: Any, _value: Any, _traceback: Any) -> None:
-        problems: list[Exception] = []
-        for reader in reversed(tuple(self.readers)):
-            try:
-                self.release(reader)
-            except Exception as exc:
-                problems.append(exc)
-        if problems:
-            # The global registry still holds the exact process/worker references.
-            # Operator-visible failure is mandatory; no successful receipt follows.
-            raise W4Refused(
-                "Git child/worker cleanup incomplete; retained for bounded retry, "
-                "no further stage authorized"
-            ) from problems[0]
-
-
 def _require_trusted_windows_stage(platform: str | None = None) -> None:
-    # R7 MUST NOT silently transform a pinned git.exe hash into DLL/loader
-    # attestation or process/descendant/TOCTOU clearance. Hold actual Windows
-    # execution until a separately reviewed trusted containment implementation.
+    # Safety hold applies to all W4 Windows staging even after Git subprocess
+    # removal: filesystem path identity and original-owner rename remain unproven.
     if (os.name if platform is None else platform) == "nt":
         raise W4Refused(
-            "Windows staging held: Git DLL/loader chain, bounded spawn and "
-            "filesystem containment have not been independently cleared"
+            "Windows staging held: handle-bound original-owner filesystem safety "
+            "and trusted offline gate have not been independently cleared"
         )
 
 
@@ -392,53 +224,7 @@ def _assert_root_identity(path: Path, identity: tuple[int, int]) -> None:
         raise W4Refused("Disposable output root identity shifted during stage")
 
 
-def _trusted_git(source: Path, executable: str | Path, expected_sha256: str):
-    _require_trusted_windows_stage()
-    exe = Path(executable)
-    if (not exe.is_absolute() or ".." in exe.parts
-            or not re.fullmatch(r"[0-9a-f]{64}", expected_sha256)):
-        raise W4Refused("Absolute Git executable and independent SHA256 pin required")
-    for ancestor in reversed(exe.parents):
-        _ordinary(ancestor)
-    info = _ordinary(exe, directory=False)
-    if info.st_size > 64 * 1024 * 1024 or _sha(exe.read_bytes()) != expected_sha256:
-        raise W4Refused("Git executable bytes do not match the approved pin")
-    if os.name == "nt":
-        install = Path("C:/Program Files/Git")
-        cores = {install / "ucrt64" / "bin" / "git.exe",
-                 install / "mingw64" / "bin" / "git.exe"}
-        if exe not in cores:
-            raise W4Refused("Pinned Git must be the direct core executable, not a launcher")
-        path = os.pathsep.join([str(exe.parent), "C:\\Windows\\System32"])
-    else:
-        path = str(exe.parent)
-    # Do not inherit PATH, HOME, credential helpers, proxy, Git config or DB controls.
-    env = {
-        "PATH": path, "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_CONFIG_GLOBAL": os.devnull, "GIT_NO_LAZY_FETCH": "1",
-        "GIT_ALLOW_PROTOCOL": "file", "GIT_NO_REPLACE_OBJECTS": "1",
-        "GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0",
-    }
-    if os.name == "nt":
-        env["SystemRoot"] = "C:\\Windows"
-
-    def run(args: list[str]) -> str:
-        try:
-            done = subprocess.run(
-                [str(exe), "-C", str(source), "-c", "core.fsmonitor=false",
-                 "-c", "core.quotepath=off", *args], check=False,
-                capture_output=True, timeout=120, env=env,
-                cwd=str(exe.parent))
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            raise W4Refused("Pinned Git read operation failed") from exc
-        if done.returncode:
-            raise W4Refused("Pinned Git refused to identify the disposable source")
-        return done.stdout.decode("utf-8")
-
-    return run, lambda: _PinnedGitObjects(exe, source, env)
-
-
-def _verify_w3_ancestry(objects: _PinnedGitObjects, head: str) -> None:
+def _verify_w3_ancestry(objects: Any, head: str) -> None:
     """Verify original commit bytes through a sole-parent line to accepted W3."""
     visited: set[str] = set()
     current = head
@@ -496,6 +282,7 @@ def _documentation(files: dict[str, tuple[str, str, bytes]]) -> tuple[bytes, byt
         "declared_dependencies": required,
         "declared_optional_groups": optional,
         "resolver_status": "NOT_RUN", "resolved_wheel_sha256": [],
+        "source_git_read_mode": "PYTHON_STDLIB_LOOSE_OBJECTS_NO_SUBPROCESS",
         "runtime_dependency_closure_accepted": False,
         "stdlib_no_launch_staging_needs_external_packages": False,
         "license_or_runtime_activation_assessed": False,
@@ -525,6 +312,7 @@ def _documentation(files: dict[str, tuple[str, str, bytes]]) -> tuple[bytes, byt
         "DO NOT execute .ps1, SQL migration, Python entrypoint, plugin or hook.\n"
         "Dependency versions/wheels are NOT locked. Runtime is NOT accepted.\n"
         "The manifest asserts bytes only, not independent F1/Fable approval.\n"
+        "Only detached HEAD and exact loose SHA1 Git objects; no Git subprocess.\n"
         "NO PostgreSQL (even SELECT), native Claude, installed P2, credential,\n"
         "user-profile, legacy project or main merge is authorized.\n"
     ).encode("ascii")
@@ -549,29 +337,33 @@ def _zip(out: Path, records: dict[str, bytes]) -> str:
 
 
 def build_no_launch(source_root: str | Path, output_root: str | Path, *,
-                    source_commit: str, approval: str,
-                    git_executable: str | Path, git_sha256: str) -> dict[str, Any]:
+                    source_commit: str, approval: str) -> dict[str, Any]:
     """One explicitly approved, new W4 root; no native/runtime/test execution."""
     if approval != STAGE_APPROVAL or not _OID.fullmatch(source_commit):
         raise W4Refused("Exact new-root approval and full source commit pin are required")
+    if not _W4_VERIFIED_DIRECT or release_owner is None or git_source is None:
+        raise W4Refused("Only directly verified Python -I -B W4 source may stage")
+    _require_trusted_windows_stage()  # Before source Git access or any output-root creation.
     source = _disposable_source(source_root)
     output = _path(output_root, new=True)
     if source == output or source in output.parents or output in source.parents:
         raise W4Refused("Source and new candidate root must remain separate")
-    # Git object transport is pinned; original owner retains the source verification.
-    git, reader_factory = _trusted_git(source, git_executable, git_sha256)
-    with _GitReaderScope(reader_factory) as leases:
-        ancestry = leases.acquire()
-        try:
-            _verify_w3_ancestry(ancestry, source_commit)
-        finally:
-            leases.release(ancestry)
-        reader = leases.acquire()
-        try:
-            commit, tree, original = release_owner.verified_source(
-                source, source_commit, git=git, objects=reader)
-        finally:
-            leases.release(reader)
+    # No subprocess, external Git executable, worker, DLL or process child exists.
+    # A strict detached-HEAD SHA-1 loose-object store supplies original-owner APIs.
+    store = git_source.LooseGitSource(source, source_commit, release_owner,
+                                      max_files=_MAX_FILES, max_bytes=_MAX_SOURCE_BYTES)
+    git = store.git_runner
+    ancestry = store.reader()
+    try:
+        _verify_w3_ancestry(ancestry, source_commit)
+    finally:
+        ancestry.close()
+    reader = store.reader()
+    try:
+        commit, tree, original = release_owner.verified_source(
+            source, source_commit, git=git, objects=reader)
+    finally:
+        reader.close()
     _pin_owners(original)
     committed_entry = original.get(_W4_REL)
     try:
@@ -584,6 +376,7 @@ def build_no_launch(source_root: str | Path, output_root: str | Path, *,
                   running_entry == committed_entry[2].replace(b"\n", b"\r\n")))):
         raise W4Refused("Executing W4 entrypoint differs from pinned source")
     dependencies, capabilities, readme = _documentation(original)
+    manifest_bytes = release_owner.source_manifest_bytes(commit, tree, original)
     try:
         output.mkdir()  # exclusive create; never overwrite an existing candidate
         root_identity = _root_identity(output)
@@ -593,15 +386,14 @@ def build_no_launch(source_root: str | Path, output_root: str | Path, *,
             "expected_paths": sorted(original),
         }))
         _assert_root_identity(output, root_identity)
-        with _GitReaderScope(reader_factory) as leases:
-            staging_reader = leases.acquire()
-            try:
-                manifest = release_owner.stage(
-                    source, output / "source", output / "SOURCE-MANIFEST.json",
-                    source_commit=source_commit, git=git, objects=staging_reader,
-                    preserve_failed_stage=True)
-            finally:
-                leases.release(staging_reader)
+        staging_reader = store.reader()
+        try:
+            manifest = release_owner.stage(
+                source, output / "source", output / "SOURCE-MANIFEST.json",
+                source_commit=source_commit, git=git, objects=staging_reader,
+                preserve_failed_stage=True)
+        finally:
+            staging_reader.close()
         _assert_root_identity(output, root_identity)
         if manifest["source_commit"] != commit or manifest["source_tree"] != tree:
             raise W4Refused("Original owner staging shifted source identity")
@@ -610,6 +402,10 @@ def build_no_launch(source_root: str | Path, output_root: str | Path, *,
                 entry[rel]["git_blob"] != v[1] or entry[rel]["sha256"] != _sha(v[2])
                 for rel, v in original.items()):
             raise W4Refused("Original owner staged a different source manifest")
+        actual_manifest = output / "SOURCE-MANIFEST.json"
+        _ordinary(actual_manifest, directory=False)
+        if actual_manifest.read_bytes() != manifest_bytes:
+            raise W4Refused("On-disk original-owner manifest changed or differs from verified bytes")
         for rel, value in original.items():
             staged = output / "source" / rel
             info = _ordinary(staged, directory=False)
@@ -617,7 +413,7 @@ def build_no_launch(source_root: str | Path, output_root: str | Path, *,
                 raise W4Refused("Staged on-disk original-owner bytes were changed")
         records = {"source/" + rel: value[2] for rel, value in original.items()}
         records.update({
-            "SOURCE-MANIFEST.json": (output / "SOURCE-MANIFEST.json").read_bytes(),
+            "SOURCE-MANIFEST.json": manifest_bytes,
             "W4-DEPENDENCIES.json": dependencies,
             "W4-CAPABILITIES.json": capabilities,
             "W4-READ-FIRST.txt": readme,
@@ -662,8 +458,8 @@ def inspect_interrupted(output_root: str | Path) -> dict[str, Any]:
         raise W4Refused("Not an explicitly named W4 disposable stage")
     if os.name == "nt" and root.parent != Path("C:/Projects"):
         raise W4Refused("Only new direct C:/Projects W4 roots are eligible")
-    if (root / "W4-RECEIPT.json").exists():
-        raise W4Refused("Completed candidate must never be interruption-rolled-back")
+    if os.path.lexists(root / "W4-RECEIPT.json"):
+        raise W4Refused("Receipt path present but not authenticated; preserve root, never rollback")
     marker = root / "W4-INCOMPLETE.json"
     _ordinary(marker, directory=False)
     try:
@@ -725,17 +521,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--source-root", required=True)
     p.add_argument("--output-root", required=True)
     p.add_argument("--source-commit", required=True)
-    p.add_argument("--git-executable", required=True)
-    p.add_argument("--git-sha256", required=True)
     p.add_argument("--approval", default="")
     args = p.parse_args(argv)
     try:
         if not sys.flags.isolated or not sys.flags.dont_write_bytecode:
             raise W4Refused("Direct-file W4 staging requires Python -I -B")
         receipt = build_no_launch(args.source_root, args.output_root,
-                                  source_commit=args.source_commit, approval=args.approval,
-                                  git_executable=args.git_executable, git_sha256=args.git_sha256)
-    except (W4Refused, release_owner.ReleaseArtifactError, OSError, KeyError) as exc:
+                                  source_commit=args.source_commit, approval=args.approval)
+    except (W4Refused, _OWNER_EXCEPTION, OSError, KeyError,
+            git_source.LooseGitRefused if git_source is not None else ValueError) as exc:
         print("W4_NO_LAUNCH_REFUSED: " + str(exc), file=sys.stderr)
         return 2
     print(json.dumps(receipt, sort_keys=True))
