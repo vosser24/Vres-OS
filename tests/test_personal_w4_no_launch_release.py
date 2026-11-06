@@ -331,8 +331,76 @@ def test_git_batch_timeout_does_not_close_locked_reader(monkeypatch):
         with pytest.raises(w4.W4Refused, match='reader still blocked'):
             reader.close()
         assert child.stdout.closed is False
+        assert reader.process is child
+        assert reader._worker is not None
     finally:
         release.set()
+        if reader._worker is not None:
+            reader._worker.join(timeout=2)
+    reader.close()
+    assert child.stdout.closed is True
+    assert reader.process is None and reader._worker is None
+
+
+def test_git_failed_reap_retains_child_handle_for_retry(monkeypatch):
+    w4, _ = _module(monkeypatch)
+
+    class Stream:
+        def __init__(self): self.closed = False
+        def close(self): self.closed = True
+
+    class Child:
+        def __init__(self):
+            self.stdin, self.stdout = Stream(), Stream()
+            self.killed = False
+            self.allow_reap = False
+        def poll(self): return None if not self.killed else -9
+        def kill(self): self.killed = True
+        def wait(self, timeout):
+            if not self.allow_reap:
+                raise w4.subprocess.TimeoutExpired(cmd='git', timeout=timeout)
+            return -9
+
+    child = Child()
+    reader = w4._PinnedGitObjects(Path('/git'), Path('/synthetic'), {})
+    reader.process = child
+    with pytest.raises(w4.W4Refused, match='could not be reaped'):
+        reader.close()
+    assert reader.process is child
+    assert child.stdout.closed is False
+    child.allow_reap = True
+    reader.close()
+    assert reader.process is None
+    assert child.stdin.closed and child.stdout.closed
+
+
+def test_git_worker_start_failure_allows_safe_cleanup(monkeypatch):
+    w4, _ = _module(monkeypatch)
+
+    class Stream:
+        def __init__(self): self.closed = False
+        def close(self): self.closed = True
+
+    class Child:
+        def __init__(self):
+            self.stdin, self.stdout = Stream(), Stream()
+            self.killed = False
+        def poll(self): return None if not self.killed else -9
+        def kill(self): self.killed = True
+        def wait(self, timeout): return -9
+
+    child = Child()
+    monkeypatch.setattr(w4.subprocess, 'Popen', lambda *a, **kw: child)
+    monkeypatch.setattr(w4.threading.Thread, 'start',
+                        lambda self: (_ for _ in ()).throw(RuntimeError('no worker')))
+    reader = w4._PinnedGitObjects(Path('/git'), Path('/synthetic'), {})
+    with pytest.raises(RuntimeError, match='no worker'):
+        reader('a' * 40)
+    assert reader.process is child
+    assert reader._worker is not None and reader._worker.ident is None
+    reader.close()
+    assert reader.process is None
+    assert child.stdin.closed and child.stdout.closed
 
 
 def test_git_batch_success_uses_one_verified_bounded_response(monkeypatch):

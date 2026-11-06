@@ -272,7 +272,9 @@ class _PinnedGitObjects:
         return result
 
     def close(self) -> None:
-        proc, self.process = self.process, None
+        # Keep both handles until reap AND reader join succeed.  An unsuccessful
+        # close must not look like successful cleanup on a subsequent attempt.
+        proc = self.process
         problem: W4Refused | None = None
         if proc is not None:
             try:
@@ -282,13 +284,16 @@ class _PinnedGitObjects:
             except (OSError, subprocess.TimeoutExpired) as exc:
                 problem = W4Refused("Pinned Git object process could not be reaped")
                 problem.__cause__ = exc
-        worker, self._worker = self._worker, None
-        if worker is not None:
+        worker = self._worker
+        if worker is not None and worker.ident is not None:
             worker.join(timeout=_GIT_WORKER_JOIN_SECONDS)
             if worker.is_alive():
                 # Never close a buffered pipe while its blocked reader owns the lock.
-                # This daemon cannot prevent interpreter exit; retain descriptors.
+                # Retain handles for a later bounded cleanup attempt.
                 raise W4Refused("Pinned Git reader still blocked; streams retained")
+        if problem is not None:
+            # Child may still be alive; do not discard its process handle.
+            raise problem
         if proc is not None:
             for stream in (proc.stdin, proc.stdout):
                 if stream is not None:
@@ -296,8 +301,8 @@ class _PinnedGitObjects:
                         stream.close()
                     except OSError:
                         pass
-        if problem is not None:
-            raise problem
+        self.process = None
+        self._worker = None
 
 
 def _trusted_git(source: Path, executable: str | Path, expected_sha256: str):
