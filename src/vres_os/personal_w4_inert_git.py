@@ -40,24 +40,51 @@ def _ordinary(path: Path, *, directory: bool) -> os.stat_result:
     return info
 
 
-def _read_regular(path: Path, *, limit: int) -> bytes:
-    before = _ordinary(path, directory=False)
-    if before.st_size > limit:
-        raise LooseGitRefused("Offline Git input exceeds its explicit byte bound")
-    if not hasattr(os, "O_NOFOLLOW"):
-        raise LooseGitRefused("No-follow source reads unavailable")
-    flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+def _open_directory(path: Path) -> int:
+    """No-follow every absolute ancestor, returning one pinned POSIX directory fd."""
+    path = Path(path)
+    if (os.name == "nt" or not path.is_absolute() or ".." in path.parts
+            or not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_DIRECTORY")
+            or os.open not in os.supports_dir_fd):
+        raise LooseGitRefused("Handle-bound POSIX source directory reads unavailable")
+    flags = (os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+             | getattr(os, "O_CLOEXEC", 0))
+    fd = os.open(path.anchor, flags)
     try:
-        fd = os.open(path, flags)
+        for component in path.parts[1:]:
+            following = os.open(component, flags, dir_fd=fd)
+            os.close(fd)
+            fd = following
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def _read_regular(path: Path, *, limit: int) -> bytes:
+    """Open an ordinary source file below a pinned, no-follow parent handle."""
+    parent = _open_directory(Path(path).parent)
+    try:
+        before = os.stat(Path(path).name, dir_fd=parent, follow_symlinks=False)
+        if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
+                or before.st_size > limit):
+            raise LooseGitRefused("Linked, special or oversized offline Git input refused")
+        flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+        fd = os.open(Path(path).name, flags, dir_fd=parent)
         with os.fdopen(fd, "rb") as stream:
             opened = os.fstat(stream.fileno())
-            if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
-                raise LooseGitRefused("Offline Git input changed before open")
+            if (not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1
+                    or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)
+                    or opened.st_size > limit):
+                raise LooseGitRefused("Offline Git input changed before bounded open")
             raw = stream.read(limit + 1)
-        after = _ordinary(path, directory=False)
+        after = os.stat(Path(path).name, dir_fd=parent, follow_symlinks=False)
     except OSError as exc:
-        raise LooseGitRefused("Offline Git input cannot be read") from exc
+        raise LooseGitRefused("Offline Git input cannot be read safely") from exc
+    finally:
+        os.close(parent)
     if (len(raw) > limit or len(raw) != opened.st_size
+            or not stat.S_ISREG(after.st_mode) or after.st_nlink != 1
             or (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino)
             or after.st_size != before.st_size):
         raise LooseGitRefused("Offline Git input changed during bounded read")
@@ -102,9 +129,13 @@ class LooseGitSource:
                 raise LooseGitRefused("Redirected or independently managed Git storage refused")
         pack_dir = self.git_dir / "objects" / "pack"
         if os.path.lexists(pack_dir):
-            _ordinary(pack_dir, directory=True)
-            if any(pack_dir.iterdir()):
-                raise LooseGitRefused("Packed Git objects are not supported by no-spawn W4")
+            pack_fd = _open_directory(pack_dir)
+            try:
+                with os.scandir(pack_fd) as items:
+                    if next(items, None) is not None:
+                        raise LooseGitRefused("Packed Git objects are not supported by no-spawn W4")
+            finally:
+                os.close(pack_fd)
         raw_head = _read_regular(self.git_dir / "HEAD", limit=128)
         if raw_head.strip() != commit.encode("ascii") or not raw_head.endswith(b"\n"):
             raise LooseGitRefused("Only an exact detached, pinned HEAD is supported")
@@ -147,6 +178,7 @@ class LooseGitSource:
         return parts[0].decode("ascii"), body
 
     def _scope_files(self) -> set[str]:
+        """Lazily enumerate the release scope through no-follow directory handles."""
         found: set[str] = set()
         visited = 0
         original_root = _ordinary(self.root, directory=True)
@@ -154,33 +186,55 @@ class LooseGitSource:
 
         for rel in self.owner.SCOPE_DIRS:
             scope = self.root.joinpath(*rel.strip("/").split("/"))
-            pending = [(scope, 0)]
+            pending: list[tuple[Path, int, tuple[int, int] | None]] = [
+                (scope, 0, None)]
             while pending:
-                here, depth = pending.pop()
+                here, depth, identity = pending.pop()
                 visited += 1
                 if visited > _MAX_SCOPE_SCAN_NODES:
                     raise LooseGitRefused("Offline source scope traversal budget exceeded")
                 if depth > _MAX_SCOPE_DEPTH:
                     raise LooseGitRefused("Offline source scope depth budget exceeded")
-                _ordinary(here, directory=True)
                 try:
-                    # Lazy scandir prevents unbounded per-directory os.walk lists.
-                    with os.scandir(here) as entries:
-                        for entry in entries:
-                            visited += 1
-                            if visited > _MAX_SCOPE_SCAN_NODES:
-                                raise LooseGitRefused("Offline source scope traversal budget exceeded")
-                            item = here / entry.name
-                            is_dir = entry.is_dir(follow_symlinks=False)
-                            _ordinary(item, directory=is_dir)
-                            if is_dir:
-                                if depth >= _MAX_SCOPE_DEPTH:
-                                    raise LooseGitRefused("Offline source scope depth budget exceeded")
-                                pending.append((item, depth + 1))
-                            else:
-                                found.add(item.relative_to(self.root).as_posix())
-                                if len(found) > self.max_files:
-                                    raise LooseGitRefused("Offline source scope exceeds file bound")
+                    fd = _open_directory(here)
+                    try:
+                        opened = os.fstat(fd)
+                        if identity is not None and (
+                                opened.st_dev, opened.st_ino) != identity:
+                            raise LooseGitRefused("Source directory moved during traversal")
+                        with os.scandir(fd) as entries:
+                            for entry in entries:
+                                visited += 1
+                                if visited > _MAX_SCOPE_SCAN_NODES:
+                                    raise LooseGitRefused("Offline source scope traversal budget exceeded")
+                                item = here / entry.name
+                                info = entry.stat(follow_symlinks=False)
+                                if (stat.S_ISLNK(info.st_mode)
+                                        or bool(getattr(info, "st_file_attributes", 0) & _REPARSE)):
+                                    raise LooseGitRefused("Redirected source scope entry refused")
+                                if stat.S_ISDIR(info.st_mode):
+                                    if depth >= _MAX_SCOPE_DEPTH:
+                                        raise LooseGitRefused("Offline source scope depth budget exceeded")
+                                    child = os.open(
+                                        entry.name,
+                                        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+                                        | getattr(os, "O_CLOEXEC", 0), dir_fd=fd)
+                                    try:
+                                        child_info = os.fstat(child)
+                                        child_identity = (child_info.st_dev, child_info.st_ino)
+                                        if child_identity != (info.st_dev, info.st_ino):
+                                            raise LooseGitRefused("Source entry moved before open")
+                                    finally:
+                                        os.close(child)
+                                    pending.append((item, depth + 1, child_identity))
+                                elif stat.S_ISREG(info.st_mode) and info.st_nlink == 1:
+                                    found.add(item.relative_to(self.root).as_posix())
+                                    if len(found) > self.max_files:
+                                        raise LooseGitRefused("Offline source scope exceeds file bound")
+                                else:
+                                    raise LooseGitRefused("Special or hardlinked source entry refused")
+                    finally:
+                        os.close(fd)
                 except OSError as exc:
                     raise LooseGitRefused("Source release-scope enumeration incomplete") from exc
         for rel in self.owner.SCOPE_FILES:
@@ -188,7 +242,7 @@ class LooseGitSource:
             if visited > _MAX_SCOPE_SCAN_NODES:
                 raise LooseGitRefused("Offline source scope traversal budget exceeded")
             p = self.root.joinpath(*rel.split("/"))
-            _ordinary(p, directory=False)
+            _read_regular(p, limit=self.max_bytes)
             found.add(rel)
         for item, original in ((self.root, original_root), (self.git_dir, original_git)):
             current = _ordinary(item, directory=True)
@@ -211,10 +265,8 @@ class LooseGitSource:
             raise LooseGitRefused("Offline source scope differs from committed files")
         for rel, (_mode, _oid, committed) in files.items():
             p = self.root.joinpath(*rel.split("/"))
-            for parent in p.parents:
-                if parent == self.root:
-                    break
-                _ordinary(parent, directory=True)
+            # Reopen every ancestor with O_NOFOLLOW; a final-component-only
+            # check does not protect against a symlinked intermediate directory.
             running = _read_regular(p, limit=self.max_bytes)
             if not self.owner._same_as_committed(running, committed):
                 raise LooseGitRefused("Offline checkout contains a modified release-scope file")

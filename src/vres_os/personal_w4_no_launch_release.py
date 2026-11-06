@@ -29,9 +29,9 @@ if not __package__:  # direct-file bootstrap: verify siblings BEFORE executing t
     _owner_dir = Path(__file__).absolute().parent
     _verified_siblings: dict[str, bytes] = {}
     for _name, _expected in (
-        ("release_artifact.py", "0381fe1c772e7f9a218010a2f3101b1fae154ca0"),
+        ("release_artifact.py", "1719f839d75b4dd994125c5f6d1ede2d4b7100b2"),
         ("release_inputs.py", "f6008f391305840645a707407fa8f464b0e27389"),
-        ("personal_w4_inert_git.py", "c83e4fc4b7c73b761c4b21a7375a8a15f3e5075b"),
+        ("personal_w4_inert_git.py", "af7bcb17f4b09eb262589021b9f6444de2c56fe1"),
         ("personal_w4_bound_output.py", "972c7c8276025c0cc2d68bd1be2d7173a29cb439"),
     ):
         _sibling = _owner_dir / _name
@@ -104,9 +104,9 @@ OWNER_BLOBS = {
     "src/vres_os/personal_w2_onboarding.py": "76acfcb1350a767fee216aaeb743cbf5066c07ba",
     "src/vres_os/personal_w3_reuse.py": "db354a36328294003416903574cc201e01802462",
     "src/vres_os/credential_broker.py": "41f1b83fca0b3245de392e688ed0ed895b1f1cd7",
-    "src/vres_os/release_artifact.py": "0381fe1c772e7f9a218010a2f3101b1fae154ca0",
+    "src/vres_os/release_artifact.py": "1719f839d75b4dd994125c5f6d1ede2d4b7100b2",
     "src/vres_os/release_inputs.py": "f6008f391305840645a707407fa8f464b0e27389",
-    "src/vres_os/personal_w4_inert_git.py": "c83e4fc4b7c73b761c4b21a7375a8a15f3e5075b",
+    "src/vres_os/personal_w4_inert_git.py": "af7bcb17f4b09eb262589021b9f6444de2c56fe1",
     "src/vres_os/personal_w4_bound_output.py": "972c7c8276025c0cc2d68bd1be2d7173a29cb439",
     "pyproject.toml": "b2d5e30d10d7be0613e90bf3ed1e346be5678969",
 }
@@ -180,6 +180,7 @@ def _path(value: str | Path, *, new: bool) -> Path:
 
 def _disposable_source(value: str | Path) -> Path:
     root = _path(value, new=False)
+    original_source = _ordinary(root)
     if not _SOURCE_NAME.fullmatch(root.name):
         raise W4Refused("Only a named disposable W4 source root is eligible")
     if os.name == "nt" and root.parent != Path("C:/Projects"):
@@ -251,6 +252,9 @@ def _disposable_source(value: str | Path) -> Path:
     after_git = _ordinary(root / ".git")
     if (after_git.st_dev, after_git.st_ino) != (original_git.st_dev, original_git.st_ino):
         raise W4Refused("Disposable Git metadata root identity shifted")
+    after_source = _ordinary(root)
+    if (after_source.st_dev, after_source.st_ino) != (original_source.st_dev, original_source.st_ino):
+        raise W4Refused("Disposable source root identity shifted")
     allowed = {
         "core": {"repositoryformatversion", "filemode", "bare", "logallrefupdates",
                  "ignorecase", "symlinks", "autocrlf", "safecrlf"},
@@ -294,8 +298,11 @@ def _verify_w3_ancestry(objects: Any, head: str) -> None:
         if current in visited or not _OID.fullmatch(current):
             break
         visited.add(current)
-        kind, raw = objects(current)
-        if (kind != "commit" or
+        bounded = getattr(objects, "read_bounded", None)
+        if not callable(bounded):
+            raise W4Refused("Accepted ancestry requires pre-inflation bounded Git reader")
+        kind, raw = bounded(current, 64 * 1024)
+        if (len(raw) > 64 * 1024 or kind != "commit" or
                 hashlib.sha1(b"commit " + str(len(raw)).encode("ascii") + b"\0" + raw).hexdigest() != current):
             raise W4Refused("Commit in accepted ancestry failed Git-object verification")
         if current == BASE_W3_R2:
@@ -583,15 +590,15 @@ def inspect_interrupted(output_root: str | Path) -> dict[str, Any]:
             raise W4Refused("Interrupted inventory scan failed; no deletion is permitted") from exc
     return {"schema": SCHEMA, "status": "INCOMPLETE_ADVISORY_ONLY",
             "root": str(root), "source_commit": journal.get("source_commit"),
+            "source_commit_is_unverified_journal_claim": True,
             "observed_files": sorted(observed), "ownership_proven": False,
             "rollback_authorized": False, "removed": False}
 
 
 def rollback_interrupted(output_root: str | Path, *, approval: str) -> dict[str, Any]:
-    if approval != ROLLBACK_APPROVAL:
-        raise W4Refused("Independent interrupted-stage rollback approval required")
-    inspect_interrupted(output_root)  # its self-declared marker is not ownership proof
-    raise W4Refused("Cross-session destructive rollback disabled: independently proven ownership required")
+    # Reject WITHOUT EVEN INSPECTING the supplied pathname. A self-declared
+    # marker and an approval string cannot authorize deletion or root access.
+    raise W4Refused("Cross-session destructive rollback disabled unconditionally")
 
 
 def main(argv: list[str] | None = None) -> int:

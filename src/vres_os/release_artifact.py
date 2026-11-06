@@ -77,6 +77,11 @@ PACKAGE_PREFIX = "src/vres_os/"
 _PACKAGED = re.compile(r"src/vres_os/(?:[^/]+\.py|migrations/[^/]+\.sql)")
 _COMMIT = re.compile(r"[0-9a-f]{40}")
 _SAFE_PART = re.compile(r"[A-Za-z0-9_.@+ -]+")
+# Windows device aliases and trailing-dot/space normalization must be rejected
+# while the archive is STILL source-only, before any future Windows extraction.
+_WIN_DEVICE_STEMS = {"CON", "PRN", "AUX", "NUL"} | {
+    f"{prefix}{number}" for prefix in ("COM", "LPT") for number in range(1, 10)
+}
 _FILE_MODES = {"100644", "100755"}
 _TREE_MODE = "40000"
 _MAX_OBJECT = 64 * 1024 * 1024
@@ -123,7 +128,11 @@ def _leads_to_scope(rel: str) -> bool:
 
 def _check_rel(rel: str) -> str:
     parts = rel.split("/")
-    if not rel or rel.startswith("/") or any(p in {"", ".", ".."} or not _SAFE_PART.fullmatch(p) for p in parts):
+    if (not rel or rel.startswith("/") or any(
+            p in {"", ".", ".."} or not _SAFE_PART.fullmatch(p)
+            or p.endswith((".", " ")) or p.split(".", 1)[0].upper() in _WIN_DEVICE_STEMS
+            or len(p.encode("utf-8")) > 240
+            for p in parts)):
         raise ReleaseArtifactError(f"Unsafe release path refused: {rel[:120]!r}")
     return rel
 
@@ -332,7 +341,11 @@ def _commit_files(objects: ObjectReader, commit: str, *, max_files: int | None =
                     raise ReleaseArtifactError("Duplicate source tree path")
                 if max_files is not None and len(files) >= max_files:
                     raise ReleaseArtifactError("Release source file-count limit exceeded")
-                data = _read_object(objects, oid, "blob")
+                # W4's bounded reader enforces the REMAINING aggregate file
+                # budget before inflation; legacy owner calls stay compatible.
+                data = _read_object(
+                    objects, oid, "blob",
+                    max_size=(max_bytes - total_bytes) if max_bytes is not None else None)
                 total_bytes += len(data)
                 if max_bytes is not None and total_bytes > max_bytes:
                     raise ReleaseArtifactError("Release source byte limit exceeded")

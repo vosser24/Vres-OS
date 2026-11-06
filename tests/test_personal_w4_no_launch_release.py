@@ -64,6 +64,15 @@ def _synthetic(monkeypatch, tmp_path):
                 w4._ordinary(p)
             return p
         monkeypatch.setattr(w4, '_path', synthetic_root)
+        # The production Windows C:/Projects source guard remains intact.
+        # Only mocked-owner/synthetic-writer tests may use pytest tmp_path.
+        def synthetic_source(value):
+            p = synthetic_root(value, new=False)
+            if not w4._SOURCE_NAME.fullmatch(p.name):
+                raise w4.W4Refused('Invalid synthetic source name')
+            w4._ordinary(p / '.git')
+            return p
+        monkeypatch.setattr(w4, '_disposable_source', synthetic_source)
     source = tmp_path / 'Vres-W4-Source-aaaaaaaa'
     source.mkdir()
     (source / '.git').mkdir()
@@ -217,6 +226,7 @@ def test_interruption_recovery_requires_explicit_permission_and_exact_inventory(
     report = w4.inspect_interrupted(dest)
     assert report['removed'] is False
     assert report['ownership_proven'] is False
+    assert report['source_commit_is_unverified_journal_claim'] is True
     assert report['rollback_authorized'] is False
     with pytest.raises(w4.W4Refused):
         w4.rollback_interrupted(dest, approval='yes')
@@ -243,6 +253,7 @@ def test_complete_root_never_recovery_deleted(monkeypatch, tmp_path):
     assert dest.is_dir()
 
 
+@pytest.mark.skipif(os.name == 'nt', reason='POSIX config/no-follow source test; Windows staging is refused')
 def test_disposable_source_rejects_executable_git_config_and_alternates(monkeypatch, tmp_path):
     w4, _, source, _ = _synthetic(monkeypatch, tmp_path)
     assert w4._disposable_source(source) == source
@@ -258,6 +269,7 @@ def test_disposable_source_rejects_executable_git_config_and_alternates(monkeypa
         w4._disposable_source(source)
 
 
+@pytest.mark.skipif(os.name == 'nt', reason='POSIX config/no-follow source test; Windows staging is refused')
 def test_git_common_directory_redirection_is_refused_before_git(monkeypatch, tmp_path):
     w4, _, source, _ = _synthetic(monkeypatch, tmp_path)
     external = tmp_path / 'synthetic-unapproved-git-store'
@@ -291,8 +303,13 @@ def test_ancestry_requires_object_hash_and_sole_parent(monkeypatch):
     data = {base: base_raw, head: head_raw}
 
     class Reader:
-        def __call__(self, oid):
+        def read_bounded(self, oid, max_payload_bytes):
+            assert max_payload_bytes == 64 * 1024
+            assert len(data[oid]) <= max_payload_bytes
             return 'commit', data[oid]
+
+        def __call__(self, oid):
+            pytest.fail('W4 ancestry must not use unbounded reader')
 
     w4._verify_w3_ancestry(Reader(), head)
     data[head] = head_raw + b'tampered'
@@ -594,7 +611,7 @@ def test_r9_original_owner_git_inventory_enforces_streaming_limits():
     reader = lambda oid: values[oid]
     with pytest.raises(module.ReleaseArtifactError, match='file-count'):
         module._commit_files(reader, commit, max_files=0, max_bytes=100)
-    with pytest.raises(module.ReleaseArtifactError, match='byte limit'):
+    with pytest.raises(module.ReleaseArtifactError, match='bounded size profile|byte limit'):
         module._commit_files(reader, commit, max_files=1, max_bytes=1)
 
 
@@ -751,6 +768,7 @@ def test_r11_disposable_git_inventory_is_lazy_and_bounded(tmp_path, monkeypatch)
         w4._disposable_source(source)
 
 
+@pytest.mark.skipif(os.name == 'nt', reason='POSIX config/no-follow source test; Windows staging is refused')
 def test_r11_git_config_bounded_before_read(tmp_path, monkeypatch):
     w4, _, source, _ = _synthetic(monkeypatch, tmp_path)
     config = source / '.git' / 'config'
@@ -805,3 +823,86 @@ def test_r11_owner_passes_bounded_reader_explicit_object_limits():
         owner._commit_files(BoundedReader(), commit_oid, max_files=350,
                             max_bytes=15 * 1024 * 1024)
     assert calls == [(commit_oid, 64 * 1024), (tree_oid, 4 * 1024 * 1024)]
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='POSIX handle-relative source reads are not Windows-authorized')
+def test_r12_intermediate_directory_symlink_cannot_redirect_source_reads(tmp_path):
+    git = _git_module()
+    root = tmp_path / 'source'
+    ordinary = root / 'ordinary'
+    ordinary.mkdir(parents=True)
+    (ordinary / 'test.txt').write_bytes(b'INERT\n')
+    assert git._read_regular(ordinary / 'test.txt', limit=64) == b'INERT\n'
+    (root / 'alias').symlink_to(ordinary, target_is_directory=True)
+    with pytest.raises((OSError, git.LooseGitRefused)):
+        git._read_regular(root / 'alias' / 'test.txt', limit=64)
+
+
+def test_r12_original_owner_rejects_windows_device_and_normalization_aliases():
+    path = HERE.with_name('release_artifact.py')
+    spec = importlib.util.spec_from_file_location('_vres_r12_windows_names', path)
+    owner = importlib.util.module_from_spec(spec)
+    owner._w4_prechecked_release_inputs = HERE.with_name('release_inputs.py').read_bytes()
+    exec(compile(path.read_bytes(), str(path), 'exec'), owner.__dict__)
+    assert owner._check_rel('src/vres_os/ordinary.py') == 'src/vres_os/ordinary.py'
+    for rel in (
+        'src/vres_os/CON.py', 'src/vres_os/aux.txt',
+        'src/vres_os/COM1.py', 'plugins/vres-os/LPT9.txt',
+        'src/vres_os/ordinary.', 'plugins/vres-os/ordinary ',
+        'scripts/windows/NUL.bat', 'src/vres_os/' + 'a' * 241,
+    ):
+        with pytest.raises(owner.ReleaseArtifactError, match='Unsafe'):
+            owner._check_rel(rel)
+
+
+def test_r12_bounded_owner_passes_remaining_aggregate_blob_budget():
+    path = HERE.with_name('release_artifact.py')
+    spec = importlib.util.spec_from_file_location('_vres_r12_aggregate_budget', path)
+    owner = importlib.util.module_from_spec(spec)
+    owner._w4_prechecked_release_inputs = HERE.with_name('release_inputs.py').read_bytes()
+    exec(compile(path.read_bytes(), str(path), 'exec'), owner.__dict__)
+
+    def object_record(kind, body):
+        raw = kind.encode() + b' ' + str(len(body)).encode() + b'\0' + body
+        return hashlib.sha1(raw).hexdigest(), (kind, body)
+
+    blob, blob_record = object_record('blob', b'123456')
+    tree, tree_record = object_record(
+        'tree', b'100644 README.md\0' + bytes.fromhex(blob))
+    commit, commit_record = object_record(
+        'commit', b'tree ' + tree.encode() + b'\n\nsource')
+    objects = {blob: blob_record, tree: tree_record, commit: commit_record}
+    calls = []
+
+    class BoundedReader:
+        def read_bounded(self, oid, ceiling):
+            calls.append((oid, ceiling))
+            return objects[oid]
+
+        def __call__(self, oid):
+            pytest.fail('Bounded original owner called unbounded reader')
+
+    with pytest.raises(owner.ReleaseArtifactError, match='bounded size profile'):
+        owner._commit_files(BoundedReader(), commit, max_files=350, max_bytes=5)
+    assert calls == [(commit, 64 * 1024), (tree, 4 * 1024 * 1024), (blob, 5)]
+
+
+def test_r12_ancestry_requires_preinflation_bounded_object_reader(monkeypatch):
+    w4, _ = _module(monkeypatch)
+
+    class Unbounded:
+        def __call__(self, oid):
+            pytest.fail('Unbounded ancestry Git object call must be refused first')
+
+    with pytest.raises(w4.W4Refused, match='pre-inflation bounded'):
+        w4._verify_w3_ancestry(Unbounded(), 'a' * 40)
+
+
+def test_r12_rollback_refuses_before_any_input_root_read(monkeypatch):
+    w4, _ = _module(monkeypatch)
+    monkeypatch.setattr(
+        w4, 'inspect_interrupted',
+        lambda *a, **kw: pytest.fail('Rollback touched the untrusted root'))
+    with pytest.raises(w4.W4Refused, match='disabled unconditionally'):
+        w4.rollback_interrupted('/never-touch-this-path', approval=w4.ROLLBACK_APPROVAL)
+
