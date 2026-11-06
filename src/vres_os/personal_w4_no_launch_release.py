@@ -10,6 +10,7 @@ import argparse
 import configparser
 import importlib.util
 import hashlib
+import io
 import json
 import os
 import re
@@ -26,9 +27,10 @@ if not __package__:  # direct-file bootstrap: verify siblings BEFORE executing t
     _owner_dir = Path(__file__).absolute().parent
     _verified_siblings: dict[str, bytes] = {}
     for _name, _expected in (
-        ("release_artifact.py", "d786ca0b2dbf9b8eb77fb859eff1f71d4a4bde08"),
-        ("release_inputs.py", "a0cdf3195f0cf0f2a61ce32521a74f78260832f7"),
-        ("personal_w4_inert_git.py", "aa97422dead3b89a289f7b842690931e87ff5806"),
+        ("release_artifact.py", "1553d775a9880e50e72fa481e07391c088baee1d"),
+        ("release_inputs.py", "f6008f391305840645a707407fa8f464b0e27389"),
+        ("personal_w4_inert_git.py", "ddf2768438f4634d794f77e3ad04165bcfcd4c47"),
+        ("personal_w4_bound_output.py", "b202e47bfcf23d16d234f5ec9e3a05dbd9709515"),
     ):
         _sibling = _owner_dir / _name
         try:
@@ -64,11 +66,20 @@ if not __package__:  # direct-file bootstrap: verify siblings BEFORE executing t
     exec(compile(_verified_siblings['personal_w4_inert_git.py'],
                  str(_owner_dir / 'personal_w4_inert_git.py'), 'exec'),
          git_source.__dict__)
+    _bound_spec = importlib.util.spec_from_file_location(
+        "_vres_w4_verified_bound_output", _owner_dir / "personal_w4_bound_output.py")
+    if _bound_spec is None:
+        raise SystemExit("W4 bound output source cannot be loaded")
+    bound_output = importlib.util.module_from_spec(_bound_spec)
+    exec(compile(_verified_siblings['personal_w4_bound_output.py'],
+                 str(_owner_dir / 'personal_w4_bound_output.py'), 'exec'),
+         bound_output.__dict__)
 else:
     # Package imports may inspect declarations, but may not execute or stage
     # an unverified release owner. No sibling module is imported here.
     release_owner = None
     git_source = None
+    bound_output = None
 
 _W4_VERIFIED_DIRECT = not __package__
 _OWNER_EXCEPTION = (release_owner.ReleaseArtifactError
@@ -91,9 +102,10 @@ OWNER_BLOBS = {
     "src/vres_os/personal_w2_onboarding.py": "76acfcb1350a767fee216aaeb743cbf5066c07ba",
     "src/vres_os/personal_w3_reuse.py": "db354a36328294003416903574cc201e01802462",
     "src/vres_os/credential_broker.py": "41f1b83fca0b3245de392e688ed0ed895b1f1cd7",
-    "src/vres_os/release_artifact.py": "d786ca0b2dbf9b8eb77fb859eff1f71d4a4bde08",
-    "src/vres_os/release_inputs.py": "a0cdf3195f0cf0f2a61ce32521a74f78260832f7",
-    "src/vres_os/personal_w4_inert_git.py": "aa97422dead3b89a289f7b842690931e87ff5806",
+    "src/vres_os/release_artifact.py": "1553d775a9880e50e72fa481e07391c088baee1d",
+    "src/vres_os/release_inputs.py": "f6008f391305840645a707407fa8f464b0e27389",
+    "src/vres_os/personal_w4_inert_git.py": "ddf2768438f4634d794f77e3ad04165bcfcd4c47",
+    "src/vres_os/personal_w4_bound_output.py": "b202e47bfcf23d16d234f5ec9e3a05dbd9709515",
     "pyproject.toml": "b2d5e30d10d7be0613e90bf3ed1e346be5678969",
 }
 _HOLDS = (
@@ -319,40 +331,42 @@ def _documentation(files: dict[str, tuple[str, str, bytes]]) -> tuple[bytes, byt
     return _json(deps), _json(caps), readme
 
 
-def _zip(out: Path, records: dict[str, bytes]) -> str:
-    archive = out / "W4-SOURCE-ONLY-NO-LAUNCH.zip"
-    with zipfile.ZipFile(archive, "x", compression=zipfile.ZIP_STORED, allowZip64=False) as z:
+def _zip_bytes(records: dict[str, bytes]) -> bytes:
+    """Produce and verify a reproducible ZIP entirely from original-owner memory bytes."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_STORED,
+                         allowZip64=False) as archive:
         for name, raw in sorted(records.items()):
             info = zipfile.ZipInfo(name, date_time=(2020, 1, 1, 0, 0, 0))
             info.compress_type = zipfile.ZIP_STORED
             info.create_system = 3
             info.external_attr = (0o100644 << 16)
-            z.writestr(info, raw)
-    with zipfile.ZipFile(archive, "r") as z:
-        if sorted(z.namelist()) != sorted(records):
-            raise W4Refused("Reopened ZIP entries do not match the source manifest")
-        if any(z.read(name) != data for name, data in records.items()):
-            raise W4Refused("Reopened ZIP bytes do not match the manifest")
-    return _sha(archive.read_bytes())
+            archive.writestr(info, raw)
+    packed = buffer.getvalue()
+    with zipfile.ZipFile(io.BytesIO(packed), "r") as archive:
+        if sorted(archive.namelist()) != sorted(records):
+            raise W4Refused("In-memory ZIP entries differ from pinned release scope")
+        if any(archive.read(name) != data for name, data in records.items()):
+            raise W4Refused("In-memory ZIP entry does not match original-owner bytes")
+    return packed
 
 
 def build_no_launch(source_root: str | Path, output_root: str | Path, *,
                     source_commit: str, approval: str) -> dict[str, Any]:
-    """One explicitly approved, new W4 root; no native/runtime/test execution."""
+    """Bound POSIX synthetic archive only; Windows staging remains hard-refused."""
     if approval != STAGE_APPROVAL or not _OID.fullmatch(source_commit):
         raise W4Refused("Exact new-root approval and full source commit pin are required")
-    if not _W4_VERIFIED_DIRECT or release_owner is None or git_source is None:
+    if (not _W4_VERIFIED_DIRECT or release_owner is None or git_source is None
+            or bound_output is None):
         raise W4Refused("Only directly verified Python -I -B W4 source may stage")
-    _require_trusted_windows_stage()  # Before source Git access or any output-root creation.
+    _require_trusted_windows_stage()  # Do not bypass for a Windows gate.
     source = _disposable_source(source_root)
     output = _path(output_root, new=True)
     if source == output or source in output.parents or output in source.parents:
-        raise W4Refused("Source and new candidate root must remain separate")
-    # No subprocess, external Git executable, worker, DLL or process child exists.
-    # A strict detached-HEAD SHA-1 loose-object store supplies original-owner APIs.
+        raise W4Refused("Source and candidate root must remain separate")
+
     store = git_source.LooseGitSource(source, source_commit, release_owner,
                                       max_files=_MAX_FILES, max_bytes=_MAX_SOURCE_BYTES)
-    git = store.git_runner
     ancestry = store.reader()
     try:
         _verify_w3_ancestry(ancestry, source_commit)
@@ -361,7 +375,8 @@ def build_no_launch(source_root: str | Path, output_root: str | Path, *,
     reader = store.reader()
     try:
         commit, tree, original = release_owner.verified_source(
-            source, source_commit, git=git, objects=reader)
+            source, source_commit, git=store.git_runner, objects=reader,
+            max_files=_MAX_FILES, max_bytes=_MAX_SOURCE_BYTES)
     finally:
         reader.close()
     _pin_owners(original)
@@ -375,80 +390,57 @@ def build_no_launch(source_root: str | Path, output_root: str | Path, *,
                  (b"\r" not in committed_entry[2] and
                   running_entry == committed_entry[2].replace(b"\n", b"\r\n")))):
         raise W4Refused("Executing W4 entrypoint differs from pinned source")
+
+    # The original release-input owner checks the same 001-041 digests on
+    # verified in-memory records: no path-based staging, temp rename or cleanup.
+    problems = release_owner._release_inputs.release_record_problems(
+        {rel: record[2] for rel, record in original.items()})
+    if problems:
+        raise W4Refused("Pinned original-owner release inputs refused: " + "; ".join(problems))
     dependencies, capabilities, readme = _documentation(original)
     manifest_bytes = release_owner.source_manifest_bytes(commit, tree, original)
-    try:
-        output.mkdir()  # exclusive create; never overwrite an existing candidate
-        root_identity = _root_identity(output)
-        _write_new(output / "W4-INCOMPLETE.json", _json({
-            "schema": SCHEMA, "state": "INCOMPLETE", "source_commit": commit,
-            "source_tree": tree, "output_name": output.name,
-            "expected_paths": sorted(original),
-        }))
-        _assert_root_identity(output, root_identity)
-        staging_reader = store.reader()
-        try:
-            manifest = release_owner.stage(
-                source, output / "source", output / "SOURCE-MANIFEST.json",
-                source_commit=source_commit, git=git, objects=staging_reader,
-                preserve_failed_stage=True)
-        finally:
-            staging_reader.close()
-        _assert_root_identity(output, root_identity)
-        if manifest["source_commit"] != commit or manifest["source_tree"] != tree:
-            raise W4Refused("Original owner staging shifted source identity")
-        entry = {row["path"]: row for row in manifest["files"]}
-        if set(entry) != set(original) or any(
-                entry[rel]["git_blob"] != v[1] or entry[rel]["sha256"] != _sha(v[2])
-                for rel, v in original.items()):
-            raise W4Refused("Original owner staged a different source manifest")
-        actual_manifest = output / "SOURCE-MANIFEST.json"
-        _ordinary(actual_manifest, directory=False)
-        if actual_manifest.read_bytes() != manifest_bytes:
-            raise W4Refused("On-disk original-owner manifest changed or differs from verified bytes")
-        for rel, value in original.items():
-            staged = output / "source" / rel
-            info = _ordinary(staged, directory=False)
-            if (info.st_size != len(value[2]) or _sha(staged.read_bytes()) != _sha(value[2])):
-                raise W4Refused("Staged on-disk original-owner bytes were changed")
-        records = {"source/" + rel: value[2] for rel, value in original.items()}
-        records.update({
-            "SOURCE-MANIFEST.json": manifest_bytes,
-            "W4-DEPENDENCIES.json": dependencies,
-            "W4-CAPABILITIES.json": capabilities,
-            "W4-READ-FIRST.txt": readme,
-        })
-        for name, raw in records.items():
-            if len(raw) > _MAX_SOURCE_BYTES:
-                raise W4Refused("An unbounded artifact entry was refused")
-        for name, raw in (("W4-DEPENDENCIES.json", dependencies),
-                          ("W4-CAPABILITIES.json", capabilities),
-                          ("W4-READ-FIRST.txt", readme)):
-            _write_new(output / name, raw)
-        _assert_root_identity(output, root_identity)
-        zip_hash = _zip(output, records)
-        _assert_root_identity(output, root_identity)
-        receipt = {
-            "schema": RECEIPT_SCHEMA, "source_commit": commit, "source_tree": tree,
-            "inherited_accepted_base_W3_R2": BASE_W3_R2,
-            "source_files": len(original), "archive_entries": len(records),
-            "zip_sha256": zip_hash,
-            "source_manifest_sha256": _sha(records["SOURCE-MANIFEST.json"]),
-            "dependency_evidence_sha256": _sha(dependencies),
-            "capability_holds_sha256": _sha(capabilities),
-            "runtime_ready": False, "launch_authorized": False,
-            "install_authorized": False, "db_contact": False,
-            "genuine_windows_pytest": "NOT_RUN",
-        }
-        _assert_root_identity(output, root_identity)
-        _write_new(output / "W4-RECEIPT.json", _json(receipt))
-        # Keep the original INCOMPLETE journal as immutable diagnostic history.
-        # A verified receipt supersedes it; do not unlink any path after staging.
-        return receipt
-    except BaseException:
-        # Keep any partial stage for read-only inspection. Path ownership can shift
-        # after mkdir; never perform automatic recursive deletion on failure.
-        raise
+    records = {"source/" + rel: value[2] for rel, value in original.items()}
+    records.update({
+        "SOURCE-MANIFEST.json": manifest_bytes,
+        "W4-DEPENDENCIES.json": dependencies,
+        "W4-CAPABILITIES.json": capabilities,
+        "W4-READ-FIRST.txt": readme,
+    })
+    if any(len(raw) > _MAX_SOURCE_BYTES for raw in records.values()):
+        raise W4Refused("Unbounded source-release entry")
+    archive_bytes = _zip_bytes(records)
+    zip_hash = _sha(archive_bytes)
+    receipt = {
+        "schema": RECEIPT_SCHEMA, "source_commit": commit, "source_tree": tree,
+        "inherited_accepted_base_W3_R2": BASE_W3_R2,
+        "source_files": len(original), "archive_entries": len(records),
+        "zip_sha256": zip_hash,
+        "source_manifest_sha256": _sha(manifest_bytes),
+        "dependency_evidence_sha256": _sha(dependencies),
+        "capability_holds_sha256": _sha(capabilities),
+        "runtime_ready": False, "launch_authorized": False,
+        "install_authorized": False, "db_contact": False,
+        "genuine_windows_pytest": "NOT_RUN",
+        "writer_profile": "POSIX_HANDLE_RELATIVE_ONLY_WINDOWS_REFUSED",
+    }
+    journal = _json({
+        "schema": SCHEMA, "state": "INCOMPLETE", "source_commit": commit,
+        "source_tree": tree, "output_name": output.name,
+        "expected_paths": sorted(original),
+    })
+
+    # The exclusively created root remains intact if any step fails. The real
+    # original owner's path-based stage() is NEVER invoked by W4 R9.
+    with bound_output.BoundOutput(output) as writer:
+        writer.put("W4-INCOMPLETE.json", journal)
+        for rel, raw in sorted(records.items()):
+            writer.put(rel, raw)
+        writer.put("W4-SOURCE-ONLY-NO-LAUNCH.zip", archive_bytes)
+        writer.verify()
+        # Completed receipt is created only after verified archive readback.
+        writer.put("W4-RECEIPT.json", _json(receipt))
+        writer.verify()
+    return receipt
 
 
 def inspect_interrupted(output_root: str | Path) -> dict[str, Any]:
@@ -529,7 +521,8 @@ def main(argv: list[str] | None = None) -> int:
         receipt = build_no_launch(args.source_root, args.output_root,
                                   source_commit=args.source_commit, approval=args.approval)
     except (W4Refused, _OWNER_EXCEPTION, OSError, KeyError,
-            git_source.LooseGitRefused if git_source is not None else ValueError) as exc:
+            git_source.LooseGitRefused if git_source is not None else ValueError,
+            bound_output.BoundOutputRefused if bound_output is not None else ValueError) as exc:
         print("W4_NO_LAUNCH_REFUSED: " + str(exc), file=sys.stderr)
         return 2
     print(json.dumps(receipt, sort_keys=True))

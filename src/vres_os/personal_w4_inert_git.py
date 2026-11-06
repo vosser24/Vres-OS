@@ -18,7 +18,7 @@ from typing import Any
 _OID = re.compile(r"[0-9a-f]{40}\Z")
 _REPARSE = 0x400
 _MAX_COMPRESSED = 64 * 1024 * 1024
-_MAX_INFLATED = 64 * 1024 * 1024 + 128
+_MAX_INFLATED = 15 * 1024 * 1024 + 4096  # W4 release-scope bound
 
 
 class LooseGitRefused(ValueError):
@@ -106,7 +106,8 @@ class LooseGitSource:
             raise LooseGitRefused("Invalid offline Git object identifier")
         directory = self.git_dir / "objects" / oid[:2]
         _ordinary(directory, directory=True)
-        compressed = _read_regular(directory / oid[2:], limit=_MAX_COMPRESSED)
+        compressed = _read_regular(directory / oid[2:],
+                                   limit=min(_MAX_COMPRESSED, self.max_bytes + 1024 * 1024))
         try:
             decoder = zlib.decompressobj()
             expanded = decoder.decompress(compressed, _MAX_INFLATED + 1)
@@ -153,7 +154,8 @@ class LooseGitSource:
     def assert_clean_scope(self) -> None:
         reader = self.reader()
         try:
-            _tree, files = self.owner._commit_files(reader, self.commit)
+            _tree, files = self.owner._commit_files(
+                reader, self.commit, max_files=self.max_files, max_bytes=self.max_bytes)
         finally:
             reader.close()
         if (len(files) > self.max_files

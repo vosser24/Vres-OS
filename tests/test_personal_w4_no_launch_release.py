@@ -45,6 +45,7 @@ def _synthetic(monkeypatch, tmp_path):
     # substitutes trusted fake owners and never creates a real Windows W4 stage.
     monkeypatch.setattr(w4, '_W4_VERIFIED_DIRECT', True)
     monkeypatch.setattr(w4, 'release_owner', owner)
+    owner._release_inputs = types.SimpleNamespace(release_record_problems=lambda records: [])
     if os.name == 'nt':
         monkeypatch.setattr(w4, '_require_trusted_windows_stage', lambda: None)
         # Author simulation uses pytest's disposable tmp_path, never a real W4 root.
@@ -77,27 +78,34 @@ def _synthetic(monkeypatch, tmp_path):
     entry_oid = hashlib.sha1(b'blob ' + str(len(entry)).encode() + b'\0' + entry).hexdigest()
     files[w4._W4_REL] = ('100644', entry_oid, entry)
 
-    def verified(src, commit, *, git, objects):
+    def verified(src, commit, *, git, objects, max_files=None, max_bytes=None):
         assert src == source
         assert commit == 'f' * 40
         return commit, 'e' * 40, files
 
-    def stage(src, out, manifest, *, source_commit, git, objects,
-              preserve_failed_stage=False):
-        assert src == source and source_commit == 'f' * 40
-        assert preserve_failed_stage is True
-        out.mkdir()
-        for rel, v in files.items():
-            target = out / rel
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(v[2])
-        result = {'source_commit': source_commit, 'source_tree': 'e' * 40,
-                  'files': [{'path': rel, 'git_blob': v[1], 'sha256': hashlib.sha256(v[2]).hexdigest()}
-                            for rel, v in files.items()]}
-        manifest.write_bytes(owner.source_manifest_bytes(source_commit, 'e' * 40, files))
-        return result
     owner.verified_source = verified
-    owner.stage = stage
+
+    class SyntheticWriter:
+        """Test-only stand-in: NEVER a Windows/operational containment authority."""
+        def __init__(self, root):
+            self.root = root
+            root.mkdir()
+            self.expected = {}
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def put(self, rel, raw):
+            path = self.root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(raw)
+            self.expected[rel] = raw
+        def verify(self):
+            for rel, raw in self.expected.items():
+                if (self.root / rel).read_bytes() != raw:
+                    raise w4.W4Refused('Synthetic writer pinned bytes mismatch')
+
+    monkeypatch.setattr(w4, 'bound_output',
+                        types.SimpleNamespace(BoundOutput=SyntheticWriter,
+                                              BoundOutputRefused=w4.W4Refused))
     owner.source_manifest_bytes = lambda commit, tree, files: json.dumps(
         {'source_commit': commit, 'source_tree': tree,
          'files': [{'path': rel, 'git_blob': v[1],
@@ -179,17 +187,16 @@ def test_selected_root_cannot_be_overwritten_and_no_parent_escape(monkeypatch, t
 
 
 def test_staging_failure_preserves_partial_owned_root(monkeypatch, tmp_path):
-    w4, owner, source, _ = _synthetic(monkeypatch, tmp_path)
-    def fail(_a, out, _m, *, source_commit, git, objects,
-             preserve_failed_stage=False):
-        assert preserve_failed_stage is True
-        out.mkdir()
-        (out / 'src' / 'vres_os').mkdir(parents=True)
-        (out / 'src' / 'vres_os' / 'personal_w3_reuse.py').write_text('disposable only')
-        raise owner.ReleaseArtifactError('simulated interruption after creation')
-    owner.stage = fail
+    w4, _, source, _ = _synthetic(monkeypatch, tmp_path)
+    base_writer = w4.bound_output.BoundOutput
+    class InterruptedWriter(base_writer):
+        def put(self, rel, raw):
+            super().put(rel, raw)
+            if rel == 'W4-INCOMPLETE.json':
+                raise w4.W4Refused('simulated interruption after journal')
+    monkeypatch.setattr(w4.bound_output, 'BoundOutput', InterruptedWriter)
     dest = tmp_path / 'Vres-W4-NoLaunch-aaaaaaaa'
-    with pytest.raises(owner.ReleaseArtifactError):
+    with pytest.raises(w4.W4Refused, match='interruption'):
         _build(w4, source, dest, approval=w4.STAGE_APPROVAL)
     assert dest.is_dir()
     assert (dest / 'W4-INCOMPLETE.json').is_file()
@@ -362,7 +369,7 @@ def _loose_fixture(tmp_path):
         SCOPE_FILES = ('pyproject.toml', 'README.md', 'LICENSE', 'rules/vres-rules.md')
         def _pathspecs(self):
             return [p.rstrip('/') for p in self.SCOPE_DIRS] + list(self.SCOPE_FILES)
-        def _commit_files(self, objects, sha):
+        def _commit_files(self, objects, sha, *, max_files=None, max_bytes=None):
             assert sha == commit
             assert objects(blob) == ('blob', content)
             return 'a' * 40, files
@@ -437,17 +444,18 @@ def test_strict_loose_git_rejects_untracked_and_modified_release_scope(tmp_path)
         store.assert_clean_scope()
 
 
-def test_original_owner_manifest_zip_cannot_accept_substituted_disk_bytes(monkeypatch, tmp_path):
+def test_r9_original_owner_stage_is_never_called_and_substitution_refused(monkeypatch, tmp_path):
     w4, owner, source, _ = _synthetic(monkeypatch, tmp_path)
-    original_stage = owner.stage
-    def tamper(*args, **kwargs):
-        result = original_stage(*args, **kwargs)
-        # A substituted manifest is not allowed into a receipt or a ZIP.
-        args[2].write_bytes(b'{}')
-        return result
-    owner.stage = tamper
+    owner.stage = lambda *a, **kw: pytest.fail('Forbidden original owner pathname stage')
+    base_writer = w4.bound_output.BoundOutput
+    class TamperingWriter(base_writer):
+        def put(self, rel, raw):
+            super().put(rel, raw)
+            if rel == 'SOURCE-MANIFEST.json':
+                (self.root / rel).write_bytes(b'{}')
+    monkeypatch.setattr(w4.bound_output, 'BoundOutput', TamperingWriter)
     dest = tmp_path / 'Vres-W4-NoLaunch-aaaaaaaa'
-    with pytest.raises(w4.W4Refused, match='manifest changed'):
+    with pytest.raises(w4.W4Refused, match='pinned bytes mismatch'):
         _build(w4, source, dest, approval=w4.STAGE_APPROVAL)
     assert (dest / 'W4-INCOMPLETE.json').exists()
     assert not (dest / 'W4-RECEIPT.json').exists()
@@ -482,3 +490,110 @@ def test_windows_production_root_guard_is_not_disabled(monkeypatch, tmp_path):
     dest = tmp_path / 'Vres-W4-NoLaunch-aaaaaaaa'
     with pytest.raises(w4.W4Refused, match='Windows'):
         w4._path(dest, new=True)
+
+
+def test_r9_original_owner_release_inputs_validate_full_inert_inventory():
+    path = HERE.with_name('release_inputs.py')
+    spec = importlib.util.spec_from_file_location('_vres_r9_inert_release_inputs', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    migrations = path.parent / 'migrations'
+    records = {
+        'src/vres_os/migrations/' + name: (migrations / name).read_bytes()
+        for name in module.PERSONAL_MIGRATION_PINS
+    }
+    assert module.release_record_problems(records) == []
+    bad = dict(records)
+    name = next(iter(module.PERSONAL_MIGRATION_PINS))
+    bad['src/vres_os/migrations/' + name] = b'-- altered inert migration\n'
+    assert module.release_record_problems(bad)
+    bad = dict(records)
+    bad['src/vres_os/experience_benchmark_violation.py'] = b'inert'
+    assert module.release_record_problems(bad)
+
+
+def test_r9_pure_in_memory_zip_is_reproducible_and_never_stages(monkeypatch, tmp_path):
+    w4, _ = _module(monkeypatch)
+    records = {'source/README.md': b'INERT\n', 'SOURCE-MANIFEST.json': b'{}\n'}
+    first = w4._zip_bytes(records)
+    second = w4._zip_bytes(dict(reversed(list(records.items()))))
+    assert first == second
+    with zipfile.ZipFile(__import__('io').BytesIO(first)) as archive:
+        assert archive.read('source/README.md') == b'INERT\n'
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_r9_full_source_pure_input_validator_refuses_before_root_creation(monkeypatch, tmp_path):
+    w4, owner, source, _ = _synthetic(monkeypatch, tmp_path)
+    owner._release_inputs.release_record_problems = lambda records: ['inert 041 migration changed']
+    dest = tmp_path / 'Vres-W4-NoLaunch-aaaaaaaa'
+    with pytest.raises(w4.W4Refused, match='release inputs refused'):
+        _build(w4, source, dest, approval=w4.STAGE_APPROVAL)
+    assert not dest.exists()
+
+
+def test_r9_posix_bound_writer_creates_exclusive_verified_root(tmp_path):
+    if os.name == 'nt':
+        pytest.skip('Windows W4 output must remain completely refused')
+    path = HERE.with_name('personal_w4_bound_output.py')
+    spec = importlib.util.spec_from_file_location('_vres_r9_bound_output', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    root = tmp_path / 'Vres-W4-NoLaunch-aaaaaaaa'
+    with module.BoundOutput(root) as writer:
+        writer.put('W4-INCOMPLETE.json', b'INCOMPLETE\n')
+        writer.put('source/src/vres_os/one.py', b'original-source\n')
+        writer.verify()
+        with pytest.raises(module.BoundOutputRefused):
+            writer.put('W4-INCOMPLETE.json', b'OVERWRITE')
+        writer.put('W4-RECEIPT.json', b'DONE\n')
+        writer.verify()
+    assert (root / 'W4-RECEIPT.json').read_bytes() == b'DONE\n'
+    with pytest.raises(OSError):
+        module.BoundOutput(root)
+
+
+def test_r9_posix_bound_writer_preserves_failed_journal(tmp_path):
+    if os.name == 'nt':
+        pytest.skip('Windows W4 output must remain completely refused')
+    path = HERE.with_name('personal_w4_bound_output.py')
+    spec = importlib.util.spec_from_file_location('_vres_r9_bound_fail', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    root = tmp_path / 'Vres-W4-NoLaunch-aaaaaaaa'
+    with pytest.raises(RuntimeError, match='simulated failure'):
+        with module.BoundOutput(root) as writer:
+            writer.put('W4-INCOMPLETE.json', b'INCOMPLETE\n')
+            raise RuntimeError('simulated failure')
+    assert (root / 'W4-INCOMPLETE.json').read_bytes() == b'INCOMPLETE\n'
+    assert not (root / 'W4-RECEIPT.json').exists()
+
+
+def test_r9_original_owner_git_inventory_enforces_streaming_limits():
+    owner_path = HERE.with_name('release_artifact.py')
+    spec = importlib.util.spec_from_file_location('_vres_r9_owner_limits', owner_path)
+    module = importlib.util.module_from_spec(spec)
+    module._w4_prechecked_release_inputs = HERE.with_name('release_inputs.py').read_bytes()
+    exec(compile(owner_path.read_bytes(), str(owner_path), 'exec'), module.__dict__)
+    def obj(kind, body):
+        import hashlib
+        full = kind.encode() + b' ' + str(len(body)).encode() + b'\0' + body
+        return hashlib.sha1(full).hexdigest(), body
+    blob, blob_body = obj('blob', b'hello\n')
+    tree, tree_body = obj('tree', b'100644 README.md\0' + bytes.fromhex(blob))
+    commit, commit_body = obj('commit', b'tree ' + tree.encode() + b'\n\nPinned source\n')
+    values = {blob: ('blob', blob_body), tree: ('tree', tree_body),
+              commit: ('commit', commit_body)}
+    reader = lambda oid: values[oid]
+    with pytest.raises(module.ReleaseArtifactError, match='file-count'):
+        module._commit_files(reader, commit, max_files=0, max_bytes=100)
+    with pytest.raises(module.ReleaseArtifactError, match='byte limit'):
+        module._commit_files(reader, commit, max_files=1, max_bytes=1)
+
+
+def test_r9_package_mode_cannot_access_bound_writer(monkeypatch):
+    w4, _ = _module(monkeypatch)
+    assert w4.bound_output is None
+    assert w4.release_owner is None
+    assert w4.git_source is None
+    assert w4._W4_VERIFIED_DIRECT is False

@@ -115,6 +115,53 @@ def release_input_problems(root: Path) -> list[str]:
     return problems
 
 
+def release_record_problems(records: dict[str, bytes]) -> list[str]:
+    """Validate W4's original-owner, Git-verified IN-MEMORY release records.
+
+    This is the same migration digest policy as release_input_problems, on bytes
+    that have already been verified against the selected source Git commit.
+    No path traversal, file opening, code execution or migration SQL execution.
+    """
+    problems: list[str] = []
+    prefix = MIGRATIONS_DIR.as_posix() + "/"
+    present = {}
+    for rel, data in records.items():
+        if type(rel) is not str or type(data) is not bytes:
+            raise ValueError("Invalid Git-verified release record")
+        if rel.startswith(prefix) and rel.endswith(".sql"):
+            name = rel[len(prefix):]
+            if "/" in name or not name:
+                problems.append("Migration record has an unexpected path")
+            else:
+                present[name] = data
+        for label, pattern in _EXPERIMENTAL:
+            if pattern.search(rel.casefold()):
+                problems.append(f"{label} experimental file {rel} must not be part of the personal release")
+                break
+    for name, raw in sorted(present.items()):
+        number = re.match(r"(\d+)_", name)
+        if number and int(number.group(1)) > PERSONAL_RELEASE_MAX_MIGRATION:
+            problems.append(f"migration {name} is above {PERSONAL_RELEASE_MAX_MIGRATION:03d} "
+                            "and is not part of the personal release")
+        elif name not in PERSONAL_MIGRATION_PINS:
+            problems.append(f"migration {name} is not one of the pinned personal-release migrations")
+        else:
+            try:
+                text = raw.decode("utf-8")
+            except UnicodeError:
+                problems.append(f"migration {name} is not valid UTF-8")
+                continue
+            # Path.read_text uses universal newline translation, as does the
+            # original release_input_problems/migration_digest implementation.
+            normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+            digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+            if digest != PERSONAL_MIGRATION_PINS[name]:
+                problems.append(f"migration {name} differs from its pinned personal-release identity")
+    for name in sorted(set(PERSONAL_MIGRATION_PINS) - set(present)):
+        problems.append(f"pinned migration {name} is missing")
+    return problems
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Validate a Vres personal-release source tree.")
     parser.add_argument("--root", type=Path, required=True)

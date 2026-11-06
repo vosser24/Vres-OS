@@ -264,13 +264,15 @@ def _tree_entries(oid: str, body: bytes) -> list[tuple[str, str, str]]:
     return entries
 
 
-def _commit_files(objects: ObjectReader, commit: str) -> tuple[str, dict[str, tuple[str, str, bytes]]]:
+def _commit_files(objects: ObjectReader, commit: str, *, max_files: int | None = None,
+                  max_bytes: int | None = None) -> tuple[str, dict[str, tuple[str, str, bytes]]]:
     """The tree id of commit and {path: (mode, blob id, bytes)} of every release file in it, all verified."""
     first = _read_object(objects, commit, "commit").split(b"\n", 1)[0]
     tree = first[5:].decode("ascii", "replace")
     if not first.startswith(b"tree ") or not _COMMIT.fullmatch(tree):
         raise ReleaseArtifactError(f"git commit {commit} does not name a tree")
     files: dict[str, tuple[str, str, bytes]] = {}
+    total_bytes = 0
     pending = [("", tree)]
     while pending:
         prefix, tree_oid = pending.pop()
@@ -292,7 +294,15 @@ def _commit_files(objects: ObjectReader, commit: str) -> tuple[str, dict[str, tu
             elif rel.startswith(PACKAGE_PREFIX) and not _PACKAGED.fullmatch(rel):
                 raise ReleaseArtifactError(f"Release path is not a package module or migration: {rel}")
             else:
-                files[rel] = (mode, oid, _read_object(objects, oid, "blob"))
+                if rel in files:
+                    raise ReleaseArtifactError("Duplicate source tree path")
+                if max_files is not None and len(files) >= max_files:
+                    raise ReleaseArtifactError("Release source file-count limit exceeded")
+                data = _read_object(objects, oid, "blob")
+                total_bytes += len(data)
+                if max_bytes is not None and total_bytes > max_bytes:
+                    raise ReleaseArtifactError("Release source byte limit exceeded")
+                files[rel] = (mode, oid, data)
     if len({rel.casefold() for rel in files}) != len(files):
         raise ReleaseArtifactError("Release paths differ only by letter case; they cannot coexist on Windows")
     missing = [f for f in SCOPE_FILES if f not in files]
@@ -321,7 +331,8 @@ def _pathspecs() -> list[str]:
 
 
 def verified_source(root: Path, source_commit: str | None, *, git: GitRunner | None = None,
-                    objects: ObjectReader | None = None) -> tuple[str, str, dict[str, tuple[str, str, bytes]]]:
+                    objects: ObjectReader | None = None, max_files: int | None = None,
+                    max_bytes: int | None = None) -> tuple[str, str, dict[str, tuple[str, str, bytes]]]:
     """(commit, tree, files) of the pinned commit at root, refusing anything that does not bind to it."""
     root = Path(root)
     pin = _pin(source_commit)
@@ -345,7 +356,7 @@ def verified_source(root: Path, source_commit: str | None, *, git: GitRunner | N
                                    "scope (" + ", ".join(changed) + "); commit or remove those changes first")
     reader = objects or _object_reader(root)
     try:
-        tree, files = _commit_files(reader, pin)
+        tree, files = _commit_files(reader, pin, max_files=max_files, max_bytes=max_bytes)
     finally:
         reader.close()
     for rel, running in _BOOTSTRAP.items():
