@@ -29,10 +29,10 @@ if not __package__:  # direct-file bootstrap: verify siblings BEFORE executing t
     _owner_dir = Path(__file__).absolute().parent
     _verified_siblings: dict[str, bytes] = {}
     for _name, _expected in (
-        ("release_artifact.py", "ba4fde661d1b6d748d9d7346249e171bf76fafb6"),
+        ("release_artifact.py", "0381fe1c772e7f9a218010a2f3101b1fae154ca0"),
         ("release_inputs.py", "f6008f391305840645a707407fa8f464b0e27389"),
-        ("personal_w4_inert_git.py", "db298b868b55a16f7973807d0f1e5c4dd82897a5"),
-        ("personal_w4_bound_output.py", "1831b824a3be43b3c3bb503a3e759ae829865dc0"),
+        ("personal_w4_inert_git.py", "c83e4fc4b7c73b761c4b21a7375a8a15f3e5075b"),
+        ("personal_w4_bound_output.py", "972c7c8276025c0cc2d68bd1be2d7173a29cb439"),
     ):
         _sibling = _owner_dir / _name
         try:
@@ -104,10 +104,10 @@ OWNER_BLOBS = {
     "src/vres_os/personal_w2_onboarding.py": "76acfcb1350a767fee216aaeb743cbf5066c07ba",
     "src/vres_os/personal_w3_reuse.py": "db354a36328294003416903574cc201e01802462",
     "src/vres_os/credential_broker.py": "41f1b83fca0b3245de392e688ed0ed895b1f1cd7",
-    "src/vres_os/release_artifact.py": "ba4fde661d1b6d748d9d7346249e171bf76fafb6",
+    "src/vres_os/release_artifact.py": "0381fe1c772e7f9a218010a2f3101b1fae154ca0",
     "src/vres_os/release_inputs.py": "f6008f391305840645a707407fa8f464b0e27389",
-    "src/vres_os/personal_w4_inert_git.py": "db298b868b55a16f7973807d0f1e5c4dd82897a5",
-    "src/vres_os/personal_w4_bound_output.py": "1831b824a3be43b3c3bb503a3e759ae829865dc0",
+    "src/vres_os/personal_w4_inert_git.py": "c83e4fc4b7c73b761c4b21a7375a8a15f3e5075b",
+    "src/vres_os/personal_w4_bound_output.py": "972c7c8276025c0cc2d68bd1be2d7173a29cb439",
     "pyproject.toml": "b2d5e30d10d7be0613e90bf3ed1e346be5678969",
 }
 _HOLDS = (
@@ -127,6 +127,7 @@ _OID = re.compile(r"[0-9a-f]{40}\Z")
 _MAX_FILES = 350
 _MAX_SOURCE_BYTES = 15 * 1024 * 1024
 _MAX_GIT_SCAN_NODES = 8192
+_MAX_GIT_CONFIG_BYTES = 64 * 1024
 _MAX_ADVISORY_MARKER_BYTES = 64 * 1024
 _MAX_ADVISORY_SCAN_NODES = 4096
 _MAX_ADVISORY_DEPTH = 32
@@ -193,25 +194,63 @@ def _disposable_source(value: str | Path) -> Path:
         raise W4Refused("Disposable Git directory inventory is incomplete") from error
 
     git_visited = 0
-    for here, directories, files in os.walk(root / ".git", followlinks=False,
-                                            onerror=reject_scan_failure):
-        git_visited += 1 + len(directories) + len(files)
-        if (git_visited > _MAX_GIT_SCAN_NODES
-                or len(Path(here).relative_to(root / ".git").parts) > 32):
+    pending = [(root / ".git", 0)]
+    original_git = _ordinary(root / ".git")
+    while pending:
+        here, depth = pending.pop()
+        git_visited += 1
+        if git_visited > _MAX_GIT_SCAN_NODES or depth > 32:
             raise W4Refused("Disposable Git metadata traversal budget exceeded")
-        for name in directories:
-            _ordinary(Path(here) / name)
-        for name in files:
-            _ordinary(Path(here) / name, directory=False)
+        _ordinary(here)
+        try:
+            # Lazy scandir, unlike os.walk, limits each entry before collection.
+            with os.scandir(here) as entries:
+                for entry in entries:
+                    git_visited += 1
+                    if git_visited > _MAX_GIT_SCAN_NODES:
+                        raise W4Refused("Disposable Git metadata traversal budget exceeded")
+                    item = here / entry.name
+                    is_dir = entry.is_dir(follow_symlinks=False)
+                    _ordinary(item, directory=is_dir)
+                    if is_dir:
+                        if depth >= 32:
+                            raise W4Refused("Disposable Git metadata traversal depth exceeded")
+                        pending.append((item, depth + 1))
+        except OSError as exc:
+            reject_scan_failure(exc)
     config_path = root / ".git" / "config"
-    _ordinary(config_path, directory=False)
     if os.path.lexists(root / ".git" / "objects" / "info" / "alternates"):
         raise W4Refused("Alternate Git object directories are not trusted")
+    before = _ordinary(config_path, directory=False)
+    if before.st_size > _MAX_GIT_CONFIG_BYTES:
+        raise W4Refused("Disposable Git config byte budget exceeded")
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise W4Refused("No-follow Git config reads unavailable")
+    try:
+        fd = os.open(config_path, os.O_RDONLY | os.O_NOFOLLOW |
+                     getattr(os, "O_CLOEXEC", 0))
+        with os.fdopen(fd, "rb") as stream:
+            opened = os.fstat(stream.fileno())
+            if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+                raise W4Refused("Disposable Git config changed before open")
+            raw_config = stream.read(_MAX_GIT_CONFIG_BYTES + 1)
+        after = _ordinary(config_path, directory=False)
+        if (len(raw_config) > _MAX_GIT_CONFIG_BYTES
+                or len(raw_config) != before.st_size
+                or after.st_size != before.st_size
+                or (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino)):
+            raise W4Refused("Disposable Git config changed during bounded read")
+        config_text = raw_config.decode("utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise W4Refused("Disposable Git config could not be read") from exc
     parser = configparser.RawConfigParser(interpolation=None, strict=False)
     try:
-        parser.read_string(config_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError, configparser.Error, UnicodeError) as exc:
+        parser.read_string(config_text)
+    except (ValueError, configparser.Error) as exc:
         raise W4Refused("Disposable source Git configuration unreadable") from exc
+    after_git = _ordinary(root / ".git")
+    if (after_git.st_dev, after_git.st_ino) != (original_git.st_dev, original_git.st_ino):
+        raise W4Refused("Disposable Git metadata root identity shifted")
     allowed = {
         "core": {"repositoryformatversion", "filemode", "bare", "logallrefupdates",
                  "ignorecase", "symlinks", "autocrlf", "safecrlf"},
@@ -447,7 +486,8 @@ def build_no_launch(source_root: str | Path, output_root: str | Path, *,
     })
 
     # The exclusively created root remains intact if any step fails. The real
-    # original owner's path-based stage() is NEVER invoked by W4 R9.
+    # original owner's path-based stage() is NEVER invoked by W4 R11.
+    # POSIX same-UID root-adoption races and Windows NT containment remain held.
     with bound_output.BoundOutput(output) as writer:
         writer.put("W4-INCOMPLETE.json", journal)
         for rel, raw in sorted(records.items()):

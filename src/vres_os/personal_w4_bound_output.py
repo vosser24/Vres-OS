@@ -52,8 +52,10 @@ class BoundOutput:
 
     The root handle and every created child directory identity are recorded.
     Final receipt creation is last; failed roots are deliberately retained.
-    A hostile process with privileges to rename the parent can still move the
-    completed candidate after we close it. This is not an installed-state proof.
+    mkdir does not yield a new directory handle: hostile same-UID concurrent
+    name replacement during root adoption remains unproven. Parent relocation
+    and post-close candidate movement remain possible. This is a synthetic
+    POSIX-only writer, never an installed-state proof.
     """
 
     def __init__(self, output: Path):
@@ -79,13 +81,23 @@ class BoundOutput:
         self._written_bytes = 0
         try:
             parent = os.fstat(self.parent_fd)
-            if parent.st_uid != os.geteuid() or parent.st_mode & 0o022:
-                raise BoundOutputRefused("A privately owned, non-group-writable output parent is required")
+            if parent.st_uid != os.geteuid() or parent.st_mode & 0o077:
+                raise BoundOutputRefused("A privately owned mode-0700 output parent is required")
             self._parent_identity = self._identity(self.parent_fd, directory=True)
             self._assert_parent_path()
             os.mkdir(self.output.name, 0o700, dir_fd=self.parent_fd)
+            # No atomic directory identity emerges from mkdir. This no-follow
+            # post-create check narrows, but cannot eliminate, same-UID races.
+            just_created = os.stat(self.output.name, dir_fd=self.parent_fd,
+                                   follow_symlinks=False)
+            if (not stat.S_ISDIR(just_created.st_mode)
+                    or just_created.st_uid != os.geteuid()
+                    or just_created.st_mode & 0o077):
+                raise BoundOutputRefused("New output root identity or mode unsafe")
             self.root_fd = os.open(self.output.name, self._dir_flags, dir_fd=self.parent_fd)
             self._directories[""] = self._identity(self.root_fd, directory=True)
+            if self._directories[""] != (just_created.st_dev, just_created.st_ino):
+                raise BoundOutputRefused("Output root moved between stat and open")
             os.fsync(self.parent_fd)
             self._assert_attached()
         except BaseException:
@@ -147,10 +159,19 @@ class BoundOutput:
                         raise BoundOutputRefused("Unregistered W4 directory")
                     # EEXIST is a refusal; never adopt another actor's directory.
                     os.mkdir(component, 0o700, dir_fd=fd)
+                    made = os.stat(component, dir_fd=fd, follow_symlinks=False)
+                    if (not stat.S_ISDIR(made.st_mode)
+                            or made.st_uid != os.geteuid()
+                            or made.st_mode & 0o077):
+                        raise BoundOutputRefused("New output directory identity or mode unsafe")
                     os.fsync(fd)
+                else:
+                    made = None
                 child = os.open(component, self._dir_flags, dir_fd=fd)
                 try:
                     identity = self._identity(child, directory=True)
+                    if made is not None and identity != (made.st_dev, made.st_ino):
+                        raise BoundOutputRefused("New child moved between stat and open")
                     if rel not in self._directories:
                         self._directories[rel] = identity
                     elif self._directories[rel] != identity:

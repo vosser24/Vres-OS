@@ -238,9 +238,18 @@ def _object_reader(root: Path) -> ObjectReader:
     return _CatFile(root)
 
 
-def _read_object(objects: ObjectReader, oid: str, kind: str) -> bytes:
-    """The content of object oid, only if it is a `kind` whose re-computed object id is oid."""
-    actual_kind, body = objects(oid)
+def _read_object(objects: ObjectReader, oid: str, kind: str, *,
+                 max_size: int | None = None) -> bytes:
+    """Verify Git content, enforcing a pre-inflation cap on the bounded W4 reader."""
+    if max_size is not None and max_size < 0:
+        raise ReleaseArtifactError("Negative release Git object budget")
+    limited = getattr(objects, "read_bounded", None)
+    if max_size is not None and callable(limited):
+        actual_kind, body = limited(oid, max_size)
+    else:
+        actual_kind, body = objects(oid)  # original-owner legacy reader still works
+    if max_size is not None and len(body) > max_size:
+        raise ReleaseArtifactError("Release Git object exceeds its bounded size profile")
     if actual_kind != kind:
         raise ReleaseArtifactError(f"git object {oid} is a {actual_kind}, not the expected {kind}")
     if hashlib.sha1(f"{kind} {len(body)}\0".encode("ascii") + body).hexdigest() != oid:
@@ -270,7 +279,9 @@ def _tree_entries(oid: str, body: bytes, *,
 def _commit_files(objects: ObjectReader, commit: str, *, max_files: int | None = None,
                   max_bytes: int | None = None) -> tuple[str, dict[str, tuple[str, str, bytes]]]:
     """The tree id of commit and {path: (mode, blob id, bytes)} of every release file in it, all verified."""
-    first = _read_object(objects, commit, "commit").split(b"\n", 1)[0]
+    bounded = max_files is not None or max_bytes is not None
+    first = _read_object(objects, commit, "commit",
+                         max_size=64 * 1024 if bounded else None).split(b"\n", 1)[0]
     tree = first[5:].decode("ascii", "replace")
     if not first.startswith(b"tree ") or not _COMMIT.fullmatch(tree):
         raise ReleaseArtifactError(f"git commit {commit} does not name a tree")
@@ -278,7 +289,6 @@ def _commit_files(objects: ObjectReader, commit: str, *, max_files: int | None =
     total_bytes = 0
     # Bounded W4 profile only. The legacy owner without max_files/max_bytes
     # retains its original staging semantics and is NOT authorized for W4.
-    bounded = max_files is not None or max_bytes is not None
     tree_count = tree_entries = tree_bytes = 0
     pending = [("", tree, 0)]
     while pending:
@@ -287,7 +297,9 @@ def _commit_files(objects: ObjectReader, commit: str, *, max_files: int | None =
             tree_count += 1
             if tree_count > 2048 or depth > 32:
                 raise ReleaseArtifactError("Release Git tree traversal/depth budget exceeded")
-        tree_body = _read_object(objects, tree_oid, "tree")
+        tree_body = _read_object(
+            objects, tree_oid, "tree",
+            max_size=(4 * 1024 * 1024 - tree_bytes) if bounded else None)
         if bounded:
             tree_bytes += len(tree_body)
             if tree_bytes > 4 * 1024 * 1024:

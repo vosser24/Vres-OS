@@ -381,6 +381,7 @@ def _loose_fixture(tmp_path):
     return git, root, commit, blob, entry, content, Owner()
 
 
+@pytest.mark.skipif(os.name == 'nt', reason='No-follow loose Git reader is POSIX-only; Windows staging refused')
 def test_strict_loose_git_source_runs_original_owner_interface_without_git_spawn(tmp_path, monkeypatch):
     git, root, commit, blob, _, content, owner = _loose_fixture(tmp_path)
     import subprocess
@@ -401,6 +402,7 @@ def test_strict_loose_git_source_runs_original_owner_interface_without_git_spawn
         store.git_runner(['show', '--format'])
 
 
+@pytest.mark.skipif(os.name == 'nt', reason='No-follow loose Git reader is POSIX-only; Windows staging refused')
 def test_strict_loose_git_rejects_packed_or_linked_storage(tmp_path):
     git, root, commit, _, _, _, owner = _loose_fixture(tmp_path)
     pack = root / '.git' / 'objects' / 'pack'
@@ -414,6 +416,7 @@ def test_strict_loose_git_rejects_packed_or_linked_storage(tmp_path):
         git.LooseGitSource(root, commit, owner, max_files=350, max_bytes=10000)
 
 
+@pytest.mark.skipif(os.name == 'nt', reason='No-follow loose Git reader is POSIX-only; Windows staging refused')
 def test_strict_loose_git_rejects_unpinned_symbolic_head(tmp_path):
     git, root, commit, _, _, _, owner = _loose_fixture(tmp_path)
     (root / '.git' / 'HEAD').write_text('ref: refs/heads/main\n')
@@ -421,6 +424,7 @@ def test_strict_loose_git_rejects_unpinned_symbolic_head(tmp_path):
         git.LooseGitSource(root, commit, owner, max_files=350, max_bytes=10000)
 
 
+@pytest.mark.skipif(os.name == 'nt', reason='No-follow loose Git reader is POSIX-only; Windows staging refused')
 def test_strict_loose_git_detects_corrupted_and_trailing_object(tmp_path):
     git, root, commit, blob, entry, _, owner = _loose_fixture(tmp_path)
     store = git.LooseGitSource(root, commit, owner, max_files=350, max_bytes=10000)
@@ -432,6 +436,7 @@ def test_strict_loose_git_detects_corrupted_and_trailing_object(tmp_path):
         store.read_object(blob)
 
 
+@pytest.mark.skipif(os.name == 'nt', reason='No-follow loose Git reader is POSIX-only; Windows staging refused')
 def test_strict_loose_git_rejects_untracked_and_modified_release_scope(tmp_path):
     git, root, commit, _, _, _, owner = _loose_fixture(tmp_path)
     store = git.LooseGitSource(root, commit, owner, max_files=350, max_bytes=10000)
@@ -663,7 +668,7 @@ def test_r10_posix_bound_writer_detects_parent_relocation(tmp_path):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     parent = tmp_path / 'original'
-    parent.mkdir()
+    parent.mkdir(mode=0o700)
     root = parent / 'Vres-W4-NoLaunch-aaaaaaaa'
     with module.BoundOutput(root) as writer:
         writer.put('W4-INCOMPLETE.json', b'INCOMPLETE\n')
@@ -708,3 +713,95 @@ def test_r10_original_owner_rejects_large_or_deep_git_trees_without_staging():
     with pytest.raises(owner.ReleaseArtifactError, match='traversal/depth'):
         owner._commit_files(lambda oid: objects[oid], commit,
                             max_files=350, max_bytes=15 * 1024 * 1024)
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='Windows loose Git reader is unapproved')
+def test_r11_loose_git_preinflation_budget_enforced(tmp_path):
+    git, root, commit, blob, entry, content, owner = _loose_fixture(tmp_path)
+    store = git.LooseGitSource(root, commit, owner, max_files=350, max_bytes=10000)
+    reader = store.reader()
+    assert reader.read_bounded(blob, len(content)) == ('blob', content)
+    with pytest.raises(git.LooseGitRefused, match='Unbounded|bounded|Bounded'):
+        reader.read_bounded(blob, 1)
+    reader.close()
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='Windows loose Git reader is unapproved')
+def test_r11_loose_source_scope_uses_lazy_scandir_not_walk(tmp_path, monkeypatch):
+    git, root, commit, _, _, _, owner = _loose_fixture(tmp_path)
+    store = git.LooseGitSource(root, commit, owner, max_files=350, max_bytes=10000)
+    monkeypatch.setattr(git.os, 'walk', lambda *a, **kw: pytest.fail('os.walk not allowed'))
+    expected = set(owner.SCOPE_FILES) | {
+        'src/vres_os/demo.py', 'plugins/vres-os/demo.txt',
+        'scripts/windows/demo.ps1',
+    }
+    assert store._scope_files() == expected
+    monkeypatch.setattr(git, '_MAX_SCOPE_SCAN_NODES', 1)
+    with pytest.raises(git.LooseGitRefused, match='budget'):
+        store._scope_files()
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='Windows Git config reader is unapproved')
+def test_r11_disposable_git_inventory_is_lazy_and_bounded(tmp_path, monkeypatch):
+    w4, _, source, _ = _synthetic(monkeypatch, tmp_path)
+    monkeypatch.setattr(w4.os, 'walk', lambda *a, **kw: pytest.fail('os.walk not allowed'))
+    assert w4._disposable_source(source) == source
+    monkeypatch.setattr(w4, '_MAX_GIT_SCAN_NODES', 1)
+    with pytest.raises(w4.W4Refused, match='metadata traversal budget'):
+        w4._disposable_source(source)
+
+
+def test_r11_git_config_bounded_before_read(tmp_path, monkeypatch):
+    w4, _, source, _ = _synthetic(monkeypatch, tmp_path)
+    config = source / '.git' / 'config'
+    monkeypatch.setattr(w4, '_MAX_GIT_CONFIG_BYTES', 64)
+    config.write_bytes(b'[core]\n' + b'a' * 100)
+    with pytest.raises(w4.W4Refused, match='config byte budget'):
+        w4._disposable_source(source)
+
+
+def test_r11_posix_output_rejects_nonprivate_parent(tmp_path):
+    if os.name == 'nt':
+        pytest.skip('Windows W4 creation remains refused')
+    path = HERE.with_name('personal_w4_bound_output.py')
+    spec = importlib.util.spec_from_file_location('_vres_r11_private_parent', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    parent = tmp_path / 'public'
+    parent.mkdir(mode=0o700)
+    parent.chmod(0o755)
+    try:
+        with pytest.raises(module.BoundOutputRefused, match='mode-0700'):
+            module.BoundOutput(parent / 'Vres-W4-NoLaunch-aaaaaaaa')
+    finally:
+        parent.chmod(0o700)
+    assert not (parent / 'Vres-W4-NoLaunch-aaaaaaaa').exists()
+
+
+def test_r11_owner_passes_bounded_reader_explicit_object_limits():
+    path = HERE.with_name('release_artifact.py')
+    spec = importlib.util.spec_from_file_location('_vres_r11_bounded_owner', path)
+    owner = importlib.util.module_from_spec(spec)
+    owner._w4_prechecked_release_inputs = HERE.with_name('release_inputs.py').read_bytes()
+    exec(compile(path.read_bytes(), str(path), 'exec'), owner.__dict__)
+
+    def obj(kind, body):
+        payload = kind.encode() + b' ' + str(len(body)).encode() + b'\0' + body
+        return hashlib.sha1(payload).hexdigest(), (kind, body)
+
+    tree_oid, tree_record = obj('tree', b'')
+    commit_oid, commit_record = obj('commit', b'tree ' + tree_oid.encode() + b'\n\npinned')
+    objects = {tree_oid: tree_record, commit_oid: commit_record}
+    calls = []
+
+    class BoundedReader:
+        def read_bounded(self, oid, maximum):
+            calls.append((oid, maximum))
+            return objects[oid]
+        def __call__(self, oid):
+            pytest.fail('bounded owner should not use unbounded reader')
+
+    with pytest.raises(owner.ReleaseArtifactError, match='incomplete'):
+        owner._commit_files(BoundedReader(), commit_oid, max_files=350,
+                            max_bytes=15 * 1024 * 1024)
+    assert calls == [(commit_oid, 64 * 1024), (tree_oid, 4 * 1024 * 1024)]

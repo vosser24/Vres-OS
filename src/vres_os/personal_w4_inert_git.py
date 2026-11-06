@@ -44,8 +44,12 @@ def _read_regular(path: Path, *, limit: int) -> bytes:
     before = _ordinary(path, directory=False)
     if before.st_size > limit:
         raise LooseGitRefused("Offline Git input exceeds its explicit byte bound")
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise LooseGitRefused("No-follow source reads unavailable")
+    flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
     try:
-        with path.open("rb") as stream:
+        fd = os.open(path, flags)
+        with os.fdopen(fd, "rb") as stream:
             opened = os.fstat(stream.fileno())
             if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
                 raise LooseGitRefused("Offline Git input changed before open")
@@ -69,6 +73,11 @@ class _LooseReader:
         if self.closed:
             raise LooseGitRefused("Closed offline Git object reader")
         return self.source.read_object(oid)
+
+    def read_bounded(self, oid: str, max_payload_bytes: int) -> tuple[str, bytes]:
+        if self.closed:
+            raise LooseGitRefused("Closed offline Git object reader")
+        return self.source.read_object(oid, max_payload_bytes=max_payload_bytes)
 
     def close(self) -> None:
         # No child process, thread, worker, pipe or OS handle survives a read.
@@ -103,22 +112,30 @@ class LooseGitSource:
     def reader(self) -> _LooseReader:
         return _LooseReader(self)
 
-    def read_object(self, oid: str) -> tuple[str, bytes]:
+    def read_object(self, oid: str, *,
+                    max_payload_bytes: int | None = None) -> tuple[str, bytes]:
         if not _OID.fullmatch(oid):
             raise LooseGitRefused("Invalid offline Git object identifier")
         directory = self.git_dir / "objects" / oid[:2]
         _ordinary(directory, directory=True)
         compressed = _read_regular(directory / oid[2:],
                                    limit=min(_MAX_COMPRESSED, self.max_bytes + 1024 * 1024))
+        if max_payload_bytes is not None and max_payload_bytes < 0:
+            raise LooseGitRefused("Negative offline Git object budget")
+        # Bound inflation before materialization; leave 64 bytes for Git's header.
+        inflated_budget = (_MAX_INFLATED if max_payload_bytes is None
+                           else min(_MAX_INFLATED, max_payload_bytes + 64))
         try:
             decoder = zlib.decompressobj()
-            expanded = decoder.decompress(compressed, _MAX_INFLATED + 1)
+            expanded = decoder.decompress(compressed, inflated_budget + 1)
         except zlib.error as exc:
             raise LooseGitRefused("Malformed compressed Git object") from exc
-        if (len(expanded) > _MAX_INFLATED or not decoder.eof
+        if (len(expanded) > inflated_budget or not decoder.eof
                 or decoder.unused_data or decoder.unconsumed_tail):
             raise LooseGitRefused("Unbounded or trailing Git object stream refused")
         header, sep, body = expanded.partition(b"\0")
+        if max_payload_bytes is not None and len(body) > max_payload_bytes:
+            raise LooseGitRefused("Bounded Git object payload exceeded")
         if not sep:
             raise LooseGitRefused("Malformed offline Git object header")
         parts = header.split(b" ")
@@ -135,26 +152,37 @@ class LooseGitSource:
         original_root = _ordinary(self.root, directory=True)
         original_git = _ordinary(self.git_dir, directory=True)
 
-        def scan_error(error: OSError) -> None:
-            raise LooseGitRefused("Source release-scope enumeration incomplete") from error
-
         for rel in self.owner.SCOPE_DIRS:
             scope = self.root.joinpath(*rel.strip("/").split("/"))
-            _ordinary(scope, directory=True)
-            for here, dirs, names in os.walk(scope, followlinks=False, onerror=scan_error):
-                visited += 1 + len(dirs) + len(names)
+            pending = [(scope, 0)]
+            while pending:
+                here, depth = pending.pop()
+                visited += 1
                 if visited > _MAX_SCOPE_SCAN_NODES:
                     raise LooseGitRefused("Offline source scope traversal budget exceeded")
-                if len(Path(here).relative_to(scope).parts) > _MAX_SCOPE_DEPTH:
+                if depth > _MAX_SCOPE_DEPTH:
                     raise LooseGitRefused("Offline source scope depth budget exceeded")
-                for name in dirs:
-                    _ordinary(Path(here) / name, directory=True)
-                for name in names:
-                    item = Path(here) / name
-                    _ordinary(item, directory=False)
-                    found.add(item.relative_to(self.root).as_posix())
-                    if len(found) > self.max_files:
-                        raise LooseGitRefused("Offline source scope exceeds file bound")
+                _ordinary(here, directory=True)
+                try:
+                    # Lazy scandir prevents unbounded per-directory os.walk lists.
+                    with os.scandir(here) as entries:
+                        for entry in entries:
+                            visited += 1
+                            if visited > _MAX_SCOPE_SCAN_NODES:
+                                raise LooseGitRefused("Offline source scope traversal budget exceeded")
+                            item = here / entry.name
+                            is_dir = entry.is_dir(follow_symlinks=False)
+                            _ordinary(item, directory=is_dir)
+                            if is_dir:
+                                if depth >= _MAX_SCOPE_DEPTH:
+                                    raise LooseGitRefused("Offline source scope depth budget exceeded")
+                                pending.append((item, depth + 1))
+                            else:
+                                found.add(item.relative_to(self.root).as_posix())
+                                if len(found) > self.max_files:
+                                    raise LooseGitRefused("Offline source scope exceeds file bound")
+                except OSError as exc:
+                    raise LooseGitRefused("Source release-scope enumeration incomplete") from exc
         for rel in self.owner.SCOPE_FILES:
             visited += 1
             if visited > _MAX_SCOPE_SCAN_NODES:
