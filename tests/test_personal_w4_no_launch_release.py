@@ -112,7 +112,9 @@ def test_accepted_owners_create_one_inert_deterministic_source_zip(monkeypatch, 
         assert result['install_authorized'] is False
         assert result['runtime_ready'] is False
         assert result['source_files'] == len(files)
-        assert not (dest / 'W4-INCOMPLETE.json').exists()
+        # No path-unlink after success: receipt supersedes the diagnostic journal.
+        assert (dest / 'W4-INCOMPLETE.json').is_file()
+        assert (dest / 'W4-RECEIPT.json').is_file()
         digest = hashlib.sha256((dest / 'W4-SOURCE-ONLY-NO-LAUNCH.zip').read_bytes()).hexdigest()
         assert digest == result['zip_sha256']
         with zipfile.ZipFile(dest / 'W4-SOURCE-ONLY-NO-LAUNCH.zip') as archive:
@@ -241,6 +243,7 @@ def test_git_binary_hash_must_match_before_any_git_child(monkeypatch, tmp_path):
     w4, _ = _module(monkeypatch)
     fake_git = tmp_path / 'git.exe'
     fake_git.write_bytes(b'not a trusted executable')
+    monkeypatch.setattr(w4, '_require_trusted_windows_stage', lambda: None)
     with pytest.raises(w4.W4Refused, match='approved pin'):
         w4._trusted_git(tmp_path, fake_git, '0' * 64)
 
@@ -441,12 +444,59 @@ def test_git_batch_success_uses_one_verified_bounded_response(monkeypatch):
         def wait(self, timeout): return -9
 
     child = Child()
-    monkeypatch.setattr(w4.subprocess, 'Popen', lambda *a, **kw: child)
+    launches = []
+    monkeypatch.setattr(w4.subprocess, 'Popen',
+                        lambda *a, **kw: (launches.append(kw), child)[1])
     reader = w4._PinnedGitObjects(Path('/git'), Path('/synthetic'), {})
     assert reader(oid) == ('blob', b'abc')
+    assert launches[0]['cwd'] == str(reader.executable.parent)
     assert child.stdout.calls == 2
     reader.close()
     assert child.killed
+
+
+def test_windows_staging_is_hard_held_without_independent_chain_of_trust(monkeypatch, tmp_path):
+    w4, _ = _module(monkeypatch)
+    with pytest.raises(w4.W4Refused, match='DLL/loader chain'):
+        w4._require_trusted_windows_stage(platform='nt')
+    w4._require_trusted_windows_stage(platform='posix')
+
+
+def test_failed_top_level_git_cleanup_keeps_live_reference_for_reap(monkeypatch):
+    w4, _ = _module(monkeypatch)
+
+    class Reader:
+        attempts = 0
+        def close(self):
+            self.attempts += 1
+            if self.attempts < 3:
+                raise w4.W4Refused('Synthetic child still alive')
+
+    reader = Reader()
+    with pytest.raises(w4.W4Refused, match='cleanup incomplete'):
+        with w4._GitReaderScope(lambda: reader) as scope:
+            scope.release(scope.acquire())  # first close failure; scope retries
+
+    assert reader.attempts == 2
+    assert reader in w4._PENDING_GIT_READERS
+    with pytest.raises(w4.W4Refused, match='previous Git child'):
+        with w4._GitReaderScope(lambda: reader):
+            pytest.fail('No second stage may start while cleanup is pending')
+    assert w4.reap_pending_git_readers() is True
+    assert reader.attempts == 3
+    assert not w4._PENDING_GIT_READERS
+
+
+def test_output_root_identity_shift_refuses_staging(monkeypatch, tmp_path):
+    w4, _ = _module(monkeypatch)
+    root = tmp_path / 'Vres-W4-NoLaunch-aaaaaaaa'
+    root.mkdir()
+    identity = w4._root_identity(root)
+    w4._assert_root_identity(root, identity)
+    monkeypatch.setattr(w4, '_root_identity',
+                        lambda _path: (identity[0], identity[1] + 1))
+    with pytest.raises(w4.W4Refused, match='identity shifted'):
+        w4._assert_root_identity(root, identity)
 
 
 def test_windows_production_root_guard_is_not_disabled(monkeypatch, tmp_path):

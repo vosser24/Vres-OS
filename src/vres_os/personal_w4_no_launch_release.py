@@ -7,6 +7,7 @@ only composes an inspectable ZIP, negative capability contract and receipt.
 from __future__ import annotations
 
 import argparse
+import atexit
 import queue
 import threading
 import configparser
@@ -243,7 +244,8 @@ class _PinnedGitObjects:
                      "-c", "core.fsmonitor=false", "-c", "core.quotepath=off",
                      "cat-file", "--batch"],
                     stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                    stderr=subprocess.DEVNULL, env=self.environment)
+                    stderr=subprocess.DEVNULL, env=self.environment,
+                    cwd=str(self.executable.parent))
             except OSError as exc:
                 raise W4Refused("Pinned Git could not read local objects") from exc
         response: queue.Queue[tuple[bool, Any]] = queue.Queue(maxsize=1)
@@ -309,7 +311,89 @@ class _PinnedGitObjects:
         self._worker = None
 
 
+# Strong references survive an exceptional close, including after the build's
+# local reader variables unwind. This is a bounded retry aid, NOT a promise that
+# an unkillable OS child can be contained or reaped.
+_PENDING_GIT_READERS: set[_PinnedGitObjects] = set()
+
+
+def reap_pending_git_readers() -> bool:
+    for reader in tuple(_PENDING_GIT_READERS):
+        try:
+            reader.close()
+        except Exception:
+            continue
+        _PENDING_GIT_READERS.discard(reader)
+    return not _PENDING_GIT_READERS
+
+
+atexit.register(reap_pending_git_readers)
+
+
+class _GitReaderScope:
+    """Own every transport through every success/failure exit from one stage."""
+
+    def __init__(self, factory: Any):
+        self.factory = factory
+        self.readers: list[_PinnedGitObjects] = []
+
+    def __enter__(self) -> "_GitReaderScope":
+        if _PENDING_GIT_READERS:
+            raise W4Refused("A previous Git child/reader has not been reaped; no new stage")
+        return self
+
+    def acquire(self) -> _PinnedGitObjects:
+        reader = self.factory()
+        self.readers.append(reader)
+        _PENDING_GIT_READERS.add(reader)
+        return reader
+
+    def release(self, reader: _PinnedGitObjects) -> None:
+        reader.close()
+        self.readers.remove(reader)
+        _PENDING_GIT_READERS.discard(reader)
+
+    def __exit__(self, _type: Any, _value: Any, _traceback: Any) -> None:
+        problems: list[Exception] = []
+        for reader in reversed(tuple(self.readers)):
+            try:
+                self.release(reader)
+            except Exception as exc:
+                problems.append(exc)
+        if problems:
+            # The global registry still holds the exact process/worker references.
+            # Operator-visible failure is mandatory; no successful receipt follows.
+            raise W4Refused(
+                "Git child/worker cleanup incomplete; retained for bounded retry, "
+                "no further stage authorized"
+            ) from problems[0]
+
+
+def _require_trusted_windows_stage(platform: str | None = None) -> None:
+    # R7 MUST NOT silently transform a pinned git.exe hash into DLL/loader
+    # attestation or process/descendant/TOCTOU clearance. Hold actual Windows
+    # execution until a separately reviewed trusted containment implementation.
+    if (os.name if platform is None else platform) == "nt":
+        raise W4Refused(
+            "Windows staging held: Git DLL/loader chain, bounded spawn and "
+            "filesystem containment have not been independently cleared"
+        )
+
+
+def _root_identity(path: Path) -> tuple[int, int]:
+    info = _ordinary(path)
+    if not info.st_ino:
+        raise W4Refused("Output filesystem provides no stable file identity")
+    return info.st_dev, info.st_ino
+
+
+def _assert_root_identity(path: Path, identity: tuple[int, int]) -> None:
+    if _root_identity(path) != identity:
+        raise W4Refused("Disposable output root identity shifted during stage")
+
+
 def _trusted_git(source: Path, executable: str | Path, expected_sha256: str):
+    _require_trusted_windows_stage()
     exe = Path(executable)
     if (not exe.is_absolute() or ".." in exe.parts
             or not re.fullmatch(r"[0-9a-f]{64}", expected_sha256)):
@@ -343,7 +427,8 @@ def _trusted_git(source: Path, executable: str | Path, expected_sha256: str):
             done = subprocess.run(
                 [str(exe), "-C", str(source), "-c", "core.fsmonitor=false",
                  "-c", "core.quotepath=off", *args], check=False,
-                capture_output=True, timeout=120, env=env)
+                capture_output=True, timeout=120, env=env,
+                cwd=str(exe.parent))
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise W4Refused("Pinned Git read operation failed") from exc
         if done.returncode:
@@ -475,17 +560,18 @@ def build_no_launch(source_root: str | Path, output_root: str | Path, *,
         raise W4Refused("Source and new candidate root must remain separate")
     # Git object transport is pinned; original owner retains the source verification.
     git, reader_factory = _trusted_git(source, git_executable, git_sha256)
-    ancestry = reader_factory()
-    try:
-        _verify_w3_ancestry(ancestry, source_commit)
-    finally:
-        ancestry.close()
-    reader = reader_factory()
-    try:
-        commit, tree, original = release_owner.verified_source(
-            source, source_commit, git=git, objects=reader)
-    finally:
-        reader.close()
+    with _GitReaderScope(reader_factory) as leases:
+        ancestry = leases.acquire()
+        try:
+            _verify_w3_ancestry(ancestry, source_commit)
+        finally:
+            leases.release(ancestry)
+        reader = leases.acquire()
+        try:
+            commit, tree, original = release_owner.verified_source(
+                source, source_commit, git=git, objects=reader)
+        finally:
+            leases.release(reader)
     _pin_owners(original)
     committed_entry = original.get(_W4_REL)
     try:
@@ -500,19 +586,23 @@ def build_no_launch(source_root: str | Path, output_root: str | Path, *,
     dependencies, capabilities, readme = _documentation(original)
     try:
         output.mkdir()  # exclusive create; never overwrite an existing candidate
+        root_identity = _root_identity(output)
         _write_new(output / "W4-INCOMPLETE.json", _json({
             "schema": SCHEMA, "state": "INCOMPLETE", "source_commit": commit,
             "source_tree": tree, "output_name": output.name,
             "expected_paths": sorted(original),
         }))
-        staging_reader = reader_factory()
-        try:
-            manifest = release_owner.stage(
-                source, output / "source", output / "SOURCE-MANIFEST.json",
-                source_commit=source_commit, git=git, objects=staging_reader,
-                preserve_failed_stage=True)
-        finally:
-            staging_reader.close()
+        _assert_root_identity(output, root_identity)
+        with _GitReaderScope(reader_factory) as leases:
+            staging_reader = leases.acquire()
+            try:
+                manifest = release_owner.stage(
+                    source, output / "source", output / "SOURCE-MANIFEST.json",
+                    source_commit=source_commit, git=git, objects=staging_reader,
+                    preserve_failed_stage=True)
+            finally:
+                leases.release(staging_reader)
+        _assert_root_identity(output, root_identity)
         if manifest["source_commit"] != commit or manifest["source_tree"] != tree:
             raise W4Refused("Original owner staging shifted source identity")
         entry = {row["path"]: row for row in manifest["files"]}
@@ -539,7 +629,9 @@ def build_no_launch(source_root: str | Path, output_root: str | Path, *,
                           ("W4-CAPABILITIES.json", capabilities),
                           ("W4-READ-FIRST.txt", readme)):
             _write_new(output / name, raw)
+        _assert_root_identity(output, root_identity)
         zip_hash = _zip(output, records)
+        _assert_root_identity(output, root_identity)
         receipt = {
             "schema": RECEIPT_SCHEMA, "source_commit": commit, "source_tree": tree,
             "inherited_accepted_base_W3_R2": BASE_W3_R2,
@@ -552,8 +644,10 @@ def build_no_launch(source_root: str | Path, output_root: str | Path, *,
             "install_authorized": False, "db_contact": False,
             "genuine_windows_pytest": "NOT_RUN",
         }
+        _assert_root_identity(output, root_identity)
         _write_new(output / "W4-RECEIPT.json", _json(receipt))
-        (output / "W4-INCOMPLETE.json").unlink()
+        # Keep the original INCOMPLETE journal as immutable diagnostic history.
+        # A verified receipt supersedes it; do not unlink any path after staging.
         return receipt
     except BaseException:
         # Keep any partial stage for read-only inspection. Path ownership can shift
