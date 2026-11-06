@@ -4,7 +4,7 @@ This *does not* resolve runtime dependencies or upgrade P2. The established
 release_artifact owner verifies pinned git objects and canonical manifest bytes.
 W4 does NOT invoke the original owner's path-based stage(). The source ZIP,
 negative capability contract and receipt are bound to immutable memory bytes.
-Windows staging remains unconditionally refused.
+Operational output staging remains unconditionally refused on every platform until an externally authenticated entrypoint and secure filesystem publication are established.
 """
 from __future__ import annotations
 
@@ -269,13 +269,18 @@ def _disposable_source(value: str | Path) -> Path:
 
 
 def _require_trusted_windows_stage(platform: str | None = None) -> None:
-    # Safety hold applies to all W4 Windows staging even after Git subprocess
-    # removal: filesystem path identity and original-owner rename remain unproven.
-    if (os.name if platform is None else platform) == "nt":
-        raise W4Refused(
-            "Windows staging held: handle-bound original-owner filesystem safety "
-            "and trusted offline gate have not been independently cleared"
-        )
+    """Permanent R13 negative capability until a distinct trusted release design.
+
+    Historical function name/signature retained for compatible synthetic tests.
+    No caller-supplied platform value, approval token, current source checksum,
+    or self-authored journal can establish external publisher authority or
+    post-close artifact ownership. Production writes are held on ALL platforms.
+    """
+    raise W4Refused(
+        "Operational W4 staging held on every platform: independently "
+        "authenticated initial Python entrypoint and handle-bound output "
+        "publication, including post-close integrity, are NOT_ESTABLISHED"
+    )
 
 
 def _root_identity(path: Path) -> tuple[int, int]:
@@ -412,13 +417,13 @@ def _zip_bytes(records: dict[str, bytes]) -> bytes:
 
 def build_no_launch(source_root: str | Path, output_root: str | Path, *,
                     source_commit: str, approval: str) -> dict[str, Any]:
-    """Bound POSIX synthetic archive only; Windows staging remains hard-refused."""
+    """Retained synthetic memory/ZIP path; operational writes hard-refused on every OS."""
     if approval != STAGE_APPROVAL or not _OID.fullmatch(source_commit):
         raise W4Refused("Exact new-root approval and full source commit pin are required")
     if (not _W4_VERIFIED_DIRECT or release_owner is None or git_source is None
             or bound_output is None):
         raise W4Refused("Only directly verified Python -I -B W4 source may stage")
-    _require_trusted_windows_stage()  # Do not bypass for a Windows gate.
+    _require_trusted_windows_stage()  # Fail before accessing ANY source/output pathname.
     source = _disposable_source(source_root)
     output = _path(output_root, new=True)
     if source == output or source in output.parents or output in source.parents:
@@ -494,7 +499,7 @@ def build_no_launch(source_root: str | Path, output_root: str | Path, *,
 
     # The exclusively created root remains intact if any step fails. The real
     # original owner's path-based stage() is NEVER invoked by W4 R11.
-    # POSIX same-UID root-adoption races and Windows NT containment remain held.
+    # R13 makes this writer test-only. POSIX same-UID races and NT containment are held.
     with bound_output.BoundOutput(output) as writer:
         writer.put("W4-INCOMPLETE.json", journal)
         for rel, raw in sorted(records.items()):

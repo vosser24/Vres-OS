@@ -46,8 +46,10 @@ def _synthetic(monkeypatch, tmp_path):
     monkeypatch.setattr(w4, '_W4_VERIFIED_DIRECT', True)
     monkeypatch.setattr(w4, 'release_owner', owner)
     owner._release_inputs = types.SimpleNamespace(release_record_problems=lambda records: [])
+    # The R13 production gate ALWAYS refuses. This test-only synthetic author
+    # harness replaces it; no real offline writer or Windows stage is authorized.
+    monkeypatch.setattr(w4, '_require_trusted_windows_stage', lambda: None)
     if os.name == 'nt':
-        monkeypatch.setattr(w4, '_require_trusted_windows_stage', lambda: None)
         # Author simulation uses pytest's disposable tmp_path, never a real W4 root.
         # A separate guarded Windows gate tests the actual C:/Projects restriction.
         def synthetic_root(value, *, new):
@@ -906,3 +908,29 @@ def test_r12_rollback_refuses_before_any_input_root_read(monkeypatch):
     with pytest.raises(w4.W4Refused, match='disabled unconditionally'):
         w4.rollback_interrupted('/never-touch-this-path', approval=w4.ROLLBACK_APPROVAL)
 
+
+
+def test_r13_operational_staging_refuses_before_source_or_output_path_access(monkeypatch):
+    """Real positive authorization cannot be inferred from an approval string."""
+    w4, _ = _module(monkeypatch)
+    monkeypatch.setattr(w4, '_W4_VERIFIED_DIRECT', True)
+    monkeypatch.setattr(w4, 'release_owner', types.SimpleNamespace())
+    monkeypatch.setattr(w4, 'git_source', types.SimpleNamespace())
+    monkeypatch.setattr(w4, 'bound_output', types.SimpleNamespace())
+    monkeypatch.setattr(
+        w4, '_disposable_source',
+        lambda value: pytest.fail('Production stage accessed untrusted source root'))
+    monkeypatch.setattr(
+        w4, '_path',
+        lambda *a, **kw: pytest.fail('Production stage accessed output root'))
+    with pytest.raises(w4.W4Refused, match='every platform'):
+        w4.build_no_launch(
+            '/path-never-read', '/output-never-touched',
+            source_commit='f' * 40, approval=w4.STAGE_APPROVAL)
+
+
+def test_r13_platform_override_is_not_a_release_authority(monkeypatch):
+    w4, _ = _module(monkeypatch)
+    for claimed_platform in ('posix', 'nt'):
+        with pytest.raises(w4.W4Refused, match='NOT_ESTABLISHED'):
+            w4._require_trusted_windows_stage(platform=claimed_platform)
