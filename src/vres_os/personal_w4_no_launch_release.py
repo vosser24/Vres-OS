@@ -1,8 +1,10 @@
 """W4: inert, reproducible original-owner source release; never install or launch.
 
 This *does not* resolve runtime dependencies or upgrade P2. The established
-release_artifact owner checks pinned git objects and stages the source. W4
-only composes an inspectable ZIP, negative capability contract and receipt.
+release_artifact owner verifies pinned git objects and canonical manifest bytes.
+W4 does NOT invoke the original owner's path-based stage(). The source ZIP,
+negative capability contract and receipt are bound to immutable memory bytes.
+Windows staging remains unconditionally refused.
 """
 from __future__ import annotations
 
@@ -27,10 +29,10 @@ if not __package__:  # direct-file bootstrap: verify siblings BEFORE executing t
     _owner_dir = Path(__file__).absolute().parent
     _verified_siblings: dict[str, bytes] = {}
     for _name, _expected in (
-        ("release_artifact.py", "1553d775a9880e50e72fa481e07391c088baee1d"),
+        ("release_artifact.py", "ba4fde661d1b6d748d9d7346249e171bf76fafb6"),
         ("release_inputs.py", "f6008f391305840645a707407fa8f464b0e27389"),
-        ("personal_w4_inert_git.py", "ddf2768438f4634d794f77e3ad04165bcfcd4c47"),
-        ("personal_w4_bound_output.py", "b202e47bfcf23d16d234f5ec9e3a05dbd9709515"),
+        ("personal_w4_inert_git.py", "db298b868b55a16f7973807d0f1e5c4dd82897a5"),
+        ("personal_w4_bound_output.py", "1831b824a3be43b3c3bb503a3e759ae829865dc0"),
     ):
         _sibling = _owner_dir / _name
         try:
@@ -102,10 +104,10 @@ OWNER_BLOBS = {
     "src/vres_os/personal_w2_onboarding.py": "76acfcb1350a767fee216aaeb743cbf5066c07ba",
     "src/vres_os/personal_w3_reuse.py": "db354a36328294003416903574cc201e01802462",
     "src/vres_os/credential_broker.py": "41f1b83fca0b3245de392e688ed0ed895b1f1cd7",
-    "src/vres_os/release_artifact.py": "1553d775a9880e50e72fa481e07391c088baee1d",
+    "src/vres_os/release_artifact.py": "ba4fde661d1b6d748d9d7346249e171bf76fafb6",
     "src/vres_os/release_inputs.py": "f6008f391305840645a707407fa8f464b0e27389",
-    "src/vres_os/personal_w4_inert_git.py": "ddf2768438f4634d794f77e3ad04165bcfcd4c47",
-    "src/vres_os/personal_w4_bound_output.py": "b202e47bfcf23d16d234f5ec9e3a05dbd9709515",
+    "src/vres_os/personal_w4_inert_git.py": "db298b868b55a16f7973807d0f1e5c4dd82897a5",
+    "src/vres_os/personal_w4_bound_output.py": "1831b824a3be43b3c3bb503a3e759ae829865dc0",
     "pyproject.toml": "b2d5e30d10d7be0613e90bf3ed1e346be5678969",
 }
 _HOLDS = (
@@ -124,6 +126,10 @@ _W4_REL = "src/vres_os/personal_w4_no_launch_release.py"
 _OID = re.compile(r"[0-9a-f]{40}\Z")
 _MAX_FILES = 350
 _MAX_SOURCE_BYTES = 15 * 1024 * 1024
+_MAX_GIT_SCAN_NODES = 8192
+_MAX_ADVISORY_MARKER_BYTES = 64 * 1024
+_MAX_ADVISORY_SCAN_NODES = 4096
+_MAX_ADVISORY_DEPTH = 32
 
 class W4Refused(ValueError):
     """No real installed/user-state operation is authorized."""
@@ -186,8 +192,13 @@ def _disposable_source(value: str | Path) -> Path:
     def reject_scan_failure(error: OSError) -> None:
         raise W4Refused("Disposable Git directory inventory is incomplete") from error
 
+    git_visited = 0
     for here, directories, files in os.walk(root / ".git", followlinks=False,
                                             onerror=reject_scan_failure):
+        git_visited += 1 + len(directories) + len(files)
+        if (git_visited > _MAX_GIT_SCAN_NODES
+                or len(Path(here).relative_to(root / ".git").parts) > 32):
+            raise W4Refused("Disposable Git metadata traversal budget exceeded")
         for name in directories:
             _ordinary(Path(here) / name)
         for name in files:
@@ -307,6 +318,8 @@ def _documentation(files: dict[str, tuple[str, str, bytes]]) -> tuple[bytes, byt
         "w2_onboarding": "ACCEPTED_NARROW_OFFLINE_WINDOWS_ADAPTER_ONLY",
         "w3_memory_resources": "ACCEPTED_NARROW_OFFLINE_WINDOWS_ADAPTER_ONLY",
         "runtime_entrypoint_bundled_but_launch_authorized": False,
+        "independent_entrypoint_publisher_authentication": "NOT_ESTABLISHED",
+        "independent_windows_filesystem_containment": "NOT_ESTABLISHED",
         "db_migrations_001_041_present_as_INERT_source_data_only": True,
         "db_migration_execution_allowed": False,
         "native_claude_or_hooks_allowed": False,
@@ -364,6 +377,8 @@ def build_no_launch(source_root: str | Path, output_root: str | Path, *,
     output = _path(output_root, new=True)
     if source == output or source in output.parents or output in source.parents:
         raise W4Refused("Source and candidate root must remain separate")
+    if source.parent != output.parent:
+        raise W4Refused("W4 POSIX synthetic source and output require one explicitly shared parent")
 
     store = git_source.LooseGitSource(source, source_commit, release_owner,
                                       max_files=_MAX_FILES, max_bytes=_MAX_SOURCE_BYTES)
@@ -421,6 +436,8 @@ def build_no_launch(source_root: str | Path, output_root: str | Path, *,
         "runtime_ready": False, "launch_authorized": False,
         "install_authorized": False, "db_contact": False,
         "genuine_windows_pytest": "NOT_RUN",
+        "independent_source_review": "NOT_RUN",
+        "operational_security_accepted": False,
         "writer_profile": "POSIX_HANDLE_RELATIVE_ONLY_WINDOWS_REFUSED",
     }
     journal = _json({
@@ -453,10 +470,22 @@ def inspect_interrupted(output_root: str | Path) -> dict[str, Any]:
     if os.path.lexists(root / "W4-RECEIPT.json"):
         raise W4Refused("Receipt path present but not authenticated; preserve root, never rollback")
     marker = root / "W4-INCOMPLETE.json"
-    _ordinary(marker, directory=False)
+    before = _ordinary(marker, directory=False)
+    if before.st_size > _MAX_ADVISORY_MARKER_BYTES:
+        raise W4Refused("Interrupted marker exceeds read-only inspection byte budget")
     try:
-        journal = json.loads(marker.read_text("ascii"))
-    except (ValueError, UnicodeError) as exc:
+        with marker.open("rb") as stream:
+            opened = os.fstat(stream.fileno())
+            if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+                raise W4Refused("Interrupted marker changed before read")
+            raw = stream.read(_MAX_ADVISORY_MARKER_BYTES + 1)
+        after = _ordinary(marker, directory=False)
+        if (len(raw) > _MAX_ADVISORY_MARKER_BYTES or len(raw) != before.st_size
+                or (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino)
+                or after.st_size != before.st_size):
+            raise W4Refused("Interrupted marker changed during bounded read")
+        journal = json.loads(raw.decode("ascii"))
+    except (OSError, ValueError, UnicodeError) as exc:
         raise W4Refused("Interrupted marker invalid") from exc
     if (type(journal) is not dict or journal.get("schema") != SCHEMA
             or journal.get("state") != "INCOMPLETE"
@@ -464,8 +493,11 @@ def inspect_interrupted(output_root: str | Path) -> dict[str, Any]:
             or not isinstance(journal.get("expected_paths"), list)
             or not journal["expected_paths"]
             or len(journal["expected_paths"]) > _MAX_FILES
-            or any(type(v) is not str or not v or v.startswith("/") or ".." in v.split("/")
-                   or "\\" in v or "\x00" in v for v in journal["expected_paths"])):
+            or any(type(v) is not str or not v or len(v) > 4096
+                   or len(v.split("/")) > _MAX_ADVISORY_DEPTH
+                   or any(not re.fullmatch(r"[A-Za-z0-9_.@+ -]+", part)
+                          or part in (".", "..") for part in v.split("/"))
+                   for v in journal["expected_paths"])):
         raise W4Refused("Interrupted ownership proof is incomplete")
     expected = {"W4-INCOMPLETE.json", "SOURCE-MANIFEST.json", "W4-DEPENDENCIES.json",
                 "W4-CAPABILITIES.json", "W4-READ-FIRST.txt", "W4-SOURCE-ONLY-NO-LAUNCH.zip"}
@@ -473,28 +505,42 @@ def inspect_interrupted(output_root: str | Path) -> dict[str, Any]:
     observed = []
     allowed_dirs = {"/".join(p.split("/")[:n]) for p in expected
                     for n in range(1, len(p.split("/")))}
-    def scan_error(error: OSError) -> None:
-        raise W4Refused("Interrupted inventory scan failed; no deletion is permitted") from error
-
-    for here, dirs, names in os.walk(root, followlinks=False, onerror=scan_error):
-        for name in dirs + names:
-            item = Path(here) / name
-            _ordinary(item, directory=name in dirs)
-            rel = item.relative_to(root).as_posix()
-            first, _, tail = rel.partition("/")
-            if re.fullmatch(r"\.source\.incomplete-[0-9a-f]{8}", first):
-                logical = "source" + ("/" + tail if tail else "")
-            elif re.fullmatch(r"\.SOURCE-MANIFEST\.json\.[0-9a-f]{32}\.tmp", rel):
-                logical = "SOURCE-MANIFEST.json"
-            else:
-                logical = rel
-            if name in dirs:
-                if logical not in allowed_dirs:
-                    raise W4Refused("Unexpected interruption-root directory; do not delete")
-            else:
-                if logical not in expected:
-                    raise W4Refused("Unexpected interruption-root file; do not delete")
-                observed.append(rel)
+    # A lazy, read-only inventory with explicit node/depth ceilings. This
+    # remains ADVISORY only; pathname reads cannot prove concurrent ownership.
+    pending = [root]
+    visited = 0
+    while pending:
+        here = pending.pop()
+        if len(here.relative_to(root).parts) > _MAX_ADVISORY_DEPTH:
+            raise W4Refused("Interrupted inventory depth budget exceeded")
+        try:
+            with os.scandir(here) as entries:
+                for entry in entries:
+                    visited += 1
+                    if visited > _MAX_ADVISORY_SCAN_NODES:
+                        raise W4Refused("Interrupted inventory node budget exceeded")
+                    item = Path(here) / entry.name
+                    kind = item.lstat()
+                    is_directory = stat.S_ISDIR(kind.st_mode)
+                    _ordinary(item, directory=is_directory)
+                    rel = item.relative_to(root).as_posix()
+                    first, _, tail = rel.partition("/")
+                    if re.fullmatch(r"\.source\.incomplete-[0-9a-f]{8}", first):
+                        logical = "source" + ("/" + tail if tail else "")
+                    elif re.fullmatch(r"\.SOURCE-MANIFEST\.json\.[0-9a-f]{32}\.tmp", rel):
+                        logical = "SOURCE-MANIFEST.json"
+                    else:
+                        logical = rel
+                    if is_directory:
+                        if logical not in allowed_dirs:
+                            raise W4Refused("Unexpected interruption-root directory; do not delete")
+                        pending.append(item)
+                    else:
+                        if logical not in expected:
+                            raise W4Refused("Unexpected interruption-root file; do not delete")
+                        observed.append(rel)
+        except OSError as exc:
+            raise W4Refused("Interrupted inventory scan failed; no deletion is permitted") from exc
     return {"schema": SCHEMA, "status": "INCOMPLETE_ADVISORY_ONLY",
             "root": str(root), "source_commit": journal.get("source_commit"),
             "observed_files": sorted(observed), "ownership_proven": False,

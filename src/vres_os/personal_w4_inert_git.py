@@ -19,6 +19,8 @@ _OID = re.compile(r"[0-9a-f]{40}\Z")
 _REPARSE = 0x400
 _MAX_COMPRESSED = 64 * 1024 * 1024
 _MAX_INFLATED = 15 * 1024 * 1024 + 4096  # W4 release-scope bound
+_MAX_SCOPE_SCAN_NODES = 4096
+_MAX_SCOPE_DEPTH = 32
 
 
 class LooseGitRefused(ValueError):
@@ -129,6 +131,9 @@ class LooseGitSource:
 
     def _scope_files(self) -> set[str]:
         found: set[str] = set()
+        visited = 0
+        original_root = _ordinary(self.root, directory=True)
+        original_git = _ordinary(self.git_dir, directory=True)
 
         def scan_error(error: OSError) -> None:
             raise LooseGitRefused("Source release-scope enumeration incomplete") from error
@@ -137,6 +142,11 @@ class LooseGitSource:
             scope = self.root.joinpath(*rel.strip("/").split("/"))
             _ordinary(scope, directory=True)
             for here, dirs, names in os.walk(scope, followlinks=False, onerror=scan_error):
+                visited += 1 + len(dirs) + len(names)
+                if visited > _MAX_SCOPE_SCAN_NODES:
+                    raise LooseGitRefused("Offline source scope traversal budget exceeded")
+                if len(Path(here).relative_to(scope).parts) > _MAX_SCOPE_DEPTH:
+                    raise LooseGitRefused("Offline source scope depth budget exceeded")
                 for name in dirs:
                     _ordinary(Path(here) / name, directory=True)
                 for name in names:
@@ -146,9 +156,16 @@ class LooseGitSource:
                     if len(found) > self.max_files:
                         raise LooseGitRefused("Offline source scope exceeds file bound")
         for rel in self.owner.SCOPE_FILES:
+            visited += 1
+            if visited > _MAX_SCOPE_SCAN_NODES:
+                raise LooseGitRefused("Offline source scope traversal budget exceeded")
             p = self.root.joinpath(*rel.split("/"))
             _ordinary(p, directory=False)
             found.add(rel)
+        for item, original in ((self.root, original_root), (self.git_dir, original_git)):
+            current = _ordinary(item, directory=True)
+            if (current.st_dev, current.st_ino) != (original.st_dev, original.st_ino):
+                raise LooseGitRefused("Offline Git/source directory identity shifted")
         return found
 
     def assert_clean_scope(self) -> None:

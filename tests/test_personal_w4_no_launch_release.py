@@ -304,7 +304,7 @@ def test_ancestry_requires_object_hash_and_sole_parent(monkeypatch):
         w4._verify_w3_ancestry(Reader(), head)
 
 
-def test_os_walk_error_must_refuse_advisory_inventory(monkeypatch, tmp_path):
+def test_scandir_error_must_refuse_advisory_inventory(monkeypatch, tmp_path):
     w4, _, _, _ = _synthetic(monkeypatch, tmp_path)
     root = tmp_path / 'Vres-W4-NoLaunch-aaaaaaaa'
     root.mkdir()
@@ -313,11 +313,13 @@ def test_os_walk_error_must_refuse_advisory_inventory(monkeypatch, tmp_path):
         'expected_paths': ['src/vres_os/personal_w3_reuse.py'],
     }))
 
-    def fail_scan(root_path, *, followlinks, onerror):
-        onerror(PermissionError('forced enumeration error'))
-        yield root_path, [], []
+    original_scandir = w4.os.scandir
+    def fail_scan(root_path):
+        if Path(root_path) == root:
+            raise PermissionError('forced enumeration error')
+        return original_scandir(root_path)
 
-    monkeypatch.setattr(w4.os, 'walk', fail_scan)
+    monkeypatch.setattr(w4.os, 'scandir', fail_scan)
     with pytest.raises(w4.W4Refused, match='scan failed'):
         w4.inspect_interrupted(root)
     assert root.is_dir()
@@ -597,3 +599,112 @@ def test_r9_package_mode_cannot_access_bound_writer(monkeypatch):
     assert w4.release_owner is None
     assert w4.git_source is None
     assert w4._W4_VERIFIED_DIRECT is False
+
+
+def test_r10_disposable_source_and_output_require_shared_parent(monkeypatch, tmp_path):
+    w4, _, source, _ = _synthetic(monkeypatch, tmp_path)
+    elsewhere = tmp_path / 'unrelated'
+    elsewhere.mkdir()
+    dest = elsewhere / 'Vres-W4-NoLaunch-aaaaaaaa'
+    with pytest.raises(w4.W4Refused, match='shared parent'):
+        _build(w4, source, dest, approval=w4.STAGE_APPROVAL)
+    assert not dest.exists()
+
+
+def test_r10_advisory_marker_has_a_hard_byte_limit(monkeypatch, tmp_path):
+    w4, _ = _module(monkeypatch)
+    root = tmp_path / 'Vres-W4-NoLaunch-aaaaaaaa'
+    root.mkdir()
+    marker = root / 'W4-INCOMPLETE.json'
+    marker.write_bytes(b'A' * (w4._MAX_ADVISORY_MARKER_BYTES + 1))
+    with pytest.raises(w4.W4Refused, match='byte budget'):
+        w4.inspect_interrupted(root)
+    assert marker.is_file()
+
+
+def test_r10_advisory_node_budget_fails_closed(monkeypatch, tmp_path):
+    w4, _ = _module(monkeypatch)
+    root = tmp_path / 'Vres-W4-NoLaunch-aaaaaaaa'
+    root.mkdir()
+    (root / 'W4-INCOMPLETE.json').write_bytes(w4._json({
+        'schema': w4.SCHEMA, 'state': 'INCOMPLETE', 'output_name': root.name,
+        'expected_paths': ['src/vres_os/personal_w3_reuse.py'],
+    }))
+    (root / 'source').mkdir()
+    monkeypatch.setattr(w4, '_MAX_ADVISORY_SCAN_NODES', 1)
+    with pytest.raises(w4.W4Refused, match='node budget'):
+        w4.inspect_interrupted(root)
+    assert (root / 'W4-INCOMPLETE.json').exists()
+
+
+def test_r10_posix_bound_writer_refuses_writable_parent(tmp_path):
+    if os.name == 'nt':
+        pytest.skip('Windows W4 staging is always refused')
+    path = HERE.with_name('personal_w4_bound_output.py')
+    spec = importlib.util.spec_from_file_location('_vres_r10_private_parent', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    parent = tmp_path / 'synthetic_parent'
+    parent.mkdir()
+    parent.chmod(0o777)
+    try:
+        with pytest.raises(module.BoundOutputRefused, match='privately owned'):
+            module.BoundOutput(parent / 'Vres-W4-NoLaunch-aaaaaaaa')
+    finally:
+        parent.chmod(0o700)
+    assert not (parent / 'Vres-W4-NoLaunch-aaaaaaaa').exists()
+
+
+def test_r10_posix_bound_writer_detects_parent_relocation(tmp_path):
+    if os.name == 'nt':
+        pytest.skip('Windows W4 staging is always refused')
+    path = HERE.with_name('personal_w4_bound_output.py')
+    spec = importlib.util.spec_from_file_location('_vres_r10_parent_move', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    parent = tmp_path / 'original'
+    parent.mkdir()
+    root = parent / 'Vres-W4-NoLaunch-aaaaaaaa'
+    with module.BoundOutput(root) as writer:
+        writer.put('W4-INCOMPLETE.json', b'INCOMPLETE\n')
+        parent.rename(tmp_path / 'moved')
+        parent.mkdir()
+        with pytest.raises(module.BoundOutputRefused, match='parent pathname'):
+            writer.put('W4-READ-FIRST.txt', b'NO LAUNCH\n')
+    assert (tmp_path / 'moved' / root.name / 'W4-INCOMPLETE.json').is_file()
+    assert not (tmp_path / 'moved' / root.name / 'W4-READ-FIRST.txt').exists()
+
+
+def test_r10_original_owner_rejects_large_or_deep_git_trees_without_staging():
+    owner_path = HERE.with_name('release_artifact.py')
+    spec = importlib.util.spec_from_file_location('_vres_r10_tree_budgets', owner_path)
+    owner = importlib.util.module_from_spec(spec)
+    owner._w4_prechecked_release_inputs = HERE.with_name('release_inputs.py').read_bytes()
+    exec(compile(owner_path.read_bytes(), str(owner_path), 'exec'), owner.__dict__)
+
+    def put(objects, kind, body):
+        payload = kind.encode() + b' ' + str(len(body)).encode() + b'\0' + body
+        oid = hashlib.sha1(payload).hexdigest()
+        objects[oid] = (kind, body)
+        return oid
+
+    objects = {}
+    tree_body = b''.join(
+        b'100644 unrelated%05d.txt\0' % index + bytes.fromhex('a' * 40)
+        for index in range(8200)
+    )
+    tree = put(objects, 'tree', tree_body)
+    commit = put(objects, 'commit', b'tree ' + tree.encode() + b'\n\nlarge')
+    with pytest.raises(owner.ReleaseArtifactError, match='tree entry budget'):
+        owner._commit_files(lambda oid: objects[oid], commit,
+                            max_files=350, max_bytes=15 * 1024 * 1024)
+
+    objects = {}
+    current = put(objects, 'tree', b'')
+    for part in reversed(['src', 'vres_os'] + ['nested'] * 36):
+        current = put(objects, 'tree', b'40000 ' + part.encode() + b'\0'
+                      + bytes.fromhex(current))
+    commit = put(objects, 'commit', b'tree ' + current.encode() + b'\n\ndeep')
+    with pytest.raises(owner.ReleaseArtifactError, match='traversal/depth'):
+        owner._commit_files(lambda oid: objects[oid], commit,
+                            max_files=350, max_bytes=15 * 1024 * 1024)

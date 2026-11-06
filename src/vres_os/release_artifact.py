@@ -248,7 +248,8 @@ def _read_object(objects: ObjectReader, oid: str, kind: str) -> bytes:
     return body
 
 
-def _tree_entries(oid: str, body: bytes) -> list[tuple[str, str, str]]:
+def _tree_entries(oid: str, body: bytes, *,
+                  max_entries: int | None = None) -> list[tuple[str, str, str]]:
     entries, i = [], 0
     try:
         while i < len(body):
@@ -256,6 +257,8 @@ def _tree_entries(oid: str, body: bytes) -> list[tuple[str, str, str]]:
             nul = body.index(b"\0", space)
             if nul + 21 > len(body):
                 raise ValueError
+            if max_entries is not None and len(entries) >= max_entries:
+                raise ReleaseArtifactError("Release Git tree entry budget exceeded")
             entries.append((body[i:space].decode("ascii"), body[space + 1:nul].decode("utf-8", "surrogateescape"),
                             body[nul + 1:nul + 21].hex()))
             i = nul + 21
@@ -273,16 +276,35 @@ def _commit_files(objects: ObjectReader, commit: str, *, max_files: int | None =
         raise ReleaseArtifactError(f"git commit {commit} does not name a tree")
     files: dict[str, tuple[str, str, bytes]] = {}
     total_bytes = 0
-    pending = [("", tree)]
+    # Bounded W4 profile only. The legacy owner without max_files/max_bytes
+    # retains its original staging semantics and is NOT authorized for W4.
+    bounded = max_files is not None or max_bytes is not None
+    tree_count = tree_entries = tree_bytes = 0
+    pending = [("", tree, 0)]
     while pending:
-        prefix, tree_oid = pending.pop()
-        for mode, name, oid in _tree_entries(tree_oid, _read_object(objects, tree_oid, "tree")):
+        prefix, tree_oid, depth = pending.pop()
+        if bounded:
+            tree_count += 1
+            if tree_count > 2048 or depth > 32:
+                raise ReleaseArtifactError("Release Git tree traversal/depth budget exceeded")
+        tree_body = _read_object(objects, tree_oid, "tree")
+        if bounded:
+            tree_bytes += len(tree_body)
+            if tree_bytes > 4 * 1024 * 1024:
+                raise ReleaseArtifactError("Release Git tree byte budget exceeded")
+        entries = _tree_entries(tree_oid, tree_body,
+                                max_entries=8192 if bounded else None)
+        for mode, name, oid in entries:
+            if bounded:
+                tree_entries += 1
+                if tree_entries > 8192:
+                    raise ReleaseArtifactError("Release Git tree aggregate entry budget exceeded")
             rel = prefix + name
             if not (in_scope(rel) or _leads_to_scope(rel)):
                 continue
             _check_rel(rel)
             if mode == _TREE_MODE:
-                pending.append((rel + "/", oid))
+                pending.append((rel + "/", oid, depth + 1))
             elif _leads_to_scope(rel):
                 raise ReleaseArtifactError(f"Release directory is not an ordinary git tree: {rel}")
             elif mode == "120000":

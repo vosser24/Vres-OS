@@ -13,6 +13,10 @@ import stat
 from pathlib import Path
 
 _SAFE = re.compile(r"[A-Za-z0-9_.@+ -]+\Z")
+_MAX_OUTPUT_FILES = 800
+_MAX_OUTPUT_BYTES = 64 * 1024 * 1024
+_MAX_SCAN_NODES = 4096
+_MAX_SCAN_DEPTH = 32
 
 
 class BoundOutputRefused(RuntimeError):
@@ -58,7 +62,7 @@ class BoundOutput:
         required = (os.open, os.mkdir, os.stat)
         if (not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_NOFOLLOW")
                 or not all(f in os.supports_dir_fd for f in required)
-                or os.listdir not in os.supports_fd):
+                or os.scandir not in os.supports_fd or not hasattr(os, "geteuid")):
             raise BoundOutputRefused("Platform lacks required handle-relative POSIX primitives")
         self.output = Path(output)
         if not self.output.is_absolute() or ".." in self.output.parts:
@@ -72,10 +76,17 @@ class BoundOutput:
         self.root_fd: int | None = None
         self._directories: dict[str, tuple[int, int]] = {}
         self._expected: dict[str, bytes] = {}
+        self._written_bytes = 0
         try:
+            parent = os.fstat(self.parent_fd)
+            if parent.st_uid != os.geteuid() or parent.st_mode & 0o022:
+                raise BoundOutputRefused("A privately owned, non-group-writable output parent is required")
+            self._parent_identity = self._identity(self.parent_fd, directory=True)
+            self._assert_parent_path()
             os.mkdir(self.output.name, 0o700, dir_fd=self.parent_fd)
             self.root_fd = os.open(self.output.name, self._dir_flags, dir_fd=self.parent_fd)
             self._directories[""] = self._identity(self.root_fd, directory=True)
+            os.fsync(self.parent_fd)
             self._assert_attached()
         except BaseException:
             self.close()
@@ -92,9 +103,26 @@ class BoundOutput:
             raise BoundOutputRefused("W4 output filesystem provides no usable identity")
         return (value.st_dev, value.st_ino)
 
+    def _assert_parent_path(self) -> None:
+        # An open handle alone cannot show that its original pathname still
+        # leads to the same directory. Rewalk the pinned absolute path through
+        # no-follow directory handles before and after each atomic operation.
+        if self.parent_fd is None:
+            raise BoundOutputRefused("W4 output parent is closed")
+        try:
+            reopened = _open_directory_from_root(self.output.parent, self._dir_flags)
+        except OSError as exc:
+            raise BoundOutputRefused("W4 output parent pathname moved") from exc
+        try:
+            if self._identity(reopened, directory=True) != self._parent_identity:
+                raise BoundOutputRefused("W4 output parent pathname was substituted")
+        finally:
+            os.close(reopened)
+
     def _assert_attached(self) -> None:
         if self.root_fd is None:
             raise BoundOutputRefused("W4 output root is closed")
+        self._assert_parent_path()
         try:
             named = os.stat(self.output.name, dir_fd=self.parent_fd, follow_symlinks=False)
             opened = self._identity(self.root_fd, directory=True)
@@ -106,7 +134,9 @@ class BoundOutput:
     def _directory(self, components: tuple[str, ...], *, create: bool) -> int:
         if self.root_fd is None:
             raise BoundOutputRefused("W4 writer closed")
-        fd = os.dup(self.root_fd)
+        # Open an independent directory description: dup() shares readdir
+        # offsets and would make the second verify() miss entries.
+        fd = os.open(".", self._dir_flags, dir_fd=self.root_fd)
         prefix: list[str] = []
         try:
             for component in components:
@@ -117,6 +147,7 @@ class BoundOutput:
                         raise BoundOutputRefused("Unregistered W4 directory")
                     # EEXIST is a refusal; never adopt another actor's directory.
                     os.mkdir(component, 0o700, dir_fd=fd)
+                    os.fsync(fd)
                 child = os.open(component, self._dir_flags, dir_fd=fd)
                 try:
                     identity = self._identity(child, directory=True)
@@ -162,6 +193,9 @@ class BoundOutput:
         parts = _parts(rel)
         if rel in self._expected:
             raise BoundOutputRefused("Duplicate W4 output file")
+        if (len(self._expected) >= _MAX_OUTPUT_FILES
+                or self._written_bytes + len(data) > _MAX_OUTPUT_BYTES):
+            raise BoundOutputRefused("W4 output file-count or total-byte budget exceeded")
         self._assert_attached()
         parent = self._directory(parts[:-1], create=True)
         try:
@@ -175,11 +209,13 @@ class BoundOutput:
                         raise BoundOutputRefused("W4 output write made no progress")
                     offset += count
                 os.fsync(fd)
+                os.fsync(parent)
             finally:
                 os.close(fd)
         finally:
             os.close(parent)
         self._expected[rel] = data
+        self._written_bytes += len(data)
         self._read(rel, data)
         self._assert_attached()
 
@@ -187,25 +223,38 @@ class BoundOutput:
         """Read back exact file bytes, reject unexpected entries, without pathname traversal."""
         self._assert_attached()
         observed: set[str] = set()
+        visited = 0
 
-        def scan(relative: str) -> None:
+        def scan(relative: str, depth: int) -> None:
+            nonlocal visited
+            if depth > _MAX_SCAN_DEPTH:
+                raise BoundOutputRefused("W4 output directory depth budget exceeded")
             fd = self._directory(tuple(relative.split("/")) if relative else (), create=False)
             try:
-                for name in os.listdir(fd):
-                    item = name if not relative else relative + "/" + name
-                    if item in self._directories:
-                        scan(item)
-                    elif item in self._expected:
-                        self._read(item, self._expected[item])
-                        observed.add(item)
-                    else:
-                        raise BoundOutputRefused("Unexpected W4 output entry")
+                # Lazy fd-relative enumeration: reject unexpected entries before
+                # materializing an unbounded list of names.
+                with os.scandir(fd) as entries:
+                    for entry in entries:
+                        visited += 1
+                        if visited > _MAX_SCAN_NODES:
+                            raise BoundOutputRefused("W4 output directory entry budget exceeded")
+                        name = entry.name
+                        item = name if not relative else relative + "/" + name
+                        if item in self._directories:
+                            scan(item, depth + 1)
+                        elif item in self._expected:
+                            self._read(item, self._expected[item])
+                            observed.add(item)
+                        else:
+                            raise BoundOutputRefused("Unexpected W4 output entry")
             finally:
                 os.close(fd)
 
-        scan("")
+        scan("", 0)
         if observed != set(self._expected):
             raise BoundOutputRefused("W4 source archive output is incomplete")
+        os.fsync(self.root_fd)
+        os.fsync(self.parent_fd)
         self._assert_attached()
 
     def close(self) -> None:
