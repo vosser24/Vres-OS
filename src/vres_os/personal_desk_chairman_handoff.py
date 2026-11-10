@@ -205,6 +205,129 @@ def render_handoff(value: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+WORK_BRIEF_SCHEMA = "vres-personal-explicit-task-project-work-brief/1"
+_PROJECT_KEY = re.compile(r"project:[A-Za-z0-9][A-Za-z0-9_.:-]{0,95}\Z", re.ASCII)
+_WORK_HOLDS = (
+    "LIVE_SCHEMA_048_INCIDENT_OPEN_NO_POSTGRESQL",
+    "HOST_HOOK_DB_ROUTE_OPEN_NO_NATIVE_CLAUDE",
+    "INDEPENDENT_FABLE_POSITIVE_AUTHORITY_NOT_GRANTED",
+    "PROTECTED_P2_INSTALLATION_NOT_AUTHORIZED",
+)
+
+
+def _exact_json(value: Any) -> str:
+    """Avoid Python False == 0 equivalence when comparing preview contracts."""
+    try:
+        return json.dumps(value, sort_keys=True, ensure_ascii=True,
+                          separators=(",", ":"), allow_nan=False)
+    except (ValueError, TypeError, UnicodeError, OverflowError, RecursionError) as exc:
+        raise PersonalHandoffRefused("Invalid work preview data") from exc
+
+
+def inspect_work_brief(
+    desk_path: str | Path, selected_task: str,
+    project_root: str | Path, project_key: str, *,
+    show_selected_action: bool = False,
+) -> dict[str, Any]:
+    """One existing receipt + one explicit read-only project inspection.
+
+    A scratch task and selected project remain independent user-supplied data.
+    Neither is a native Vres task binding or permission to run project code.
+    W3 synthetic memory/metadata is intentionally NOT promoted to live memory.
+    """
+    if (type(selected_task) is not str or not _TASK_KEY.fullmatch(selected_task)
+            or type(project_key) is not str or not _PROJECT_KEY.fullmatch(project_key)
+            or type(project_root) not in (str, Path)
+            or type(show_selected_action) is not bool):
+        raise PersonalHandoffRefused("One exact task and project selection required")
+    root = Path(project_root)
+    if not root.is_absolute() or ".." in root.parts:
+        raise PersonalHandoffRefused("An explicit absolute project root is required")
+
+    # Construct only a data identity. NEVER call discover_project(): it runs Git.
+    from vres_os.project import ProjectIdentity
+    from vres_os import personal_w2_onboarding as w2
+    from vres_os import personal_project_intake as intake
+    project = ProjectIdentity(
+        root=root, key=project_key, name="explicitly-selected",
+        remote_url=None, branch=None,
+    )
+    try:
+        selected = inspect_handoff(
+            desk_path, selected_task, show_selected_action=show_selected_action)
+        if selected["status"] != "VERIFIED_SCRATCH_SELECTION_FOR_UNTRUSTED_CHAIRMAN_HANDOFF":
+            raise PersonalHandoffRefused("No exact active scratch task selected")
+        scan = w2.preview_personal_w2_onboarding(project)
+        # Reuse the existing sanitizer: never echo untrusted file or hook text.
+        intake_text = intake.render_personal_project_intake(scan["project_preview"])
+        if any(scan.get(k) is not False for k in (
+            "activation_authorized", "project_write_permitted",
+            "profile_write_permitted", "independent_fable_validation_granted",
+        )):
+            raise PersonalHandoffRefused("Project snapshot attempted to grant authority")
+        current = w2.require_current_personal_w2_onboarding(project, scan)
+        reselected = inspect_handoff(
+            desk_path, selected_task, show_selected_action=show_selected_action)
+        if _exact_json(scan) != _exact_json(current) or _exact_json(selected) != _exact_json(reselected):
+            raise PersonalHandoffRefused("Scratch or project changed during preview")
+    except Exception:
+        # Do not expose project path, private task text or imported hook contents.
+        raise PersonalHandoffRefused("Work brief refused: selected source changed or unsafe") from None
+
+    result = {
+        "schema": WORK_BRIEF_SCHEMA,
+        "status": "EXPLICIT_SCRATCH_AND_PROJECT_READ_ONLY_PREVIEW",
+        "scratch_handoff": reselected,
+        "project_binding_sha256": current["project_binding_sha256"],
+        "project_intake_summary": intake_text,
+        "project_snapshot_scope": "SCAN_TIME_STRUCTURAL_FINDINGS_NOT_ALL_FILE_BYTES",
+        "memory_status": "W3_SYNTHETIC_ONLY_NO_LIVE_RETRIEVAL",
+        "task_bound_to_project": False,
+        "native_chairman_task_bound": False,
+        "operator_approval_granted": False,
+        "files_written": False,
+        "read_only": True,
+        "open_holds": list(_WORK_HOLDS),
+    }
+    if len(_exact_json(result).encode("ascii")) > 9500:
+        raise PersonalHandoffRefused("Work brief exceeds bounded output")
+    return result
+
+
+def render_work_brief(report: dict[str, Any]) -> str:
+    """Human work orientation only, not an authorization or an agent command."""
+    if (type(report) is not dict or report.get("schema") != WORK_BRIEF_SCHEMA
+            or report.get("status") != "EXPLICIT_SCRATCH_AND_PROJECT_READ_ONLY_PREVIEW"
+            or report.get("project_snapshot_scope") != "SCAN_TIME_STRUCTURAL_FINDINGS_NOT_ALL_FILE_BYTES"
+            or report.get("memory_status") != "W3_SYNTHETIC_ONLY_NO_LIVE_RETRIEVAL"
+            or report.get("open_holds") != list(_WORK_HOLDS)
+            or report.get("read_only") is not True
+            or any(report.get(k) is not False for k in (
+                "task_bound_to_project", "native_chairman_task_bound",
+                "operator_approval_granted", "files_written",
+            ))):
+        raise PersonalHandoffRefused("Work brief cannot grant task/project authority")
+    sha, summary, scratch = (
+        report.get("project_binding_sha256"), report.get("project_intake_summary"),
+        report.get("scratch_handoff"),
+    )
+    if (type(sha) is not str or not _NOTE_DIGEST.fullmatch(sha)
+            or type(summary) is not str or len(summary) > 3200
+            or not summary.startswith("Vres-OS PERSONAL")
+            or type(scratch) is not dict
+            or scratch.get("scratch_is_authoritative_task") is not False
+            or scratch.get("chairman_task_bound") is not False
+            or scratch.get("writes_performed") is not False):
+        raise PersonalHandoffRefused("Malformed or authority-claiming work data")
+    return "\n\n".join((
+        "VRES PERSONAL WORK BRIEF — EXPLICIT TASK + PROJECT / READ ONLY\n"
+        "Two user-selected data sources, NOT an authoritative task-to-project binding.",
+        render_handoff(scratch), summary,
+        "No real memory, credentials, database, Git, native Claude, hooks or protected "
+        "installation was accessed or authorized by this work brief.",
+    ))
+
+
 class _SafeParser(argparse.ArgumentParser):
     def error(self, message: str) -> None:
         raise PersonalHandoffRefused("Invalid personal handoff arguments")
@@ -216,12 +339,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--select")
     parser.add_argument("--show-selected-action", action="store_true")
     parser.add_argument("--format", choices=("text", "json"), default="text")
+    parser.add_argument("--project-root")
+    parser.add_argument("--project-key")
     try:
         args = parser.parse_args(argv)
-        report = inspect_handoff(args.desk, args.select,
-                                 show_selected_action=args.show_selected_action)
-        output = render_handoff(report) if args.format == "text" else json.dumps(
-            report, sort_keys=True, ensure_ascii=True)
+        if args.project_root is not None or args.project_key is not None:
+            report = inspect_work_brief(
+                args.desk, args.select, args.project_root, args.project_key,
+                show_selected_action=args.show_selected_action)
+            output = render_work_brief(report) if args.format == "text" else json.dumps(
+                report, sort_keys=True, ensure_ascii=True)
+        else:
+            report = inspect_handoff(args.desk, args.select,
+                                     show_selected_action=args.show_selected_action)
+            output = render_handoff(report) if args.format == "text" else json.dumps(
+                report, sort_keys=True, ensure_ascii=True)
     except Exception:
         print("VRES_SCRATCH_HANDOFF_REFUSED: verify exact desk/task and receipt; no host action.",
               file=sys.stderr)
