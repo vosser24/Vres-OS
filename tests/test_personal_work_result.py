@@ -41,6 +41,11 @@ def test_selected_result_and_repeatable_resume_evidence(tmp_path, capsys):
     recheck = result.inspect_work_result(*args, expected_sha256=digest)
     assert recheck["status"] == "RESULT_BYTES_MATCH_PRIOR_DIGEST"
     assert recheck["work_brief"] == first["work_brief"]
+    assert first["checkpoint_is_persisted"] is False
+    replay = result.inspect_work_result(
+        *args, expected_checkpoint_sha256=first["checkpoint_sha256"])
+    assert replay["status"] == "RESULT_EXACT_CONTEXT_CHECKPOINT_MATCH"
+    assert replay["checkpoint_sha256"] == first["checkpoint_sha256"]
     assert cli.main(["work-result", "--desk", str(personal),
                      "--select", "TASK-WORK-RESULT", "--project-root", str(project),
                      "--project-key", "project:work-result",
@@ -83,3 +88,33 @@ def test_wrong_changed_outside_hidden_and_linked_result_refused(tmp_path, capsys
                      "--project-key", "project:work-result",
                      "--result-file", str(document), "--expected-sha256", original]) == 2
     assert "REFUSED" in capsys.readouterr().err
+
+def test_same_document_bytes_in_another_project_do_not_replay(tmp_path):
+    personal, project, document = fixture(tmp_path)
+    original = result.inspect_work_result(
+        personal, "TASK-WORK-RESULT", project, "project:work-result", document)
+    other_project = tmp_path / "OtherProject"
+    other_project.mkdir()
+    same_bytes = other_project / "report.md"
+    same_bytes.write_bytes(document.read_bytes())
+    assert result.inspect_work_result(
+        personal, "TASK-WORK-RESULT", other_project, "project:another-project",
+        same_bytes)["result_sha256"] == original["result_sha256"]
+    with pytest.raises(result.WorkResultRefused, match="replay identity"):
+        result.inspect_work_result(
+            personal, "TASK-WORK-RESULT", other_project, "project:another-project",
+            same_bytes, expected_checkpoint_sha256=original["checkpoint_sha256"])
+
+
+def test_task_changes_during_digest_read_are_refused(tmp_path, monkeypatch):
+    personal, project, document = fixture(tmp_path)
+    note = personal / "Vres-Workbench-TASK-WORK-RESULT" / "notes" / "next-step.md"
+    normal_digest = result._read_digest
+    def change_task_while_hashing(path):
+        digest = normal_digest(path)
+        note.write_text(note.read_text(encoding="utf-8") + "\nchanged", encoding="utf-8")
+        return digest
+    monkeypatch.setattr(result, "_read_digest", change_task_while_hashing)
+    with pytest.raises(result.WorkResultRefused):
+        result.inspect_work_result(
+            personal, "TASK-WORK-RESULT", project, "project:work-result", document)
