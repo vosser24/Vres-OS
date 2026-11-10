@@ -1088,12 +1088,49 @@ def rollback(project, *, authority: Authority, data_root: Path | None = None) ->
 
 
 def status(project, *, data_root: Path | None = None) -> dict[str, Any]:
-    sd = _state_dir(project, data_root)
+    """Read the ORIGINAL #168 adoption state without creating directories.
+
+    A journal means interrupted activation/recovery regardless of the earlier
+    recorded state. Saved awaiting-operator inventories are only displayed if
+    their exact structural contents still match a fresh read-only inventory.
+    This does not execute Claude, recover, activate, approve or write state.
+    The final journal recheck is cooperative, not atomic filesystem locking.
+    """
+    from .paths import data_dir_path
+
+    # _state_dir calls mkdir, so it is for state-writing operations only.
+    base = Path(data_root) if data_root is not None else data_dir_path()
+    sd = base / "projects" / hashlib.sha256(project.key.encode("utf-8")).hexdigest()[:24]
     record = _state(sd, project) or {"state": None}
+    journal = sd / "journal.json"
+
+    def interrupted() -> dict[str, Any]:
+        return {
+            "state": "recovery_required",
+            "recorded_state": record["state"],
+            "interrupted_journal_present": True,
+            "recovery_performed": False,
+            "activation_allowed": False,
+        }
+
+    if _lstat(journal) is not None:
+        return interrupted()
+
     out = dict(record)
     if record.get("state") == "awaiting_operator":
-        inv = _read_json(sd / "snapshots" / f"{record['inventory_version']}.json")
+        version = record.get("inventory_version")
+        if type(version) is not str or re.fullmatch(r"[0-9a-f]{64}", version) is None:
+            raise AdoptionError("Saved Claude inventory identity invalid; re-inventory required")
+        inv = _read_json(sd / "snapshots" / f"{version}.json")
+        if type(inv) is not dict or inv.get("version") != version or type(inv.get("items")) is not list:
+            raise AdoptionError("Saved Claude inventory snapshot unavailable; re-inventory required")
+        live = inventory(Path(project.root))
+        if inv != live:
+            raise AdoptionError("Saved Claude inventory differs from live project; re-inventory required")
         out["items"], out["pending"], out["blockers"] = inv["items"], _pending(sd, inv), _blockers(inv)
+
+    if _lstat(journal) is not None:
+        return interrupted()
     return out
 
 # ----------------------------------------------------------------------- offline architecture plan check
