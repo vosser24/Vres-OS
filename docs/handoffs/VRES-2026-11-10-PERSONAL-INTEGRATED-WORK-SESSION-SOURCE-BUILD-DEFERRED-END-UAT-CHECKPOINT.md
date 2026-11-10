@@ -1,0 +1,43 @@
+# Vres-OS — 2026-11-10 original-owner integrated personal workflow source build; deferred final dummy UAT
+
+**Status:** NEW SOURCE PUBLISHED / FOCUSED TESTS AUTHORED NOT_RUN / PHYSICAL WINDOWS AND CLAUDE CODE UAT NOT_RUN / NO HOST OR INSTALLED ACTION.  
+**Owner direction:** "build all and we will test with live project dummy uat on claude code at the end." This is consent to continue proportionate original-source feature development and defer the requested UAT, **not** consent to overwrite installed P2, touch existing user profile/credentials, launch native Claude Code/hooks, or contact PostgreSQL. Open incident-specific holds remain controlling, even for a dummy project. The user wants one integrated PERSONAL product, not a new standalone program, an enterprise product or a serial synthetic-UAT treadmill.
+
+## Canonical identities and exact source build
+
+Repository: https://github.com/vosser24/Vres-OS ; observed repository ID `1368577038`.
+
+Before source work, canonical docs branch `docs/chatgpt-continuity-20261023` matched HEAD `0cea637dd0b3c6f9b321eef3d94a82a5ff81e887`, recorded TREE `fd37201478e7477978a9e27062c1e6762af7b5dc` and sole intended parent `a501e2ffdf606090e787d56c18a3976f471a3570`. Its continuity index blob was `c4392ceb4e3d976f198becb17a6cdeddf5f692a0`, and the prior Windows 8/8 UAT evidence blob was `1fa6bfcfe316bcd969ba35867c3ce7479f59d82e`.
+
+Source base: `feature/personal-work-result-history-link-20261110` HEAD `04808884f27b9db722bc529e927962c36654488a`, recorded full Git TREE `3c4976aacb799c08d86b1fa1db4e4572fd98a5d2`, sole parent `258467ad0465f706c993444175efdaca026769fb`, source package TREE `36387294715f698e2fdfd04d231316fee58d72ab`. These are historical prior verified source identities, not a claim that the new source package tree was computed independently.
+
+**New dedicated source branch:** `feature/personal-integrated-work-session-20261110`. Created at exact base `04808884f27b9db722bc529e927962c36654488a`, never main or protected R13.
+
+1. Intermediate feature commit `ebda385055863cf9aa184d7097b776880bbfe4b9` with authored tree `b85b2fda932339ac5ff5c463cfbf01ca52973676`, exact intended parent `04808884f27b9db722bc529e927962c36654488a`. Added bounded `personal_work_session.py`, dispatched it via original `personal_desk_cli.py`, and authored focused synthetic tests.
+2. Current feature HEAD `8e94cb9ff2c4a3a362354cba807e247b0caf9a30` with **authored tree** `c030e304d82eabcc81c8f97d34b010f179108bd8`, exact intended sole parent `ebda385055863cf9aa184d7097b776880bbfe4b9`. Added preflight-and-explicit-approval `work-session start` for a NEW separate empty ordinary project and an absent scratch desk. Reuses original desk and input note owners; no project scaffold or other datastore.
+3. Live compare of new source HEAD against base gave 2 ahead, 0 behind, changed **only** `src/vres_os/personal_desk_cli.py`, `src/vres_os/personal_work_session.py`, `tests/test_personal_work_session.py`. Live remote branch/commit compare identical. Exact current blobs were read back: CLI `b1dd91636cfdb5891f9a090bd718638944bb211e`, session `fe457e4e1c80bd62c005ad397d5b742a2470b5e9`, tests `1a969a2cb6d2a1cd64b0c628047bcae29cfd3d76`. The connector does not independently expose raw remote Git commit headers or tree enumeration. New Git package subtree ID NOT_COMPUTED.
+4. Product main independently remained `9a8acc5d464b96432a93cb95daa9581412fb07ee`; protected `feature/personal-w4-r13-universal-staging-hold-20261106` remained `bcf62460d68caebfdbd0e838d44c5997992c5fbc`. Historical installed P2 source `82c82430b38f93bd6b9d5c3af3b5de9c1368af9c`; physical installation NOT_REVERIFIED.
+
+## Practical behavior and authority
+
+Internal source-only `work-session` facade offers `start` (explicit approved NEW scratch task + already-existing EMPTY ordinary project, no project writing), `review` (original active task and optional explicit project/document digest plus original historical snapshots, no default document path disclosure), `finish` (delegates to original `personal_work_completion.finish_work`, exact-context token plus explicit approval), `reopen` (original `lifecycle.reopen` with explicit snapshot SHA/approval, does not assert external file current) and `replay` (explicit read of saved historical project path, verifies current task/project/path/document SHA via original `inspect_work_result`, suppresses document path, refuses changed bytes). All original task note, receipt and result-history metadata remain under original owners. This facade is an internal source-level integration surface, NOT an additional user-facing app, second Chairman, native Claude hook, database client, or duplicate task/memory/evidence store. The normal long-term user UX remains `start vres` and native `clear` per #174.
+
+Preflight does not provide hostile same-user filesystem race security or proof of document factual quality. An interrupted start may leave an empty/partial scratch desk, and a failed finish/reopen may leave ambiguous history/active state: inspect manually, NEVER blind retry or auto-delete.
+
+**Testing and completeness:** seven focused tests authored in `tests/test_personal_work_session.py`; Python syntax, pytest, Linux integration, Windows functional gate, independent static-review signoff and native Claude end UAT for THIS NEW SOURCE are **NOT_RUN / NOT_VERIFIED**. No source test, Python execution, installed Windows action, external download, Git for Windows maintenance, PostgreSQL or native Claude occurred in the authoring session. This is **NOT** completion of all V-01..V-42 or issues #165–170/#176. Previous 35 focused Linux PASS across five invocations, 7/7 parent owner-Windows UAT, and 8/8 exact result-history owner-Windows UAT with echoed CMD ERRORLEVEL=0 remain distinct past evidence ONLY for their original pinned versions. Preserve all rejected and exploratory attempts and no broad-suite PASS claim.
+
+## Program and absolute holds
+
+Product: one production-quality PERSONAL Windows daily-operations app for one user. Preserve original Chairman/task/memory/credential/adoption/release owners; all V-01..V-42; M0..M8; issues #163/#164/#165–170/#174/#176/#185, W0–W3 and W4 R1–R13 original evidence, protected worktrees and all rejected attempts. Historical closed #163/#164/#174 remain separate from open #165–170/#176; do not close issues or merge product main.
+
+- `LIVE_SCHEMA_048_INCIDENT=OPEN`: absolutely NO PostgreSQL even SELECT, direct or indirect, including hooks/health/audit.
+- `HOST_HOOK_DB_ROUTE_ATTEMPTED_AND_REFUSED=OPEN`: NO ordinary native Claude Code or installed hooks. Dummy project selection does not clear this.
+- Original P3 incident OPEN; trusted independent F1/Fable authority NOT_GRANTED; R13 universal release/staging hold ACTIVE.
+- NO installed P2 overwrite, real current-user profile/credentials, real legacy project, production DB, original TASK-DAY-01, profile or PRISM migration, installer, migrations, destructive rollback, protected copies/worktree changes, git-maintenance operation, product main merge.
+- #169 physical installed Visual Studio/Claude adoption UAT and #170 real personal pilot remain NOT_RUN and require separate prerequisite evidence, incident disposition and informed approval. A future isolated non-sensitive dummy project UAT may be planned, not run while host-hook/DB holds remain OPEN.
+
+## Exact next safe development action
+
+Continue building integrated source on the dedicated feature lineage; **no broad serial UAT before the final owner-selected dummy project trial**. First perform focused static/standalone source review for the new facade and strengthen its fail-closed invariants, then implement the next original-owner production gaps in cohesive stages: #165 configurable Chairman policy source without host launch; safe #166 global legacy Claude snapshot/quarantine design and source-only guards; #167 data-source identity/catalog contracts WITHOUT connecting to DB; #176 protected experience re-use boundaries; and #168 fresh/legacy project adoption that consumes the original owners and #174 architecture. Keep each stage on its dedicated exact-parent branch and do not claim completion of unbuilt broad features. End acceptance plan may later use a NEW ordinary non-sensitive dummy project in a separately safe Windows host/Claude context only after the incidents are explicitly and independently resolved and new host consent is granted.
+
+**Pending:** source Python syntax/pytest, independent review, CI, any Windows run, source package TREE recomputation, release packaging, main merge, issue closure, schema/host incident clearance and user-selected final dummy project. NO asynchronous test or execution has been started.
