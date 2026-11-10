@@ -322,3 +322,82 @@ def test_completed_work_cannot_read_catalog_until_explicit_reopen(tmp_path):
     with pytest.raises(session.WorkSessionRefused):
         _selected_catalog_review(ctx, catalog)
     assert session.review_session(ctx[0], ctx[1])["active"] is False
+
+
+#168 opt-in original project-intake bridge; no adoption/state writes or hooks.
+def test_selected_project_intake_is_opt_in_read_only_and_keeps_root_hidden(tmp_path):
+    ctx, _ = _new(tmp_path)
+    selected, task, project, key, _ = ctx
+    before = {str(p.relative_to(project)): p.read_bytes() for p in project.rglob("*") if p.is_file()}
+    default = session.review_session(selected, task, project_root=project, project_key=key)
+    assert default["selected_project_intake"] is None
+    packet = session.review_session(
+        selected, task, project_root=project, project_key=key,
+        include_project_intake=True)
+    summary = packet["selected_project_intake"]
+    assert summary["status"] == "SELECTED_PROJECT_INTAKE_PREVIEW_ONLY"
+    assert "READ-ONLY PROJECT INTAKE" in summary["report"]
+    assert summary["original_project_preview_owner_reused"] is True
+    assert summary["legacy_bytes_are_instructions"] is False
+    assert all(summary[x] is False for x in (
+        "project_adoption_state_written", "project_activation_authorized",
+        "native_hooks_executed", "database_or_credentials_accessed",
+        "independent_validation_granted"))
+    assert str(project) not in json.dumps(packet)
+    assert before == {str(p.relative_to(project)): p.read_bytes()
+                      for p in project.rglob("*") if p.is_file()}
+
+
+def test_selected_project_intake_requires_explicit_project_and_boolean(tmp_path):
+    ctx, _ = _new(tmp_path)
+    selected, task, project, key, _ = ctx
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_session(selected, task, include_project_intake=True)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_session(selected, task, project_root=project,
+                               include_project_intake=True)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_session(selected, task, project_root=project,
+                               project_key=key, include_project_intake="yes")
+    assert session.review_session(selected, task)["active"] is True
+
+
+def test_selected_legacy_intake_only_reports_risk_without_executing_hooks(tmp_path):
+    ctx, _ = _new(tmp_path)
+    selected, task, project, key, _ = ctx
+    legacy = project / ".claude"
+    legacy.mkdir()
+    settings = legacy / "settings.json"
+    content = b'{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"DO_NOT_RUN_FAKE"}]}]}}'
+    settings.write_bytes(content)
+    packet = session.review_session(
+        selected, task, project_root=project, project_key=key,
+        include_project_intake=True)
+    report = packet["selected_project_intake"]["report"]
+    assert "Existing Claude surfaces:" in report
+    assert "Required reviews:" in report
+    assert "DO_NOT_RUN_FAKE" not in json.dumps(packet)
+    assert settings.read_bytes() == content
+    assert packet["selected_project_intake"]["native_hooks_executed"] is False
+
+
+def test_project_intake_opt_in_is_exposed_via_original_work_session_cli(tmp_path, capsys):
+    ctx, _ = _new(tmp_path)
+    selected, task, project, key, _ = ctx
+    args = ["work-session", "review", "--desk", str(selected), "--task-key", task,
+            "--project-root", str(project), "--project-key", key,
+            "--include-project-intake"]
+    assert cli.main(args) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["selected_project_intake"]["status"] == "SELECTED_PROJECT_INTAKE_PREVIEW_ONLY"
+    assert str(project) not in json.dumps(report)
+
+
+def test_project_intake_review_refused_after_completion_until_explicit_reopen(tmp_path):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, _ = ctx
+    _finish(ctx, token)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_session(selected, task, project_root=project, project_key=key,
+                               include_project_intake=True)
+    assert session.review_session(selected, task)["selected_project_intake"] is None

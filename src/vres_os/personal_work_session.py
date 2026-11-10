@@ -202,6 +202,33 @@ def _selected_catalog_summary(
     }
 
 
+
+def _selected_project_adoption_preview(project_root: str | Path) -> dict[str, Any]:
+    """One explicitly requested ORIGINAL #168 read-only project intake.
+
+    The existing intake owner hides untrusted file contents and rejects
+    redirected paths. This is a preview, not a migration, installation, user
+    instruction, credential lookup or adoption state inspection.
+    """
+    try:
+        report = intake.inspect_personal_project(project_root)
+    except Exception:
+        # Never echo a selected path, source file, or unsafe legacy config.
+        raise WorkSessionRefused("Original read-only project intake refused") from None
+    return {
+        "status": "SELECTED_PROJECT_INTAKE_PREVIEW_ONLY",
+        "report": report,
+        "project_root_hidden": True,
+        "original_project_preview_owner_reused": True,
+        "legacy_bytes_are_instructions": False,
+        "project_adoption_state_written": False,
+        "project_activation_authorized": False,
+        "native_hooks_executed": False,
+        "database_or_credentials_accessed": False,
+        "independent_validation_granted": False,
+    }
+
+
 def review_session(desk: str | Path, task: str, *,
                    project_root: str | Path | None = None,
                    project_key: str | None = None,
@@ -211,13 +238,19 @@ def review_session(desk: str | Path, task: str, *,
                    catalog_document: bytes | None = None,
                    catalog_namespace: str | None = None,
                    catalog_source_id: str | None = None,
-                   expected_catalog_sha256: str | None = None) -> dict[str, Any]:
+                   expected_catalog_sha256: str | None = None,
+                   include_project_intake: bool = False) -> dict[str, Any]:
     """One view across active receipt, optional project result and old history.
 
     No guess about the newest event: lifecycle history has no timestamps.
     No result file is opened unless explicitly selected. Catalog inputs are
     opt-in saved bytes, NEVER an implicit current-user store/credential lookup.
+    The #168 project intake only scans on an explicit read-only opt-in.
     """
+    if type(include_project_intake) is not bool:
+        raise WorkSessionRefused("Project intake selection must be an exact boolean")
+    if include_project_intake and (project_root is None or project_key is None):
+        raise WorkSessionRefused("Explicit project root and key required for intake")
     catalog_fields = (catalog_document, catalog_namespace,
                       catalog_source_id, expected_catalog_sha256)
     catalog_requested = any(field is not None for field in catalog_fields)
@@ -231,6 +264,7 @@ def review_session(desk: str | Path, task: str, *,
     project_binding = None
     observed = None
     selected_catalog = None
+    selected_intake = None
     if active:
         selected = handoff.inspect_handoff(desk, task)
         selected_sha = selected["selected_note_sha256"]
@@ -245,12 +279,15 @@ def review_session(desk: str | Path, task: str, *,
                 selected_catalog = _selected_catalog_summary(
                     catalog_document, catalog_namespace, catalog_source_id,
                     project_key, expected_catalog_sha256)
-                # Re-read original owner binding after inspecting the saved
-                # metadata. Refuse task/project drift, never auto-retry.
+            if include_project_intake:
+                selected_intake = _selected_project_adoption_preview(project_root)
+            if catalog_requested or include_project_intake:
+                # Both optional reviews are strictly read-only; verify their
+                # task/project association again before publishing a summary.
                 after = handoff.inspect_work_brief(desk, task, project_root, project_key)
                 if (after["scratch_handoff"]["selected_note_sha256"] != selected_sha
                         or after["project_binding_sha256"] != project_binding):
-                    raise WorkSessionRefused("Task or project changed during catalog review")
+                    raise WorkSessionRefused("Task or project changed during optional review")
         if result_file is not None:
             if project_binding is None:
                 raise WorkSessionRefused("A result requires an explicit project selection")
@@ -286,6 +323,7 @@ def review_session(desk: str | Path, task: str, *,
         "selected_project_binding_sha256": project_binding,
         "observed_result": observed,
         "selected_project_catalog": selected_catalog,
+        "selected_project_intake": selected_intake,
         "historical_snapshots": rows,
         "history_has_timestamps": False,
         "historical_document_current_bytes_verified": False,
@@ -391,6 +429,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                              required=(name == "finish"))
         if name == "review":
             sub.add_argument("--show-result-paths", action="store_true")
+            sub.add_argument("--include-project-intake", action="store_true")
         if name in ("start", "finish", "reopen", "replay"):
             sub.add_argument("--yes", action="store_true")
         if name in ("reopen", "replay"):
@@ -407,7 +446,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 project_root=args.project_root, project_key=args.project_key,
                 result_file=args.result_file,
                 expected_checkpoint_sha256=args.expected_checkpoint_sha256,
-                show_result_paths=args.show_result_paths)
+                show_result_paths=args.show_result_paths,
+                include_project_intake=args.include_project_intake)
         elif args.command == "finish":
             packet = completion.finish_work(
                 args.desk, args.task_key, args.project_root, args.project_key,
