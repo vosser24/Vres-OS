@@ -803,3 +803,77 @@ def test_chairman_candidate_refuses_task_mutation_during_pure_preview(
         session.review_session(
             selected, task, project_root=project, project_key=key,
             include_chairman_candidate=True, **_synthetic_chairman_history_selection())
+
+
+# #165/#168/#176: project identity is not structural scan freshness.
+# Synthetic changes remain exclusively inside pytest tmp_path and never touch
+# Windows/Claude homes, original legacy projects, hooks or PostgreSQL.
+
+
+def test_chairman_candidate_refuses_project_scan_change_during_preview(
+        tmp_path, monkeypatch):
+    ctx, checkpoint = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    calls = []
+    original = session._selected_chairman_candidate_preview
+
+    def change_after_candidate(*args):
+        candidate = original(*args)
+        calls.append(True)
+        (project / "CLAUDE.md").write_text(
+            "# Synthetic pre-existing Claude project instructions\n", encoding="utf-8")
+        return candidate
+
+    monkeypatch.setattr(session, "_selected_chairman_candidate_preview",
+                        change_after_candidate)
+    with pytest.raises((session.WorkSessionRefused,
+                        session.handoff.PersonalHandoffRefused)):
+        session.review_session(
+            selected, task, project_root=project, project_key=key,
+            include_chairman_candidate=True, **_synthetic_chairman_history_selection())
+    assert calls == [True]
+
+
+def test_result_refuses_project_scan_change_after_chairman_preview(
+        tmp_path, monkeypatch):
+    ctx, checkpoint = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    original = session.result.inspect_work_result
+    calls = []
+
+    def change_before_result(*args, **kwargs):
+        calls.append(True)
+        (project / "CLAUDE.md").write_text(
+            "# Synthetic late project addition\n", encoding="utf-8")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(session.result, "inspect_work_result", change_before_result)
+    with pytest.raises((session.WorkSessionRefused, result.WorkResultRefused)):
+        session.review_session(
+            selected, task, project_root=project, project_key=key,
+            result_file=document, expected_checkpoint_sha256=checkpoint,
+            include_chairman_candidate=True, **_synthetic_chairman_history_selection())
+    assert calls == [True]
+
+
+def test_experience_late_result_recheck_refuses_project_scan_change(
+        tmp_path, monkeypatch):
+    ctx, checkpoint = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    original = session.result.inspect_work_result
+    calls = []
+
+    def change_before_late_result(*args, **kwargs):
+        calls.append(True)
+        if len(calls) == 2:
+            (project / "CLAUDE.md").write_text(
+                "# Synthetic project changed after experience scan\n", encoding="utf-8")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(session.result, "inspect_work_result", change_before_late_result)
+    with pytest.raises((session.WorkSessionRefused, result.WorkResultRefused)):
+        session.review_session(
+            selected, task, project_root=project, project_key=key,
+            result_file=document, expected_checkpoint_sha256=checkpoint,
+            include_experience_provenance=True)
+    assert calls == [True, True]

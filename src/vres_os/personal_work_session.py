@@ -437,16 +437,20 @@ def review_session(desk: str | Path, task: str, *,
                 # task/project association again before publishing a summary.
                 after = handoff.inspect_work_brief(desk, task, project_root, project_key)
                 if (after["scratch_handoff"]["selected_note_sha256"] != selected_sha
-                        or after["project_binding_sha256"] != project_binding):
-                    raise WorkSessionRefused("Task or project changed during optional review")
+                        or after["project_binding_sha256"] != project_binding
+                        or handoff._exact_json(after) != handoff._exact_json(brief)):
+                    # Project root/key hashes do not cover structural scan data.
+                    raise WorkSessionRefused("Task or project scan changed during optional review")
         if result_file is not None:
             if project_binding is None:
                 raise WorkSessionRefused("A result requires an explicit project selection")
             inspected = result.inspect_work_result(
                 desk, task, project_root, project_key, result_file,
                 expected_checkpoint_sha256=expected_checkpoint_sha256)
-            if inspected["work_brief"]["scratch_handoff"]["selected_note_sha256"] != selected_sha:
-                raise WorkSessionRefused("Task changed during result inspection")
+            if (inspected["work_brief"]["scratch_handoff"]["selected_note_sha256"] != selected_sha
+                    or inspected["work_brief"]["project_binding_sha256"] != project_binding
+                    or handoff._exact_json(inspected["work_brief"]) != handoff._exact_json(brief)):
+                raise WorkSessionRefused("Task or project scan changed during result inspection")
             observed = {
                 "status": inspected["status"],
                 "checkpoint_sha256": inspected["checkpoint_sha256"],
@@ -459,8 +463,9 @@ def review_session(desk: str | Path, task: str, *,
             if include_experience_provenance:
                 after = handoff.inspect_work_brief(desk, task, project_root, project_key)
                 if (after["scratch_handoff"]["selected_note_sha256"] != selected_sha
-                        or after["project_binding_sha256"] != project_binding):
-                    raise WorkSessionRefused("Task or project changed during experience source review")
+                        or after["project_binding_sha256"] != project_binding
+                        or handoff._exact_json(after) != handoff._exact_json(brief)):
+                    raise WorkSessionRefused("Task or project scan changed during experience source review")
                 # The extra work-brief scan can outlast a document edit.
                 # Reuse the ORIGINAL result owner to revalidate exact bytes,
                 # task and project before publishing an experience source.
@@ -472,7 +477,8 @@ def review_session(desk: str | Path, task: str, *,
                         or fresh["result_bytes"] != inspected["result_bytes"]
                         or fresh["work_brief"]["project_binding_sha256"] != project_binding
                         or fresh["work_brief"]["scratch_handoff"]["selected_note_sha256"]
-                        != selected_sha):
+                        != selected_sha
+                        or handoff._exact_json(fresh["work_brief"]) != handoff._exact_json(brief)):
                     raise WorkSessionRefused("Result changed during experience source review")
                 inspected = fresh
                 observed["result_rechecked_after_experience_preview"] = True
