@@ -224,3 +224,77 @@ def test_interrupted_rollback_keeps_journal_and_recover_finishes(tmp_path, monke
     assert outcome["state"] == "awaiting_operator"
     assert not (sd / "journal.json").exists()
     assert target.read_bytes() == b"# Synthetic reviewed instruction\n"
+
+
+def test_rollback_preserves_edit_during_preimage_verification(tmp_path, monkeypatch):
+    project, data, sd = _active(tmp_path, monkeypatch)
+    target = project.root / "CLAUDE.md"
+    new_content = b"# Synthetic late owner edit during rollback\n"
+    original_reader = project_adoption._read_verified_preimage
+
+    def interleaved(pre_dir, name, expected_sha, rel):
+        content = original_reader(pre_dir, name, expected_sha, rel)
+        target.write_bytes(new_content)
+        return content
+
+    monkeypatch.setattr(project_adoption, "_read_verified_preimage", interleaved)
+    with pytest.raises(AdoptionError, match="changed while restoration pre-images were verified"):
+        project_adoption.rollback(project, authority=_approved, data_root=data)
+    assert target.read_bytes() == new_content
+    assert (sd / "journal.json").exists()
+    assert project_adoption.status(project, data_root=data)["state"] == "recovery_required"
+
+
+def test_restore_checks_all_observed_paths_before_first_write(tmp_path, monkeypatch):
+    root = tmp_path / "synthetic-project"
+    root.mkdir()
+    pre_dir = tmp_path / "synthetic-preimages"
+    pre_dir.mkdir()
+    original = {"a.md": b"# Original A\n", "b.md": b"# Original B\n"}
+    pre = {}
+    post = {}
+    for i, (rel, data) in enumerate(original.items()):
+        copy = f"{i:04d}"
+        (pre_dir / copy).write_bytes(data)
+        pre[rel] = {"existed": True, "copy": copy, "sha256": hashlib.sha256(data).hexdigest()}
+        post[rel] = None  # Both were removed by an interrupted activation.
+    changed = b"# Concurrent owner edit after scan\n"
+    original_reader = project_adoption._read_verified_preimage
+
+    def interleaved(directory, name, expected_sha, rel):
+        content = original_reader(directory, name, expected_sha, rel)
+        if rel == "b.md":
+            (root / "a.md").write_bytes(changed)
+        return content
+
+    monkeypatch.setattr(project_adoption, "_read_verified_preimage", interleaved)
+    with pytest.raises(AdoptionError, match="changed while restoration pre-images were verified"):
+        project_adoption._restore(root, pre_dir, pre, post)
+    assert (root / "a.md").read_bytes() == changed
+    assert not (root / "b.md").exists()
+
+
+def test_restore_rechecks_each_path_after_prior_restore_write(tmp_path, monkeypatch):
+    root = tmp_path / "synthetic-project"
+    root.mkdir()
+    pre_dir = tmp_path / "synthetic-preimages"
+    pre_dir.mkdir()
+    pre, post = {}, {}
+    for i, rel in enumerate(("a.md", "b.md")):
+        data = ("# Original " + rel + "\n").encode()
+        (pre_dir / f"{i:04d}").write_bytes(data)
+        pre[rel] = {"existed": True, "copy": f"{i:04d}", "sha256": hashlib.sha256(data).hexdigest()}
+        post[rel] = None
+    late_content = b"# Owner edit after restoring first path\n"
+    original_replace = project_adoption.os.replace
+
+    def interleaved(src, dst):
+        original_replace(src, dst)
+        if Path(dst) == root / "a.md":
+            (root / "b.md").write_bytes(late_content)
+
+    monkeypatch.setattr(project_adoption.os, "replace", interleaved)
+    with pytest.raises(AdoptionError, match="changed immediately before restoration"):
+        project_adoption._restore(root, pre_dir, pre, post)
+    assert (root / "a.md").read_bytes() == b"# Original a.md\n"
+    assert (root / "b.md").read_bytes() == late_content

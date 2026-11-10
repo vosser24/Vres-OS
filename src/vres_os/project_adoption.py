@@ -1116,8 +1116,13 @@ def _restore(root: Path, pre_dir: Path, pre: dict[str, Any], post: dict[str, str
     """
     _validate_restore_manifest(root, pre, post)
     todo = []
+    # Remember every reviewed path, including ones already back at their
+    # pre-activation content. Other paths must not silently change while the
+    # remaining pre-images are checked.
+    observed: dict[str, str | None] = {}
     for rel, entry in pre.items():
         current = _sha_or_none(_within(root, rel))
+        observed[rel] = current
         before = entry["sha256"] if entry["existed"] else None
         if current == before:
             continue
@@ -1134,8 +1139,22 @@ def _restore(root: Path, pre_dir: Path, pre: dict[str, Any], post: dict[str, str
             verified_preimages[rel] = _read_verified_preimage(
                 pre_dir, entry["copy"], entry["sha256"], rel
             )
+    # A verified pre-image is not a lock on a project file. Refuse a late
+    # modification of ANY reviewed surface before making the first write.
+    for rel, expected in observed.items():
+        if _sha_or_none(_within(root, rel)) != expected:
+            raise AdoptionError(
+                f"{rel} changed while restoration pre-images were verified; "
+                "no restoration was performed"
+            )
     for rel in todo:
         entry, path = pre[rel], _within(root, rel)
+        # A second check limits changes between the full scan and this write.
+        # It is cooperative: there is no atomic compare-and-replace primitive.
+        if _sha_or_none(_within(root, rel)) != observed[rel]:
+            raise AdoptionError(
+                f"{rel} changed immediately before restoration; recovery is required"
+            )
         if entry["existed"]:
             path.parent.mkdir(parents=True, exist_ok=True)
             tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
