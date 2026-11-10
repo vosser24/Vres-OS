@@ -877,3 +877,137 @@ def test_experience_late_result_recheck_refuses_project_scan_change(
             result_file=document, expected_checkpoint_sha256=checkpoint,
             include_experience_provenance=True)
     assert calls == [True, True]
+
+
+# #167 ORIGINAL current-user saved catalog adapter, synthetic tmp_path only.
+# Never access a real Vres profile, Credential Locker, PostgreSQL or native Claude.
+
+def _saved_catalog_for_session(tmp_path, project_key):
+    from types import SimpleNamespace
+    from vres_os.personal_data_source_store import CurrentUserDataSourceStore
+
+    data_root = tmp_path / "synthetic-user-catalog-root"
+    data_root.mkdir()
+    namespace = "a" * 64
+    credential_id = "credential-" + "a" * 32
+    origin = "example.gr:5432/vres_app"
+    calls = []
+
+    def synthetic_metadata(resource_id):
+        calls.append(resource_id)
+        return SimpleNamespace(resource_id=credential_id, service_type="postgres",
+                               origin=origin)
+
+    def protect(path, *, directory):
+        path.chmod(0o700 if directory else 0o600)
+
+    store = CurrentUserDataSourceStore(
+        data_root, namespace, synthetic_metadata, owner_protector=protect)
+    sid, revision = store.update(
+        lambda catalog: catalog.register_postgres(origin, credential_id, authorized=True),
+        expected_revision=0, authorized=True)
+    assert revision == 1
+    linked, revision = store.update(
+        lambda catalog: catalog.bind(sid, project_key, authorized=True),
+        expected_revision=revision, authorized=True)
+    assert linked is True and revision == 2 and calls == [credential_id]
+    calls.clear()
+    return store, sid, calls
+
+
+def test_active_review_can_select_original_saved_catalog_without_metadata_lookup(
+        tmp_path):
+    ctx, checkpoint = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    store, sid, calls = _saved_catalog_for_session(tmp_path, key)
+    assert session.review_session(selected, task)["selected_project_catalog"] is None
+    packet = session.review_session(
+        selected, task, project_root=project, project_key=key,
+        include_saved_catalog=True, saved_catalog_store=store,
+        saved_catalog_source_id=sid)
+    summary = packet["selected_project_catalog"]
+    assert summary["status"] == "READ_ONLY_EXPLICIT_SAVED_CURRENT_USER_CATALOG_SUMMARY"
+    assert summary["saved_catalog_file_observed_read_only"] is True
+    assert summary["saved_catalog_revision"] == 2
+    assert summary["catalog_bytes_supplied_by_caller"] is False
+    assert summary["catalog_storage_provenance_verified"] is False
+    assert summary["current_user_identity_verified"] is False
+    assert summary["credential_lookup_performed"] is False
+    assert len(summary["catalog_document_sha256"]) == 64
+    assert calls == []
+    redacted = json.dumps(packet)
+    assert str(store.root) not in redacted
+    assert "example.gr:5432" not in redacted
+    assert "credential-" not in redacted
+
+
+def test_saved_catalog_requires_explicit_opt_in_exact_owner_and_project(
+        tmp_path):
+    ctx, checkpoint = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    store, sid, calls = _saved_catalog_for_session(tmp_path, key)
+    kwargs = dict(project_root=project, project_key=key)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_session(selected, task, **kwargs,
+                               saved_catalog_store=store, saved_catalog_source_id=sid)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_session(selected, task, **kwargs,
+                               include_saved_catalog="yes",
+                               saved_catalog_store=store, saved_catalog_source_id=sid)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_session(selected, task, **kwargs,
+                               include_saved_catalog=True, saved_catalog_source_id=sid)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_session(selected, task, **kwargs, include_saved_catalog=True,
+                               saved_catalog_store=object(), saved_catalog_source_id=sid)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_session(selected, task, **kwargs, include_saved_catalog=True,
+                               saved_catalog_store=store, saved_catalog_source_id=sid,
+                               catalog_document=b"unrelated")
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_session(selected, task, **kwargs, include_saved_catalog=True,
+                               saved_catalog_store=store,
+                               saved_catalog_source_id="data-source-" + "f" * 64)
+    assert calls == []
+
+
+def test_saved_catalog_rechecks_revision_and_binding_after_optional_project_scan(
+        tmp_path, monkeypatch):
+    ctx, checkpoint = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    store, sid, calls = _saved_catalog_for_session(tmp_path, key)
+    original = session._selected_project_adoption_preview
+    mutated = []
+
+    def change_after_scan(root):
+        summary = original(root)
+        changed, revision = store.update(
+            lambda catalog: catalog.unlink(sid, key, authorized=True),
+            expected_revision=2, authorized=True)
+        mutated.append((changed, revision))
+        return summary
+
+    monkeypatch.setattr(session, "_selected_project_adoption_preview", change_after_scan)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_session(
+            selected, task, project_root=project, project_key=key,
+            include_project_intake=True, include_saved_catalog=True,
+            saved_catalog_store=store, saved_catalog_source_id=sid)
+    assert mutated == [(True, 3)]
+    assert calls == []
+
+
+def test_saved_catalog_without_existing_document_refuses_without_creation(tmp_path):
+    from vres_os.personal_data_source_store import CurrentUserDataSourceStore
+
+    ctx, checkpoint = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    root = tmp_path / "other-empty-data-root"
+    root.mkdir()
+    store = CurrentUserDataSourceStore(root, "a" * 64, lambda _: None)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_session(
+            selected, task, project_root=project, project_key=key,
+            include_saved_catalog=True, saved_catalog_store=store,
+            saved_catalog_source_id="data-source-" + "a" * 64)
+    assert list(root.iterdir()) == []

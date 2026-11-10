@@ -375,3 +375,42 @@ def test_module_imports_cannot_execute_db_network_or_user_credential_locker():
     # Production ACL protector is imported only inside the explicitly approved write callback.
     functions = [n for n in tree.body if isinstance(n, ast.FunctionDef)]
     assert any(n.name == "_default_protect" for n in functions)
+
+
+# Existing saved file evidence is not operator provenance or live database truth.
+
+def test_saved_snapshot_requires_existing_file_and_no_writer_lock(storage):
+    import hashlib
+
+    with pytest.raises(CatalogStoreRefused, match="No existing saved"):
+        storage.load_saved_snapshot()
+    sid, revision = add_source(storage)
+    assert revision == 1
+    add_binding(storage, sid, A, revision)
+    file = storage.root / "data-source-catalog" / "catalog-v1.json"
+    saved = file.read_bytes()
+    calls = []
+    silent = CurrentUserDataSourceStore(
+        storage.root, NAMESPACE, lambda rid: calls.append(rid),
+        owner_protector=protect)
+    current, rev, sha = silent.load_saved_snapshot()
+    assert rev == 2
+    assert sha == hashlib.sha256(saved).hexdigest()
+    assert current.summary_for(sid, A)["engine"] == "postgres"
+    assert calls == []
+    assert file.read_bytes() == saved
+    lock = storage.root / "data-source-catalog" / "catalog-update.lock"
+    lock.write_bytes(b"synthetic writer lock")
+    with pytest.raises(CatalogStoreRefused, match="writer lock"):
+        silent.load_saved_snapshot()
+    assert file.read_bytes() == saved
+
+
+def test_saved_snapshot_rejects_noncanonical_storage_without_rewriting(storage):
+    sid, revision = add_source(storage)
+    file = storage.root / "data-source-catalog" / "catalog-v1.json"
+    original = file.read_bytes()
+    file.write_bytes(original + b"\n")
+    with pytest.raises(CatalogStoreRefused, match="not canonical"):
+        storage.load_saved_snapshot()
+    assert file.read_bytes() == original + b"\n"

@@ -179,6 +179,37 @@ class CurrentUserDataSourceStore:
         revision = json.loads(catalog.to_document())["revision"]
         return catalog, revision
 
+    def load_saved_snapshot(self) -> tuple[PersonalDataSources, int, str]:
+        """Read an EXISTING saved #167 snapshot with its digest and revision.
+
+        No files are created; no credential metadata or database is contacted.
+        Refuse pending writer locks or changing bytes. The explicitly supplied
+        user-data root and the digest are NOT authentication of user identity.
+        """
+        self._check_directory(required=True)
+        if _plain_file(self._lockfile) is not None:
+            raise CatalogStoreRefused("Catalog writer lock requires review before saved inspection")
+        raw = self._read(self._current)
+        if raw is None:
+            raise CatalogStoreRefused("No existing saved current-user catalog was found")
+        try:
+            catalog = PersonalDataSources(self.user_namespace, self._lookup, raw)
+            canonical = catalog.to_document()
+            if canonical != raw:
+                raise CatalogStoreRefused("Saved catalog bytes are not canonical")
+            import hashlib
+            import json
+            revision = json.loads(canonical)["revision"]
+            digest = hashlib.sha256(raw).hexdigest()
+        except CatalogStoreRefused:
+            raise
+        except DataSourceRefused:
+            raise CatalogStoreRefused("Saved catalog metadata cannot be verified") from None
+        if (_plain_file(self._lockfile) is not None
+                or self._read(self._current) != raw):
+            raise CatalogStoreRefused("Saved catalog or writer state changed during inspection")
+        return catalog, revision, digest
+
     def inspect_previous(self) -> tuple[PersonalDataSources, int] | None:
         """Read-only preimage inspection; never automatically restores old authority."""
         raw = self._read(self._previous)

@@ -203,6 +203,38 @@ def _selected_catalog_summary(
 
 
 
+def _selected_saved_catalog_summary(
+    store: Any, source_id: str, project_key: str,
+) -> dict[str, Any]:
+    """Original #167 saved-file review; no implicit profile or credential access.
+
+    Only a trusted application caller supplies the existing store object.
+    The original owner double-reads its file; source and project selection
+    remain read-time evidence, not verified user identity or database truth.
+    """
+    from .personal_data_source_store import CurrentUserDataSourceStore
+    if type(store) is not CurrentUserDataSourceStore:
+        raise WorkSessionRefused("An exact original current-user catalog store is required")
+    try:
+        catalog, revision, digest = store.load_saved_snapshot()
+        summary = _selected_catalog_summary(
+            catalog.to_document(), store.user_namespace, source_id,
+            project_key, digest)
+    except Exception:
+        raise WorkSessionRefused("Selected saved catalog unavailable or project binding refused") from None
+    return {
+        **summary,
+        "status": "READ_ONLY_EXPLICIT_SAVED_CURRENT_USER_CATALOG_SUMMARY",
+        "catalog_bytes_supplied_by_caller": False,
+        "saved_catalog_file_observed_read_only": True,
+        "saved_catalog_revision": revision,
+        "saved_catalog_store_path_hidden": True,
+        "catalog_storage_provenance_verified": False,
+        "current_user_identity_verified": False,
+        "metadata_lookup_performed": False,
+    }
+
+
 def _selected_project_adoption_preview(project_root: str | Path) -> dict[str, Any]:
     """One explicitly requested ORIGINAL #168 read-only project intake.
 
@@ -358,6 +390,9 @@ def review_session(desk: str | Path, task: str, *,
                    catalog_namespace: str | None = None,
                    catalog_source_id: str | None = None,
                    expected_catalog_sha256: str | None = None,
+                   include_saved_catalog: bool = False,
+                   saved_catalog_store: Any | None = None,
+                   saved_catalog_source_id: str | None = None,
                    include_project_intake: bool = False,
                    include_experience_provenance: bool = False,
                    include_chairman_candidate: bool = False,
@@ -398,6 +433,15 @@ def review_session(desk: str | Path, task: str, *,
     catalog_fields = (catalog_document, catalog_namespace,
                       catalog_source_id, expected_catalog_sha256)
     catalog_requested = any(field is not None for field in catalog_fields)
+    if type(include_saved_catalog) is not bool:
+        raise WorkSessionRefused("Saved catalog selection must be an exact boolean")
+    if (not include_saved_catalog
+            and (saved_catalog_store is not None or saved_catalog_source_id is not None)):
+        raise WorkSessionRefused("Saved catalog store requires explicit opt-in")
+    if include_saved_catalog and (
+            saved_catalog_store is None or saved_catalog_source_id is None
+            or project_root is None or project_key is None or catalog_requested):
+        raise WorkSessionRefused("One explicit saved catalog, source and project required")
     if catalog_requested and (not all(field is not None for field in catalog_fields)
                               or project_root is None or project_key is None):
         raise WorkSessionRefused("An exact catalog and selected project are required together")
@@ -425,6 +469,9 @@ def review_session(desk: str | Path, task: str, *,
                 selected_catalog = _selected_catalog_summary(
                     catalog_document, catalog_namespace, catalog_source_id,
                     project_key, expected_catalog_sha256)
+            if include_saved_catalog:
+                selected_catalog = _selected_saved_catalog_summary(
+                    saved_catalog_store, saved_catalog_source_id, project_key)
             if include_project_intake:
                 selected_intake = _selected_project_adoption_preview(project_root)
             if include_chairman_candidate:
@@ -432,7 +479,8 @@ def review_session(desk: str | Path, task: str, *,
                     task, selected_sha, project_binding, chairman_history_document,
                     chairman_template, expected_chairman_history_sha256,
                     expected_chairman_proposal_sha256, expected_chairman_template_sha256)
-            if catalog_requested or include_project_intake or include_chairman_candidate:
+            if (catalog_requested or include_saved_catalog
+                    or include_project_intake or include_chairman_candidate):
                 # All optional reviews are strictly read-only; verify their
                 # task/project association again before publishing a summary.
                 after = handoff.inspect_work_brief(desk, task, project_root, project_key)
@@ -493,6 +541,13 @@ def review_session(desk: str | Path, task: str, *,
                 "A completed task must be explicitly reopened before project replay")
         if not rows:
             raise WorkSessionRefused("No active task or historical snapshot matches")
+    if include_saved_catalog:
+        # The original saved store is the only file owner. This late read
+        # detects ordinary revision, content or project-binding changes.
+        latest_catalog = _selected_saved_catalog_summary(
+            saved_catalog_store, saved_catalog_source_id, project_key)
+        if latest_catalog != selected_catalog:
+            raise WorkSessionRefused("Saved current-user catalog changed during review")
     return {
         "schema": SCHEMA,
         "status": ("ACTIVE_WORK_SESSION_REVIEW" if active
