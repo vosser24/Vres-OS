@@ -229,6 +229,59 @@ def _selected_project_adoption_preview(project_root: str | Path) -> dict[str, An
     }
 
 
+def _selected_experience_source_provenance(
+    task: str, selected_sha: str, project_binding: str,
+    inspected: dict[str, Any],
+) -> dict[str, Any]:
+    """Non-authoritative #176 source linkage, not experience capture/retrieval.
+
+    Reuse the ORIGINAL exact task/project/document result owner; never import
+    the DB-backed experience or experience_retrieval modules. The digest only
+    identifies this observed work context, not user, memory or trust authority.
+    """
+    brief = inspected.get("work_brief")
+    receipt = brief.get("scratch_handoff") if type(brief) is dict else None
+    digest = inspected.get("result_sha256")
+    size = inspected.get("result_bytes")
+    checkpoint = inspected.get("checkpoint_sha256")
+    if (inspected.get("status") != "RESULT_EXACT_CONTEXT_CHECKPOINT_MATCH"
+            or type(receipt) is not dict
+            or receipt.get("selected_note_sha256") != selected_sha
+            or brief.get("project_binding_sha256") != project_binding
+            or type(digest) is not str or not workbench._SHA.fullmatch(digest)
+            or type(checkpoint) is not str or not workbench._SHA.fullmatch(checkpoint)
+            or type(size) is not int or not 0 <= size <= 16 * 1024 * 1024):
+        raise WorkSessionRefused("An exact original-owner work result is required")
+    link = {
+        "schema": "vres-personal-experience-work-source/1",
+        "task_key_claimed": task,
+        "selected_note_sha256": selected_sha,
+        "selected_project_binding_sha256": project_binding,
+        "checkpoint_sha256": checkpoint,
+        "result_sha256": digest,
+        "result_bytes": size,
+    }
+    encoded = json.dumps(link, sort_keys=True, ensure_ascii=True,
+                         separators=(",", ":")).encode("utf-8")
+    return {
+        **link,
+        "status": "NONAUTHORITATIVE_EXPERIENCE_SOURCE_LINK_ONLY",
+        "source_link_sha256": hashlib.sha256(encoded).hexdigest(),
+        "provenance": "original_work_result_bytes_observed_this_review",
+        "source_independently_authenticated": False,
+        "original_experience_truth_owner_reused_for_authority": False,
+        "original_experience_truth_owner_remains_required": True,
+        "database_project_id_resolved": False,
+        "experience_retrieval_performed": False,
+        "trust_rank_or_lifecycle_validated": False,
+        "revocation_state_checked": False,
+        "experience_capture_or_memory_promotion": False,
+        "native_claude_or_hooks_executed": False,
+        "database_contacted": False,
+        "writes_performed": False,
+    }
+
+
 def review_session(desk: str | Path, task: str, *,
                    project_root: str | Path | None = None,
                    project_key: str | None = None,
@@ -239,18 +292,25 @@ def review_session(desk: str | Path, task: str, *,
                    catalog_namespace: str | None = None,
                    catalog_source_id: str | None = None,
                    expected_catalog_sha256: str | None = None,
-                   include_project_intake: bool = False) -> dict[str, Any]:
+                   include_project_intake: bool = False,
+                   include_experience_provenance: bool = False) -> dict[str, Any]:
     """One view across active receipt, optional project result and old history.
 
     No guess about the newest event: lifecycle history has no timestamps.
     No result file is opened unless explicitly selected. Catalog inputs are
     opt-in saved bytes, NEVER an implicit current-user store/credential lookup.
     The #168 project intake only scans on an explicit read-only opt-in.
+    The #176 source-link preview never reads or writes an experience store.
     """
     if type(include_project_intake) is not bool:
         raise WorkSessionRefused("Project intake selection must be an exact boolean")
     if include_project_intake and (project_root is None or project_key is None):
         raise WorkSessionRefused("Explicit project root and key required for intake")
+    if type(include_experience_provenance) is not bool:
+        raise WorkSessionRefused("Experience provenance selection must be an exact boolean")
+    if include_experience_provenance and any(value is None for value in (
+            project_root, project_key, result_file, expected_checkpoint_sha256)):
+        raise WorkSessionRefused("Experience provenance requires exact project and result selection")
     catalog_fields = (catalog_document, catalog_namespace,
                       catalog_source_id, expected_catalog_sha256)
     catalog_requested = any(field is not None for field in catalog_fields)
@@ -265,6 +325,7 @@ def review_session(desk: str | Path, task: str, *,
     observed = None
     selected_catalog = None
     selected_intake = None
+    selected_experience = None
     if active:
         selected = handoff.inspect_handoff(desk, task)
         selected_sha = selected["selected_note_sha256"]
@@ -304,6 +365,13 @@ def review_session(desk: str | Path, task: str, *,
                 "result_quality_validated": False,
                 "current_bytes_observed_this_review": True,
             }
+            if include_experience_provenance:
+                after = handoff.inspect_work_brief(desk, task, project_root, project_key)
+                if (after["scratch_handoff"]["selected_note_sha256"] != selected_sha
+                        or after["project_binding_sha256"] != project_binding):
+                    raise WorkSessionRefused("Task or project changed during experience source review")
+                selected_experience = _selected_experience_source_provenance(
+                    task, selected_sha, project_binding, inspected)
         elif expected_checkpoint_sha256 is not None:
             raise WorkSessionRefused("Expected replay token requires a result file")
     else:
@@ -324,6 +392,7 @@ def review_session(desk: str | Path, task: str, *,
         "observed_result": observed,
         "selected_project_catalog": selected_catalog,
         "selected_project_intake": selected_intake,
+        "selected_experience_provenance": selected_experience,
         "historical_snapshots": rows,
         "history_has_timestamps": False,
         "historical_document_current_bytes_verified": False,
@@ -430,6 +499,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if name == "review":
             sub.add_argument("--show-result-paths", action="store_true")
             sub.add_argument("--include-project-intake", action="store_true")
+            sub.add_argument("--include-experience-provenance", action="store_true")
         if name in ("start", "finish", "reopen", "replay"):
             sub.add_argument("--yes", action="store_true")
         if name in ("reopen", "replay"):
@@ -447,7 +517,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 result_file=args.result_file,
                 expected_checkpoint_sha256=args.expected_checkpoint_sha256,
                 show_result_paths=args.show_result_paths,
-                include_project_intake=args.include_project_intake)
+                include_project_intake=args.include_project_intake,
+                include_experience_provenance=args.include_experience_provenance)
         elif args.command == "finish":
             packet = completion.finish_work(
                 args.desk, args.task_key, args.project_root, args.project_key,

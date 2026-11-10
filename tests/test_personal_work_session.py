@@ -401,3 +401,89 @@ def test_project_intake_review_refused_after_completion_until_explicit_reopen(tm
         session.review_session(selected, task, project_root=project, project_key=key,
                                include_project_intake=True)
     assert session.review_session(selected, task)["selected_project_intake"] is None
+
+
+#176: an explicitly selected original-owner result can supply provenance only.
+# No experience/experience_retrieval import, DB use, memory write or authority.
+def test_experience_link_is_explicit_exact_and_hides_paths(tmp_path):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    default = session.review_session(selected, task)
+    assert default["selected_experience_provenance"] is None
+    before = document.read_bytes()
+    kwargs = dict(project_root=project, project_key=key, result_file=document,
+                  expected_checkpoint_sha256=token,
+                  include_experience_provenance=True)
+    report = session.review_session(selected, task, **kwargs)
+    link = report["selected_experience_provenance"]
+    assert link["status"] == "NONAUTHORITATIVE_EXPERIENCE_SOURCE_LINK_ONLY"
+    assert link["checkpoint_sha256"] == token
+    assert link["result_sha256"] == report["observed_result"]["result_sha256"]
+    assert link["result_bytes"] == len(before)
+    assert len(link["source_link_sha256"]) == 64
+    assert link["original_experience_truth_owner_remains_required"] is True
+    assert all(link[field] is False for field in (
+        "source_independently_authenticated", "database_project_id_resolved",
+        "experience_retrieval_performed", "trust_rank_or_lifecycle_validated",
+        "revocation_state_checked", "experience_capture_or_memory_promotion",
+        "database_contacted", "native_claude_or_hooks_executed",
+        "writes_performed"))
+    assert session.review_session(selected, task, **kwargs)[
+        "selected_experience_provenance"]["source_link_sha256"] == link["source_link_sha256"]
+    assert str(project) not in json.dumps(report)
+    assert str(document) not in json.dumps(report)
+    assert "Non-sensitive sample." not in json.dumps(report)
+    assert document.read_bytes() == before
+
+
+def test_experience_link_refuses_missing_selection_and_nonboolean(tmp_path):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_session(selected, task, include_experience_provenance=True)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_session(selected, task, project_root=project, project_key=key,
+                               result_file=document, include_experience_provenance=True)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_session(selected, task, project_root=project, project_key=key,
+                               result_file=document, expected_checkpoint_sha256=token,
+                               include_experience_provenance="yes")
+
+
+def test_experience_link_cannot_call_stale_result_current(tmp_path):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    document.write_text("# Changed since checkpoint\n", encoding="utf-8")
+    with pytest.raises((session.WorkSessionRefused, result.WorkResultRefused)):
+        session.review_session(selected, task, project_root=project, project_key=key,
+                               result_file=document, expected_checkpoint_sha256=token,
+                               include_experience_provenance=True)
+    assert session.review_session(selected, task)["selected_experience_provenance"] is None
+
+
+def test_experience_link_requires_active_work_not_archived_memory(tmp_path):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    _finish(ctx, token)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_session(selected, task, project_root=project, project_key=key,
+                               result_file=document, expected_checkpoint_sha256=token,
+                               include_experience_provenance=True)
+    historical = session.review_session(selected, task)
+    assert historical["selected_experience_provenance"] is None
+
+
+def test_experience_link_cli_is_opt_in_and_nonauthorizing(tmp_path, capsys):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    base = ["work-session", "review", "--desk", str(selected), "--task-key", task,
+            "--project-root", str(project), "--project-key", key,
+            "--result-file", str(document), "--expected-checkpoint-sha256", token]
+    assert cli.main(base) == 0
+    assert json.loads(capsys.readouterr().out)["selected_experience_provenance"] is None
+    assert cli.main(base + ["--include-experience-provenance"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["selected_experience_provenance"]["status"] == (
+        "NONAUTHORITATIVE_EXPERIENCE_SOURCE_LINK_ONLY")
+    assert str(project) not in json.dumps(report)
+    assert report["selected_experience_provenance"]["experience_retrieval_performed"] is False
