@@ -282,6 +282,72 @@ def _selected_experience_source_provenance(
     }
 
 
+def _selected_chairman_candidate_preview(
+    task: str, selected_sha: str, project_binding: str,
+    history_document: bytes, template: bytes,
+    history_sha: str, proposal_sha: str, template_sha: str,
+) -> dict[str, Any]:
+    """Bind ORIGINAL #165 policy history to one active source selection only.
+
+    All bytes and hashes are caller supplied, never installed-state evidence.
+    Do not import live Chairman routing, DB/experience, Claude or hook owners.
+    """
+    if (type(history_document) is not bytes
+            or not 0 < len(history_document) <= 256 * 1024
+            or type(template) is not bytes or not 0 < len(template) <= 64 * 1024):
+        raise WorkSessionRefused("Bounded Chairman history and template bytes required")
+    try:
+        from . import chairman_policy_history as chairman
+        history = chairman.ChairmanPolicyHistory.from_document(history_document)
+        if history.to_document() != history_document:
+            raise WorkSessionRefused("Chairman history must be exact canonical bytes")
+        candidate = chairman.prepare_chairman_review_candidate(
+            history, template, expected_history_sha256=history_sha,
+            expected_proposal_sha256=proposal_sha,
+            expected_template_sha256=template_sha)
+        manifest = candidate.manifest()
+        host = chairman.review_chairman_host_claim(
+            candidate, task_family="personal-work-session")
+        if (manifest["state"] != "REVIEW_CANDIDATE_ONLY"
+                or host["status"] != "NO_HOST_MODEL_EVIDENCE_STOP"):
+            raise WorkSessionRefused("Chairman source preview cannot claim host authority")
+    except Exception:
+        raise WorkSessionRefused("Original Chairman source candidate or exact hash refused") from None
+    identity = [
+        "vres-personal-work-chairman-source-link/1", task, selected_sha,
+        project_binding, manifest["history_sha256"],
+        manifest["latest_proposal_sha256"], manifest["template_sha256"],
+        manifest["rendered_sha256"],
+    ]
+    link = hashlib.sha256(json.dumps(
+        identity, sort_keys=True, separators=(",", ":"),
+        ensure_ascii=True, allow_nan=False).encode("ascii")).hexdigest()
+    return {
+        "schema": "vres-personal-work-chairman-source-link/1",
+        "status": "NONAUTHORITATIVE_CHAIRMAN_CANDIDATE_TASK_SOURCE_ONLY",
+        "task_key_claimed": task,
+        "selected_note_sha256": selected_sha,
+        "selected_project_binding_sha256": project_binding,
+        "source_link_sha256": link,
+        "history_sha256": manifest["history_sha256"],
+        "latest_proposal_sha256": manifest["latest_proposal_sha256"],
+        "template_sha256": manifest["template_sha256"],
+        "rendered_candidate_sha256": manifest["rendered_sha256"],
+        "requested_family": manifest["requested_family"],
+        "requested_effort": manifest["requested_effort"],
+        "host_evidence_status": host["status"],
+        "history_and_template_caller_supplied": True,
+        "saved_history_storage_authenticated": False,
+        "installed_chairman_verified": False,
+        "task_bound_in_live_chairman": False,
+        "policy_or_worker_routing_modified": False,
+        "approval_or_f1_fable_authority_granted": False,
+        "native_claude_or_hooks_executed": False,
+        "database_contacted": False,
+        "files_written": False,
+    }
+
+
 def review_session(desk: str | Path, task: str, *,
                    project_root: str | Path | None = None,
                    project_key: str | None = None,
@@ -293,7 +359,13 @@ def review_session(desk: str | Path, task: str, *,
                    catalog_source_id: str | None = None,
                    expected_catalog_sha256: str | None = None,
                    include_project_intake: bool = False,
-                   include_experience_provenance: bool = False) -> dict[str, Any]:
+                   include_experience_provenance: bool = False,
+                   include_chairman_candidate: bool = False,
+                   chairman_history_document: bytes | None = None,
+                   chairman_template: bytes | None = None,
+                   expected_chairman_history_sha256: str | None = None,
+                   expected_chairman_proposal_sha256: str | None = None,
+                   expected_chairman_template_sha256: str | None = None) -> dict[str, Any]:
     """One view across active receipt, optional project result and old history.
 
     No guess about the newest event: lifecycle history has no timestamps.
@@ -311,6 +383,18 @@ def review_session(desk: str | Path, task: str, *,
     if include_experience_provenance and any(value is None for value in (
             project_root, project_key, result_file, expected_checkpoint_sha256)):
         raise WorkSessionRefused("Experience provenance requires exact project and result selection")
+    if type(include_chairman_candidate) is not bool:
+        raise WorkSessionRefused("Chairman selection must be an exact boolean")
+    chairman_fields = (chairman_history_document, chairman_template,
+                       expected_chairman_history_sha256,
+                       expected_chairman_proposal_sha256,
+                       expected_chairman_template_sha256)
+    if (not include_chairman_candidate and any(x is not None for x in chairman_fields)):
+        raise WorkSessionRefused("Chairman candidate bytes require explicit opt-in")
+    if (include_chairman_candidate and (
+            not all(x is not None for x in chairman_fields)
+            or project_root is None or project_key is None)):
+        raise WorkSessionRefused("Exact Chairman history, template and project required")
     catalog_fields = (catalog_document, catalog_namespace,
                       catalog_source_id, expected_catalog_sha256)
     catalog_requested = any(field is not None for field in catalog_fields)
@@ -326,6 +410,7 @@ def review_session(desk: str | Path, task: str, *,
     selected_catalog = None
     selected_intake = None
     selected_experience = None
+    selected_chairman_candidate = None
     if active:
         selected = handoff.inspect_handoff(desk, task)
         selected_sha = selected["selected_note_sha256"]
@@ -342,8 +427,13 @@ def review_session(desk: str | Path, task: str, *,
                     project_key, expected_catalog_sha256)
             if include_project_intake:
                 selected_intake = _selected_project_adoption_preview(project_root)
-            if catalog_requested or include_project_intake:
-                # Both optional reviews are strictly read-only; verify their
+            if include_chairman_candidate:
+                selected_chairman_candidate = _selected_chairman_candidate_preview(
+                    task, selected_sha, project_binding, chairman_history_document,
+                    chairman_template, expected_chairman_history_sha256,
+                    expected_chairman_proposal_sha256, expected_chairman_template_sha256)
+            if catalog_requested or include_project_intake or include_chairman_candidate:
+                # All optional reviews are strictly read-only; verify their
                 # task/project association again before publishing a summary.
                 after = handoff.inspect_work_brief(desk, task, project_root, project_key)
                 if (after["scratch_handoff"]["selected_note_sha256"] != selected_sha
@@ -408,6 +498,7 @@ def review_session(desk: str | Path, task: str, *,
         "observed_result": observed,
         "selected_project_catalog": selected_catalog,
         "selected_project_intake": selected_intake,
+        "selected_chairman_candidate": selected_chairman_candidate,
         "selected_experience_provenance": selected_experience,
         "historical_snapshots": rows,
         "history_has_timestamps": False,

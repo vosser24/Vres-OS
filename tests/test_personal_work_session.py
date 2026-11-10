@@ -702,3 +702,104 @@ def test_active_experience_source_refuses_document_changed_during_late_scan(
             include_experience_provenance=True)
     assert len(scans) >= 3
     assert session.review_session(selected, task)["selected_experience_provenance"] is None
+
+
+def _synthetic_chairman_history_selection():
+    import hashlib
+    from vres_os.chairman_policy import DEFAULT_CHAIRMAN_POLICY
+    from vres_os.chairman_policy_history import ChairmanPolicyHistory
+    history = ChairmanPolicyHistory.begin(
+        DEFAULT_CHAIRMAN_POLICY, reason="Synthetic candidate, never installed")
+    history_bytes = history.to_document()
+    template = (
+        b"---\n"
+        b"name: chairman\n"
+        b"description: Synthetic read-only Chairman candidate.\n"
+        b"model: sonnet\n"
+        b"effort: high\n"
+        b"---\n"
+        b"\nReview only; do not activate.\n"
+    )
+    return {
+        "chairman_history_document": history_bytes,
+        "chairman_template": template,
+        "expected_chairman_history_sha256": hashlib.sha256(history_bytes).hexdigest(),
+        "expected_chairman_proposal_sha256": history.latest_proposal.sha256,
+        "expected_chairman_template_sha256": hashlib.sha256(template).hexdigest(),
+    }
+
+
+def test_active_session_chairman_history_is_bound_only_as_untrusted_candidate(tmp_path):
+    ctx, checkpoint = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    candidate_args = _synthetic_chairman_history_selection()
+    kwargs = dict(project_root=project, project_key=key, result_file=document,
+                  expected_checkpoint_sha256=checkpoint)
+    normal = session.review_session(selected, task, **kwargs)
+    assert normal["selected_chairman_candidate"] is None
+    report = session.review_session(
+        selected, task, include_chairman_candidate=True, **candidate_args, **kwargs)
+    candidate = report["selected_chairman_candidate"]
+    assert candidate["status"] == "NONAUTHORITATIVE_CHAIRMAN_CANDIDATE_TASK_SOURCE_ONLY"
+    assert candidate["selected_note_sha256"] == report["active_note_sha256"]
+    assert candidate["selected_project_binding_sha256"] == report["selected_project_binding_sha256"]
+    assert candidate["host_evidence_status"] == "NO_HOST_MODEL_EVIDENCE_STOP"
+    assert candidate["approval_or_f1_fable_authority_granted"] is False
+    assert candidate["task_bound_in_live_chairman"] is False
+    assert candidate["database_contacted"] is False
+    assert candidate["files_written"] is False
+    assert report["observed_result"]["checkpoint_sha256"] == checkpoint
+    assert str(project) not in json.dumps(report)
+    assert "Synthetic candidate, never installed" not in json.dumps(report)
+    again = session.review_session(
+        selected, task, include_chairman_candidate=True, **candidate_args, **kwargs)
+    assert again["selected_chairman_candidate"]["source_link_sha256"] == candidate[
+        "source_link_sha256"]
+
+
+def test_chairman_source_candidate_refuses_missing_opt_in_stale_and_partial(tmp_path):
+    ctx, checkpoint = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    args = _synthetic_chairman_history_selection()
+    project_args = dict(project_root=project, project_key=key)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_session(selected, task, **project_args, **args)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_session(selected, task, **project_args,
+                               include_chairman_candidate=True)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_session(selected, task, **project_args,
+                               include_chairman_candidate="yes", **args)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_session(selected, task,
+                               include_chairman_candidate=True, **args)
+    stale = dict(args)
+    stale["expected_chairman_history_sha256"] = "0" * 64
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_session(selected, task, **project_args,
+                               include_chairman_candidate=True, **stale)
+    _finish(ctx, checkpoint)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_session(selected, task, **project_args,
+                               include_chairman_candidate=True, **args)
+
+
+def test_chairman_candidate_refuses_task_mutation_during_pure_preview(
+        tmp_path, monkeypatch):
+    ctx, checkpoint = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    original = session._selected_chairman_candidate_preview
+
+    def tamper_after_candidate(*args):
+        reviewed = original(*args)
+        note = desk._owned_task(selected, task) / "notes" / "next-step.md"
+        note.write_text("# Changed after candidate preview\n", encoding="utf-8")
+        return reviewed
+
+    monkeypatch.setattr(session, "_selected_chairman_candidate_preview",
+                        tamper_after_candidate)
+    with pytest.raises((session.WorkSessionRefused,
+                        session.handoff.PersonalHandoffRefused)):
+        session.review_session(
+            selected, task, project_root=project, project_key=key,
+            include_chairman_candidate=True, **_synthetic_chairman_history_selection())
