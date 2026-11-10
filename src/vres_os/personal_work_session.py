@@ -7,6 +7,7 @@ A result's historical metadata never proves that external bytes are current.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -21,6 +22,7 @@ if not __package__:
     from vres_os import personal_work_result as result
     from vres_os import personal_work_completion as completion
     from vres_os import personal_project_intake as intake
+    from vres_os import personal_data_sources as data_sources
 else:
     from . import personal_desk_chairman_handoff as handoff
     from . import personal_portable_desk as portable
@@ -29,6 +31,7 @@ else:
     from . import personal_work_result as result
     from . import personal_work_completion as completion
     from . import personal_project_intake as intake
+    from . import personal_data_sources as data_sources
 
 SCHEMA = "vres-personal-integrated-work-session/1"
 
@@ -142,23 +145,92 @@ def start_session(desk: str | Path, task: str, note_file: str | Path,
     }
 
 
+
+def _reject_catalog_credential_lookup(_resource_id: str) -> None:
+    """Never ask the Credential Broker for metadata in a read-only review."""
+    raise WorkSessionRefused("Credential access is forbidden during catalog review")
+
+
+def _selected_catalog_summary(
+    document: bytes, namespace: str, source_id: str, project_key: str,
+    expected_sha256: str,
+) -> dict[str, Any]:
+    """Use only existing #167 owner rules on exact, caller-supplied saved bytes.
+
+    The digest identifies those bytes; it is NOT storage authentication, a
+    live database check, a credential grant or a current-user identity proof.
+    """
+    if type(document) is not bytes or not 0 < len(document) <= 512 * 1024:
+        raise WorkSessionRefused("A bounded saved catalog document is required")
+    if type(expected_sha256) is not str or not workbench._SHA.fullmatch(expected_sha256):
+        raise WorkSessionRefused("Exact saved catalog SHA-256 is required")
+    if type(project_key) is not str or not data_sources._PROJECT.fullmatch(project_key):
+        raise WorkSessionRefused("Catalog linking requires a canonical #167 project key")
+    if type(source_id) is not str or not data_sources._SOURCE.fullmatch(source_id):
+        raise WorkSessionRefused("One exact registered catalog source ID is required")
+    if hashlib.sha256(document).hexdigest() != expected_sha256:
+        raise WorkSessionRefused("Saved catalog bytes do not match their selected SHA-256")
+    try:
+        catalog = data_sources.PersonalDataSources(
+            namespace, _reject_catalog_credential_lookup, document=document)
+        if catalog.to_document() != document:
+            raise WorkSessionRefused("Saved catalog document is not canonical")
+        # summary_for AND catalog_for each enforce the ORIGINAL project binding.
+        summary = catalog.summary_for(source_id, project_key)
+        structural = catalog.catalog_for(source_id, project_key)
+    except data_sources.DataSourceRefused:
+        raise WorkSessionRefused("Source is not linked to this exact project or catalog is invalid") from None
+    objects = structural["schema"]["objects"] if structural["schema"] is not None else ()
+    return {
+        "status": "READ_ONLY_SELECTED_PROJECT_CATALOG_SUMMARY",
+        "catalog_document_sha256": expected_sha256,
+        "selected_source_id": source_id,
+        "engine": summary["engine"],
+        "snapshot_status": structural["status"],
+        "snapshot_fingerprint": summary["snapshot_fingerprint"],
+        "assurance": summary["assurance"],
+        "structural_object_count": len(objects),
+        "structural_column_count": sum(len(item["columns"]) for item in objects),
+        "credential_resource_handle_hidden": True,
+        "origin_hidden": True,
+        "catalog_bytes_supplied_by_caller": True,
+        "catalog_storage_provenance_verified": False,
+        "current_user_identity_verified": False,
+        "database_contacted": False,
+        "credential_lookup_performed": False,
+        "writes_performed": False,
+    }
+
+
 def review_session(desk: str | Path, task: str, *,
                    project_root: str | Path | None = None,
                    project_key: str | None = None,
                    result_file: str | Path | None = None,
                    expected_checkpoint_sha256: str | None = None,
-                   show_result_paths: bool = False) -> dict[str, Any]:
+                   show_result_paths: bool = False,
+                   catalog_document: bytes | None = None,
+                   catalog_namespace: str | None = None,
+                   catalog_source_id: str | None = None,
+                   expected_catalog_sha256: str | None = None) -> dict[str, Any]:
     """One view across active receipt, optional project result and old history.
 
     No guess about the newest event: lifecycle history has no timestamps.
-    No result file is opened unless explicitly selected.
+    No result file is opened unless explicitly selected. Catalog inputs are
+    opt-in saved bytes, NEVER an implicit current-user store/credential lookup.
     """
+    catalog_fields = (catalog_document, catalog_namespace,
+                      catalog_source_id, expected_catalog_sha256)
+    catalog_requested = any(field is not None for field in catalog_fields)
+    if catalog_requested and (not all(field is not None for field in catalog_fields)
+                              or project_root is None or project_key is None):
+        raise WorkSessionRefused("An exact catalog and selected project are required together")
     rows = _history_rows(desk, task, show_result_paths=show_result_paths)
     root = portable._desk(desk, must_exist=True)
     active = task in portable._existing_tasks(root)
     selected_sha = None
     project_binding = None
     observed = None
+    selected_catalog = None
     if active:
         selected = handoff.inspect_handoff(desk, task)
         selected_sha = selected["selected_note_sha256"]
@@ -169,6 +241,16 @@ def review_session(desk: str | Path, task: str, *,
             if brief["scratch_handoff"]["selected_note_sha256"] != selected_sha:
                 raise WorkSessionRefused("Task changed during project inspection")
             project_binding = brief["project_binding_sha256"]
+            if catalog_requested:
+                selected_catalog = _selected_catalog_summary(
+                    catalog_document, catalog_namespace, catalog_source_id,
+                    project_key, expected_catalog_sha256)
+                # Re-read original owner binding after inspecting the saved
+                # metadata. Refuse task/project drift, never auto-retry.
+                after = handoff.inspect_work_brief(desk, task, project_root, project_key)
+                if (after["scratch_handoff"]["selected_note_sha256"] != selected_sha
+                        or after["project_binding_sha256"] != project_binding):
+                    raise WorkSessionRefused("Task or project changed during catalog review")
         if result_file is not None:
             if project_binding is None:
                 raise WorkSessionRefused("A result requires an explicit project selection")
@@ -203,6 +285,7 @@ def review_session(desk: str | Path, task: str, *,
         "active_note_sha256": selected_sha,
         "selected_project_binding_sha256": project_binding,
         "observed_result": observed,
+        "selected_project_catalog": selected_catalog,
         "historical_snapshots": rows,
         "history_has_timestamps": False,
         "historical_document_current_bytes_verified": False,

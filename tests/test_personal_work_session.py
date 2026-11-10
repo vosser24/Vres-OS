@@ -187,3 +187,138 @@ def test_start_refuses_postpreview_project_change_without_deleting_desk(tmp_path
     assert new_desk.is_dir()
     assert desk._existing_tasks(new_desk) == ["TASK-POST-CHECK"]
     assert (project / "appeared-after-preflight.md").is_file()
+
+
+#167: strictly source-only bridge to the ORIGINAL current-user data-source owner.
+# Neither the bridge nor these fixtures import a PostgreSQL driver.
+def _catalog_fixture(*, with_snapshot=True):
+    import hashlib
+    from types import SimpleNamespace
+    from vres_os.personal_data_sources import PersonalDataSources
+
+    namespace = "a" * 64
+    source_credential = "credential-" + "a" * 32
+    origin = "example.gr:5432/vres_app"
+    project_key = "project:" + "a" * 24
+    calls = []
+
+    def synthetic_metadata(resource_id):
+        calls.append(resource_id)
+        return SimpleNamespace(resource_id=source_credential,
+                               service_type="postgres", origin=origin)
+
+    catalog = PersonalDataSources(namespace, synthetic_metadata)
+    sid = catalog.register_postgres(origin, source_credential, authorized=True)
+    catalog.bind(sid, project_key, authorized=True)
+    if with_snapshot:
+        structure = {"objects": [{
+            "schema": "public", "name": "sample", "kind": "table",
+            "columns": [{"name": "id", "type": "integer", "nullable": False}],
+            "primary_key": ["id"], "foreign_keys": [],
+        }]}
+        catalog.accept_schema(sid, project_key, structure,
+                              expected_current_fingerprint=None,
+                              authorized=True, reviewed=True)
+    saved = catalog.to_document()
+    return dict(document=saved, namespace=namespace, source_id=sid,
+                project_key=project_key, sha=hashlib.sha256(saved).hexdigest(),
+                credential=source_credential, origin=origin, calls=calls)
+
+
+def _selected_catalog_review(ctx, catalog, **changes):
+    selected, task, project, _, _ = ctx
+    kwargs = dict(
+        project_root=project, project_key=catalog["project_key"],
+        catalog_document=catalog["document"],
+        catalog_namespace=catalog["namespace"],
+        catalog_source_id=catalog["source_id"],
+        expected_catalog_sha256=catalog["sha"],
+    )
+    kwargs.update(changes)
+    return session.review_session(selected, task, **kwargs)
+
+
+def test_catalog_review_is_exact_bound_read_only_and_masks_credential_origin(tmp_path):
+    ctx, _ = _new(tmp_path)
+    catalog = _catalog_fixture()
+    original_calls = list(catalog["calls"])
+    packet = _selected_catalog_review(ctx, catalog, show_result_paths=True)
+    summary = packet["selected_project_catalog"]
+    assert packet["status"] == "ACTIVE_WORK_SESSION_REVIEW"
+    assert packet["writes_performed"] is False
+    assert summary["status"] == "READ_ONLY_SELECTED_PROJECT_CATALOG_SUMMARY"
+    assert summary["catalog_document_sha256"] == catalog["sha"]
+    assert summary["snapshot_status"] == "AVAILABLE_UNVERIFIED"
+    assert summary["assurance"] == "caller_supplied_unverified"
+    assert summary["structural_object_count"] == 1
+    assert summary["structural_column_count"] == 1
+    assert summary["catalog_storage_provenance_verified"] is False
+    assert summary["current_user_identity_verified"] is False
+    assert summary["database_contacted"] is False
+    assert summary["credential_lookup_performed"] is False
+    assert summary["origin_hidden"] is True
+    assert summary["credential_resource_handle_hidden"] is True
+    assert catalog["calls"] == original_calls
+    serialized = json.dumps(packet)
+    assert catalog["credential"] not in serialized
+    assert catalog["origin"] not in serialized
+
+
+def test_catalog_review_refuses_cross_project_or_unknown_source(tmp_path):
+    ctx, _ = _new(tmp_path)
+    catalog = _catalog_fixture()
+    with pytest.raises(session.WorkSessionRefused):
+        _selected_catalog_review(ctx, catalog, project_key="project:" + "b" * 24)
+    with pytest.raises(session.WorkSessionRefused):
+        _selected_catalog_review(ctx, catalog, catalog_source_id="data-source-" + "0" * 32)
+    assert session.review_session(ctx[0], ctx[1])["selected_project_catalog"] is None
+
+
+def test_catalog_review_refuses_stale_sha_wrong_namespace_and_noncanonical_bytes(tmp_path):
+    ctx, _ = _new(tmp_path)
+    catalog = _catalog_fixture()
+    with pytest.raises(session.WorkSessionRefused):
+        _selected_catalog_review(ctx, catalog, expected_catalog_sha256="0" * 64)
+    with pytest.raises(session.WorkSessionRefused):
+        _selected_catalog_review(ctx, catalog, catalog_namespace="b" * 64)
+    import hashlib
+    padded = catalog["document"] + b" "
+    with pytest.raises(session.WorkSessionRefused):
+        _selected_catalog_review(
+            ctx, catalog, catalog_document=padded,
+            expected_catalog_sha256=hashlib.sha256(padded).hexdigest())
+
+
+def test_catalog_review_requires_all_exact_selection_fields_and_canonical_key(tmp_path):
+    ctx, _ = _new(tmp_path)
+    catalog = _catalog_fixture()
+    with pytest.raises(session.WorkSessionRefused):
+        _selected_catalog_review(ctx, catalog, catalog_source_id=None)
+    with pytest.raises(session.WorkSessionRefused):
+        _selected_catalog_review(ctx, catalog, project_root=None)
+    with pytest.raises(session.WorkSessionRefused):
+        _selected_catalog_review(ctx, catalog, project_key="project:ordinary")
+    # The original task review intentionally retains its older key semantics.
+    selected, task, project, key, _ = ctx
+    assert session.review_session(selected, task, project_root=project,
+                                  project_key=key)["active"] is True
+
+
+def test_catalog_without_snapshot_is_not_claimed_as_verified_structure(tmp_path):
+    ctx, _ = _new(tmp_path)
+    catalog = _catalog_fixture(with_snapshot=False)
+    summary = _selected_catalog_review(ctx, catalog)["selected_project_catalog"]
+    assert summary["snapshot_status"] == "NOT_CATALOGUED"
+    assert summary["assurance"] == "none"
+    assert summary["snapshot_fingerprint"] is None
+    assert summary["structural_object_count"] == 0
+    assert summary["structural_column_count"] == 0
+
+
+def test_completed_work_cannot_read_catalog_until_explicit_reopen(tmp_path):
+    ctx, checkpoint = _new(tmp_path)
+    catalog = _catalog_fixture()
+    _finish(ctx, checkpoint)
+    with pytest.raises(session.WorkSessionRefused):
+        _selected_catalog_review(ctx, catalog)
+    assert session.review_session(ctx[0], ctx[1])["active"] is False
