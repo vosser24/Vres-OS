@@ -789,10 +789,34 @@ def start(project, *, data_root: Path | None = None) -> dict[str, Any]:
                           reason="an activation was interrupted; run `vres project recover`") | {"changed": False}
     if record and record["state"] in {"active", "recovery_required"}:
         return record | {"changed": False}
-    if record and record["state"] == "fresh":  # scaffold written but not yet confirmed by state
-        scaffold = _lstat(root / "CLAUDE.md")
-        if scaffold is not None and hashlib.sha256((root / "CLAUDE.md").read_bytes()).hexdigest() == record["scaffold_sha256"]:
-            return _set_state(sd, project, "active", created=["CLAUDE.md"]) | {"changed": False}
+    if record and record["state"] == "fresh":  # scaffold written, final state may be interrupted
+        expected = record.get("scaffold_sha256")
+        if type(expected) is not str or re.fullmatch(r"[0-9a-f]{64}", expected) is None:
+            raise AdoptionError("Interrupted fresh scaffold identity is invalid; manual review required")
+        path = root / "CLAUDE.md"
+        scaffold = _lstat(path)
+        if scaffold is not None:
+            if _is_link(scaffold) or not stat.S_ISREG(scaffold.st_mode):
+                raise AdoptionError("Interrupted fresh scaffold is not an ordinary file; manual review required")
+            if hashlib.sha256(path.read_bytes()).hexdigest() == expected:
+                # The previous process might have stopped after writing the
+                # scaffold while another actor added Claude settings or changed
+                # the project architecture. Re-inventory rather than treating
+                # the old matching CLAUDE.md digest as full project readiness.
+                reviewed = inventory(root)
+                if (
+                    len(reviewed["items"]) == 1
+                    and reviewed["items"][0]["path"] == "CLAUDE.md"
+                    and reviewed["items"][0]["sha256"] == expected
+                    and not _legacy_architecture_hold(root)
+                    and hashlib.sha256(
+                        scaffold_text(project.name, detect_facts(root)).encode("utf-8")
+                    ).hexdigest() == expected
+                    and inventory(root) == reviewed
+                ):
+                    return _set_state(sd, project, "active", created=["CLAUDE.md"]) | {"changed": False}
+        # Changed or added surfaces follow original legacy review; nothing is
+        # silently overwritten or accepted as active.
     inv = inventory(root)
     if not inv["items"]:
         # #168: no Claude surfaces does not establish that source is a fresh project.
