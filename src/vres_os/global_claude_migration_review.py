@@ -15,7 +15,7 @@ from typing import Any
 from .global_claude_fixture_transaction import (
     FixtureTransaction,
     GlobalFixtureRefusal,
-    inspect_global_fixture,
+    inspect_global_fixture, rollback_global_fixture,
 )
 
 _SCHEMA = "vres-personal-synthetic-global-legacy-migration-review/1"
@@ -268,6 +268,36 @@ def freeze_synthetic_migration_plan(tx: FixtureTransaction, review: Any, sheet: 
     progress = migration_review_progress(tx, current, decision)
     if progress["pending"]:
         raise MigrationReviewRefusal("Unresolved migration choices; cannot freeze review")
+    # Pure synthetic rollback from the exact quarantined byte snapshot.
+    # The ORIGINAL transaction owner verifies its seal, journal and opaque
+    # vendor-state identities. Nothing on the user's Claude profile changes.
+    try:
+        restored = rollback_global_fixture(tx)
+        before = inspect_global_fixture(tx)
+        after = inspect_global_fixture(restored)
+    except GlobalFixtureRefusal:
+        raise MigrationReviewRefusal("Synthetic rollback rehearsal could not verify") from None
+    expected_active = tuple((path, data) for path, data, _digest in tx._snapshot)
+    if (restored._active != expected_active or restored._quarantine != ()
+            or restored._native_ids != tx._native_ids
+            or before["sealed_snapshot_sha256"] != current["snapshot_sha256"]
+            or after["sealed_snapshot_sha256"] != current["snapshot_sha256"]
+            or after["simulated_rollback_verified"] is not True):
+        raise MigrationReviewRefusal("Synthetic rollback failed exact restoration checks")
+    rehearsal = {
+        "status": "SYNTHETIC_EXACT_ROLLBACK_REHEARSAL_ONLY",
+        "sealed_snapshot_sha256": current["snapshot_sha256"],
+        "governance_file_count": before["governance_file_count"],
+        "opaque_vendor_handle_count": before["opaque_native_handle_count"],
+        "synthetic_snapshot_bytes_restored": True,
+        "opaque_vendor_handles_preserved": True,
+        "real_profile_snapshot_verified": False,
+        "real_vendor_state_unchanged_verified": False,
+        "durable_host_journal_verified": False,
+        "native_hook_quarantine_verified": False,
+        "independent_fable_validation_granted": False,
+        "real_activation_authorized": False,
+    }
     mapping = {r["number"]: r["decision"] for r in decision["choices"]}
     items = [{"number": item["number"], "decision": mapping[item["number"]],
               "destination_if_keep": item["destination_if_keep"] if mapping[item["number"]] == "KEEP" else "archived_only_not_destroyed",
@@ -275,7 +305,7 @@ def freeze_synthetic_migration_plan(tx: FixtureTransaction, review: Any, sheet: 
              for item in current["items"]]
     canonical = {"schema": _SCHEMA, "snapshot_sha256": current["snapshot_sha256"],
                  "review_sha256": current["review_sha256"], "decision_sheet_sha256": decision["state_sha256"],
-                 "items": items}
+                 "items": items, "rollback_rehearsal": rehearsal}
     return {
         **canonical, "synthetic_plan_sha256": _digest(canonical),
         "status": "synthetic_preview_frozen_no_real_operator_authority",

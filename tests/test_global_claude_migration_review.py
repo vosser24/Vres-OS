@@ -261,3 +261,50 @@ def test_only_synthetic_fixture_imports_and_no_ambient_db_or_host_io():
     for forbidden in ("Path(", "open(", "os.environ", "subprocess", "psycopg", "connect(",
                       "requests", "keyring", "read_bytes(", "write_bytes("):
         assert forbidden not in source
+
+
+#166 integrated recoverability evidence bound to the SAME synthetic choice plan.
+def test_frozen_migration_plan_binds_original_snapshot_rollback_and_vendor_opaque_identity():
+    from vres_os.global_claude_fixture_transaction import inspect_global_fixture
+    token = object()  # opaque synthetic native vendor state; never dereferenced
+    tx, review, sheet = prepared(fixture(native=[(".credentials.json", token)]))
+    before = inspect_global_fixture(tx)
+    all_choices = record_legacy_migration_choices(
+        tx, review, sheet, "DROP 1,2,3 / KEEP 4,5,6")
+    frozen = freeze_synthetic_migration_plan(tx, review, all_choices)
+    rehearsal = frozen["rollback_rehearsal"]
+    assert rehearsal["status"] == "SYNTHETIC_EXACT_ROLLBACK_REHEARSAL_ONLY"
+    assert rehearsal["sealed_snapshot_sha256"] == tx._seal
+    assert rehearsal["opaque_vendor_handle_count"] == 1
+    assert rehearsal["synthetic_snapshot_bytes_restored"] is True
+    assert rehearsal["opaque_vendor_handles_preserved"] is True
+    assert all(rehearsal[k] is False for k in (
+        "real_profile_snapshot_verified", "real_vendor_state_unchanged_verified",
+        "durable_host_journal_verified", "native_hook_quarantine_verified",
+        "independent_fable_validation_granted", "real_activation_authorized"))
+    assert inspect_global_fixture(tx) == before  # source fixture stays quarantined
+    assert tx._native[0][1] is token
+    assert ".credentials.json" not in json.dumps(frozen)
+    assert "INSTRUCTION INJECTION" not in json.dumps(frozen)
+
+
+def test_frozen_migration_plan_is_stale_against_changed_source_or_unresolved_choices():
+    tx, review, sheet = prepared()
+    with pytest.raises(MigrationReviewRefusal):
+        freeze_synthetic_migration_plan(tx, review, sheet)
+    all_choices = record_legacy_migration_choices(
+        tx, review, sheet, "DROP 1,2,3 / KEEP 4,5,6")
+    other = fixture({**SYNTHETIC, "CLAUDE.md": b"new legacy config"})
+    with pytest.raises(MigrationReviewRefusal):
+        freeze_synthetic_migration_plan(other, review, all_choices)
+
+
+def test_recovery_required_fixture_cannot_freeze_synthetic_adoption_plan():
+    from vres_os.global_claude_fixture_transaction import quarantine_global_fixture
+    snap = fixture(phase="snapshotted")
+    tx, review, sheet = prepared(quarantine_global_fixture(snap))
+    all_choices = record_legacy_migration_choices(
+        tx, review, sheet, "KEEP 1,2 / DROP 3,4,5,6")
+    interrupted = quarantine_global_fixture(snap, interrupt_after=2)
+    with pytest.raises(MigrationReviewRefusal):
+        freeze_synthetic_migration_plan(interrupted, review, all_choices)
