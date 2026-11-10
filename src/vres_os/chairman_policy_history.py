@@ -17,7 +17,9 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Any
 
-from .chairman_policy import ChairmanPolicy, ChairmanPolicyError
+from .chairman_policy import (
+    ChairmanPolicy, ChairmanPolicyError, ChairmanMaterialization, materialize_chairman,
+)
 
 HISTORY_SCHEMA = "vres-chairman-proposal-history/1"
 _PROPOSAL_SCHEMA = "vres-chairman-proposal/1"
@@ -233,3 +235,175 @@ class ChairmanPolicyHistory:
             "latest_proposal_sha256": self.latest_proposal.sha256,
             "state": "candidates_only",
         }
+
+
+#165 SOURCE-ONLY: bind a selected candidate to the ORIGINAL proposal history
+# and original Chairman materializer. This is not another policy store, and no
+# caller-supplied hash or model string can become runtime or F1 authority.
+REVIEW_CANDIDATE_SCHEMA = "vres-chairman-review-candidate/1"
+HOST_CLAIM_SCHEMA = "vres-chairman-host-claim-review/1"
+_CLAUDE_PHYSICAL_MODEL = re.compile(r"claude-(sonnet|opus)-[a-z0-9]+(?:-[a-z0-9]+)*\\Z", re.ASCII)
+_TASK_FAMILY = re.compile(r"[a-z][a-z0-9_-]{0,63}\\Z", re.ASCII)
+_COST_CLAIM = re.compile(r"(?:0|[1-9][0-9]{0,7})(?:\\.[0-9]{1,6})?\\Z", re.ASCII)
+_METRIC_KEYS = frozenset({
+    "duration_ms", "input_tokens", "output_tokens",
+    "cache_read_input_tokens", "cache_creation_input_tokens",
+    "reroute_count", "rework_count", "repair_count",
+})
+
+
+@dataclass(frozen=True, slots=True)
+class ChairmanPolicyReviewCandidate:
+    """Exact historical proposal + rendered bytes, *not* an approved policy."""
+
+    history_document: bytes
+    materialization: ChairmanMaterialization
+
+    def __post_init__(self) -> None:
+        if type(self.history_document) is not bytes or type(self.materialization) is not ChairmanMaterialization:
+            raise ChairmanPolicyHistoryError("Exact source-only candidate bytes required")
+        history = ChairmanPolicyHistory.from_document(self.history_document)
+        if self.materialization.policy != history.latest_proposal.policy:
+            raise ChairmanPolicyHistoryError("Rendered policy differs from latest candidate")
+        try:
+            expected = materialize_chairman(
+                self.materialization.template, history.latest_proposal.policy
+            )
+        except ChairmanPolicyError:
+            raise ChairmanPolicyHistoryError("Candidate template cannot be materialized") from None
+        if self.materialization != expected:
+            raise ChairmanPolicyHistoryError("Rendered Chairman bytes differ from history policy")
+
+    def manifest(self) -> dict[str, Any]:
+        history = ChairmanPolicyHistory.from_document(self.history_document)
+        manifest = self.materialization.manifest()
+        return {
+            "schema": REVIEW_CANDIDATE_SCHEMA,
+            "state": "REVIEW_CANDIDATE_ONLY",
+            "history_sha256": hashlib.sha256(self.history_document).hexdigest(),
+            "latest_proposal_sha256": history.latest_proposal.sha256,
+            "requested_family": manifest["requested_family"],
+            "requested_effort": manifest["requested_effort"],
+            "policy_version": manifest["policy_version"],
+            "policy_sha256": manifest["policy_sha256"],
+            "template_sha256": manifest["template_sha256"],
+            "rendered_sha256": manifest["rendered_sha256"],
+            "template_provenance": "CALLER_SUPPLIED_NOT_RELEASE_AUTHENTICATED",
+            "host_physical_model": "NOT_OBSERVED",
+            "host_identity_verified": False,
+            "installed_identity_verified": False,
+            "independent_validation": "NOT_RUN",
+            "worker_routing_policy_modified": False,
+            "fallback_on_unavailable_model": "STOP_NO_SILENT_DOWNGRADE",
+            "installation_or_activation_authorized": False,
+        }
+
+    def __bool__(self) -> bool:
+        raise TypeError("A Chairman review candidate is not activation authority")
+
+
+def prepare_chairman_review_candidate(
+    history: ChairmanPolicyHistory,
+    template: bytes,
+    *,
+    expected_history_sha256: str,
+    expected_proposal_sha256: str,
+    expected_template_sha256: str,
+) -> ChairmanPolicyReviewCandidate:
+    """Review an exact proposal/template under explicit caller-selected hashes.
+
+    External release provenance, user approval, protected validation and
+    installed model checks are separate gates; none is supplied by this API.
+    """
+    if type(history) is not ChairmanPolicyHistory or type(template) is not bytes:
+        raise ChairmanPolicyHistoryError("Exact proposal history and template bytes required")
+    for value in (expected_history_sha256, expected_proposal_sha256, expected_template_sha256):
+        if type(value) is not str or not _SHA256.fullmatch(value):
+            raise ChairmanPolicyHistoryError("Exact lowercase digest input required")
+    canonical = history.to_document()
+    if ChairmanPolicyHistory.from_document(canonical) != history:
+        raise ChairmanPolicyHistoryError("Policy history is not canonically reproducible")
+    if (hashlib.sha256(canonical).hexdigest() != expected_history_sha256
+            or history.latest_proposal.sha256 != expected_proposal_sha256
+            or hashlib.sha256(template).hexdigest() != expected_template_sha256):
+        raise ChairmanPolicyHistoryError("Stale proposal or release-template identity")
+    try:
+        rendered = materialize_chairman(template, history.latest_proposal.policy)
+    except ChairmanPolicyError:
+        raise ChairmanPolicyHistoryError("Original Chairman materializer refused candidate") from None
+    return ChairmanPolicyReviewCandidate(canonical, rendered)
+
+
+def review_chairman_host_claim(
+    candidate: ChairmanPolicyReviewCandidate,
+    *,
+    task_family: str,
+    claimed_physical_model: str | None = None,
+    claimed_effort: str | None = None,
+    claimed_metrics: dict[str, int] | None = None,
+    claimed_cost_usd: str | None = None,
+    claimed_validation: str | None = None,
+) -> dict[str, Any]:
+    """Inspect untrusted telemetry WITHOUT contacting Claude or modifying policy.
+
+    The caller must NOT present this pure review as host-observed installed
+    Chairman evidence. A later host/authority adapter must independently bind
+    session, source release, task and actual observed physical model.
+    """
+    if type(candidate) is not ChairmanPolicyReviewCandidate:
+        raise ChairmanPolicyHistoryError("An exact candidate is required")
+    candidate.__post_init__()
+    if type(task_family) is not str or not _TASK_FAMILY.fullmatch(task_family):
+        raise ChairmanPolicyHistoryError("Exact bounded task family required")
+    if claimed_validation is not None and (
+        type(claimed_validation) is not str
+        or claimed_validation not in {"pass", "fail", "unknown"}
+    ):
+        raise ChairmanPolicyHistoryError("Invalid validation outcome claim")
+    if claimed_metrics is None:
+        claimed_metrics = {}
+    if type(claimed_metrics) is not dict or not set(claimed_metrics) <= _METRIC_KEYS:
+        raise ChairmanPolicyHistoryError("Unknown or malformed host metric claim")
+    for value in claimed_metrics.values():
+        if type(value) is not int or not 0 <= value <= 1_000_000_000:
+            raise ChairmanPolicyHistoryError("Host metric claim must be a bounded count")
+    if claimed_cost_usd is not None and (
+        type(claimed_cost_usd) is not str or not _COST_CLAIM.fullmatch(claimed_cost_usd)
+    ):
+        raise ChairmanPolicyHistoryError("Host cost claim must be a bounded decimal string")
+    if claimed_physical_model is None:
+        if claimed_effort is not None or claimed_metrics or claimed_cost_usd is not None:
+            raise ChairmanPolicyHistoryError("Metrics cannot substitute for missing physical model")
+        match = None
+    else:
+        if type(claimed_physical_model) is not str:
+            raise ChairmanPolicyHistoryError("Physical model claim must be a string")
+        match = _CLAUDE_PHYSICAL_MODEL.fullmatch(claimed_physical_model)
+        if match is None or match.group(1) != candidate.materialization.policy.family:
+            raise ChairmanPolicyHistoryError("Physical model claim mismatches requested Chairman family")
+    if claimed_effort is not None and (
+        type(claimed_effort) is not str
+        or claimed_effort != candidate.materialization.policy.effort
+    ):
+        raise ChairmanPolicyHistoryError("Claimed effort differs from requested Chairman effort")
+    return {
+        "schema": HOST_CLAIM_SCHEMA,
+        "status": ("CALLER_CLAIM_MATCH_UNVERIFIED" if match is not None
+                   else "NO_HOST_MODEL_EVIDENCE_STOP"),
+        "review_candidate_sha256": candidate.materialization.rendered_sha256,
+        "task_family": task_family,
+        "requested_family": candidate.materialization.policy.family,
+        "requested_effort": candidate.materialization.policy.effort,
+        "claimed_physical_model": claimed_physical_model,
+        "claimed_effort": claimed_effort,
+        "claimed_metrics": dict(sorted(claimed_metrics.items())),
+        "claimed_cost_usd": claimed_cost_usd,
+        "claimed_validation_outcome": claimed_validation,
+        "quality_score": None,
+        "provenance": "CALLER_SUPPLIED_UNVERIFIED_NOT_HOST_EVIDENCE",
+        "host_session_bound": False,
+        "installed_policy_verified": False,
+        "physical_chairman_observed": False,
+        "no_auto_policy_change": True,
+        "fallback_on_unavailable_model": "STOP_NO_SILENT_DOWNGRADE",
+    }
