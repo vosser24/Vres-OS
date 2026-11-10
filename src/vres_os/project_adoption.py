@@ -465,6 +465,24 @@ def _write_json(path: Path, value: Any) -> None:
         tmp.unlink(missing_ok=True)
 
 
+def _write_exclusive_journal(path: Path, value: dict[str, Any]) -> None:
+    """Durably create a journal without clobbering interrupted activation state.
+
+    Exclusive creation complements cooperative scans, but does not provide an
+    atomic transaction across project and state files. Partial journal writes
+    require recovery/manual review, never silent deletion.
+    """
+    try:
+        with open(path, "x", encoding="utf-8") as handle:
+            json.dump(value, handle, indent=2, sort_keys=True, default=str)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except FileExistsError:
+        raise AdoptionError(
+            "An interrupted adoption journal already exists; recover before activating"
+        ) from None
+
+
 _MAX_ADOPTION_RECORD_BYTES = 2 * 1024 * 1024
 _MAX_ADOPTION_JSON_DEPTH = 128
 
@@ -837,6 +855,15 @@ def start(project, *, data_root: Path | None = None) -> dict[str, Any]:
         "blockers": _blockers(inv)}
 
 
+def _refuse_interrupted_journal(sd: Path) -> None:
+    """Never issue or reuse KEEP/DROP authority while recovery is pending."""
+    if _lstat(sd / "journal.json") is not None:
+        raise AdoptionError(
+            "An interrupted adoption journal exists; run `vres project recover` "
+            "before decisions or activation"
+        )
+
+
 def _current_inventory(sd: Path, project) -> dict[str, Any]:
     """Bind every saved KEEP/DROP option to today's ORIGINAL live inventory.
 
@@ -845,6 +872,7 @@ def _current_inventory(sd: Path, project) -> dict[str, Any]:
     merely because an untrusted saved JSON document repeats that label.
     """
     record = _state(sd, project)
+    _refuse_interrupted_journal(sd)
     if not record or record["state"] != "awaiting_operator":
         raise AdoptionError("The project is not awaiting operator decisions; run start first")
     version = record.get("inventory_version")
@@ -852,6 +880,7 @@ def _current_inventory(sd: Path, project) -> dict[str, Any]:
         raise AdoptionError("Saved Claude inventory identity invalid; re-inventory required")
     recorded = _read_json(sd / "snapshots" / f"{version}.json")
     live = inventory(project.root)
+    _refuse_interrupted_journal(sd)  # cooperative recheck after live scan
     if type(recorded) is not dict or recorded != live or live["version"] != version:
         raise AdoptionError("The project's saved Claude inventory differs from current source; earlier decisions "
                             "are void. Run start again to re-inventory, then decide again.")
@@ -934,6 +963,8 @@ def decide(project, number: int, decision: str, *, authority: Authority, data_ro
     if decision not in item["options"]:
         raise AdoptionError(f"Item {number} can only be: {', '.join(item['options'])}")
     evidence = _evidence(authority, f"{decision} {number}")
+    if _current_inventory(sd, project) != inv:
+        raise AdoptionError("Project inventory changed during decision authorization; retry after review")
     stored = _read_json(sd / "decisions.json") or {}
     if stored.get("inventory_version") != inv["version"]:
         stored = {"inventory_version": inv["version"], "decisions": {}}
@@ -1021,6 +1052,14 @@ def activate(project, *, authority: Authority, data_root: Path | None = None) ->
     keeps_root = any(i["path"] == "CLAUDE.md" and i["path"] not in remove for i in inv["items"])
     create = [] if keeps_root else ["CLAUDE.md"]
     evidence = _evidence(authority, "ACTIVATE")
+    # Operator interaction can span filesystem changes. Recheck the journal,
+    # inventory, decisions and architecture hold before preparing pre-images.
+    if (
+        _current_inventory(sd, project) != inv
+        or _legacy_architecture_hold(root)
+        or _decisions(sd, inv) != decided
+    ):
+        raise AdoptionError("Adoption evidence changed during activation authorization; retry after review")
     scaffold = scaffold_text(project.name, detect_facts(root)).encode("utf-8")
     post = {**{rel: None for rel in remove}, **{rel: hashlib.sha256(scaffold).hexdigest() for rel in create}}
     activation = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
@@ -1038,8 +1077,10 @@ def activate(project, *, authority: Authority, data_root: Path | None = None) ->
             data = path.read_bytes()
             _write_new(pre_dir / f"{index:04d}", data)
             pre[rel] = {"existed": True, "copy": f"{index:04d}", "sha256": hashlib.sha256(data).hexdigest()}
-    _write_json(sd / "journal.json", {"version": VERSION, "activation": activation, "inventory_version": inv["version"],
-                                      "remove": remove, "create": create, "pre": pre, "post": post})
+    _write_exclusive_journal(sd / "journal.json", {
+        "version": VERSION, "activation": activation, "inventory_version": inv["version"],
+        "remove": remove, "create": create, "pre": pre, "post": post,
+    })
     _set_state(sd, project, "activating", inventory_version=inv["version"], activation=activation)
     try:
         for rel in remove:
