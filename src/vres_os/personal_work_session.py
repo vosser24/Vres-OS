@@ -364,12 +364,28 @@ def review_session(desk: str | Path, task: str, *,
                 "result_bytes": inspected["result_bytes"],
                 "result_quality_validated": False,
                 "current_bytes_observed_this_review": True,
+                "result_rechecked_after_experience_preview": False,
             }
             if include_experience_provenance:
                 after = handoff.inspect_work_brief(desk, task, project_root, project_key)
                 if (after["scratch_handoff"]["selected_note_sha256"] != selected_sha
                         or after["project_binding_sha256"] != project_binding):
                     raise WorkSessionRefused("Task or project changed during experience source review")
+                # The extra work-brief scan can outlast a document edit.
+                # Reuse the ORIGINAL result owner to revalidate exact bytes,
+                # task and project before publishing an experience source.
+                fresh = result.inspect_work_result(
+                    desk, task, project_root, project_key, result_file,
+                    expected_checkpoint_sha256=inspected["checkpoint_sha256"])
+                if (fresh["checkpoint_sha256"] != inspected["checkpoint_sha256"]
+                        or fresh["result_sha256"] != inspected["result_sha256"]
+                        or fresh["result_bytes"] != inspected["result_bytes"]
+                        or fresh["work_brief"]["project_binding_sha256"] != project_binding
+                        or fresh["work_brief"]["scratch_handoff"]["selected_note_sha256"]
+                        != selected_sha):
+                    raise WorkSessionRefused("Result changed during experience source review")
+                inspected = fresh
+                observed["result_rechecked_after_experience_preview"] = True
                 selected_experience = _selected_experience_source_provenance(
                     task, selected_sha, project_binding, inspected)
         elif expected_checkpoint_sha256 is not None:

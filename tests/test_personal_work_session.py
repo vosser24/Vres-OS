@@ -662,3 +662,43 @@ def test_saved_replay_readiness_refuses_document_changed_during_intake(tmp_path,
                              include_project_intake=True)
     assert session.review_session(selected, task)["historical_snapshots"][0][
         "result_evidence"]["document_current_bytes_verified"] is False
+
+
+def test_active_experience_source_reports_late_document_recheck(tmp_path):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    options = dict(project_root=project, project_key=key,
+                   result_file=document, expected_checkpoint_sha256=token)
+    plain = session.review_session(selected, task, **options)
+    assert plain["observed_result"]["result_rechecked_after_experience_preview"] is False
+    checked = session.review_session(
+        selected, task, include_experience_provenance=True, **options)
+    assert checked["observed_result"]["result_rechecked_after_experience_preview"] is True
+    assert checked["selected_experience_provenance"]["checkpoint_sha256"] == token
+    assert checked["selected_experience_provenance"]["writes_performed"] is False
+    assert str(project) not in json.dumps(checked)
+
+
+def test_active_experience_source_refuses_document_changed_during_late_scan(
+        tmp_path, monkeypatch):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    inspect_original = session.handoff.inspect_work_brief
+    scans = []
+
+    def changed_during_followup(*args, **kwargs):
+        report = inspect_original(*args, **kwargs)
+        scans.append(True)
+        if len(scans) == 3:
+            document.write_text("# Replaced during slow provenance scan\n",
+                                encoding="utf-8")
+        return report
+
+    monkeypatch.setattr(session.handoff, "inspect_work_brief", changed_during_followup)
+    with pytest.raises((session.WorkSessionRefused, result.WorkResultRefused)):
+        session.review_session(
+            selected, task, project_root=project, project_key=key,
+            result_file=document, expected_checkpoint_sha256=token,
+            include_experience_provenance=True)
+    assert len(scans) >= 3
+    assert session.review_session(selected, task)["selected_experience_provenance"] is None
