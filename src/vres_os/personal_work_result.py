@@ -195,7 +195,7 @@ def render_work_result(packet: dict[str, Any]) -> str:
     if packet["status"] == "RESULT_EXACT_CONTEXT_CHECKPOINT_MATCH":
         detail = "Previous exact task/project/path/document replay token MATCHES."
     elif packet["status"] == "RESULT_BYTES_MATCH_PRIOR_DIGEST":
-        detail = "The user-supplied prior document digest MATCHES."
+        detail = "The user-supplied prior digest MATCHES."
     else:
         detail = "Save the replay token below to compare this exact context later."
     return "\n\n".join((
