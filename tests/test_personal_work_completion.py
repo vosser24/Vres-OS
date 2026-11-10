@@ -1,4 +1,4 @@
-"""One useful personal task -> real document -> confirmed completion -> resume."""
+"""One useful task -> real document -> confirmed completion -> retained history."""
 from __future__ import annotations
 
 import hashlib
@@ -42,8 +42,9 @@ def test_user_confirmed_result_completed_then_history_and_reopen_replay(tmp_path
     assert output["result_sha256"] == hashlib.sha256(before).hexdigest()
     assert output["existing_lifecycle_history_verified"] is True
     assert output["user_confirmed_scratch_completion"] is True
-    assert output["document_to_history_link_persisted"] is False
-    assert output["checkpoint_persisted"] is False
+    assert output["document_to_history_link_persisted"] is True
+    assert output["checkpoint_persisted"] is True
+    assert output["history_result_current_bytes_verified"] is False
     assert output["native_chairman_task_completed"] is False
     assert output["result_quality_validated"] is False
     assert output["new_task_or_evidence_store_created"] is False
@@ -55,6 +56,8 @@ def test_user_confirmed_result_completed_then_history_and_reopen_replay(tmp_path
     assert snapshots[0]["task_key_claimed"] == task
     assert snapshots[0]["sha256"] == note_sha
     assert snapshots[0]["state"] == "completed"
+    assert snapshots[0]['result_evidence']['checkpoint_sha256'] == original['checkpoint_sha256']
+    assert snapshots[0]['result_evidence']['document_path_hidden'] is True
     with pytest.raises(result.WorkResultRefused):
         result.inspect_work_result(*args, expected_checkpoint_sha256=original["checkpoint_sha256"])
     resumed = lifecycle.reopen(
@@ -85,6 +88,7 @@ def test_desk_cli_work_finish_requires_explicit_yes_and_preserves_history(tmp_pa
     history = json.loads(capsys.readouterr().out)
     assert history["count"] == 1
     assert history["snapshots"][0]["state"] == "completed"
+    assert history['snapshots'][0]['result_evidence']['checkpoint_sha256'] == original['checkpoint_sha256']
     assert cli.main(["desk", "reopen", "--desk", str(selected),
                      "--task-key", task, "--from-state", "completed",
                      "--sha256", history["snapshots"][0]["sha256"], "--yes"]) == 0

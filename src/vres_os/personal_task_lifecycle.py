@@ -10,10 +10,12 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import secrets
 import sys
+import unicodedata
 from itertools import islice
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Sequence
 
 if not __package__:
@@ -33,6 +35,12 @@ _HISTORY = 'Vres-Lifecycle-History'
 _BUCKETS = ('revisions', 'completed', 'archived', 'pending')
 _STATES = ('completed', 'archived')
 _MAX_HISTORY_ENTRIES = 48
+_RESULT_LINK_SCHEMA = 'vres-personal-result-history-link/1'
+_RESULT_NAME = re.compile(r'Vres-Result-H[a-f0-9]{64}\.json\Z', re.ASCII)
+_PROJECT_KEY = re.compile(r'project:[A-Za-z0-9][A-Za-z0-9_.:-]{0,95}\Z', re.ASCII)
+_RESULT_TYPES = frozenset(('.md', '.txt', '.py', '.json', '.csv',
+                           '.pdf', '.docx', '.xlsx', '.pptx'))
+_MAX_RESULT_LINK_BYTES = 4096
 
 
 class LifecycleRefused(ValueError):
@@ -83,16 +91,143 @@ def _archive_name(key: str, sha: str) -> str:
     return 'Vres-Workbench-H' + ident
 
 
-def _snapshots(hist: Path | None) -> list[dict[str, Any]]:
+def _result_name(key: str, note_sha: str) -> str:
+    return 'Vres-Result-H' + _archive_name(key, note_sha)[len('Vres-Workbench-H'):] + '.json'
+
+
+def _result_bytes(record: dict[str, Any]) -> bytes:
+    """Canonical bounded history metadata, not a current-document or task approval."""
+    keys = {'schema', 'task_key_claimed', 'selected_note_sha256',
+            'project_key', 'project_root', 'relative_result_path',
+            'project_binding_sha256', 'result_sha256', 'result_bytes',
+            'checkpoint_sha256', 'result_contents_disclosed',
+            'result_quality_validated', 'native_chairman_task_bound'}
+    if type(record) is not dict or set(record) != keys or record['schema'] != _RESULT_LINK_SCHEMA:
+        raise LifecycleRefused('Malformed history result record')
+    key, note, project_key, root, rel = (
+        record['task_key_claimed'], record['selected_note_sha256'],
+        record['project_key'], record['project_root'], record['relative_result_path'])
+    if (type(key) is not str or not workbench._TASK_KEY.fullmatch(key)
+            or type(project_key) is not str or not _PROJECT_KEY.fullmatch(project_key)
+            or type(root) is not str or len(root.encode('utf-8')) > 1024
+            or not Path(root).is_absolute() or '..' in Path(root).parts
+            or str(Path(root)) != root or type(rel) is not str or '\\' in rel
+            or not rel or len(rel.encode('utf-8')) > 950):
+        raise LifecycleRefused('Ambiguous history document location')
+    parts = PurePosixPath(rel).parts
+    if (not 1 <= len(parts) <= 6 or PurePosixPath(rel).is_absolute()
+            or '/'.join(parts) != rel or PurePosixPath(rel).suffix.lower() not in _RESULT_TYPES
+            or any(not part or part in ('.', '..') or part.startswith('.') or ':' in part
+                   or len(part) > 150 or any(unicodedata.category(ch) in {'Cc', 'Cf', 'Cs', 'Zl', 'Zp'}
+                      for ch in part) for part in parts)
+            or any(unicodedata.category(ch) in {'Cc', 'Cf', 'Cs', 'Zl', 'Zp'} for ch in root)):
+        raise LifecycleRefused('Ambiguous history result path')
+    for name in ('selected_note_sha256', 'project_binding_sha256',
+                 'result_sha256', 'checkpoint_sha256'):
+        if type(record[name]) is not str or not workbench._SHA.fullmatch(record[name]):
+            raise LifecycleRefused('Invalid history result digest')
+    if (type(record['result_bytes']) is not int or not 0 < record['result_bytes'] <= 8*1024*1024
+            or any(record[name] is not False for name in (
+                'result_contents_disclosed', 'result_quality_validated', 'native_chairman_task_bound'))):
+        raise LifecycleRefused('History result cannot grant validation or authority')
+    canonical = lambda x: json.dumps(x, sort_keys=True, separators=(',', ':'),
+                                     ensure_ascii=True, allow_nan=False).encode('ascii')
+    binding = hashlib.sha256(canonical([project_key, root])).hexdigest()
+    rel_digest = hashlib.sha256(rel.encode('utf-8')).hexdigest()
+    checkpoint = hashlib.sha256(canonical([
+        'vres-personal-work-result-evidence/1', key, note, binding, rel_digest,
+        record['result_sha256'], record['result_bytes'],
+    ])).hexdigest()
+    if (record['project_binding_sha256'] != binding
+            or record['checkpoint_sha256'] != checkpoint):
+        raise LifecycleRefused('History result replay identity mismatch')
+    encoded = canonical(record) + b'\n'
+    if len(encoded) > _MAX_RESULT_LINK_BYTES:
+        raise LifecycleRefused('History result record exceeds byte bound')
+    return encoded
+
+
+def prepare_result_link(*, task: str, note_sha256: str, project_root: str | Path,
+                        project_key: str, relative_result_path: str,
+                        project_binding_sha256: str, result_sha256: str,
+                        result_bytes: int, checkpoint_sha256: str) -> dict[str, Any]:
+    """Validate record before any completion mutation; no disk write."""
+    record = {
+        'schema': _RESULT_LINK_SCHEMA, 'task_key_claimed': task,
+        'selected_note_sha256': note_sha256, 'project_key': project_key,
+        'project_root': str(project_root), 'relative_result_path': relative_result_path,
+        'project_binding_sha256': project_binding_sha256,
+        'result_sha256': result_sha256, 'result_bytes': result_bytes,
+        'checkpoint_sha256': checkpoint_sha256,
+        'result_contents_disclosed': False, 'result_quality_validated': False,
+        'native_chairman_task_bound': False,
+    }
+    _result_bytes(record)
+    return record
+
+
+def _read_result_link(path: Path) -> dict[str, Any]:
+    before = workbench._plain(path, directory=False)
+    if not 0 < before.st_size <= _MAX_RESULT_LINK_BYTES:
+        raise LifecycleRefused('History result record has unexpected size')
+    try:
+        raw = path.read_bytes()
+        record = json.loads(raw.decode('ascii'))
+    except (OSError, ValueError, UnicodeError) as exc:
+        raise LifecycleRefused('History result record could not be read') from exc
+    if (raw != _result_bytes(record) or
+            workbench._plain(path, directory=False).st_size != len(raw)):
+        raise LifecycleRefused('History result record changed or is noncanonical')
+    if path.name != _result_name(record['task_key_claimed'], record['selected_note_sha256']):
+        raise LifecycleRefused('History result filename and task receipt differ')
+    return record
+
+
+def _public_result(record: dict[str, Any], *, show_result_paths: bool) -> dict[str, Any]:
+    public = {
+        'schema': record['schema'], 'project_key': record['project_key'],
+        'result_sha256': record['result_sha256'], 'result_bytes': record['result_bytes'],
+        'checkpoint_sha256': record['checkpoint_sha256'],
+        'document_path_hidden': not show_result_paths,
+        'document_current_bytes_verified': False,
+        'document_quality_validated': False,
+        'native_chairman_task_bound': False,
+    }
+    if show_result_paths:
+        public.update({
+            'project_root': record['project_root'],
+            'relative_result_path': record['relative_result_path'],
+            'result_file': str(Path(record['project_root']).joinpath(
+                *PurePosixPath(record['relative_result_path']).parts)),
+        })
+    return public
+
+
+def _snapshots(hist: Path | None, *, show_result_paths: bool = False) -> list[dict[str, Any]]:
     if hist is None:
         return []
     result: list[dict[str, Any]] = []
+    links: dict[tuple[str, str], dict[str, Any]] = {}
     for bucket in ('revisions', 'completed', 'archived'):
         root = hist / bucket
         if workbench._stat(root) is None:
             continue
         workbench._plain(root, directory=True)
-        for entry in islice(root.iterdir(), _MAX_HISTORY_ENTRIES + 1):
+        # Existing snapshots are still the original exact note+receipt folders.
+        # Result sidecars live alongside completed snapshots under this owner.
+        members = list(islice(root.iterdir(), 2 * _MAX_HISTORY_ENTRIES + 1))
+        if len(members) > 2 * _MAX_HISTORY_ENTRIES:
+            raise LifecycleRefused('Personal history inventory limit reached')
+        for entry in members:
+            if bucket == 'completed' and _RESULT_NAME.fullmatch(entry.name):
+                if len(links) >= _MAX_HISTORY_ENTRIES:
+                    raise LifecycleRefused('Personal result history limit reached')
+                record = _read_result_link(entry)
+                ident = record['task_key_claimed'], record['selected_note_sha256']
+                if ident in links:
+                    raise LifecycleRefused('Duplicate completed result history link')
+                links[ident] = record
+                continue
             if len(result) >= _MAX_HISTORY_ENTRIES:
                 raise LifecycleRefused('Personal history limit reached')
             workbench._plain(entry, directory=True)
@@ -102,7 +237,50 @@ def _snapshots(hist: Path | None) -> list[dict[str, Any]]:
                 raise LifecycleRefused('History folder identity does not match receipt')
             result.append({'task_key_claimed': key, 'sha256': sha,
                            'bytes': receipt['bytes'], 'state': bucket})
+    completed = {(row['task_key_claimed'], row['sha256']): row
+                 for row in result if row['state'] == 'completed'}
+    for ident, record in links.items():
+        if ident not in completed:
+            raise LifecycleRefused('Orphaned result link does not match completed history')
+        completed[ident]['result_evidence'] = _public_result(
+            record, show_result_paths=show_result_paths)
     return sorted(result, key=lambda r: (r['task_key_claimed'], r['state'], r['sha256']))
+
+
+def persist_result_link(value: str | Path, record: dict[str, Any]) -> dict[str, Any]:
+    """Attach one immutable document reference to an existing completed snapshot.
+
+    An interrupted/failed write may leave a completed note without metadata;
+    callers must report uncertainty and never retry completion blindly.
+    """
+    raw = _result_bytes(record)
+    root = _root(value)
+    hist = _history(root, create=False)
+    existing = _snapshots(hist)
+    exact = [item for item in existing
+             if item['state'] == 'completed'
+             and item['task_key_claimed'] == record['task_key_claimed']
+             and item['sha256'] == record['selected_note_sha256']]
+    if hist is None or len(exact) != 1 or 'result_evidence' in exact[0]:
+        raise LifecycleRefused('Exactly one unlinked completed snapshot required')
+    path = hist / 'completed' / _result_name(
+        record['task_key_claimed'], record['selected_note_sha256'])
+    workbench._plain(path.parent, directory=True)
+    if workbench._stat(path) is not None:
+        raise LifecycleRefused('Result link already exists; no overwrite permitted')
+    with path.open('xb') as stream:
+        stream.write(raw)
+    if _read_result_link(path) != record:
+        raise LifecycleRefused('Stored history link failed readback')
+    after = [item for item in _snapshots(hist)
+             if item['state'] == 'completed'
+             and item['task_key_claimed'] == record['task_key_claimed']
+             and item['sha256'] == record['selected_note_sha256']]
+    if len(after) != 1 or after[0].get('result_evidence', {}).get('checkpoint_sha256') != record['checkpoint_sha256']:
+        raise LifecycleRefused('Completed result link not found after write')
+    return {'status': 'EXISTING_COMPLETED_HISTORY_RESULT_LINK_RECORDED',
+            'checkpoint_sha256': record['checkpoint_sha256'], 'history_written': True,
+            'new_task_store_created': False}
 
 
 def _archive_destination(hist: Path, state: str, key: str, sha: str) -> Path:
@@ -114,13 +292,15 @@ def _archive_destination(hist: Path, state: str, key: str, sha: str) -> Path:
     return path
 
 
-def list_history(value: str | Path) -> dict[str, Any]:
+def list_history(value: str | Path, *, show_result_paths: bool = False) -> dict[str, Any]:
     root = _root(value)
     hist = _history(root, create=False)
-    entries = _snapshots(hist)
+    if type(show_result_paths) is not bool:
+        raise LifecycleRefused('Result path display requires explicit boolean opt-in')
+    entries = _snapshots(hist, show_result_paths=show_result_paths)
     return {'schema': SCHEMA, 'status': 'READ_ONLY_PERSONAL_HISTORY',
             'snapshots': entries, 'count': len(entries), 'writes_performed': False,
-            'authoritative_task_store': False}
+            'authoritative_task_store': False, 'document_current_bytes_verified': False}
 
 
 def read_daily_review(value: str | Path) -> dict[str, Any]:
@@ -297,6 +477,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             sub.add_argument('--yes', action='store_true')
         if name == 'review':
             sub.add_argument('--format', choices=('text', 'json'), default='text')
+        if name == 'history':
+            sub.add_argument('--show-result-paths', action='store_true')
         if name == 'revise':
             sub.add_argument('--note-file', required=True)
         if name == 'reopen':
@@ -305,7 +487,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         args = p.parse_args(argv)
         if args.command == 'history':
-            result = list_history(args.desk)
+            result = list_history(args.desk, show_result_paths=args.show_result_paths)
         elif args.command == 'review':
             result = read_daily_review(args.desk)
         elif args.command == 'revise':

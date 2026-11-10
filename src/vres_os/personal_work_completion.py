@@ -1,9 +1,10 @@
 """User-confirmed personal scratch completion tied to one exact Work Result.
 
 Uses the existing Work Result verifier and existing Personal Desk lifecycle;
-never creates another task or evidence store. The completion snapshot persists
-only the original scratch note/receipt. The user must retain the result replay
-token separately; the document-to-history association is NOT persisted yet.
+never creates another task or evidence store. The original completed scratch
+note/receipt stays unchanged. A bounded exact-context document reference is
+recorded alongside its verified completed snapshot in the SAME lifecycle owner.
+History does not assert that the external document is still unchanged.
 No native Chairman completion, F1 authority, model, database, profile or hook.
 """
 from __future__ import annotations
@@ -59,6 +60,16 @@ def finish_work(
         if selected["selected_task"] != task:
             raise WorkCompletionRefused("Selected scratch task mismatch")
         note_sha = selected["selected_note_sha256"]
+        file_path, relative = result._selected_file(project_root, result_file)
+        # Validate the bounded record completely BEFORE moving the task.
+        prepared = lifecycle.prepare_result_link(
+            task=task, note_sha256=note_sha, project_root=project_root,
+            project_key=project_key, relative_result_path=relative.as_posix(),
+            project_binding_sha256=inspected["work_brief"]["project_binding_sha256"],
+            result_sha256=inspected["result_sha256"],
+            result_bytes=inspected["result_bytes"],
+            checkpoint_sha256=inspected["checkpoint_sha256"],
+        )
         move = lifecycle.move_out(
             desk, task, state="completed", approved=True,
             expected_sha256=note_sha,
@@ -67,6 +78,20 @@ def finish_work(
                 or move.get("sha256") != note_sha
                 or move.get("archived_bytes_preserved") is not True):
             raise WorkCompletionRefused("Lifecycle completion readback mismatch")
+        # After completion, the original active task has moved; do not pretend
+        # a replay against that active task could still succeed. Rehash the
+        # external document and REFUSE attaching stale metadata if it changed.
+        after_sha, after_bytes = result._read_digest(file_path)
+        if (after_sha != inspected['result_sha256']
+                or after_bytes != inspected['result_bytes']):
+            raise WorkCompletionRefused(
+                "Task may be completed but result changed; inspect history before retry"
+            )
+        stored = lifecycle.persist_result_link(desk, prepared)
+        if (stored.get('status') != 'EXISTING_COMPLETED_HISTORY_RESULT_LINK_RECORDED'
+                or stored.get('checkpoint_sha256') != expected_checkpoint_sha256
+                or stored.get('history_written') is not True):
+            raise WorkCompletionRefused('Task may be completed; history result link uncertain')
     except WorkCompletionRefused:
         raise
     except Exception:
@@ -76,11 +101,15 @@ def finish_work(
 
     # A failure here MUST NOT trigger blind retries; the task may be completed.
     try:
-        entries = lifecycle.list_history(desk)["snapshots"]
+        entries = lifecycle.list_history(desk, show_result_paths=True)["snapshots"]
         matches = [e for e in entries if e["task_key_claimed"] == task
-                   and e["sha256"] == note_sha and e["state"] == "completed"]
+                   and e["sha256"] == note_sha and e["state"] == "completed"
+                   and e.get('result_evidence', {}).get('checkpoint_sha256')
+                   == expected_checkpoint_sha256]
         if len(matches) != 1:
             raise WorkCompletionRefused("Completed task snapshot could not be verified")
+        if matches[0]['result_evidence'].get('result_file') != str(file_path):
+            raise WorkCompletionRefused('Stored result location does not match selection')
     except Exception:
         raise WorkCompletionRefused(
             "Task may be completed; inspect existing history before any retry"
@@ -98,8 +127,9 @@ def finish_work(
         "existing_lifecycle_history_verified": True,
         "existing_lifecycle_reopen_available": True,
         "user_confirmed_scratch_completion": True,
-        "document_to_history_link_persisted": False,
-        "checkpoint_persisted": False,
+        "document_to_history_link_persisted": True,
+        "checkpoint_persisted": True,
+        "history_result_current_bytes_verified": False,
         "result_quality_validated": False,
         "native_chairman_task_completed": False,
         "external_result_file_modified": False,

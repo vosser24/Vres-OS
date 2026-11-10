@@ -53,6 +53,7 @@ Usage: python -I -S -B personal_desk_cli.py COMMAND [command options]
   desk      Portable daily desk: init/add/focus/open/remove without manual SHA
             desk COMMAND --desk ABS-Vres-Desk-* [command options]
             init/add/focus/open/remove/revise/complete/archive/history/reopen/review
+            history --show-result-paths (explicitly reveal stored document location)
   help      Show this guide
 
 Only user-selected scratch directories are written or undone. The selected
