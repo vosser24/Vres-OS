@@ -58,6 +58,7 @@ Usage: python -I -S -B personal_desk_cli.py COMMAND [command options]
             --expected-checkpoint-sha256 HEX --yes
             reopen|replay --desk ABS --task-key TASK-*
             --snapshot-sha256 HEX --yes
+            replay: [--include-experience-provenance] [--include-project-intake]
   undo      Delete ONLY an unchanged owned scratch draft with approval
             --workspace ABS --sha256 HEX --yes
   desk      Portable daily desk: init/add/focus/open/remove without manual SHA

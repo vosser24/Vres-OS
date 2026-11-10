@@ -436,7 +436,8 @@ def reopen_saved(desk: str | Path, task: str, snapshot_sha256: str, *,
 
 def replay_saved(desk: str | Path, task: str, snapshot_sha256: str, *,
                  approved: bool = False,
-                 include_experience_provenance: bool = False) -> dict[str, Any]:
+                 include_experience_provenance: bool = False,
+                 include_project_intake: bool = False) -> dict[str, Any]:
     """Explicit opt-in to inspect the SAVED path and compare current exact bytes.
 
     Caller must reopen the exact original note first. On mismatch, leave
@@ -446,6 +447,8 @@ def replay_saved(desk: str | Path, task: str, snapshot_sha256: str, *,
         raise WorkSessionRefused("Explicit read-saved-document confirmation required")
     if type(include_experience_provenance) is not bool:
         raise WorkSessionRefused("Historical experience source selection must be boolean")
+    if type(include_project_intake) is not bool:
+        raise WorkSessionRefused("Historical project intake selection must be boolean")
     old = _saved_completed(desk, task, snapshot_sha256, show_result_paths=True)
     link = old["result_evidence"]
     checked = result.inspect_work_result(
@@ -462,6 +465,27 @@ def replay_saved(desk: str | Path, task: str, snapshot_sha256: str, *,
     again = _saved_completed(desk, task, snapshot_sha256, show_result_paths=True)
     if again["result_evidence"] != link:
         raise WorkSessionRefused("Saved history changed during replay")
+    selected_intake = None
+    if include_project_intake:
+        # #168 runs only after saved context matches; history is not authority.
+        selected_intake = _selected_project_adoption_preview(link["project_root"])
+        # Intake can be slow. Recheck original task, current document and
+        # immutable history link after this separately selected read-only scan.
+        rechecked = result.inspect_work_result(
+            desk, task, link["project_root"], link["project_key"],
+            link["result_file"],
+            expected_checkpoint_sha256=link["checkpoint_sha256"])
+        if (rechecked["status"] != "RESULT_EXACT_CONTEXT_CHECKPOINT_MATCH"
+                or rechecked["checkpoint_sha256"] != link["checkpoint_sha256"]
+                or rechecked["result_sha256"] != link["result_sha256"]
+                or rechecked["result_bytes"] != link["result_bytes"]
+                or rechecked["work_brief"]["scratch_handoff"]["selected_note_sha256"]
+                != snapshot_sha256):
+            raise WorkSessionRefused("Saved result changed during selected project intake")
+        if _saved_completed(
+                desk, task, snapshot_sha256, show_result_paths=True)["result_evidence"] != link:
+            raise WorkSessionRefused("Saved history changed during selected project intake")
+        checked = rechecked
     selected_experience = None
     if include_experience_provenance:
         # Reuse the active-result source contract; saved evidence is attached
@@ -499,6 +523,9 @@ def replay_saved(desk: str | Path, task: str, snapshot_sha256: str, *,
         "result_sha256": checked["result_sha256"],
         "result_bytes": checked["result_bytes"],
         "selected_experience_provenance": selected_experience,
+        "selected_project_intake": selected_intake,
+        "result_rechecked_after_selected_intake": include_project_intake,
+        "project_activation_authorized": False,
         "current_result_bytes_matched_in_this_read": True,
         "future_document_bytes_guaranteed_unchanged": False,
         "document_path_disclosed": False,
@@ -536,6 +563,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             sub.add_argument("--yes", action="store_true")
         if name == "replay":
             sub.add_argument("--include-experience-provenance", action="store_true")
+            sub.add_argument("--include-project-intake", action="store_true")
         if name in ("reopen", "replay"):
             sub.add_argument("--snapshot-sha256", required=True)
     try:
@@ -565,7 +593,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             packet = replay_saved(
                 args.desk, args.task_key, args.snapshot_sha256, approved=args.yes,
-                include_experience_provenance=args.include_experience_provenance)
+                include_experience_provenance=args.include_experience_provenance,
+                include_project_intake=args.include_project_intake)
         print(json.dumps(packet, sort_keys=True, ensure_ascii=True))
     except Exception:
         print("VRES_WORK_SESSION_REFUSED: inspect exact task and history; do not retry blindly.",

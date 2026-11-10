@@ -574,3 +574,91 @@ def test_saved_experience_replay_cli_is_original_dispatch_and_path_hidden(tmp_pa
     assert str(project) not in json.dumps(actual)
     assert str(document) not in json.dumps(actual)
 
+
+#168 + #176: one explicitly reopened saved-result-bound project-readiness view.
+def test_saved_replay_project_readiness_is_opt_in_redacted_and_read_only(tmp_path):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    _finish(ctx, token)
+    sha = session.review_session(selected, task)["historical_snapshots"][0]["sha256"]
+    session.reopen_saved(selected, task, sha, approved=True)
+    plain = session.replay_saved(selected, task, sha, approved=True)
+    assert plain["selected_project_intake"] is None
+    assert plain["result_rechecked_after_selected_intake"] is False
+    report = session.replay_saved(
+        selected, task, sha, approved=True, include_project_intake=True)
+    intake = report["selected_project_intake"]
+    assert intake["status"] == "SELECTED_PROJECT_INTAKE_PREVIEW_ONLY"
+    assert "READ-ONLY PROJECT INTAKE" in intake["report"]
+    assert report["checkpoint_sha256"] == token
+    assert report["result_rechecked_after_selected_intake"] is True
+    assert report["project_activation_authorized"] is False
+    assert intake["project_adoption_state_written"] is False
+    assert intake["native_hooks_executed"] is False
+    assert intake["database_or_credentials_accessed"] is False
+    assert report["writes_performed"] is False
+    assert str(project) not in json.dumps(report)
+    assert str(document) not in json.dumps(report)
+    assert "Non-sensitive sample." not in json.dumps(report)
+
+
+def test_saved_replay_readiness_with_original_provenance_keeps_hooks_inert(tmp_path):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    legacy = project / ".claude"
+    legacy.mkdir()
+    settings = legacy / "settings.json"
+    fake = b'{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"FAKE_NEVER_EXECUTE"}]}]}}'
+    settings.write_bytes(fake)
+    _finish(ctx, token)
+    sha = session.review_session(selected, task)["historical_snapshots"][0]["sha256"]
+    session.reopen_saved(selected, task, sha, approved=True)
+    report = session.replay_saved(
+        selected, task, sha, approved=True, include_project_intake=True,
+        include_experience_provenance=True)
+    assert report["selected_experience_provenance"]["saved_snapshot_sha256"] == sha
+    assert report["selected_experience_provenance"]["experience_episode_created"] is False
+    assert report["selected_project_intake"]["project_activation_authorized"] is False
+    assert "FAKE_NEVER_EXECUTE" not in json.dumps(report)
+    assert str(project) not in json.dumps(report)
+    assert settings.read_bytes() == fake
+
+
+def test_saved_replay_readiness_requires_boolean_consent_and_original_cli(tmp_path, capsys):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    _finish(ctx, token)
+    sha = session.review_session(selected, task)["historical_snapshots"][0]["sha256"]
+    with pytest.raises(session.WorkSessionRefused):
+        session.replay_saved(selected, task, sha, approved=True,
+                             include_project_intake="yes")
+    base = ["work-session", "replay", "--desk", str(selected),
+            "--task-key", task, "--snapshot-sha256", sha]
+    assert cli.main(base + ["--include-project-intake"]) == 2
+    capsys.readouterr()
+    session.reopen_saved(selected, task, sha, approved=True)
+    assert cli.main(base + ["--yes", "--include-project-intake"]) == 0
+    packet = json.loads(capsys.readouterr().out)
+    assert packet["selected_project_intake"]["status"] == "SELECTED_PROJECT_INTAKE_PREVIEW_ONLY"
+    assert str(project) not in json.dumps(packet)
+
+
+def test_saved_replay_readiness_refuses_document_changed_during_intake(tmp_path, monkeypatch):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    _finish(ctx, token)
+    sha = session.review_session(selected, task)["historical_snapshots"][0]["sha256"]
+    session.reopen_saved(selected, task, sha, approved=True)
+    original = session._selected_project_adoption_preview
+
+    def changed_during_preview(root):
+        summary = original(root)
+        document.write_text("# Changed during slow intake scan\n", encoding="utf-8")
+        return summary
+
+    monkeypatch.setattr(session, "_selected_project_adoption_preview", changed_during_preview)
+    with pytest.raises((session.WorkSessionRefused, result.WorkResultRefused)):
+        session.replay_saved(selected, task, sha, approved=True,
+                             include_project_intake=True)
+    assert session.review_session(selected, task)["historical_snapshots"][0][
+        "result_evidence"]["document_current_bytes_verified"] is False
