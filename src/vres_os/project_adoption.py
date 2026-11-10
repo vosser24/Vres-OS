@@ -838,13 +838,22 @@ def start(project, *, data_root: Path | None = None) -> dict[str, Any]:
 
 
 def _current_inventory(sd: Path, project) -> dict[str, Any]:
+    """Bind every saved KEEP/DROP option to today's ORIGINAL live inventory.
+
+    The inventory version is a scan label, not a signature of the serialized
+    snapshot. Never trust changed rows, allowed choices, blockers or numbers
+    merely because an untrusted saved JSON document repeats that label.
+    """
     record = _state(sd, project)
     if not record or record["state"] != "awaiting_operator":
         raise AdoptionError("The project is not awaiting operator decisions; run start first")
-    recorded = _read_json(sd / "snapshots" / f"{record['inventory_version']}.json")
+    version = record.get("inventory_version")
+    if type(version) is not str or re.fullmatch(r"[0-9a-f]{64}", version) is None:
+        raise AdoptionError("Saved Claude inventory identity invalid; re-inventory required")
+    recorded = _read_json(sd / "snapshots" / f"{version}.json")
     live = inventory(project.root)
-    if recorded is None or live["version"] != recorded["version"]:
-        raise AdoptionError("The project's Claude configuration changed since it was inventoried; earlier decisions "
+    if type(recorded) is not dict or recorded != live or live["version"] != version:
+        raise AdoptionError("The project's saved Claude inventory differs from current source; earlier decisions "
                             "are void. Run start again to re-inventory, then decide again.")
     return recorded
 
