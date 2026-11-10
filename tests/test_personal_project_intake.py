@@ -14,32 +14,42 @@ import pytest
 from vres_os import personal_project_intake as intake
 
 
-def _snapshot(*, legacy=False, blocked=False, complete=True):
+def _snapshot(*, legacy=False, blocked=False, complete=True, established=False):
     rows = []
-    gates = []
-    if not complete:
-        gates.append("ARCHITECTURE_AUDIT_INCOMPLETE")
     if legacy:
-        gates.append("CLAUDE_KEEP_DROP_REVIEW")
         rows.append({"path": "CLAUDE.md", "risk": "instructions", "blocked": False,
                      "status": "ok", "options": ["KEEP", "DROP"]})
         rows.append({"path": ".claude/settings.json", "risk": "executable", "blocked": False,
                      "status": "ok", "options": ["DROP"]})
     if blocked:
-        gates.insert(1 if not complete else 0, "CLAUDE_MANUAL_REVIEW")
         rows.append({"path": ".claude/TOKEN_SECRET.txt", "risk": "unknown", "blocked": True,
                      "status": "sensitive_path", "options": ["KEEP"]})
-    state = ("LEGACY_ARCHITECTURE_SCAN_INCOMPLETE" if legacy and not complete else
-             "LEGACY_MANUAL_REVIEW_REQUIRED" if blocked else
-             "LEGACY_KEEP_DROP_REVIEW_REQUIRED" if legacy else
+    present = bool(rows)
+    gates = [
+        name for name, applies in (
+            ("ARCHITECTURE_AUDIT_INCOMPLETE", not complete),
+            ("CLAUDE_MANUAL_REVIEW", blocked),
+            ("ARCHITECTURE_ALIGNMENT_PLAN", established),
+            ("CLAUDE_KEEP_DROP_REVIEW", present),
+        ) if applies
+    ]
+    state = ("LEGACY_ARCHITECTURE_SCAN_INCOMPLETE" if present and not complete else
+             "LEGACY_MANUAL_REVIEW_REQUIRED" if present and blocked else
+             "LEGACY_KEEP_DROP_REVIEW_REQUIRED" if present else
              "ARCHITECTURE_SCAN_INCOMPLETE" if not complete else
+             "ESTABLISHED_ARCHITECTURE_PLAN_REQUIRED" if established else
              "FRESH_SCAFFOLD_CANDIDATE")
     return {"preview_status": state, "items": rows,
             "required_review_gates": gates,
+            "priority_review_gate": gates[0] if gates else "NONE",
+            "review_gates_are_non_authorizing": True,
             "inventory_item_count": len(rows),
             "inventory_blocker_count": int(blocked),
+            "claude_configuration_present": present,
             "architecture_source_file_count": 3,
             "architecture_audit_complete": complete,
+            "architecture_plan_required": established,
+            "architecture_review_required": established or not complete,
             "activation_allowed": False,
             "project_write_permitted": False,
             "state_write_permitted": False,
@@ -61,6 +71,40 @@ def test_fresh_and_legacy_produce_actionable_bounded_text_without_activation():
         assert "no hook executed" in report
         assert "does not grant adoption" in report
         assert len(report) < 2800
+
+
+
+def test_established_no_legacy_requires_original_architecture_alignment_review():
+    report = intake.render_personal_project_intake(_snapshot(established=True))
+    assert "ESTABLISHED_ARCHITECTURE_PLAN_REQUIRED" in report
+    assert "ARCHITECTURE_ALIGNMENT_PLAN" in report
+    assert "does not grant adoption" in report
+
+
+def test_incomplete_legacy_preserves_all_independent_review_gates():
+    report = intake.render_personal_project_intake(
+        _snapshot(legacy=True, blocked=True, complete=False, established=True))
+    assert "LEGACY_ARCHITECTURE_SCAN_INCOMPLETE" in report
+    assert ("ARCHITECTURE_AUDIT_INCOMPLETE, CLAUDE_MANUAL_REVIEW, "
+            "ARCHITECTURE_ALIGNMENT_PLAN, CLAUDE_KEEP_DROP_REVIEW") in report
+
+
+@pytest.mark.parametrize("change", [
+    lambda r: r.update(preview_status="FRESH_SCAFFOLD_CANDIDATE"),
+    lambda r: r.update(claude_configuration_present=False),
+    lambda r: r.update(architecture_plan_required="false"),
+    lambda r: r.update(architecture_review_required=False),
+    lambda r: r.update(priority_review_gate="NONE"),
+    lambda r: r.update(review_gates_are_non_authorizing=False),
+    lambda r: r.update(required_review_gates=["CLAUDE_KEEP_DROP_REVIEW",
+                                               "ARCHITECTURE_ALIGNMENT_PLAN"]),
+    lambda r: r.update(required_review_gates=[["ARCHITECTURE_ALIGNMENT_PLAN"]]),
+])
+def test_legacy_alignment_preview_cannot_erase_or_reorder_required_gates(change):
+    report = deepcopy(_snapshot(legacy=True, established=True))
+    change(report)
+    with pytest.raises(intake.PersonalIntakeRefused):
+        intake.render_personal_project_intake(report)
 
 
 def test_blocked_private_path_and_values_are_not_rendered():

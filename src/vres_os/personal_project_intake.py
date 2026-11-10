@@ -78,12 +78,16 @@ def render_personal_project_intake(report: Any) -> str:
     blocked = report.get("inventory_blocker_count")
     sources = report.get("architecture_source_file_count")
     complete = report.get("architecture_audit_complete")
+    established = report.get("architecture_plan_required")
+    legacy_present = report.get("claude_configuration_present")
     if (type(items) is not list or len(items) > _MAX_ITEMS
             or type(total) is not int or total != len(items)
             or type(blocked) is not int or blocked < 0 or blocked > total
             or type(sources) is not int or not 0 <= sources <= 100000
-            or type(complete) is not bool
+            or type(complete) is not bool or type(established) is not bool
+            or type(legacy_present) is not bool or legacy_present != bool(total)
             or type(gates) is not list or len(gates) > len(_GATES)
+            or any(type(gate) is not str for gate in gates)
             or len(set(gates)) != len(gates) or not set(gates) <= _GATES):
         raise PersonalIntakeRefused("Preview inventory or review requirements are inconsistent")
     risks = {key: 0 for key in _RISKS}
@@ -104,12 +108,36 @@ def render_personal_project_intake(report: Any) -> str:
             surfaces.append(name)
     if blocked != blocked_seen:
         raise PersonalIntakeRefused("Preview block count differs from items")
-    if not complete and "ARCHITECTURE_AUDIT_INCOMPLETE" not in gates:
-        raise PersonalIntakeRefused("Incomplete architecture scan has no review gate")
-    if total > 0 and "CLAUDE_KEEP_DROP_REVIEW" not in gates:
-        raise PersonalIntakeRefused("Existing Claude configuration has no review gate")
-    if blocked > 0 and "CLAUDE_MANUAL_REVIEW" not in gates:
-        raise PersonalIntakeRefused("Blocked legacy items have no manual review gate")
+    # The original #168 preview classifies independent review obligations.
+    # Changing one claimed field must not mislabel a legacy/established project
+    # as fresh, silently omit gates, or turn a preview into approval.
+    required = [
+        name for name, applies in (
+            ("ARCHITECTURE_AUDIT_INCOMPLETE", not complete),
+            ("CLAUDE_MANUAL_REVIEW", blocked > 0),
+            ("ARCHITECTURE_ALIGNMENT_PLAN", established),
+            ("CLAUDE_KEEP_DROP_REVIEW", legacy_present),
+        ) if applies
+    ]
+    if gates != required:
+        raise PersonalIntakeRefused("Project review gates disagree with snapshot fields")
+    if (report.get("priority_review_gate") != (required[0] if required else "NONE")
+            or report.get("review_gates_are_non_authorizing") is not True
+            or report.get("architecture_review_required") is not (established or not complete)):
+        raise PersonalIntakeRefused("Project preview has inconsistent review authority fields")
+    if legacy_present and not complete:
+        status = "LEGACY_ARCHITECTURE_SCAN_INCOMPLETE"
+    elif legacy_present:
+        status = ("LEGACY_MANUAL_REVIEW_REQUIRED" if blocked
+                  else "LEGACY_KEEP_DROP_REVIEW_REQUIRED")
+    elif not complete:
+        status = "ARCHITECTURE_SCAN_INCOMPLETE"
+    elif established:
+        status = "ESTABLISHED_ARCHITECTURE_PLAN_REQUIRED"
+    else:
+        status = "FRESH_SCAFFOLD_CANDIDATE"
+    if report["preview_status"] != status:
+        raise PersonalIntakeRefused("Project classification disagrees with required reviews")
     counts = ", ".join(f"{name} {risks[name]}" for name in (
         "executable", "active", "conflicting", "instructions", "inert", "other", "unknown"
     ) if risks[name]) or "none"
