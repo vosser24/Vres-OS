@@ -242,9 +242,9 @@ class ChairmanPolicyHistory:
 # caller-supplied hash or model string can become runtime or F1 authority.
 REVIEW_CANDIDATE_SCHEMA = "vres-chairman-review-candidate/1"
 HOST_CLAIM_SCHEMA = "vres-chairman-host-claim-review/1"
-_CLAUDE_PHYSICAL_MODEL = re.compile(r"claude-(sonnet|opus)-[a-z0-9]+(?:-[a-z0-9]+)*\\Z", re.ASCII)
-_TASK_FAMILY = re.compile(r"[a-z][a-z0-9_-]{0,63}\\Z", re.ASCII)
-_COST_CLAIM = re.compile(r"(?:0|[1-9][0-9]{0,7})(?:\\.[0-9]{1,6})?\\Z", re.ASCII)
+_CLAUDE_PHYSICAL_MODEL = re.compile(r"claude-(sonnet|opus)-[a-z0-9]+(?:-[a-z0-9]+)*\Z", re.ASCII)
+_TASK_FAMILY = re.compile(r"[a-z][a-z0-9_-]{0,63}\Z", re.ASCII)
+_COST_CLAIM = re.compile(r"(?:0|[1-9][0-9]{0,7})(?:\.[0-9]{1,6})?\Z", re.ASCII)
 _METRIC_KEYS = frozenset({
     "duration_ms", "input_tokens", "output_tokens",
     "cache_read_input_tokens", "cache_creation_input_tokens",
