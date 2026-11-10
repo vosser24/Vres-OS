@@ -169,13 +169,18 @@ def render_daily_review(report: dict[str, Any]) -> str:
 
 
 def move_out(value: str | Path, key: str, *, state: str,
-             approved: bool = False) -> dict[str, Any]:
+             approved: bool = False, expected_sha256: str | None = None) -> dict[str, Any]:
     """Complete or archive one verified active task; preserve exact note bytes."""
     if approved is not True or state not in _STATES:
         raise LifecycleRefused('Explicit completion/archive approval required')
+    if expected_sha256 is not None and (
+            type(expected_sha256) is not str or not workbench._SHA.fullmatch(expected_sha256)):
+        raise LifecycleRefused('Require an exact lowercase task receipt SHA-256')
     root = _root(value)
     desk._existing_tasks(root)  # refuse inconsistent active receipt inventory
     active, receipt = _active(root, key)
+    if expected_sha256 is not None and receipt['sha256'] != expected_sha256:
+        raise LifecycleRefused('Selected task changed since work-result confirmation')
     hist = _history(root, create=False)
     if hist is not None:
         _snapshots(hist)
@@ -183,6 +188,10 @@ def move_out(value: str | Path, key: str, *, state: str,
     hist = _history(root, create=True)
     assert hist is not None
     target = _archive_destination(hist, state, key, receipt['sha256'])
+    # Recheck the precise user-confirmed note just before the only move.
+    if (workbench.inspect_note(active) != receipt or
+            (expected_sha256 is not None and receipt['sha256'] != expected_sha256)):
+        raise LifecycleRefused('Selected task changed before completion')
     # Move, never unlink. A failure leaves the original intact for inspection.
     active.rename(target)
     if workbench.inspect_note(target) != receipt:
