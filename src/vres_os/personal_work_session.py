@@ -435,7 +435,8 @@ def reopen_saved(desk: str | Path, task: str, snapshot_sha256: str, *,
 
 
 def replay_saved(desk: str | Path, task: str, snapshot_sha256: str, *,
-                 approved: bool = False) -> dict[str, Any]:
+                 approved: bool = False,
+                 include_experience_provenance: bool = False) -> dict[str, Any]:
     """Explicit opt-in to inspect the SAVED path and compare current exact bytes.
 
     Caller must reopen the exact original note first. On mismatch, leave
@@ -443,6 +444,8 @@ def replay_saved(desk: str | Path, task: str, snapshot_sha256: str, *,
     """
     if approved is not True:
         raise WorkSessionRefused("Explicit read-saved-document confirmation required")
+    if type(include_experience_provenance) is not bool:
+        raise WorkSessionRefused("Historical experience source selection must be boolean")
     old = _saved_completed(desk, task, snapshot_sha256, show_result_paths=True)
     link = old["result_evidence"]
     checked = result.inspect_work_result(
@@ -459,6 +462,34 @@ def replay_saved(desk: str | Path, task: str, snapshot_sha256: str, *,
     again = _saved_completed(desk, task, snapshot_sha256, show_result_paths=True)
     if again["result_evidence"] != link:
         raise WorkSessionRefused("Saved history changed during replay")
+    selected_experience = None
+    if include_experience_provenance:
+        # Reuse the active-result source contract; saved evidence is attached
+        # only AFTER the original completed snapshot and result bytes match.
+        brief = checked["work_brief"]
+        source = _selected_experience_source_provenance(
+            task, snapshot_sha256, brief["project_binding_sha256"], checked)
+        historical_context = [
+            "vres-personal-experience-saved-result-replay/1",
+            task, snapshot_sha256, source["source_link_sha256"],
+            link["checkpoint_sha256"],
+        ]
+        historical_digest = hashlib.sha256(json.dumps(
+            historical_context, sort_keys=True, ensure_ascii=True,
+            separators=(",", ":"), allow_nan=False,
+        ).encode("ascii")).hexdigest()
+        selected_experience = {
+            **source,
+            "status": "NONAUTHORITATIVE_SAVED_EXPERIENCE_SOURCE_REPLAY_ONLY",
+            "saved_snapshot_sha256": snapshot_sha256,
+            "saved_history_source_link_sha256": historical_digest,
+            "saved_history_link_rechecked_this_read": True,
+            "document_current_bytes_observed_this_replay": True,
+            "future_document_bytes_guaranteed_unchanged": False,
+            "saved_history_is_memory_authority": False,
+            "experience_eligible_for_live_retrieval": False,
+            "experience_episode_created": False,
+        }
     return {
         "schema": SCHEMA,
         "status": "SAVED_WORK_SESSION_EXACT_CONTEXT_REPLAY_MATCH",
@@ -467,6 +498,7 @@ def replay_saved(desk: str | Path, task: str, snapshot_sha256: str, *,
         "checkpoint_sha256": checked["checkpoint_sha256"],
         "result_sha256": checked["result_sha256"],
         "result_bytes": checked["result_bytes"],
+        "selected_experience_provenance": selected_experience,
         "current_result_bytes_matched_in_this_read": True,
         "future_document_bytes_guaranteed_unchanged": False,
         "document_path_disclosed": False,
@@ -502,6 +534,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             sub.add_argument("--include-experience-provenance", action="store_true")
         if name in ("start", "finish", "reopen", "replay"):
             sub.add_argument("--yes", action="store_true")
+        if name == "replay":
+            sub.add_argument("--include-experience-provenance", action="store_true")
         if name in ("reopen", "replay"):
             sub.add_argument("--snapshot-sha256", required=True)
     try:
@@ -530,7 +564,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.desk, args.task_key, args.snapshot_sha256, approved=args.yes)
         else:
             packet = replay_saved(
-                args.desk, args.task_key, args.snapshot_sha256, approved=args.yes)
+                args.desk, args.task_key, args.snapshot_sha256, approved=args.yes,
+                include_experience_provenance=args.include_experience_provenance)
         print(json.dumps(packet, sort_keys=True, ensure_ascii=True))
     except Exception:
         print("VRES_WORK_SESSION_REFUSED: inspect exact task and history; do not retry blindly.",

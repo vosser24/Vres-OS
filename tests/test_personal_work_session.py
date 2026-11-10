@@ -487,3 +487,90 @@ def test_experience_link_cli_is_opt_in_and_nonauthorizing(tmp_path, capsys):
         "NONAUTHORITATIVE_EXPERIENCE_SOURCE_LINK_ONLY")
     assert str(project) not in json.dumps(report)
     assert report["selected_experience_provenance"]["experience_retrieval_performed"] is False
+
+#176 opt-in saved history -> current exact document -> NONAUTHORITATIVE source.
+def test_saved_experience_replay_is_opt_in_bound_and_nonauthoritative(tmp_path):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    _finish(ctx, token)
+    historical = session.review_session(selected, task)
+    snapshot = historical["historical_snapshots"][0]["sha256"]
+    assert historical["selected_experience_provenance"] is None
+    session.reopen_saved(selected, task, snapshot, approved=True)
+    assert session.replay_saved(
+        selected, task, snapshot, approved=True)["selected_experience_provenance"] is None
+    actual = session.replay_saved(
+        selected, task, snapshot, approved=True, include_experience_provenance=True)
+    source = actual["selected_experience_provenance"]
+    assert source["status"] == "NONAUTHORITATIVE_SAVED_EXPERIENCE_SOURCE_REPLAY_ONLY"
+    assert source["saved_snapshot_sha256"] == snapshot
+    assert source["checkpoint_sha256"] == token
+    assert source["result_sha256"] == actual["result_sha256"]
+    assert source["saved_history_link_rechecked_this_read"] is True
+    assert source["document_current_bytes_observed_this_replay"] is True
+    assert source["saved_history_is_memory_authority"] is False
+    assert source["experience_eligible_for_live_retrieval"] is False
+    assert source["experience_episode_created"] is False
+    assert source["revocation_state_checked"] is False
+    assert source["database_contacted"] is False
+    assert source["original_experience_truth_owner_remains_required"] is True
+    again = session.replay_saved(
+        selected, task, snapshot, approved=True, include_experience_provenance=True)
+    assert source["saved_history_source_link_sha256"] == (
+        again["selected_experience_provenance"]["saved_history_source_link_sha256"])
+    assert len(source["saved_history_source_link_sha256"]) == 64
+    assert str(project) not in json.dumps(actual)
+    assert str(document) not in json.dumps(actual)
+    assert "Non-sensitive sample." not in json.dumps(actual)
+
+
+def test_saved_experience_replay_needs_explicit_reopen_and_boolean(tmp_path):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    _finish(ctx, token)
+    snapshot = session.review_session(selected, task)["historical_snapshots"][0]["sha256"]
+    with pytest.raises((session.WorkSessionRefused, result.WorkResultRefused)):
+        session.replay_saved(
+            selected, task, snapshot, approved=True, include_experience_provenance=True)
+    session.reopen_saved(selected, task, snapshot, approved=True)
+    with pytest.raises(session.WorkSessionRefused):
+        session.replay_saved(
+            selected, task, snapshot, include_experience_provenance=True)
+    with pytest.raises(session.WorkSessionRefused):
+        session.replay_saved(
+            selected, task, snapshot, approved=True, include_experience_provenance="yes")
+
+
+def test_saved_experience_replay_stale_document_refuses_current_claim(tmp_path):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    _finish(ctx, token)
+    snapshot = session.review_session(selected, task)["historical_snapshots"][0]["sha256"]
+    session.reopen_saved(selected, task, snapshot, approved=True)
+    document.write_text("# Changed result; no valid replay\n", encoding="utf-8")
+    with pytest.raises((session.WorkSessionRefused, result.WorkResultRefused)):
+        session.replay_saved(
+            selected, task, snapshot, approved=True, include_experience_provenance=True)
+    old = session.review_session(selected, task)["historical_snapshots"][0]
+    assert old["result_evidence"]["document_current_bytes_verified"] is False
+
+
+def test_saved_experience_replay_cli_is_original_dispatch_and_path_hidden(tmp_path, capsys):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    _finish(ctx, token)
+    snapshot = session.review_session(selected, task)["historical_snapshots"][0]["sha256"]
+    base = ["work-session", "replay", "--desk", str(selected),
+            "--task-key", task, "--snapshot-sha256", snapshot]
+    assert cli.main(base + ["--yes", "--include-experience-provenance"]) == 2
+    capsys.readouterr()
+    session.reopen_saved(selected, task, snapshot, approved=True)
+    assert cli.main(base + ["--yes"]) == 0
+    assert json.loads(capsys.readouterr().out)["selected_experience_provenance"] is None
+    assert cli.main(base + ["--yes", "--include-experience-provenance"]) == 0
+    actual = json.loads(capsys.readouterr().out)
+    assert actual["selected_experience_provenance"]["status"] == (
+        "NONAUTHORITATIVE_SAVED_EXPERIENCE_SOURCE_REPLAY_ONLY")
+    assert str(project) not in json.dumps(actual)
+    assert str(document) not in json.dumps(actual)
+
