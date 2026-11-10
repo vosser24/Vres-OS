@@ -68,6 +68,20 @@ def _saved_completed(desk: str | Path, task: str, sha: str, *,
 
 
 
+def _require_empty_new_project(project: Path) -> None:
+    """Recheck the ordinary root and emptiness before and after owner writes.
+
+    This is a cooperative race guard, NOT an NTFS handle-based or hostile
+    same-user guarantee. Never delete a partially created desk on refusal.
+    """
+    checked = intake._plain_project_root(project)
+    try:
+        if next(checked.iterdir(), None) is not None:
+            raise WorkSessionRefused("Start requires an EMPTY new ordinary project")
+    except OSError:
+        raise WorkSessionRefused("Selected project inventory cannot be confirmed") from None
+
+
 def start_session(desk: str | Path, task: str, note_file: str | Path,
                   project_root: str | Path, project_key: str, *,
                   approved: bool = False) -> dict[str, Any]:
@@ -90,11 +104,7 @@ def start_session(desk: str | Path, task: str, note_file: str | Path,
     under = portable.project_draft._under
     if under(new_desk, project) or under(project, new_desk):
         raise WorkSessionRefused("Project and scratch desk must be separate")
-    try:
-        if next(project.iterdir(), None) is not None:
-            raise WorkSessionRefused("Start requires an EMPTY new ordinary project")
-    except OSError:
-        raise WorkSessionRefused("Project inventory cannot be confirmed") from None
+    _require_empty_new_project(project)
     source_note = Path(note_file)
     if under(source_note, project) or under(source_note, new_desk):
         raise WorkSessionRefused("Input note must be outside desk and project")
@@ -111,6 +121,9 @@ def start_session(desk: str | Path, task: str, note_file: str | Path,
                 or created.get("sha256") != receipt_preview["sha256"]
                 or preview["selected_project_binding_sha256"] is None):
             raise WorkSessionRefused("Created task and original project preview differ")
+        # A project that changed since initial preflight is not an EMPTY
+        # project start. Refuse without auto-deleting the now-existing desk.
+        _require_empty_new_project(project)
     except Exception:
         raise WorkSessionRefused(
             "New desk may already contain a task; inspect before any retry") from None

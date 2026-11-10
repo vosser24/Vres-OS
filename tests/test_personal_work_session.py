@@ -162,3 +162,28 @@ def test_start_rejects_nonempty_project_without_creating_desk(tmp_path):
         session.start_session(new_desk, "TASK-NONEMPTY", note, project,
                               "project:existing", approved=True)
     assert not new_desk.exists()
+
+
+def test_start_refuses_postpreview_project_change_without_deleting_desk(tmp_path, monkeypatch):
+    new_desk = tmp_path / "Vres-Desk-Changed-At-Start"
+    project = tmp_path / "NewInitiallyEmptyProject"
+    project.mkdir()
+    note = tmp_path / "input-note.md"
+    note.write_text("# Task\n\n## Next action\n- Write a report.\n", encoding="utf-8")
+    original = session.review_session
+
+    def project_changed_after_review(*args, **kwargs):
+        packet = original(*args, **kwargs)
+        (project / "appeared-after-preflight.md").write_text(
+            "Unrelated new file", encoding="utf-8")
+        return packet
+
+    monkeypatch.setattr(session, "review_session", project_changed_after_review)
+    with pytest.raises(session.WorkSessionRefused, match="inspect before any retry"):
+        session.start_session(
+            new_desk, "TASK-POST-CHECK", note, project,
+            "project:new", approved=True)
+    # The original owner retains the scratch task; never destroy or retry it.
+    assert new_desk.is_dir()
+    assert desk._existing_tasks(new_desk) == ["TASK-POST-CHECK"]
+    assert (project / "appeared-after-preflight.md").is_file()
