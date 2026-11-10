@@ -1,0 +1,264 @@
+"""One bounded personal work-session facade over ORIGINAL source owners.
+
+This is an internal source-only integration surface, not a new task/knowledge
+store, native Chairman, live Claude hook, installer or database client.
+A result's historical metadata never proves that external bytes are current.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+from typing import Any, Sequence
+
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).absolute().parent.parent))
+    from vres_os import personal_desk_chairman_handoff as handoff
+    from vres_os import personal_portable_desk as portable
+    from vres_os import personal_offline_workbench as workbench
+    from vres_os import personal_task_lifecycle as lifecycle
+    from vres_os import personal_work_result as result
+    from vres_os import personal_work_completion as completion
+else:
+    from . import personal_desk_chairman_handoff as handoff
+    from . import personal_portable_desk as portable
+    from . import personal_offline_workbench as workbench
+    from . import personal_task_lifecycle as lifecycle
+    from . import personal_work_result as result
+    from . import personal_work_completion as completion
+
+SCHEMA = "vres-personal-integrated-work-session/1"
+
+
+class WorkSessionRefused(ValueError):
+    """An ambiguous or unapproved personal workflow cannot proceed."""
+
+
+class _SafeParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        raise WorkSessionRefused("Invalid work-session arguments")
+
+
+def _history_rows(desk: str | Path, task: str, *,
+                  show_result_paths: bool = False) -> list[dict[str, Any]]:
+    if (type(task) is not str or not workbench._TASK_KEY.fullmatch(task)
+            or type(show_result_paths) is not bool):
+        raise WorkSessionRefused("Exact task selection required")
+    report = lifecycle.list_history(desk, show_result_paths=show_result_paths)
+    if report.get("status") != "READ_ONLY_PERSONAL_HISTORY":
+        raise WorkSessionRefused("Original history did not verify")
+    return [row for row in report["snapshots"] if row["task_key_claimed"] == task]
+
+
+def _saved_completed(desk: str | Path, task: str, sha: str, *,
+                     show_result_paths: bool = False) -> dict[str, Any]:
+    if type(sha) is not str or not workbench._SHA.fullmatch(sha):
+        raise WorkSessionRefused("Exact completed-note SHA-256 required")
+    matches = [
+        row for row in _history_rows(desk, task, show_result_paths=show_result_paths)
+        if row["state"] == "completed" and row["sha256"] == sha
+        and "result_evidence" in row
+    ]
+    if len(matches) != 1:
+        raise WorkSessionRefused("Exactly one linked completed snapshot required")
+    return matches[0]
+
+
+def review_session(desk: str | Path, task: str, *,
+                   project_root: str | Path | None = None,
+                   project_key: str | None = None,
+                   result_file: str | Path | None = None,
+                   expected_checkpoint_sha256: str | None = None,
+                   show_result_paths: bool = False) -> dict[str, Any]:
+    """One view across active receipt, optional project result and old history.
+
+    No guess about the newest event: lifecycle history has no timestamps.
+    No result file is opened unless explicitly selected.
+    """
+    rows = _history_rows(desk, task, show_result_paths=show_result_paths)
+    root = portable._desk(desk, must_exist=True)
+    active = task in portable._existing_tasks(root)
+    selected_sha = None
+    project_binding = None
+    observed = None
+    if active:
+        selected = handoff.inspect_handoff(desk, task)
+        selected_sha = selected["selected_note_sha256"]
+        if project_root is not None or project_key is not None:
+            if project_root is None or project_key is None:
+                raise WorkSessionRefused("Both project root and key are required")
+            brief = handoff.inspect_work_brief(desk, task, project_root, project_key)
+            if brief["scratch_handoff"]["selected_note_sha256"] != selected_sha:
+                raise WorkSessionRefused("Task changed during project inspection")
+            project_binding = brief["project_binding_sha256"]
+        if result_file is not None:
+            if project_binding is None:
+                raise WorkSessionRefused("A result requires an explicit project selection")
+            inspected = result.inspect_work_result(
+                desk, task, project_root, project_key, result_file,
+                expected_checkpoint_sha256=expected_checkpoint_sha256)
+            if inspected["work_brief"]["scratch_handoff"]["selected_note_sha256"] != selected_sha:
+                raise WorkSessionRefused("Task changed during result inspection")
+            observed = {
+                "status": inspected["status"],
+                "checkpoint_sha256": inspected["checkpoint_sha256"],
+                "result_sha256": inspected["result_sha256"],
+                "result_bytes": inspected["result_bytes"],
+                "result_quality_validated": False,
+                "current_bytes_observed_this_review": True,
+            }
+        elif expected_checkpoint_sha256 is not None:
+            raise WorkSessionRefused("Expected replay token requires a result file")
+    else:
+        if any(x is not None for x in (
+                project_root, project_key, result_file, expected_checkpoint_sha256)):
+            raise WorkSessionRefused(
+                "A completed task must be explicitly reopened before project replay")
+        if not rows:
+            raise WorkSessionRefused("No active task or historical snapshot matches")
+    return {
+        "schema": SCHEMA,
+        "status": ("ACTIVE_WORK_SESSION_REVIEW" if active
+                   else "HISTORICAL_WORK_SESSION_REVIEW"),
+        "task_key_claimed": task,
+        "active": active,
+        "active_note_sha256": selected_sha,
+        "selected_project_binding_sha256": project_binding,
+        "observed_result": observed,
+        "historical_snapshots": rows,
+        "history_has_timestamps": False,
+        "historical_document_current_bytes_verified": False,
+        "result_quality_validated": False,
+        "native_chairman_authority_granted": False,
+        "writes_performed": False,
+        "new_store_created": False,
+        "installed_vres_modified": False,
+    }
+
+
+def reopen_saved(desk: str | Path, task: str, snapshot_sha256: str, *,
+                 approved: bool = False) -> dict[str, Any]:
+    """Explicitly restore one original completed note, never auto-open a project."""
+    if approved is not True:
+        raise WorkSessionRefused("Explicit reopen confirmation required")
+    old = _saved_completed(desk, task, snapshot_sha256)
+    restored = lifecycle.reopen(
+        desk, task, state="completed",
+        expected_sha256=snapshot_sha256, approved=True)
+    if (restored.get("status") != "OWN_TASK_REOPENED"
+            or restored.get("sha256") != snapshot_sha256):
+        raise WorkSessionRefused("Task may have reopened; inspect desk before retry")
+    again = _saved_completed(desk, task, snapshot_sha256)
+    if again["result_evidence"] != old["result_evidence"]:
+        raise WorkSessionRefused("Task reopened but history changed; do not retry blindly")
+    return {
+        "schema": SCHEMA,
+        "status": "SAVED_WORK_SESSION_TASK_REOPENED",
+        "task_key_claimed": task,
+        "selected_note_sha256": snapshot_sha256,
+        "saved_checkpoint_sha256": old["result_evidence"]["checkpoint_sha256"],
+        "original_history_preserved": True,
+        "historical_document_current_bytes_verified": False,
+        "result_replayed": False,
+        "native_chairman_authority_granted": False,
+        "new_store_created": False,
+        "installed_vres_modified": False,
+    }
+
+
+def replay_saved(desk: str | Path, task: str, snapshot_sha256: str, *,
+                 approved: bool = False) -> dict[str, Any]:
+    """Explicit opt-in to inspect the SAVED path and compare current exact bytes.
+
+    Caller must reopen the exact original note first. On mismatch, leave
+    history untouched and never describe old evidence as current.
+    """
+    if approved is not True:
+        raise WorkSessionRefused("Explicit read-saved-document confirmation required")
+    old = _saved_completed(desk, task, snapshot_sha256, show_result_paths=True)
+    link = old["result_evidence"]
+    checked = result.inspect_work_result(
+        desk, task, link["project_root"], link["project_key"],
+        link["result_file"],
+        expected_checkpoint_sha256=link["checkpoint_sha256"])
+    if (checked["status"] != "RESULT_EXACT_CONTEXT_CHECKPOINT_MATCH"
+            or checked["checkpoint_sha256"] != link["checkpoint_sha256"]
+            or checked["result_sha256"] != link["result_sha256"]
+            or checked["result_bytes"] != link["result_bytes"]
+            or checked["work_brief"]["scratch_handoff"]["selected_note_sha256"]
+            != snapshot_sha256):
+        raise WorkSessionRefused("Saved result no longer matches exact context")
+    again = _saved_completed(desk, task, snapshot_sha256, show_result_paths=True)
+    if again["result_evidence"] != link:
+        raise WorkSessionRefused("Saved history changed during replay")
+    return {
+        "schema": SCHEMA,
+        "status": "SAVED_WORK_SESSION_EXACT_CONTEXT_REPLAY_MATCH",
+        "task_key_claimed": task,
+        "selected_note_sha256": snapshot_sha256,
+        "checkpoint_sha256": checked["checkpoint_sha256"],
+        "result_sha256": checked["result_sha256"],
+        "result_bytes": checked["result_bytes"],
+        "current_result_bytes_matched_in_this_read": True,
+        "future_document_bytes_guaranteed_unchanged": False,
+        "document_path_disclosed": False,
+        "result_quality_validated": False,
+        "native_chairman_authority_granted": False,
+        "writes_performed": False,
+        "new_store_created": False,
+        "installed_vres_modified": False,
+    }
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = _SafeParser(
+        description="Internal source-only personal workflow over original task owners")
+    subs = parser.add_subparsers(dest="command", required=True)
+    for name in ("review", "finish", "reopen", "replay"):
+        sub = subs.add_parser(name)
+        sub.add_argument("--desk", required=True)
+        sub.add_argument("--task-key", required=True)
+        if name in ("review", "finish"):
+            sub.add_argument("--project-root", required=(name == "finish"))
+            sub.add_argument("--project-key", required=(name == "finish"))
+            sub.add_argument("--result-file", required=(name == "finish"))
+            sub.add_argument("--expected-checkpoint-sha256",
+                             required=(name == "finish"))
+        if name == "review":
+            sub.add_argument("--show-result-paths", action="store_true")
+        if name in ("finish", "reopen", "replay"):
+            sub.add_argument("--yes", action="store_true")
+        if name in ("reopen", "replay"):
+            sub.add_argument("--snapshot-sha256", required=True)
+    try:
+        args = parser.parse_args(argv)
+        if args.command == "review":
+            packet = review_session(
+                args.desk, args.task_key,
+                project_root=args.project_root, project_key=args.project_key,
+                result_file=args.result_file,
+                expected_checkpoint_sha256=args.expected_checkpoint_sha256,
+                show_result_paths=args.show_result_paths)
+        elif args.command == "finish":
+            packet = completion.finish_work(
+                args.desk, args.task_key, args.project_root, args.project_key,
+                args.result_file,
+                expected_checkpoint_sha256=args.expected_checkpoint_sha256,
+                approved=args.yes)
+        elif args.command == "reopen":
+            packet = reopen_saved(
+                args.desk, args.task_key, args.snapshot_sha256, approved=args.yes)
+        else:
+            packet = replay_saved(
+                args.desk, args.task_key, args.snapshot_sha256, approved=args.yes)
+        print(json.dumps(packet, sort_keys=True, ensure_ascii=True))
+    except Exception:
+        print("VRES_WORK_SESSION_REFUSED: inspect exact task and history; do not retry blindly.",
+              file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

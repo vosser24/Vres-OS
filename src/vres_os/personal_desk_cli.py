@@ -48,6 +48,14 @@ Usage: python -I -S -B personal_desk_cli.py COMMAND [command options]
   work-finish  User-confirm exact task + result and complete existing scratch task
             --desk ABS --select TASK-* --project-root ABS --project-key project:*
             --result-file ABS --expected-checkpoint-sha256 HEX --yes
+  work-session  Internal one-task review/finish/reopen/replay (original owners)
+            review --desk ABS --task-key TASK-* [--project-root ABS
+            --project-key project:* --result-file ABS]
+            finish --desk ABS --task-key TASK-* --project-root ABS
+            --project-key project:* --result-file ABS
+            --expected-checkpoint-sha256 HEX --yes
+            reopen|replay --desk ABS --task-key TASK-*
+            --snapshot-sha256 HEX --yes
   undo      Delete ONLY an unchanged owned scratch draft with approval
             --workspace ABS --sha256 HEX --yes
   desk      Portable daily desk: init/add/focus/open/remove without manual SHA
@@ -74,7 +82,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     action, rest = args[0], args[1:]
     # Constant dispatch only. Never import arbitrary modules from operator data.
-    if action not in {"prepare", "create", "inspect", "open", "today", "today-here", "work", "work-result", "work-finish", "undo", "desk"}:
+    if action not in {"prepare", "create", "inspect", "open", "today", "today-here", "work", "work-result", "work-finish", "work-session", "undo", "desk"}:
         print("VRES_DESK_REFUSED: unknown command; run 'help'.", file=sys.stderr)
         return 2
     try:
@@ -101,6 +109,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             outcome = owner.main(rest)
         elif action == "work-finish":
             from vres_os import personal_work_completion as owner
+            outcome = owner.main(rest)
+        elif action == "work-session":
+            from vres_os import personal_work_session as owner
             outcome = owner.main(rest)
         else:  # today
             from vres_os import personal_daily_focus as owner
