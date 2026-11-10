@@ -41,6 +41,9 @@ Usage: python -I -S -B personal_desk_cli.py COMMAND [command options]
   work      One task + one explicit project, read-only combined work brief
             --desk ABS --select TASK-* --project-root ABS --project-key project:*
             [--show-selected-action] [--format text|json]
+  work-result  Verify actual project result bytes, without reading task authority
+            --desk ABS --select TASK-* --project-root ABS --project-key project:*
+            --result-file ABS [--expected-sha256 HEX] [--format text|json]
   undo      Delete ONLY an unchanged owned scratch draft with approval
             --workspace ABS --sha256 HEX --yes
   desk      Portable daily desk: init/add/focus/open/remove without manual SHA
@@ -66,7 +69,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     action, rest = args[0], args[1:]
     # Constant dispatch only. Never import arbitrary modules from operator data.
-    if action not in {"prepare", "create", "inspect", "open", "today", "today-here", "work", "undo", "desk"}:
+    if action not in {"prepare", "create", "inspect", "open", "today", "today-here", "work", "work-result", "undo", "desk"}:
         print("VRES_DESK_REFUSED: unknown command; run 'help'.", file=sys.stderr)
         return 2
     try:
@@ -87,6 +90,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             outcome = owner.main(rest)
         elif action == "work":
             from vres_os import personal_desk_chairman_handoff as owner
+            outcome = owner.main(rest)
+        elif action == "work-result":
+            from vres_os import personal_work_result as owner
             outcome = owner.main(rest)
         else:  # today
             from vres_os import personal_daily_focus as owner
