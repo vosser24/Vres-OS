@@ -993,6 +993,87 @@ def _sha_or_none(path: Path) -> str | None:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+
+def _checked_activation_id(value: Any) -> str:
+    """An on-disk activation name must never become an arbitrary state path."""
+    if type(value) is not str or re.fullmatch(r"[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}", value) is None:
+        raise AdoptionError("Saved activation identifier is invalid; manual recovery required")
+    return value
+
+
+def _validate_restore_manifest(root: Path, pre: Any, post: Any) -> None:
+    """Reject malformed persisted path/copy/identity data before a single write."""
+    if type(pre) is not dict or type(post) is not dict or set(pre) != set(post) or len(pre) > _MAX_ITEMS + 1:
+        raise AdoptionError("Saved adoption restoration manifest is invalid; manual recovery required")
+    copies: set[str] = set()
+    for rel, entry in pre.items():
+        if type(rel) is not str or not rel or "\\" in rel or PurePosixPath(rel).as_posix() != rel:
+            raise AdoptionError("Saved adoption restoration path is invalid; manual recovery required")
+        _within(root, rel)  # rejects absolute, out-of-project and resolved linked escape paths
+        if type(entry) is not dict or type(entry.get("existed")) is not bool:
+            raise AdoptionError("Saved adoption pre-image entry is invalid; manual recovery required")
+        if entry["existed"]:
+            name = entry.get("copy")
+            digest = entry.get("sha256")
+            if (
+                set(entry) != {"existed", "copy", "sha256"}
+                or type(name) is not str or re.fullmatch(r"[0-9]{4}", name) is None
+                or name in copies
+                or type(digest) is not str or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+            ):
+                raise AdoptionError("Saved adoption pre-image identity is invalid; manual recovery required")
+            copies.add(name)
+        elif set(entry) != {"existed"}:
+            raise AdoptionError("Saved adoption absent-file entry is invalid; manual recovery required")
+        expected = post[rel]
+        if expected is not None and (
+            type(expected) is not str or re.fullmatch(r"[0-9a-f]{64}", expected) is None
+        ):
+            raise AdoptionError("Saved adoption post-image identity is invalid; manual recovery required")
+        if not entry["existed"] and expected is None:
+            raise AdoptionError("Saved adoption contains an impossible absent-file transition")
+
+
+def _read_verified_preimage(pre_dir: Path, name: str, expected_sha: str, rel: str) -> bytes:
+    """Read a bounded ordinary pre-image, rejecting observable link/rebind races.
+
+    Pre-image storage is never executable. This is a cooperative filesystem
+    identity check, NOT an atomic Windows directory-descriptor transaction.
+    """
+    path = pre_dir / name
+    ancestors = _record_ancestor_identity(path)
+    info = _lstat(path)
+    if (
+        ancestors is None or info is None or _is_link(info)
+        or not stat.S_ISREG(info.st_mode) or info.st_size > _MAX_BYTES or info.st_size < 0
+    ):
+        raise AdoptionError(f"Pre-image of {rel} is not a bounded ordinary file")
+    def stamp(item: os.stat_result) -> tuple[int, int, int, int]:
+        return (item.st_dev, item.st_ino, item.st_size, item.st_mtime_ns)
+    original = stamp(info)
+    try:
+        def no_follow(filename: str, flags: int) -> int:
+            return os.open(filename, flags | getattr(os, "O_NOFOLLOW", 0))
+        with open(path, "rb", opener=no_follow) as handle:
+            opened = os.fstat(handle.fileno())
+            if not stat.S_ISREG(opened.st_mode) or stamp(opened) != original:
+                raise AdoptionError(f"Pre-image of {rel} changed during inspection")
+            data = handle.read(_MAX_BYTES + 1)
+            final = os.fstat(handle.fileno())
+    except OSError:
+        raise AdoptionError(f"Pre-image of {rel} could not be read safely") from None
+    leaf = _lstat(path)
+    if (
+        stamp(final) != original or len(data) != info.st_size
+        or leaf is None or _is_link(leaf) or not stat.S_ISREG(leaf.st_mode)
+        or stamp(leaf) != original or _record_ancestor_identity(path) != ancestors
+    ):
+        raise AdoptionError(f"Pre-image of {rel} changed during inspection")
+    if hashlib.sha256(data).hexdigest() != expected_sha:
+        raise AdoptionError(f"Pre-image of {rel} fails its integrity check")
+    return data
+
+
 def _restore(root: Path, pre_dir: Path, pre: dict[str, Any], post: dict[str, str | None]) -> list[str]:
     """Restore pre-images only where a path is still in a state the activation itself produced.
 
@@ -1002,6 +1083,7 @@ def _restore(root: Path, pre_dir: Path, pre: dict[str, Any], post: dict[str, str
     edited by someone after the activation started, so it is never overwritten or deleted and
     the whole restore refuses.
     """
+    _validate_restore_manifest(root, pre, post)
     todo = []
     for rel, entry in pre.items():
         current = _sha_or_none(_within(root, rel))
@@ -1018,10 +1100,9 @@ def _restore(root: Path, pre_dir: Path, pre: dict[str, Any], post: dict[str, str
     for rel in todo:
         entry = pre[rel]
         if entry["existed"]:
-            data = (pre_dir / entry["copy"]).read_bytes()
-            if hashlib.sha256(data).hexdigest() != entry["sha256"]:
-                raise AdoptionError(f"Pre-image of {rel} fails its integrity check")
-            verified_preimages[rel] = data
+            verified_preimages[rel] = _read_verified_preimage(
+                pre_dir, entry["copy"], entry["sha256"], rel
+            )
     for rel in todo:
         entry, path = pre[rel], _within(root, rel)
         if entry["existed"]:
@@ -1138,9 +1219,22 @@ def recover(project, *, data_root: Path | None = None) -> dict[str, Any]:
     journal = _read_json(sd / "journal.json")
     if journal is None:
         return {"state": (_state(sd, project) or {}).get("state"), "recovered": False}
-    if journal.get("version") != VERSION or not isinstance(journal.get("post"), dict):
+    if type(journal) is not dict or type(journal.get("version")) is not int or journal["version"] != VERSION:
         raise AdoptionError("Adoption journal has an unsupported format; recover manually")
-    restored = _restore(root, sd / "activations" / journal["activation"] / "pre", journal["pre"], journal["post"])
+    activation = _checked_activation_id(journal.get("activation"))
+    version = journal.get("inventory_version")
+    if type(version) is not str or re.fullmatch(r"[0-9a-f]{64}", version) is None:
+        raise AdoptionError("Saved recovery inventory identity is invalid")
+    _validate_restore_manifest(root, journal.get("pre"), journal.get("post"))
+    removes, creates = journal.get("remove"), journal.get("create")
+    if (
+        type(removes) is not list or type(creates) is not list
+        or any(type(rel) is not str for rel in removes + creates)
+        or len(removes) != len(set(removes)) or len(creates) != len(set(creates))
+        or set(removes + creates) != set(journal["pre"])
+    ):
+        raise AdoptionError("Saved recovery operation paths are inconsistent with the manifest")
+    restored = _restore(root, sd / "activations" / activation / "pre", journal["pre"], journal["post"])
     # A failed state write must leave recovery evidence visible.
     _set_state(sd, project, "awaiting_operator", inventory_version=journal["inventory_version"])
     (sd / "journal.json").unlink()
@@ -1155,7 +1249,15 @@ def rollback(project, *, authority: Authority, data_root: Path | None = None) ->
     _refuse_interrupted_journal(sd)
     if not record or record["state"] != "active" or not record.get("activation"):
         raise AdoptionError("Only an activated legacy adoption can be rolled back")
-    result = _read_json(sd / "activations" / record["activation"] / "result.json")
+    activation = _checked_activation_id(record["activation"])
+    result = _read_json(sd / "activations" / activation / "result.json")
+    if (
+        type(result) is not dict
+        or type(result.get("inventory_version")) is not str
+        or result["inventory_version"] != record.get("inventory_version")
+    ):
+        raise AdoptionError("Saved rollback result is inconsistent with the active adoption")
+    _validate_restore_manifest(root, result.get("pre"), result.get("post"))
     for rel, sha in result["post"].items():
         if _sha_or_none(_within(root, rel)) != sha:
             raise AdoptionError(f"{rel} changed after activation; rollback refused to avoid losing those changes")

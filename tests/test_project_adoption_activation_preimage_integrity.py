@@ -92,7 +92,7 @@ def test_recover_keeps_journal_if_state_persist_fails(tmp_path, monkeypatch):
     target = project.root / "CLAUDE.md"
     before = target.read_bytes()
     sha = hashlib.sha256(before).hexdigest()
-    activation = "synthetic-recover"
+    activation = "20261110T000000Z-00000001"
     pre = sd / "activations" / activation / "pre"
     pre.mkdir(parents=True)
     (pre / "0000").write_bytes(before)
