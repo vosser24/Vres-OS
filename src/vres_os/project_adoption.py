@@ -1012,15 +1012,22 @@ def _restore(root: Path, pre_dir: Path, pre: dict[str, Any], post: dict[str, str
             raise AdoptionError(f"{rel} was changed after the activation started; it is not overwritten. "
                                 "Resolve it by hand, then run recover again")
         todo.append(rel)
+    # Validate EVERY requested pre-image before restoring the first path.
+    # A corrupt later copy must not cause a predictable partial recovery.
+    verified_preimages: dict[str, bytes] = {}
     for rel in todo:
-        entry, path = pre[rel], _within(root, rel)
+        entry = pre[rel]
         if entry["existed"]:
             data = (pre_dir / entry["copy"]).read_bytes()
             if hashlib.sha256(data).hexdigest() != entry["sha256"]:
                 raise AdoptionError(f"Pre-image of {rel} fails its integrity check")
+            verified_preimages[rel] = data
+    for rel in todo:
+        entry, path = pre[rel], _within(root, rel)
+        if entry["existed"]:
             path.parent.mkdir(parents=True, exist_ok=True)
             tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-            tmp.write_bytes(data)
+            tmp.write_bytes(verified_preimages[rel])
             os.replace(tmp, path)
         else:
             path.unlink()
@@ -1066,17 +1073,31 @@ def activate(project, *, authority: Authority, data_root: Path | None = None) ->
     pre_dir = sd / "activations" / activation / "pre"
     pre_dir.mkdir(parents=True)
     pre: dict[str, Any] = {}
+    reviewed_sha = {item["path"]: item["sha256"] for item in inv["items"]}
     for index, rel in enumerate(remove + create):
         path = _within(root, rel)
         info = _lstat(path)
         if info is not None and (_is_link(info) or not stat.S_ISREG(info.st_mode)):
             raise AdoptionError(f"{rel} is a link or not an ordinary file; nothing was activated")
         if info is None:
+            if rel in remove or reviewed_sha.get(rel) is not None:
+                raise AdoptionError("Reviewed project surface disappeared during activation preparation")
             pre[rel] = {"existed": False}
         else:
             data = path.read_bytes()
+            digest = hashlib.sha256(data).hexdigest()
+            if digest != reviewed_sha.get(rel):
+                raise AdoptionError("Project surface changed during activation preparation; retry review")
             _write_new(pre_dir / f"{index:04d}", data)
-            pre[rel] = {"existed": True, "copy": f"{index:04d}", "sha256": hashlib.sha256(data).hexdigest()}
+            pre[rel] = {"existed": True, "copy": f"{index:04d}", "sha256": digest}
+    # Keep source, decision and architecture evidence bound to approved bytes.
+    # A final scan is cooperative, not an atomic filesystem transaction.
+    if (
+        _current_inventory(sd, project) != inv
+        or _legacy_architecture_hold(root)
+        or _decisions(sd, inv) != decided
+    ):
+        raise AdoptionError("Project evidence changed during activation preparation; retry review")
     _write_exclusive_journal(sd / "journal.json", {
         "version": VERSION, "activation": activation, "inventory_version": inv["version"],
         "remove": remove, "create": create, "pre": pre, "post": post,
@@ -1084,6 +1105,10 @@ def activate(project, *, authority: Authority, data_root: Path | None = None) ->
     _set_state(sd, project, "activating", inventory_version=inv["version"], activation=activation)
     try:
         for rel in remove:
+            # Refuse a late modification before DROP. No POSIX/Windows
+            # atomic delete-if-hash operation is claimed here.
+            if _sha_or_none(_within(root, rel)) != reviewed_sha.get(rel):
+                raise AdoptionError("Reviewed project surface changed immediately before DROP")
             _within(root, rel).unlink()
         for rel in create:
             _write_new(_within(root, rel), scaffold)
@@ -1092,8 +1117,9 @@ def activate(project, *, authority: Authority, data_root: Path | None = None) ->
     except BaseException as exc:
         try:
             _restore(root, pre_dir, pre, post)
-            (sd / "journal.json").unlink()
+            # Preserve the journal if persisted state cannot be reconciled.
             _set_state(sd, project, "awaiting_operator", inventory_version=inv["version"])
+            (sd / "journal.json").unlink()
         except Exception:
             _set_state(sd, project, "recovery_required", activation=activation,
                        reason="activation failed and automatic rollback also failed; run `vres project recover`")
@@ -1115,8 +1141,9 @@ def recover(project, *, data_root: Path | None = None) -> dict[str, Any]:
     if journal.get("version") != VERSION or not isinstance(journal.get("post"), dict):
         raise AdoptionError("Adoption journal has an unsupported format; recover manually")
     restored = _restore(root, sd / "activations" / journal["activation"] / "pre", journal["pre"], journal["post"])
-    (sd / "journal.json").unlink()
+    # A failed state write must leave recovery evidence visible.
     _set_state(sd, project, "awaiting_operator", inventory_version=journal["inventory_version"])
+    (sd / "journal.json").unlink()
     return {"state": "awaiting_operator", "recovered": True, "restored": restored}
 
 
@@ -1125,6 +1152,7 @@ def rollback(project, *, authority: Authority, data_root: Path | None = None) ->
     root = Path(project.root).resolve(strict=True)
     sd = _state_dir(project, data_root)
     record = _state(sd, project)
+    _refuse_interrupted_journal(sd)
     if not record or record["state"] != "active" or not record.get("activation"):
         raise AdoptionError("Only an activated legacy adoption can be rolled back")
     result = _read_json(sd / "activations" / record["activation"] / "result.json")
