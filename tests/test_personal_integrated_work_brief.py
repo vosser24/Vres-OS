@@ -80,7 +80,8 @@ def test_wrong_task_traversal_stale_digest_and_fake_approval_refused(tmp_path, c
     with pytest.raises(work.PersonalHandoffRefused):
         work.inspect_work_brief(desk, "TASK-INTEGRATED-1",
                                 project / ".." / project.name, "project:integrated")
-    note.write_text(note.read_text(encoding="utf-8") + "\nchanged", encoding="utf-8")
+    owned_note = desk / "Vres-Workbench-TASK-INTEGRATED-1" / "notes" / "next-step.md"
+    owned_note.write_text(owned_note.read_text(encoding="utf-8") + "\nchanged", encoding="utf-8")
     with pytest.raises(work.PersonalHandoffRefused):
         work.inspect_work_brief(*args)
     assert personal_desk_cli.main([

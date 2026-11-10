@@ -237,7 +237,7 @@ def inspect_work_brief(
     """
     if (type(selected_task) is not str or not _TASK_KEY.fullmatch(selected_task)
             or type(project_key) is not str or not _PROJECT_KEY.fullmatch(project_key)
-            or type(project_root) not in (str, Path)
+            or not isinstance(project_root, (str, Path))
             or type(show_selected_action) is not bool):
         raise PersonalHandoffRefused("One exact task and project selection required")
     root = Path(project_root)
