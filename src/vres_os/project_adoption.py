@@ -1007,7 +1007,11 @@ def _validate_restore_manifest(root: Path, pre: Any, post: Any) -> None:
         raise AdoptionError("Saved adoption restoration manifest is invalid; manual recovery required")
     copies: set[str] = set()
     for rel, entry in pre.items():
-        if type(rel) is not str or not rel or "\\" in rel or PurePosixPath(rel).as_posix() != rel:
+        if (
+            type(rel) is not str or not rel or "\\" in rel or ":" in rel
+            or PurePosixPath(rel).as_posix() != rel
+            or any(part.endswith((".", " ")) for part in PurePosixPath(rel).parts)
+        ):
             raise AdoptionError("Saved adoption restoration path is invalid; manual recovery required")
         _within(root, rel)  # rejects absolute, out-of-project and resolved linked escape paths
         if type(entry) is not dict or type(entry.get("existed")) is not bool:
@@ -1032,6 +1036,33 @@ def _validate_restore_manifest(root: Path, pre: Any, post: Any) -> None:
             raise AdoptionError("Saved adoption post-image identity is invalid; manual recovery required")
         if not entry["existed"] and expected is None:
             raise AdoptionError("Saved adoption contains an impossible absent-file transition")
+
+
+def _validate_restore_operations(
+    pre: dict[str, Any], post: dict[str, str | None], removes: Any, creates: Any,
+) -> None:
+    """Check persisted DROP/scaffold transitions, allowing replacement of root CLAUDE.md.
+
+    An ordinary DROP has an existing pre-image and absent post-image. Only the
+    canonical root scaffold can be newly created; a reviewed root CLAUDE.md
+    may be both dropped and recreated in one activation. These are saved
+    structural checks, not proof of an unforgeable operator signature.
+    """
+    if (
+        type(removes) is not list or type(creates) is not list
+        or any(type(rel) is not str for rel in removes + creates)
+        or len(removes) != len(set(removes))
+        or len(creates) != len(set(creates))
+        or creates not in ([], ["CLAUDE.md"])
+        or set(removes) | set(creates) != set(pre)
+    ):
+        raise AdoptionError("Saved recovery operations do not match the restoration manifest")
+    for rel in removes:
+        if not pre[rel]["existed"] or (rel not in creates and post[rel] is not None):
+            raise AdoptionError("Saved DROP transition is inconsistent with the pre/post manifest")
+    for rel in creates:
+        if post[rel] is None or (rel not in removes and pre[rel]["existed"]):
+            raise AdoptionError("Saved scaffold transition is inconsistent with the pre/post manifest")
 
 
 def _read_verified_preimage(pre_dir: Path, name: str, expected_sha: str, rel: str) -> bytes:
@@ -1225,15 +1256,16 @@ def recover(project, *, data_root: Path | None = None) -> dict[str, Any]:
     version = journal.get("inventory_version")
     if type(version) is not str or re.fullmatch(r"[0-9a-f]{64}", version) is None:
         raise AdoptionError("Saved recovery inventory identity is invalid")
-    _validate_restore_manifest(root, journal.get("pre"), journal.get("post"))
-    removes, creates = journal.get("remove"), journal.get("create")
-    if (
-        type(removes) is not list or type(creates) is not list
-        or any(type(rel) is not str for rel in removes + creates)
-        or len(removes) != len(set(removes)) or len(creates) != len(set(creates))
-        or set(removes + creates) != set(journal["pre"])
+    record = _state(sd, project)
+    if record is None or (
+        record.get("inventory_version") is not None
+        and record["inventory_version"] != version
     ):
-        raise AdoptionError("Saved recovery operation paths are inconsistent with the manifest")
+        raise AdoptionError("Recovery journal does not match the current project's saved state")
+    _validate_restore_manifest(root, journal.get("pre"), journal.get("post"))
+    _validate_restore_operations(
+        journal["pre"], journal["post"], journal.get("remove"), journal.get("create")
+    )
     restored = _restore(root, sd / "activations" / activation / "pre", journal["pre"], journal["post"])
     # A failed state write must leave recovery evidence visible.
     _set_state(sd, project, "awaiting_operator", inventory_version=journal["inventory_version"])
@@ -1258,12 +1290,44 @@ def rollback(project, *, authority: Authority, data_root: Path | None = None) ->
     ):
         raise AdoptionError("Saved rollback result is inconsistent with the active adoption")
     _validate_restore_manifest(root, result.get("pre"), result.get("post"))
+    _validate_restore_operations(
+        result["pre"], result["post"], record.get("removed"), record.get("created")
+    )
     for rel, sha in result["post"].items():
         if _sha_or_none(_within(root, rel)) != sha:
             raise AdoptionError(f"{rel} changed after activation; rollback refused to avoid losing those changes")
     _evidence(authority, "ROLLBACK")
-    _restore(root, sd / "activations" / record["activation"] / "pre", result["pre"], result["post"])
-    _set_state(sd, project, "awaiting_operator", inventory_version=record["inventory_version"])
+    # Authorization is not a filesystem lock. Refuse a late concurrent change
+    # before creating durable rollback recovery evidence or modifying the project.
+    _refuse_interrupted_journal(sd)
+    if _state(sd, project) != record or _read_json(sd / "activations" / activation / "result.json") != result:
+        raise AdoptionError("Rollback records changed during operator authorization; retry review")
+    _validate_restore_manifest(root, result["pre"], result["post"])
+    for rel, sha in result["post"].items():
+        if _sha_or_none(_within(root, rel)) != sha:
+            raise AdoptionError(f"{rel} changed during rollback authorization; nothing was restored")
+    # The same original recovery operation can finish an interrupted rollback.
+    # Preserve the journal if state persistence or any project restoration fails.
+    _write_exclusive_journal(sd / "journal.json", {
+        "version": VERSION, "activation": activation,
+        "inventory_version": record["inventory_version"],
+        "remove": record["removed"], "create": record["created"],
+        "pre": result["pre"], "post": result["post"],
+    })
+    try:
+        _restore(root, sd / "activations" / activation / "pre", result["pre"], result["post"])
+        _set_state(sd, project, "awaiting_operator", inventory_version=record["inventory_version"])
+    except Exception as exc:
+        try:
+            _set_state(
+                sd, project, "recovery_required",
+                activation=activation, inventory_version=record["inventory_version"],
+                reason="rollback interrupted; run vres project recover",
+            )
+        except Exception:
+            pass  # The exclusive journal remains the durable recovery signal.
+        raise AdoptionError("Rollback incomplete; recovery journal retained for manual recovery") from exc
+    (sd / "journal.json").unlink()
     return {"state": "awaiting_operator", "restored": sorted(result["pre"])}
 
 
