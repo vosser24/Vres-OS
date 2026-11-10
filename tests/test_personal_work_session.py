@@ -1011,3 +1011,99 @@ def test_saved_catalog_without_existing_document_refuses_without_creation(tmp_pa
             include_saved_catalog=True, saved_catalog_store=store,
             saved_catalog_source_id="data-source-" + "a" * 64)
     assert list(root.iterdir()) == []
+
+# #167 final saved read is not the end of the task/project/result freshness window.
+
+def test_saved_catalog_final_read_refuses_late_project_scan_change(tmp_path, monkeypatch):
+    ctx, _ = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    store, sid, calls = _saved_catalog_for_session(tmp_path, key)
+    original = store.load_saved_snapshot
+    reads = []
+
+    def mutate_on_final_read():
+        snapshot = original()
+        reads.append(True)
+        if len(reads) == 2:
+            (project / "CLAUDE.md").write_text(
+                "# Synthetic change after final saved catalog read\n", encoding="utf-8")
+        return snapshot
+
+    monkeypatch.setattr(store, "load_saved_snapshot", mutate_on_final_read)
+    with pytest.raises((session.WorkSessionRefused,
+                        session.handoff.PersonalHandoffRefused)):
+        session.review_session(
+            selected, task, project_root=project, project_key=key,
+            include_saved_catalog=True, saved_catalog_store=store,
+            saved_catalog_source_id=sid)
+    assert reads == [True, True]
+    assert calls == []
+
+
+def test_saved_catalog_final_read_refuses_late_result_content_change(tmp_path, monkeypatch):
+    ctx, checkpoint = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    store, sid, calls = _saved_catalog_for_session(tmp_path, key)
+    original = store.load_saved_snapshot
+    reads = []
+
+    def mutate_on_final_read():
+        snapshot = original()
+        reads.append(True)
+        if len(reads) == 2:
+            document.write_text("# Synthetic result changed during saved read\n",
+                                encoding="utf-8")
+        return snapshot
+
+    monkeypatch.setattr(store, "load_saved_snapshot", mutate_on_final_read)
+    with pytest.raises((session.WorkSessionRefused, result.WorkResultRefused)):
+        session.review_session(
+            selected, task, project_root=project, project_key=key,
+            result_file=document, expected_checkpoint_sha256=checkpoint,
+            include_saved_catalog=True, saved_catalog_store=store,
+            saved_catalog_source_id=sid)
+    assert reads == [True, True]
+    assert calls == []
+
+
+def test_saved_catalog_final_read_keeps_unchanged_exact_result(tmp_path):
+    ctx, checkpoint = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    store, sid, calls = _saved_catalog_for_session(tmp_path, key)
+    packet = session.review_session(
+        selected, task, project_root=project, project_key=key,
+        result_file=document, expected_checkpoint_sha256=checkpoint,
+        include_saved_catalog=True, saved_catalog_store=store,
+        saved_catalog_source_id=sid)
+    assert packet["observed_result"]["checkpoint_sha256"] == checkpoint
+    assert packet["selected_project_catalog"]["saved_catalog_revision"] == 2
+    assert packet["writes_performed"] is False
+    assert calls == []
+    assert str(project) not in json.dumps(packet)
+    assert str(document) not in json.dumps(packet)
+
+def test_saved_catalog_final_read_refuses_late_active_task_change(tmp_path, monkeypatch):
+    ctx, _ = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    store, sid, calls = _saved_catalog_for_session(tmp_path, key)
+    original = store.load_saved_snapshot
+    reads = []
+
+    def mutate_on_final_read():
+        snapshot = original()
+        reads.append(True)
+        if len(reads) == 2:
+            note = desk._owned_task(selected, task) / "notes" / "next-step.md"
+            note.write_text("# Synthetic task note changed after saved read\n",
+                            encoding="utf-8")
+        return snapshot
+
+    monkeypatch.setattr(store, "load_saved_snapshot", mutate_on_final_read)
+    with pytest.raises((session.WorkSessionRefused,
+                        session.handoff.PersonalHandoffRefused)):
+        session.review_session(
+            selected, task, project_root=project, project_key=key,
+            include_saved_catalog=True, saved_catalog_store=store,
+            saved_catalog_source_id=sid)
+    assert reads == [True, True]
+    assert calls == []

@@ -548,6 +548,25 @@ def review_session(desk: str | Path, task: str, *,
             saved_catalog_store, saved_catalog_source_id, project_key)
         if latest_catalog != selected_catalog:
             raise WorkSessionRefused("Saved current-user catalog changed during review")
+        # The last saved-file read may itself outlast a task, project scan or
+        # result edit. Check the ORIGINAL owners after it before combining
+        # their evidence. These are cooperative checks, not atomic snapshots.
+        final_brief = handoff.inspect_work_brief(
+            desk, task, project_root, project_key)
+        if (final_brief["scratch_handoff"]["selected_note_sha256"] != selected_sha
+                or final_brief["project_binding_sha256"] != project_binding
+                or handoff._exact_json(final_brief) != handoff._exact_json(brief)):
+            raise WorkSessionRefused("Task or project scan changed during final saved catalog read")
+        if observed is not None:
+            final_result = result.inspect_work_result(
+                desk, task, project_root, project_key, result_file,
+                expected_checkpoint_sha256=inspected["checkpoint_sha256"])
+            if (final_result["checkpoint_sha256"] != inspected["checkpoint_sha256"]
+                    or final_result["result_sha256"] != inspected["result_sha256"]
+                    or final_result["result_bytes"] != inspected["result_bytes"]
+                    or handoff._exact_json(final_result["work_brief"])
+                    != handoff._exact_json(brief)):
+                raise WorkSessionRefused("Result changed during final saved catalog read")
     return {
         "schema": SCHEMA,
         "status": ("ACTIVE_WORK_SESSION_REVIEW" if active
