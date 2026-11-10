@@ -128,3 +128,37 @@ def test_history_without_result_link_is_not_automatically_trusted(tmp_path):
         session.reopen_saved(selected, task, note_sha, approved=True)
     assert session.review_session(selected, task)["historical_snapshots"][0].get(
         "result_evidence") is None
+
+
+def test_start_uses_original_desk_owner_and_empty_separate_project(tmp_path):
+    new_desk = tmp_path / "Vres-Desk-New-Work"
+    project = tmp_path / "NewEmptyProject"
+    project.mkdir()
+    note = tmp_path / "external-task.md"
+    note.write_text("# New task\n\n## Next action\n- Write one summary.\n",
+                    encoding="utf-8")
+    with pytest.raises(session.WorkSessionRefused):
+        session.start_session(new_desk, "TASK-ONE-START", note, project,
+                              "project:new", approved=False)
+    assert not new_desk.exists()
+    created = session.start_session(
+        new_desk, "TASK-ONE-START", note, project, "project:new", approved=True)
+    assert created["status"] == "NEW_ORIGINAL_OWNER_WORK_SESSION_STARTED"
+    assert created["original_scratch_task_created"] is True
+    assert created["ordinary_project_modified"] is False
+    assert list(project.iterdir()) == []
+    assert session.review_session(new_desk, "TASK-ONE-START")["active"] is True
+    assert not (new_desk / "Vres-Lifecycle-History").exists()
+
+
+def test_start_rejects_nonempty_project_without_creating_desk(tmp_path):
+    new_desk = tmp_path / "Vres-Desk-Nonempty"
+    project = tmp_path / "ExistingProject"
+    project.mkdir()
+    (project / "something.md").write_text("Legacy content", encoding="utf-8")
+    note = tmp_path / "selected.md"
+    note.write_text("# Work\n\n## Next action\n- Read.\n", encoding="utf-8")
+    with pytest.raises(session.WorkSessionRefused):
+        session.start_session(new_desk, "TASK-NONEMPTY", note, project,
+                              "project:existing", approved=True)
+    assert not new_desk.exists()

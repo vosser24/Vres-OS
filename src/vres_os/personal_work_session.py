@@ -20,6 +20,7 @@ if not __package__:
     from vres_os import personal_task_lifecycle as lifecycle
     from vres_os import personal_work_result as result
     from vres_os import personal_work_completion as completion
+    from vres_os import personal_project_intake as intake
 else:
     from . import personal_desk_chairman_handoff as handoff
     from . import personal_portable_desk as portable
@@ -27,6 +28,7 @@ else:
     from . import personal_task_lifecycle as lifecycle
     from . import personal_work_result as result
     from . import personal_work_completion as completion
+    from . import personal_project_intake as intake
 
 SCHEMA = "vres-personal-integrated-work-session/1"
 
@@ -63,6 +65,68 @@ def _saved_completed(desk: str | Path, task: str, sha: str, *,
     if len(matches) != 1:
         raise WorkSessionRefused("Exactly one linked completed snapshot required")
     return matches[0]
+
+
+
+def start_session(desk: str | Path, task: str, note_file: str | Path,
+                  project_root: str | Path, project_key: str, *,
+                  approved: bool = False) -> dict[str, Any]:
+    """Start one task only in an absent desk and a separate EMPTY project.
+
+    The caller first creates the ordinary project directory and supplies an
+    existing non-sensitive Markdown note outside both project and desk.
+    This does not create a project scaffold, invoke Chairman or execute code.
+    An unexpected failure after the first write leaves the desk for inspection,
+    never automatic deletion or blind retry.
+    """
+    if approved is not True:
+        raise WorkSessionRefused("Explicit new scratch task approval required")
+    if type(task) is not str or not workbench._TASK_KEY.fullmatch(task):
+        raise WorkSessionRefused("One exact task label required")
+    if type(project_key) is not str or not handoff._PROJECT_KEY.fullmatch(project_key):
+        raise WorkSessionRefused("One exact project identity required")
+    new_desk = portable._desk(desk, must_exist=False)
+    project = intake._plain_project_root(project_root)
+    under = portable.project_draft._under
+    if under(new_desk, project) or under(project, new_desk):
+        raise WorkSessionRefused("Project and scratch desk must be separate")
+    try:
+        if next(project.iterdir(), None) is not None:
+            raise WorkSessionRefused("Start requires an EMPTY new ordinary project")
+    except OSError:
+        raise WorkSessionRefused("Project inventory cannot be confirmed") from None
+    source_note = Path(note_file)
+    if under(source_note, project) or under(source_note, new_desk):
+        raise WorkSessionRefused("Input note must be outside desk and project")
+    markdown = portable.project_draft._manual_markdown(note_file)
+    receipt_preview = workbench.preview_note(task, markdown)
+    # No mutations until all ordinary path, note and preview checks pass.
+    portable.init_desk(new_desk, approved=True)
+    try:
+        created = portable.add_task(new_desk, task, note_file, approved=True)
+        preview = review_session(
+            new_desk, task, project_root=project, project_key=project_key)
+        if (preview["status"] != "ACTIVE_WORK_SESSION_REVIEW"
+                or preview["active_note_sha256"] != receipt_preview["sha256"]
+                or created.get("sha256") != receipt_preview["sha256"]
+                or preview["selected_project_binding_sha256"] is None):
+            raise WorkSessionRefused("Created task and original project preview differ")
+    except Exception:
+        raise WorkSessionRefused(
+            "New desk may already contain a task; inspect before any retry") from None
+    return {
+        "schema": SCHEMA,
+        "status": "NEW_ORIGINAL_OWNER_WORK_SESSION_STARTED",
+        "task_key_claimed": task,
+        "selected_note_sha256": receipt_preview["sha256"],
+        "project_binding_sha256": preview["selected_project_binding_sha256"],
+        "ordinary_project_modified": False,
+        "original_scratch_task_created": True,
+        "result_document_created": False,
+        "native_chairman_authority_granted": False,
+        "new_task_or_evidence_store_created": False,
+        "installed_vres_modified": False,
+    }
 
 
 def review_session(desk: str | Path, task: str, *,
@@ -215,10 +279,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = _SafeParser(
         description="Internal source-only personal workflow over original task owners")
     subs = parser.add_subparsers(dest="command", required=True)
-    for name in ("review", "finish", "reopen", "replay"):
+    for name in ("start", "review", "finish", "reopen", "replay"):
         sub = subs.add_parser(name)
         sub.add_argument("--desk", required=True)
         sub.add_argument("--task-key", required=True)
+        if name == "start":
+            sub.add_argument("--note-file", required=True)
+            sub.add_argument("--project-root", required=True)
+            sub.add_argument("--project-key", required=True)
         if name in ("review", "finish"):
             sub.add_argument("--project-root", required=(name == "finish"))
             sub.add_argument("--project-key", required=(name == "finish"))
@@ -227,13 +295,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                              required=(name == "finish"))
         if name == "review":
             sub.add_argument("--show-result-paths", action="store_true")
-        if name in ("finish", "reopen", "replay"):
+        if name in ("start", "finish", "reopen", "replay"):
             sub.add_argument("--yes", action="store_true")
         if name in ("reopen", "replay"):
             sub.add_argument("--snapshot-sha256", required=True)
     try:
         args = parser.parse_args(argv)
-        if args.command == "review":
+        if args.command == "start":
+            packet = start_session(
+                args.desk, args.task_key, args.note_file,
+                args.project_root, args.project_key, approved=args.yes)
+        elif args.command == "review":
             packet = review_session(
                 args.desk, args.task_key,
                 project_root=args.project_root, project_key=args.project_key,

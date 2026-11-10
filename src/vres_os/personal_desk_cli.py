@@ -48,7 +48,9 @@ Usage: python -I -S -B personal_desk_cli.py COMMAND [command options]
   work-finish  User-confirm exact task + result and complete existing scratch task
             --desk ABS --select TASK-* --project-root ABS --project-key project:*
             --result-file ABS --expected-checkpoint-sha256 HEX --yes
-  work-session  Internal one-task review/finish/reopen/replay (original owners)
+  work-session  Internal one-task start/review/finish/reopen/replay
+            start --desk ABS --task-key TASK-* --note-file ABS
+            --project-root ABS --project-key project:* --yes (empty project)
             review --desk ABS --task-key TASK-* [--project-root ABS
             --project-key project:* --result-file ABS]
             finish --desk ABS --task-key TASK-* --project-root ABS
