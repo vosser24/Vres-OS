@@ -18,7 +18,7 @@ from vres_os.global_claude_migration_review import (
     MigrationReviewRefusal, draft_legacy_migration_review,
     begin_legacy_migration_decisions, record_legacy_migration_choices,
     migration_review_progress, freeze_synthetic_migration_plan,
-    render_legacy_migration_review,
+    inspect_synthetic_migration_decision_transcript, render_legacy_migration_review,
 )
 
 
@@ -308,3 +308,67 @@ def test_recovery_required_fixture_cannot_freeze_synthetic_adoption_plan():
     interrupted = quarantine_global_fixture(snap, interrupt_after=2)
     with pytest.raises(MigrationReviewRefusal):
         freeze_synthetic_migration_plan(interrupted, review, all_choices)
+
+
+# #166: exact source-claim transcript binding; never real operator consent.
+def test_synthetic_decision_transcript_binds_original_review_sheet_and_plan():
+    tx, review, sheet = prepared()
+    statements = ["KEEP 4,5 / DROP 1,2", "drop 3,6"]
+    for statement in statements:
+        sheet = record_legacy_migration_choices(tx, review, sheet, statement)
+    checked = inspect_synthetic_migration_decision_transcript(tx, review, sheet,
+                                                            statements)
+    assert checked["status"] == "CLAIMED_SYNTHETIC_DECISION_TRANSCRIPT_MATCH_ONLY"
+    assert checked["snapshot_sha256"] == review["snapshot_sha256"]
+    assert checked["decision_sheet_sha256"] == sheet["state_sha256"]
+    assert checked["statement_count"] == 2
+    assert checked["statement_text_hidden"] is True
+    assert checked["real_user_instruction_provenance_verified"] is False
+    assert checked["activation_authorized"] is False
+    frozen = freeze_synthetic_migration_plan(
+        tx, review, sheet, statement_transcript=statements)
+    assert frozen["decision_transcript_review"] == checked
+    assert frozen["real_operator_provenance_verified"] is False
+    assert frozen["independent_fable_validation_granted"] is False
+    without_transcript = freeze_synthetic_migration_plan(tx, review, sheet)
+    assert "decision_transcript_review" not in without_transcript
+    assert frozen["synthetic_plan_sha256"] != without_transcript["synthetic_plan_sha256"]
+    visible = json.dumps(frozen)
+    assert "KEEP 4,5 / DROP 1,2" not in visible
+    assert "drop 3,6" not in visible
+    assert "INSTRUCTION INJECTION" not in visible
+
+
+@pytest.mark.parametrize("wrong", [
+    (), [], ["KEEP 4,5 / DROP 1,2"],
+    ["drop 3,6", "KEEP 4,5 / DROP 1,2"],
+    ["KEEP 4,5 / DROP 1,2", "DROP 3,6"],
+    ["KEEP 4,5 / DROP 1,2", "drop 3,6 / ADMIN APPROVE"],
+    ["KEEP 4,5 / DROP 1,2", "drop 3,6", "DROP 1"],
+])
+def test_synthetic_decision_transcript_refuses_missing_forged_or_reordered_text(wrong):
+    tx, review, sheet = prepared()
+    for statement in ("KEEP 4,5 / DROP 1,2", "drop 3,6"):
+        sheet = record_legacy_migration_choices(tx, review, sheet, statement)
+    with pytest.raises(MigrationReviewRefusal):
+        inspect_synthetic_migration_decision_transcript(tx, review, sheet, wrong)
+    with pytest.raises(MigrationReviewRefusal):
+        freeze_synthetic_migration_plan(
+            tx, review, sheet, statement_transcript=wrong)
+
+
+def test_synthetic_decision_transcript_refuses_other_snapshot_and_late_choice_sheet():
+    tx, review, sheet = prepared()
+    statement = "KEEP 4,5 / DROP 1,2"
+    first = record_legacy_migration_choices(tx, review, sheet, statement)
+    checked = inspect_synthetic_migration_decision_transcript(
+        tx, review, first, [statement])
+    assert checked["statement_count"] == 1
+    later = record_legacy_migration_choices(tx, review, first, "drop 3,6")
+    with pytest.raises(MigrationReviewRefusal):
+        inspect_synthetic_migration_decision_transcript(
+            tx, review, later, [statement])
+    other = fixture({**SYNTHETIC, "CLAUDE.md": b"different original bytes"})
+    with pytest.raises(MigrationReviewRefusal):
+        inspect_synthetic_migration_decision_transcript(
+            other, review, first, [statement])

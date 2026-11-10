@@ -244,6 +244,64 @@ def record_legacy_migration_choices(
             "state_sha256": _digest(basis)}
 
 
+
+def inspect_synthetic_migration_decision_transcript(
+    tx: FixtureTransaction, review: Any, sheet: Any,
+    statements: Any,
+) -> dict[str, Any]:
+    """Match exact claimed KEEP/DROP text to an ORIGINAL sealed synthetic sheet.
+
+    This proves only consistency of caller-presented bytes with that sheet.
+    A digest or a boolean is NOT proof of a Windows user instruction, a
+    Chairman decision, identity, consent, durable journal or Fable authority.
+    No original legacy content or statement text is included in the output.
+    """
+    current = _check_review(tx, review)
+    decision = _check_state(current, sheet)
+    digests = decision["statement_digests"]
+    if (type(statements) is not list or len(statements) != len(digests)
+            or len(statements) > _MAX_ITEMS):
+        raise MigrationReviewRefusal("Exact ordered synthetic decision statements required")
+    rebuilt: list[dict[str, Any]] = []
+    for statement, digest in zip(statements, digests):
+        parsed = _parse(statement, current["count"])
+        if hashlib.sha256(statement.encode("utf-8")).hexdigest() != digest:
+            raise MigrationReviewRefusal("Claimed instruction bytes differ from recorded decision")
+        rebuilt.extend(parsed)
+    numbers = [row["number"] for row in rebuilt]
+    if (len(numbers) != len(set(numbers))
+            or sorted(rebuilt, key=lambda row: row["number"]) != decision["choices"]):
+        raise MigrationReviewRefusal("Transcript choices differ from the sealed synthetic sheet")
+    basis = {
+        "schema": "vres-personal-synthetic-decision-transcript/1",
+        "snapshot_sha256": current["snapshot_sha256"],
+        "review_sha256": current["review_sha256"],
+        "decision_sheet_sha256": decision["state_sha256"],
+        "statement_digests": digests,
+        "choices": decision["choices"],
+    }
+    return {
+        "schema": basis["schema"],
+        "status": "CLAIMED_SYNTHETIC_DECISION_TRANSCRIPT_MATCH_ONLY",
+        "snapshot_sha256": current["snapshot_sha256"],
+        "review_sha256": current["review_sha256"],
+        "decision_sheet_sha256": decision["state_sha256"],
+        "decision_transcript_sha256": _digest(basis),
+        "statement_count": len(statements),
+        "statement_text_hidden": True,
+        "original_legacy_bytes_hidden": True,
+        "input_provenance": "caller_claimed_synthetic_text_not_attested",
+        "real_user_instruction_provenance_verified": False,
+        "real_operator_provenance_verified": False,
+        "independent_fable_validation_granted": False,
+        "real_global_snapshot_verified": False,
+        "activation_authorized": False,
+        "files_written": False,
+        "native_claude_or_hooks_executed": False,
+        "database_contacted": False,
+    }
+
+
 def migration_review_progress(tx: FixtureTransaction, review: Any, sheet: Any) -> dict[str, Any]:
     current = _check_review(tx, review)
     decision = _check_state(current, sheet)
@@ -261,13 +319,19 @@ def migration_review_progress(tx: FixtureTransaction, review: Any, sheet: Any) -
     }
 
 
-def freeze_synthetic_migration_plan(tx: FixtureTransaction, review: Any, sheet: Any) -> dict[str, Any]:
+def freeze_synthetic_migration_plan(
+    tx: FixtureTransaction, review: Any, sheet: Any, *,
+    statement_transcript: Any | None = None,
+) -> dict[str, Any]:
     """Produce immutable-looking JSON data only; never activate, validate, or apply."""
     current = _check_review(tx, review)
     decision = _check_state(current, sheet)
     progress = migration_review_progress(tx, current, decision)
     if progress["pending"]:
         raise MigrationReviewRefusal("Unresolved migration choices; cannot freeze review")
+    transcript_review = (inspect_synthetic_migration_decision_transcript(
+        tx, current, decision, statement_transcript)
+        if statement_transcript is not None else None)
     # Pure synthetic rollback from the exact quarantined byte snapshot.
     # The ORIGINAL transaction owner verifies its seal, journal and opaque
     # vendor-state identities. Nothing on the user's Claude profile changes.
@@ -306,6 +370,10 @@ def freeze_synthetic_migration_plan(tx: FixtureTransaction, review: Any, sheet: 
     canonical = {"schema": _SCHEMA, "snapshot_sha256": current["snapshot_sha256"],
                  "review_sha256": current["review_sha256"], "decision_sheet_sha256": decision["state_sha256"],
                  "items": items, "rollback_rehearsal": rehearsal}
+    if transcript_review is not None:
+        # Bind source-claim consistency into the frozen synthetic plan digest.
+        # No real-user consent or Fable authority is inferred.
+        canonical["decision_transcript_review"] = transcript_review
     return {
         **canonical, "synthetic_plan_sha256": _digest(canonical),
         "status": "synthetic_preview_frozen_no_real_operator_authority",
