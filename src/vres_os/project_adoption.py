@@ -413,7 +413,19 @@ def inventory(root: Path) -> dict[str, Any]:
         elif info.st_size > _MAX_BYTES:
             status, blocker = "too_large", "too large to inspect safely"
         else:
-            data = path.read_bytes()
+            # A path can be rebound after the outer lstat; never use an
+            # unrestricted Path.read_bytes() for current Claude surfaces.
+            # The common bounded reader refuses linked leaves, changing file
+            # descriptors and ancestor-directory swaps before returning bytes.
+            data = _read_verified_preimage(root, rel, None, "reviewed project surface")
+            final_info = _lstat(path)
+            if (
+                final_info is None or _is_link(final_info)
+                or (final_info.st_dev, final_info.st_ino, final_info.st_size,
+                    final_info.st_mtime_ns)
+                != (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+            ):
+                raise AdoptionError("Project inventory surface changed during bounded inspection")
             text = data.decode("utf-8", errors="replace")
             parsed = _parse(text.lstrip("\ufeff")) if rel.endswith(".json") else None
             disposition = sanitize_extracted_text(text)
@@ -747,12 +759,20 @@ def _snapshot(sd: Path, root: Path, inv: dict[str, Any]) -> None:
         snap.mkdir(parents=True)
         for item in inv["items"]:
             if item["sha256"] is not None:
-                _write_new(snap / f"{item['number']:04d}", (root / item["path"]).read_bytes())
+                # Pin saved bytes to the exact reviewed SHA before the first
+                # durable copy. Never persist data from a late link/rebind.
+                data = _read_verified_preimage(
+                    root, item["path"], item["sha256"], "reviewed snapshot surface")
+                _write_new(snap / f"{item['number']:04d}", data)
     for item in inv["items"]:  # verify, including a snapshot taken by an earlier start
         if item["sha256"] is not None:
-            copy = snap / f"{item['number']:04d}"
-            if not copy.is_file() or hashlib.sha256(copy.read_bytes()).hexdigest() != item["sha256"]:
-                raise AdoptionError("Adoption snapshot fails its integrity check; nothing was changed")
+            try:
+                _read_verified_preimage(
+                    snap, f"{item['number']:04d}", item["sha256"], "saved snapshot copy")
+            except (AdoptionError, OSError, ValueError, TypeError):
+                raise AdoptionError(
+                    "Adoption snapshot fails its integrity check; nothing was changed"
+                ) from None
     _write_json(snap.parent / f"{inv['version']}.json", inv)
 
 
@@ -1421,11 +1441,13 @@ def _validate_restore_operations(
             raise AdoptionError("Saved scaffold transition is inconsistent with the pre/post manifest")
 
 
-def _read_verified_preimage(pre_dir: Path, name: str, expected_sha: str, rel: str) -> bytes:
-    """Read a bounded ordinary pre-image, rejecting observable link/rebind races.
+def _read_verified_preimage(pre_dir: Path, name: str, expected_sha: str | None, rel: str) -> bytes:
+    """Bounded non-following read for saved copies and original project surfaces.
 
-    Pre-image storage is never executable. This is a cooperative filesystem
-    identity check, NOT an atomic Windows directory-descriptor transaction.
+    Inventory passes expected_sha=None only to obtain bounded, identity-checked
+    current bytes; all saved copies and activation pre-images require their
+    exact pinned digest. Cooperative checks are NOT an atomic filesystem
+    transaction, on Windows or elsewhere. Nothing is executed.
     """
     path = pre_dir / name
     ancestors = _record_ancestor_identity(path)
@@ -1456,7 +1478,7 @@ def _read_verified_preimage(pre_dir: Path, name: str, expected_sha: str, rel: st
         or stamp(leaf) != original or _record_ancestor_identity(path) != ancestors
     ):
         raise AdoptionError(f"Pre-image of {rel} changed during inspection")
-    if hashlib.sha256(data).hexdigest() != expected_sha:
+    if expected_sha is not None and hashlib.sha256(data).hexdigest() != expected_sha:
         raise AdoptionError(f"Pre-image of {rel} fails its integrity check")
     return data
 
@@ -1571,10 +1593,16 @@ def activate(project, *, authority: Authority, data_root: Path | None = None) ->
                 raise AdoptionError("Reviewed project surface disappeared during activation preparation")
             pre[rel] = {"existed": False}
         else:
-            data = path.read_bytes()
-            digest = hashlib.sha256(data).hexdigest()
-            if digest != reviewed_sha.get(rel):
-                raise AdoptionError("Project surface changed during activation preparation; retry review")
+            expected_sha = reviewed_sha.get(rel)
+            if type(expected_sha) is not str or re.fullmatch(r"[0-9a-f]{64}", expected_sha) is None:
+                raise AdoptionError("Reviewed project surface lacks a verifiable digest")
+            try:
+                data = _read_verified_preimage(
+                    root, rel, expected_sha, "reviewed activation surface")
+            except (AdoptionError, OSError, ValueError, TypeError):
+                raise AdoptionError(
+                    "Project surface changed or became unsafe during activation preparation"
+                ) from None
             _write_new(pre_dir / f"{index:04d}", data)
             pre[rel] = {"existed": True, "copy": f"{index:04d}", "sha256": digest}
     # Keep source, decision and architecture evidence bound to approved bytes.
