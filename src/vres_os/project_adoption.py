@@ -777,6 +777,36 @@ def _legacy_architecture_hold(root: Path) -> dict[str, Any]:
         "required_validator": dict(audit["required_validator"]),
     }
 
+def _current_fresh_scaffold(project, expected: Any) -> bool:
+    """Cooperatively verify a fresh project's sole canonical Claude surface.
+
+    A saved active/fresh label is not evidence that no new hooks, configuration
+    or architecture changes appeared. Purely read-only; this never runs Claude
+    or claims an atomic lock or independently trusted Fable approval.
+    """
+    if type(expected) is not str or re.fullmatch(r"[0-9a-f]{64}", expected) is None:
+        raise AdoptionError("Saved fresh scaffold identity is invalid; manual review required")
+    root = Path(project.root).resolve(strict=True)
+    info = _lstat(root / "CLAUDE.md")
+    if info is None:
+        return False
+    if _is_link(info) or not stat.S_ISREG(info.st_mode):
+        raise AdoptionError("Fresh scaffold is not an ordinary file; manual review required")
+    reviewed = inventory(root)
+    if (
+        len(reviewed["items"]) != 1
+        or reviewed["items"][0]["path"] != "CLAUDE.md"
+        or reviewed["items"][0]["status"] != "ok"
+        or reviewed["items"][0]["sha256"] != expected
+        or _legacy_architecture_hold(root)
+        or hashlib.sha256(
+            scaffold_text(project.name, detect_facts(root)).encode("utf-8")
+        ).hexdigest() != expected
+    ):
+        return False
+    return inventory(root) == reviewed
+
+
 # ------------------------------------------------------------------------------------------- operations
 
 def start(project, *, data_root: Path | None = None) -> dict[str, Any]:
@@ -787,34 +817,26 @@ def start(project, *, data_root: Path | None = None) -> dict[str, Any]:
     if _lstat(sd / "journal.json") is not None:
         return _set_state(sd, project, "recovery_required",
                           reason="an activation was interrupted; run `vres project recover`") | {"changed": False}
-    if record and record["state"] in {"active", "recovery_required"}:
+    if record and record["state"] == "active":
+        if not record.get("activation"):
+            # Fresh active state is not permanent evidence of present readiness.
+            # Older records lacking the saved SHA cannot be upgraded silently.
+            if record.get("created") != ["CLAUDE.md"] or not _current_fresh_scaffold(
+                project, record.get("scaffold_sha256")
+            ):
+                raise AdoptionError(
+                    "Previously active fresh project no longer matches its saved scaffold "
+                    "and configuration; manual review required, saved state preserved"
+                )
+        return record | {"changed": False}
+    if record and record["state"] == "recovery_required":
         return record | {"changed": False}
     if record and record["state"] == "fresh":  # scaffold written, final state may be interrupted
         expected = record.get("scaffold_sha256")
-        if type(expected) is not str or re.fullmatch(r"[0-9a-f]{64}", expected) is None:
-            raise AdoptionError("Interrupted fresh scaffold identity is invalid; manual review required")
-        path = root / "CLAUDE.md"
-        scaffold = _lstat(path)
-        if scaffold is not None:
-            if _is_link(scaffold) or not stat.S_ISREG(scaffold.st_mode):
-                raise AdoptionError("Interrupted fresh scaffold is not an ordinary file; manual review required")
-            if hashlib.sha256(path.read_bytes()).hexdigest() == expected:
-                # The previous process might have stopped after writing the
-                # scaffold while another actor added Claude settings or changed
-                # the project architecture. Re-inventory rather than treating
-                # the old matching CLAUDE.md digest as full project readiness.
-                reviewed = inventory(root)
-                if (
-                    len(reviewed["items"]) == 1
-                    and reviewed["items"][0]["path"] == "CLAUDE.md"
-                    and reviewed["items"][0]["sha256"] == expected
-                    and not _legacy_architecture_hold(root)
-                    and hashlib.sha256(
-                        scaffold_text(project.name, detect_facts(root)).encode("utf-8")
-                    ).hexdigest() == expected
-                    and inventory(root) == reviewed
-                ):
-                    return _set_state(sd, project, "active", created=["CLAUDE.md"]) | {"changed": False}
+        if _current_fresh_scaffold(project, expected):
+            return _set_state(
+                sd, project, "active", created=["CLAUDE.md"], scaffold_sha256=expected
+            ) | {"changed": False}
         # Changed or added surfaces follow original legacy review; nothing is
         # silently overwritten or accepted as active.
     inv = inventory(root)
@@ -856,9 +878,12 @@ def start(project, *, data_root: Path | None = None) -> dict[str, Any]:
                 "changed": False
             }
         text = scaffold_text(project.name, detect_facts(root)).encode("utf-8")
-        _set_state(sd, project, "fresh", scaffold_sha256=hashlib.sha256(text).hexdigest())
+        scaffold_sha = hashlib.sha256(text).hexdigest()
+        _set_state(sd, project, "fresh", scaffold_sha256=scaffold_sha)
         _write_new(root / "CLAUDE.md", text)
-        return _set_state(sd, project, "active", created=["CLAUDE.md"]) | {"changed": True}
+        return _set_state(
+            sd, project, "active", created=["CLAUDE.md"], scaffold_sha256=scaffold_sha
+        ) | {"changed": True}
     # An existing Claude configuration is not evidence that the software
     # architecture itself is fresh. Keep the existing numbered inventory and
     # decision flow, but expose a separate, non-authorizing architecture hold.
@@ -1402,6 +1427,15 @@ def status(project, *, data_root: Path | None = None) -> dict[str, Any]:
 
     if _lstat(journal) is not None:
         return interrupted()
+
+    if record.get("state") == "active" and not record.get("activation"):
+        if record.get("created") != ["CLAUDE.md"] or not _current_fresh_scaffold(
+            project, record.get("scaffold_sha256")
+        ):
+            raise AdoptionError(
+                "Recorded active fresh project has drifted; manual review required, "
+                "saved state unchanged"
+            )
 
     out = dict(record)
     if record.get("state") == "awaiting_operator":
