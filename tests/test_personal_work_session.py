@@ -1107,3 +1107,103 @@ def test_saved_catalog_final_read_refuses_late_active_task_change(tmp_path, monk
             saved_catalog_source_id=sid)
     assert reads == [True, True]
     assert calls == []
+
+
+# #168/#165 opt-in original Chairman work-session view of legacy owner plans.
+def _synthetic_legacy_work_review(tmp_path):
+    from types import SimpleNamespace
+    from vres_os import project_adoption
+
+    root = tmp_path / "OriginalLegacy"
+    root.mkdir()
+    keep = root / "AGENTS.md"
+    keep.write_bytes(b"# Original safe fixture\n")
+    project = SimpleNamespace(root=root.resolve(), name=root.name,
+                              key="project:" + "a" * 24)
+    data = tmp_path / "OriginalLegacyState"
+    assert project_adoption.start(project, data_root=data)["state"] == "awaiting_operator"
+    confirm = lambda s: {"confirmed": True, "kind": "synthetic_fixture"}
+    project_adoption.decide(project, 1, "KEEP", authority=confirm, data_root=data)
+    project_adoption.activate(project, authority=confirm, data_root=data)
+    keep.write_bytes(b"# Synthetic owner edit\n")
+    review = project_adoption.status(project, data_root=data)[
+        "legacy_configuration_readiness"]["owner_review"]
+    desk_root = tmp_path / "SyntheticDesk"
+    desk_root.mkdir()
+    note = tmp_path / "SyntheticWork.md"
+    note.write_text("# Work\n\n## Next action\n- Review legacy changes.\n",
+                    encoding="utf-8")
+    desk.add_task(desk_root, "TASK-LEGACY-REVIEW", note, approved=True)
+    return desk_root, project, data, keep, review["snapshot_token"]
+
+
+def test_session_owner_review_exposes_snapshot_choices_without_private_roots(tmp_path):
+    from vres_os import project_adoption
+    desk_root, project, data, keep, token = _synthetic_legacy_work_review(tmp_path)
+    project_adoption.record_legacy_review_intent(
+        project, 1, "REQUEST_REVERSIBLE_PLAN", snapshot_token=token,
+        authority=lambda s: {"confirmed": True, "kind": "synthetic_fixture"},
+        data_root=data,
+    )
+    packet = session.review_session(
+        desk_root, "TASK-LEGACY-REVIEW",
+        project_root=project.root, project_key=project.key,
+        include_legacy_owner_review=True, legacy_review_data_root=data,
+    )
+    selected = packet["selected_legacy_owner_review"]
+    assert selected["snapshot_token"] == token
+    assert selected["recorded_intents"] == {"1": "REQUEST_REVERSIBLE_PLAN"}
+    assert "RESTORE_ORIGINAL_KEEP_FOR_REVIEW" in selected["plan_target_options"]["1"]
+    assert selected["selected_reversible_plan"] is None
+    assert selected["remediation_authorized"] is False
+    assert selected["database_contacted"] is False
+    assert str(project.root) not in json.dumps(packet)
+    assert str(data) not in json.dumps(packet)
+    assert keep.read_bytes() == b"# Synthetic owner edit\n"
+
+
+def test_session_owner_plan_bridge_refuses_unapproved_target_or_implicit_state(tmp_path):
+    from vres_os import project_adoption
+    desk_root, project, data, keep, token = _synthetic_legacy_work_review(tmp_path)
+    kwargs = dict(project_root=project.root, project_key=project.key)
+    with pytest.raises(session.WorkSessionRefused, match="explicit opt-in"):
+        session.review_session(
+            desk_root, "TASK-LEGACY-REVIEW", **kwargs, legacy_review_data_root=data)
+    with pytest.raises(session.WorkSessionRefused, match="data root required"):
+        session.review_session(
+            desk_root, "TASK-LEGACY-REVIEW", **kwargs, include_legacy_owner_review=True)
+    project_adoption.record_legacy_review_intent(
+        project, 1, "REQUEST_REVERSIBLE_PLAN", snapshot_token=token,
+        authority=lambda s: {"confirmed": True, "kind": "synthetic_fixture"}, data_root=data,
+    )
+    packet = session.review_session(
+        desk_root, "TASK-LEGACY-REVIEW", **kwargs,
+        include_legacy_owner_review=True, legacy_review_data_root=data,
+        legacy_review_snapshot_token=token,
+        legacy_review_targets={1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"},
+    )
+    plan = packet["selected_legacy_owner_review"]["selected_reversible_plan"]
+    assert len(plan["plan_digest"]) == 64
+    assert plan["caller_targets_are_verified_owner_consent"] is False
+    assert plan["remediation_authorized"] is False
+    assert packet["writes_performed"] is False
+    assert keep.read_bytes() == b"# Synthetic owner edit\n"
+
+
+def test_session_owner_review_refuses_source_changed_during_task_scan(tmp_path, monkeypatch):
+    desk_root, project, data, keep, token = _synthetic_legacy_work_review(tmp_path)
+    original = session._selected_legacy_owner_review
+    calls = []
+    def drift(*args, **kwargs):
+        packet = original(*args, **kwargs)
+        calls.append(True)
+        if len(calls) == 1:
+            keep.write_bytes(b"# Later synthetic owner edit\n")
+        return packet
+    monkeypatch.setattr(session, "_selected_legacy_owner_review", drift)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_session(
+            desk_root, "TASK-LEGACY-REVIEW",
+            project_root=project.root, project_key=project.key,
+            include_legacy_owner_review=True, legacy_review_data_root=data,
+        )

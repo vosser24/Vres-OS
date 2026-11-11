@@ -261,6 +261,66 @@ def _selected_project_adoption_preview(project_root: str | Path) -> dict[str, An
     }
 
 
+
+def _selected_legacy_owner_review(
+    project_root: str | Path, project_key: str, data_root: str | Path, *,
+    snapshot_token: str | None = None,
+    targets: dict[int, str] | None = None,
+) -> dict[str, Any]:
+    """#168 owner evidence in the existing Chairman work-session, read only.
+
+    Caller must select the ordinary state root explicitly. This does NOT use
+    ambient profile state, invoke Git, Claude, hooks, DB, or grant plan authority.
+    The original project-adoption owner validates history and redacts findings.
+    """
+    from types import SimpleNamespace
+    from . import project_adoption
+
+    root, state_root = Path(project_root), Path(data_root)
+    if not root.is_absolute() or not state_root.is_absolute():
+        raise WorkSessionRefused("Exact absolute project and state roots required")
+    if (targets is None) != (snapshot_token is None):
+        raise WorkSessionRefused("Explicit targets and snapshot token must be selected together")
+    identity = SimpleNamespace(root=root, key=project_key, name=root.name)
+    try:
+        first = project_adoption.status(identity, data_root=state_root)
+        readiness = first.get("legacy_configuration_readiness")
+        if first.get("state") != "active" or type(readiness) is not dict:
+            raise WorkSessionRefused("No active original legacy review selected")
+        review = readiness.get("owner_review")
+        if type(review) is not dict or type(review.get("findings")) is not list:
+            raise WorkSessionRefused("Original legacy review is unavailable")
+        plan = None
+        if targets is not None:
+            plan = project_adoption.draft_legacy_reversible_plan(
+                identity, snapshot_token=snapshot_token, targets=targets,
+                data_root=state_root,
+            )
+        if first != project_adoption.status(identity, data_root=state_root):
+            raise WorkSessionRefused("Legacy review changed during read")
+    except (project_adoption.AdoptionError, OSError, ValueError, TypeError, KeyError):
+        raise WorkSessionRefused("Selected legacy owner review was refused") from None
+    return {
+        "status": "ORIGINAL_LEGACY_OWNER_REVIEW_SELECTED_READ_ONLY",
+        "configuration_state": readiness["state"],
+        "snapshot_token": review["snapshot_token"],
+        "findings": review["findings"],
+        "recorded_intents": review["recorded_intents"],
+        "intent_revision_counts": review["intent_revision_counts"],
+        "pending_displayed_numbers": review["pending_displayed_numbers"],
+        "plan_target_options": review["plan_target_options"],
+        "selected_reversible_plan": plan,
+        "project_and_state_paths_hidden": True,
+        "caller_targets_are_verified_owner_consent": False,
+        "project_changes_performed": False,
+        "remediation_authorized": False,
+        "activation_allowed": False,
+        "independent_fable_authority": "NOT_GRANTED",
+        "native_chairman_task_bound": False,
+        "database_contacted": False,
+    }
+
+
 def _selected_experience_source_provenance(
     task: str, selected_sha: str, project_binding: str,
     inspected: dict[str, Any],
@@ -394,6 +454,10 @@ def review_session(desk: str | Path, task: str, *,
                    saved_catalog_store: Any | None = None,
                    saved_catalog_source_id: str | None = None,
                    include_project_intake: bool = False,
+                   include_legacy_owner_review: bool = False,
+                   legacy_review_data_root: str | Path | None = None,
+                   legacy_review_snapshot_token: str | None = None,
+                   legacy_review_targets: dict[int, str] | None = None,
                    include_experience_provenance: bool = False,
                    include_chairman_candidate: bool = False,
                    chairman_history_document: bytes | None = None,
@@ -411,6 +475,15 @@ def review_session(desk: str | Path, task: str, *,
     """
     if type(include_project_intake) is not bool:
         raise WorkSessionRefused("Project intake selection must be an exact boolean")
+    if type(include_legacy_owner_review) is not bool:
+        raise WorkSessionRefused("Legacy owner-review selection must be an exact boolean")
+    if include_legacy_owner_review:
+        if (project_root is None or project_key is None
+                or legacy_review_data_root is None):
+            raise WorkSessionRefused("Explicit project and adoption data root required")
+    elif any(field is not None for field in (
+            legacy_review_data_root, legacy_review_snapshot_token, legacy_review_targets)):
+        raise WorkSessionRefused("Legacy state or targets require explicit opt-in")
     if include_project_intake and (project_root is None or project_key is None):
         raise WorkSessionRefused("Explicit project root and key required for intake")
     if type(include_experience_provenance) is not bool:
@@ -453,6 +526,7 @@ def review_session(desk: str | Path, task: str, *,
     observed = None
     selected_catalog = None
     selected_intake = None
+    selected_legacy_review = None
     selected_experience = None
     selected_chairman_candidate = None
     if active:
@@ -474,13 +548,20 @@ def review_session(desk: str | Path, task: str, *,
                     saved_catalog_store, saved_catalog_source_id, project_key)
             if include_project_intake:
                 selected_intake = _selected_project_adoption_preview(project_root)
+            if include_legacy_owner_review:
+                selected_legacy_review = _selected_legacy_owner_review(
+                    project_root, project_key, legacy_review_data_root,
+                    snapshot_token=legacy_review_snapshot_token,
+                    targets=legacy_review_targets,
+                )
             if include_chairman_candidate:
                 selected_chairman_candidate = _selected_chairman_candidate_preview(
                     task, selected_sha, project_binding, chairman_history_document,
                     chairman_template, expected_chairman_history_sha256,
                     expected_chairman_proposal_sha256, expected_chairman_template_sha256)
             if (catalog_requested or include_saved_catalog
-                    or include_project_intake or include_chairman_candidate):
+                    or include_project_intake or include_legacy_owner_review
+                    or include_chairman_candidate):
                 # All optional reviews are strictly read-only; verify their
                 # task/project association again before publishing a summary.
                 after = handoff.inspect_work_brief(desk, task, project_root, project_key)
@@ -489,6 +570,16 @@ def review_session(desk: str | Path, task: str, *,
                         or handoff._exact_json(after) != handoff._exact_json(brief)):
                     # Project root/key hashes do not cover structural scan data.
                     raise WorkSessionRefused("Task or project scan changed during optional review")
+                if include_legacy_owner_review:
+                    # The task/project scan may have outlasted the original
+                    # owner snapshot; compare fresh bounded redacted findings.
+                    fresh_legacy = _selected_legacy_owner_review(
+                        project_root, project_key, legacy_review_data_root,
+                        snapshot_token=legacy_review_snapshot_token,
+                        targets=legacy_review_targets,
+                    )
+                    if fresh_legacy != selected_legacy_review:
+                        raise WorkSessionRefused("Legacy owner review changed during task scan")
         if result_file is not None:
             if project_binding is None:
                 raise WorkSessionRefused("A result requires an explicit project selection")
@@ -578,6 +669,7 @@ def review_session(desk: str | Path, task: str, *,
         "observed_result": observed,
         "selected_project_catalog": selected_catalog,
         "selected_project_intake": selected_intake,
+        "selected_legacy_owner_review": selected_legacy_review,
         "selected_chairman_candidate": selected_chairman_candidate,
         "selected_experience_provenance": selected_experience,
         "historical_snapshots": rows,
