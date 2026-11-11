@@ -807,6 +807,47 @@ def _current_fresh_scaffold(project, expected: Any) -> bool:
     return inventory(root) == reviewed
 
 
+def _attest_active_record(sd: Path, project, record: dict[str, Any]) -> None:
+    """Read-only fresh/legacy identity and current fresh-project attestation.
+
+    A truthy saved activation field alone is not evidence of original legacy
+    activation. Both paths fail closed on mixed or missing saved identities.
+    This is a consistency check, not a tamperproof local-state signature.
+    """
+    if "activation" not in record:
+        if (
+            record.get("created") != ["CLAUDE.md"]
+            or "inventory_version" in record
+            or "removed" in record
+        ):
+            raise AdoptionError("Saved active adoption has an inconsistent fresh identity; manual review required")
+        if not _current_fresh_scaffold(project, record.get("scaffold_sha256")):
+            raise AdoptionError(
+                "Recorded active fresh project has drifted; manual review required, "
+                "saved state unchanged"
+            )
+        return
+
+    # A genuine original legacy activation has a checked identifier and an
+    # original result/restore manifest. Do not let a stray truthy field bypass
+    # the active-fresh scaffold, configuration and #174 architecture checks.
+    activation = _checked_activation_id(record["activation"])
+    version = record.get("inventory_version")
+    if (
+        "scaffold_sha256" in record
+        or type(version) is not str
+        or re.fullmatch(r"[0-9a-f]{64}", version) is None
+    ):
+        raise AdoptionError("Saved active adoption has an inconsistent legacy identity; manual review required")
+    result = _read_json(sd / "activations" / activation / "result.json")
+    if type(result) is not dict or result.get("inventory_version") != version:
+        raise AdoptionError("Saved active legacy activation result is missing or inconsistent; manual review required")
+    _validate_restore_manifest(Path(project.root), result.get("pre"), result.get("post"))
+    _validate_restore_operations(
+        result["pre"], result["post"], record.get("removed"), record.get("created")
+    )
+
+
 # ------------------------------------------------------------------------------------------- operations
 
 def start(project, *, data_root: Path | None = None) -> dict[str, Any]:
@@ -818,16 +859,7 @@ def start(project, *, data_root: Path | None = None) -> dict[str, Any]:
         return _set_state(sd, project, "recovery_required",
                           reason="an activation was interrupted; run `vres project recover`") | {"changed": False}
     if record and record["state"] == "active":
-        if not record.get("activation"):
-            # Fresh active state is not permanent evidence of present readiness.
-            # Older records lacking the saved SHA cannot be upgraded silently.
-            if record.get("created") != ["CLAUDE.md"] or not _current_fresh_scaffold(
-                project, record.get("scaffold_sha256")
-            ):
-                raise AdoptionError(
-                    "Previously active fresh project no longer matches its saved scaffold "
-                    "and configuration; manual review required, saved state preserved"
-                )
+        _attest_active_record(sd, project, record)
         return record | {"changed": False}
     if record and record["state"] == "recovery_required":
         return record | {"changed": False}
@@ -881,6 +913,14 @@ def start(project, *, data_root: Path | None = None) -> dict[str, Any]:
         scaffold_sha = hashlib.sha256(text).hexdigest()
         _set_state(sd, project, "fresh", scaffold_sha256=scaffold_sha)
         _write_new(root / "CLAUDE.md", text)
+        # Files may change during scaffold creation. Never persist active from
+        # an earlier audit if a fresh project has since gained Claude settings,
+        # changed its detected facts or acquired a #174 architecture hold.
+        if not _current_fresh_scaffold(project, scaffold_sha):
+            raise AdoptionError(
+                "Fresh project changed during initial scaffold creation; "
+                "saved fresh state preserved for explicit review"
+            )
         return _set_state(
             sd, project, "active", created=["CLAUDE.md"], scaffold_sha256=scaffold_sha
         ) | {"changed": True}
@@ -1428,14 +1468,8 @@ def status(project, *, data_root: Path | None = None) -> dict[str, Any]:
     if _lstat(journal) is not None:
         return interrupted()
 
-    if record.get("state") == "active" and not record.get("activation"):
-        if record.get("created") != ["CLAUDE.md"] or not _current_fresh_scaffold(
-            project, record.get("scaffold_sha256")
-        ):
-            raise AdoptionError(
-                "Recorded active fresh project has drifted; manual review required, "
-                "saved state unchanged"
-            )
+    if record.get("state") == "active":
+        _attest_active_record(sd, project, record)
 
     out = dict(record)
     if record.get("state") == "awaiting_operator":

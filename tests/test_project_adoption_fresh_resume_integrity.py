@@ -190,3 +190,89 @@ def test_active_fresh_refuses_reported_link_before_inventory(tmp_path, monkeypat
     with pytest.raises(AdoptionError, match="not an ordinary file"):
         project_adoption.start(project, data_root=data)
     assert project_adoption._state(sd, project) == before
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("activation", "20261111T000000Z-a1b2c3d4"),
+        ("inventory_version", "0" * 64),
+        ("removed", []),
+    ],
+)
+def test_active_fresh_mixed_legacy_identity_does_not_bypass_rechecks(tmp_path, field, value):
+    project, data, sd = _newly_active_fresh(tmp_path)
+    altered = project_adoption._state(sd, project)
+    altered[field] = value
+    project_adoption._write_json(sd / "state.json", altered)
+    before_scaffold = (project.root / "CLAUDE.md").read_bytes()
+    for read in (project_adoption.status, project_adoption.start):
+        with pytest.raises(AdoptionError, match="Saved active adoption"):
+            read(project, data_root=data)
+    assert project_adoption._state(sd, project) == altered
+    assert (project.root / "CLAUDE.md").read_bytes() == before_scaffold
+
+
+def test_first_fresh_start_rechecks_after_scaffold_write(tmp_path, monkeypatch):
+    root = tmp_path / "first-fresh"
+    root.mkdir()
+    project = SimpleNamespace(root=root.resolve(), name=root.name, key="synthetic:first-fresh")
+    data = tmp_path / "first-fresh-state"
+    original_write_new = project_adoption._write_new
+    settings = root / ".claude" / "settings.json"
+    payload = b'{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"echo synthetic"}]}]}}'
+
+    def synthetic_concurrent_settings(path, contents):
+        original_write_new(path, contents)
+        if Path(path) == root / "CLAUDE.md":
+            settings.parent.mkdir()
+            settings.write_bytes(payload)  # inert synthetic test bytes
+
+    monkeypatch.setattr(project_adoption, "_write_new", synthetic_concurrent_settings)
+    with pytest.raises(AdoptionError, match="initial scaffold creation"):
+        project_adoption.start(project, data_root=data)
+    sd = project_adoption._state_dir(project, data)
+    record = project_adoption._state(sd, project)
+    assert record["state"] == "fresh"
+    assert record["scaffold_sha256"] == hashlib.sha256(
+        (root / "CLAUDE.md").read_bytes()
+    ).hexdigest()
+    assert settings.read_bytes() == payload
+
+
+def _active_legacy_with_saved_result(tmp_path):
+    root = tmp_path / "synthetic-legacy-activation"
+    root.mkdir()
+    (root / "AGENTS.md").write_text("# Harmless synthetic owner instructions\n", encoding="utf-8")
+    project = SimpleNamespace(root=root.resolve(), name=root.name, key="synthetic:legacy-result")
+    data = tmp_path / "synthetic-legacy-state"
+    pending = project_adoption.start(project, data_root=data)
+    assert pending["state"] == "awaiting_operator"
+    assert len(pending["items"]) == 1
+    entry = pending["items"][0]
+    assert "KEEP" in entry["options"]
+    authority = lambda statement: {
+        "confirmed": True, "kind": "synthetic_fixture", "statement": statement,
+    }
+    project_adoption.decide(project, entry["number"], "KEEP", authority=authority, data_root=data)
+    activated = project_adoption.activate(project, authority=authority, data_root=data)
+    assert activated["state"] == "active"
+    sd = project_adoption._state_dir(project, data)
+    return project, data, sd
+
+
+def test_valid_legacy_active_result_stays_distinct_from_fresh_recheck(tmp_path):
+    project, data, sd = _active_legacy_with_saved_result(tmp_path)
+    saved = project_adoption._state(sd, project)
+    assert saved["activation"]
+    assert "scaffold_sha256" not in saved
+    assert project_adoption.status(project, data_root=data) == saved
+    assert project_adoption.start(project, data_root=data) == saved | {"changed": False}
+
+
+def test_missing_saved_legacy_result_refuses_active_without_state_write(tmp_path):
+    project, data, sd = _active_legacy_with_saved_result(tmp_path)
+    saved = project_adoption._state(sd, project)
+    (sd / "activations" / saved["activation"] / "result.json").unlink()
+    for read in (project_adoption.status, project_adoption.start):
+        with pytest.raises(AdoptionError, match="legacy activation result"):
+            read(project, data_root=data)
+    assert project_adoption._state(sd, project) == saved
