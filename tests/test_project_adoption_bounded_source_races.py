@@ -75,3 +75,33 @@ def test_snapshot_refuses_late_source_rebind_before_persisting_copy(
         project_adoption._snapshot(state, root, inv)
     assert altered == [True]
     assert not (state / "snapshots" / inv["version"] / "0001").exists()
+
+def test_current_rollback_hash_refuses_leaf_rebind_before_read(
+    tmp_path, monkeypatch,
+):
+    root, target, content = _disposable(tmp_path)
+    substitute = root / "synthetic-replacement"
+    substitute.write_bytes(b"S" * len(content))
+    real_open = os.open
+    changed = []
+
+    def swap_at_open(name, flags, *args, **kwargs):
+        if Path(name) == target and not changed:
+            os.replace(substitute, target)
+            changed.append(True)
+        return real_open(name, flags, *args, **kwargs)
+
+    monkeypatch.setattr(project_adoption.os, "open", swap_at_open)
+    with pytest.raises(AdoptionError, match="changed during inspection"):
+        project_adoption._sha_or_none(target)
+    assert changed == [True]
+
+
+def test_current_rollback_hash_rejects_oversized_changed_surface(
+    tmp_path, monkeypatch,
+):
+    _root, target, content = _disposable(tmp_path)
+    monkeypatch.setattr(project_adoption, "_MAX_BYTES", len(content) - 1)
+    with pytest.raises(AdoptionError, match="not a bounded ordinary file"):
+        project_adoption._sha_or_none(target)
+    assert target.read_bytes() == content

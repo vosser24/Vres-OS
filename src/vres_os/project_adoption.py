@@ -1361,12 +1361,20 @@ def console_authority(statement: str) -> dict[str, Any]:
 
 
 def _sha_or_none(path: Path) -> str | None:
+    """Bounded, identity-checked hash for original activation/rollback decisions.
+
+    An absent file remains None and a link/special file stays a refusal marker.
+    Present ordinary files use the same cooperative no-follow checks as
+    inventory and pre-image reads; this is not atomic compare-and-write.
+    """
     info = _lstat(path)
     if info is None:
         return None
     if _is_link(info) or not stat.S_ISREG(info.st_mode):
         return "not-an-ordinary-file"
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    data = _read_verified_preimage(
+        path.parent, path.name, None, "current adoption/rollback surface")
+    return hashlib.sha256(data).hexdigest()
 
 
 
