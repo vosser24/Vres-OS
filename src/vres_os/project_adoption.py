@@ -861,6 +861,140 @@ def _attest_active_record(sd: Path, project, record: dict[str, Any]) -> None:
     )
 
 
+def _legacy_configuration_readiness(sd: Path, project, record: dict[str, Any]) -> dict[str, Any]:
+    """Read-only #168/#174 current legacy Claude configuration drift diagnostic.
+
+    The persisted active state means a historical activation occurred; it is
+    NOT proof that today's Claude configuration is still the reviewed one.
+    Preserve original KEEP files, DROP choices and rollback history. No new
+    adoption state or F1/Fable/host authorization is created by this report.
+    """
+
+    def report(
+        state: str, *, added: int = 0, missing: int = 0, changed: int = 0,
+        unverifiable: int = 0, architecture_hold: bool = False,
+    ) -> dict[str, Any]:
+        return {
+            "state": state,
+            "manual_review_required": state != "UNCHANGED",
+            "added": added, "missing": missing, "changed": changed,
+            "unverifiable": unverifiable,
+            "architecture_review_required": architecture_hold,
+            "authority": "READ_ONLY_LOCAL_CONSISTENCY_NOT_FABLE_VALIDATION",
+        }
+
+    try:
+        root = Path(project.root).resolve(strict=True)
+        version = record["inventory_version"]
+        snapshot_path = sd / "snapshots" / f"{version}.json"
+        saved = _read_json(snapshot_path)
+        if (
+            type(saved) is not dict or saved.get("version") != version
+            or type(saved.get("items")) is not list
+            or len(saved["items"]) > _MAX_ITEMS
+        ):
+            return report("UNVERIFIABLE")
+
+        original: dict[str, dict[str, Any]] = {}
+        material = []
+        for number, item in enumerate(saved["items"], 1):
+            if type(item) is not dict:
+                return report("UNVERIFIABLE")
+            rel, digest = item.get("path"), item.get("sha256")
+            if (
+                type(rel) is not str or not rel or "\\" in rel or ":" in rel
+                or PurePosixPath(rel).is_absolute()
+                or PurePosixPath(rel).as_posix() != rel
+                or ".." in PurePosixPath(rel).parts
+                or rel in original
+                or type(item.get("number")) is not int or item["number"] != number
+                or type(item.get("bytes")) is not int or item["bytes"] < 0
+                or type(item.get("status")) is not str
+                or type(item.get("risk")) is not str
+                or (digest is not None and (
+                    type(digest) is not str
+                    or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+                ))
+            ):
+                return report("UNVERIFIABLE")
+            original[rel] = item
+            material.append((rel, digest, item["status"], item["bytes"], item["risk"]))
+        recomputed = hashlib.sha256(json.dumps(material, sort_keys=True).encode("utf-8")).hexdigest()
+        if recomputed != version:
+            return report("UNVERIFIABLE")
+
+        # Reuse the ORIGINAL operator decision record; never derive KEEP from
+        # mere file presence or silently reclassify formerly dropped content.
+        choices = _decisions(sd, saved)
+        if set(choices) != {str(item["number"]) for item in saved["items"]}:
+            return report("UNVERIFIABLE")
+        dropped = {
+            item["path"] for item in saved["items"]
+            if choices[str(item["number"])]["decision"] == "DROP"
+        }
+        if dropped != set(record["removed"]):
+            return report("UNVERIFIABLE")
+
+        result_path = sd / "activations" / record["activation"] / "result.json"
+        result = _read_json(result_path)
+        if type(result) is not dict or result.get("inventory_version") != version:
+            return report("UNVERIFIABLE")
+        _validate_restore_manifest(root, result.get("pre"), result.get("post"))
+        _validate_restore_operations(
+            result["pre"], result["post"], record["removed"], record["created"]
+        )
+        expected = {
+            rel: item["sha256"] for rel, item in original.items() if rel not in dropped
+        }
+        # A new scaffold, or a replacement for a reviewed DROP root scaffold,
+        # is governed by its original persisted post-image digest.
+        for rel in record["created"]:
+            expected[rel] = result["post"][rel]
+
+        current = inventory(root)
+        architecture = _legacy_architecture_hold(root)
+        if current != inventory(root) or architecture != _legacy_architecture_hold(root):
+            return report("UNVERIFIABLE")
+        live = {item["path"]: item for item in current["items"]}
+        added = len(live.keys() - expected.keys())
+        missing = len(expected.keys() - live.keys())
+        changed = unverifiable = 0
+        for rel in live.keys() & expected.keys():
+            item = live[rel]
+            old_digest = expected[rel]
+            if old_digest is None or item["sha256"] is None:
+                unverifiable += 1
+            elif item["status"] != "ok" or item["sha256"] != old_digest:
+                changed += 1
+            elif (
+                rel in original and rel not in record["created"]
+                and (item["risk"] != original[rel]["risk"] or "KEEP" not in item["options"])
+            ):
+                changed += 1
+
+        # Cooperative final saved-record recheck, not an atomic filesystem
+        # lock or cryptographic authentication. Never change the saved state.
+        if (
+            _read_json(snapshot_path) != saved
+            or _read_json(result_path) != result
+            or _decisions(sd, saved) != choices
+            or _state(sd, project) != record
+        ):
+            return report("UNVERIFIABLE")
+        state = (
+            "DRIFTED" if added or missing or changed or architecture else
+            "UNVERIFIABLE" if unverifiable else "UNCHANGED"
+        )
+        return report(
+            state, added=added, missing=missing, changed=changed,
+            unverifiable=unverifiable, architecture_hold=bool(architecture),
+        )
+    except (AdoptionError, OSError, ValueError, TypeError, KeyError, AttributeError):
+        # A read failure cannot turn historical saved work into an approved
+        # current configuration, and is never a reason to rewrite it.
+        return report("UNVERIFIABLE")
+
+
 # ------------------------------------------------------------------------------------------- operations
 
 def start(project, *, data_root: Path | None = None) -> dict[str, Any]:
@@ -873,6 +1007,13 @@ def start(project, *, data_root: Path | None = None) -> dict[str, Any]:
                           reason="an activation was interrupted; run `vres project recover`") | {"changed": False}
     if record and record["state"] == "active":
         _attest_active_record(sd, project, record)
+        if "activation" in record and _legacy_configuration_readiness(
+            sd, project, record
+        )["state"] != "UNCHANGED":
+            raise AdoptionError(
+                "Active legacy Claude configuration has drifted or is unverified; "
+                "manual review required, saved activation and project unchanged"
+            )
         return record | {"changed": False}
     if record and record["state"] == "recovery_required":
         return record | {"changed": False}
@@ -1485,6 +1626,12 @@ def status(project, *, data_root: Path | None = None) -> dict[str, Any]:
         _attest_active_record(sd, project, record)
 
     out = dict(record)
+    if record.get("state") == "active" and "activation" in record:
+        # Historical activation remains recorded; expose today's readiness
+        # separately without silently invalidating KEEP/DROP or rollback.
+        out["legacy_configuration_readiness"] = _legacy_configuration_readiness(
+            sd, project, record
+        )
     if record.get("state") == "awaiting_operator":
         version = record.get("inventory_version")
         if type(version) is not str or re.fullmatch(r"[0-9a-f]{64}", version) is None:

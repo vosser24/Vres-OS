@@ -264,7 +264,12 @@ def test_valid_legacy_active_result_stays_distinct_from_fresh_recheck(tmp_path):
     saved = project_adoption._state(sd, project)
     assert saved["activation"]
     assert "scaffold_sha256" not in saved
-    assert project_adoption.status(project, data_root=data) == saved
+    reported = project_adoption.status(project, data_root=data)
+    readiness = reported.pop("legacy_configuration_readiness")
+    assert readiness["state"] == "UNCHANGED"
+    assert readiness["manual_review_required"] is False
+    assert readiness["authority"] == "READ_ONLY_LOCAL_CONSISTENCY_NOT_FABLE_VALIDATION"
+    assert reported == saved
     assert project_adoption.start(project, data_root=data) == saved | {"changed": False}
 
 
@@ -298,3 +303,109 @@ def test_active_legacy_result_without_original_confirmation_refuses_readonly(tmp
     assert project_adoption._state(sd, project) == saved
     assert (project.root / "AGENTS.md").read_bytes() == kept
     assert (project.root / "CLAUDE.md").read_bytes() == scaffold
+
+
+def test_active_legacy_new_claude_hook_reports_drift_and_blocks_start(tmp_path):
+    project, data, sd = _active_legacy_with_saved_result(tmp_path)
+    saved = project_adoption._state(sd, project)
+    kept = (project.root / "AGENTS.md").read_bytes()
+    settings = project.root / ".claude" / "settings.json"
+    settings.parent.mkdir()
+    payload = b'{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"echo synthetic"}]}]}}'
+    settings.write_bytes(payload)  # fixture data only; no native Claude execution
+
+    observed = project_adoption.status(project, data_root=data)
+    readiness = observed["legacy_configuration_readiness"]
+    assert observed["state"] == "active"  # preserve historical activated work
+    assert readiness["state"] == "DRIFTED"
+    assert readiness["added"] == 1
+    assert readiness["manual_review_required"] is True
+    with pytest.raises(AdoptionError, match="Active legacy Claude configuration"):
+        project_adoption.start(project, data_root=data)
+    assert project_adoption._state(sd, project) == saved
+    assert settings.read_bytes() == payload
+    assert (project.root / "AGENTS.md").read_bytes() == kept
+
+
+def test_active_legacy_edited_keep_requires_review_without_dropping_file(tmp_path):
+    project, data, sd = _active_legacy_with_saved_result(tmp_path)
+    saved = project_adoption._state(sd, project)
+    kept = project.root / "AGENTS.md"
+    changed = b"# Owner edited the original synthetic KEEP document\n"
+    kept.write_bytes(changed)
+
+    readiness = project_adoption.status(project, data_root=data)["legacy_configuration_readiness"]
+    assert readiness["state"] == "DRIFTED"
+    assert readiness["changed"] == 1
+    assert readiness["added"] == 0
+    with pytest.raises(AdoptionError, match="manual review required"):
+        project_adoption.start(project, data_root=data)
+    assert kept.read_bytes() == changed
+    assert project_adoption._state(sd, project) == saved
+
+
+def test_active_legacy_missing_saved_decisions_is_not_fabricated_as_ready(tmp_path):
+    project, data, sd = _active_legacy_with_saved_result(tmp_path)
+    saved = project_adoption._state(sd, project)
+    (sd / "decisions.json").unlink()  # synthetic loss of saved operator evidence
+
+    observed = project_adoption.status(project, data_root=data)
+    assert observed["state"] == "active"
+    assert observed["legacy_configuration_readiness"]["state"] == "UNVERIFIABLE"
+    with pytest.raises(AdoptionError, match="unverified"):
+        project_adoption.start(project, data_root=data)
+    assert project_adoption._state(sd, project) == saved
+
+
+def test_active_legacy_dropped_executable_reappearance_is_new_drift(tmp_path):
+    root = tmp_path / "synthetic-legacy-dropped-executable"
+    root.mkdir()
+    settings = root / ".claude" / "settings.json"
+    settings.parent.mkdir()
+    payload = b'{"hooks":{"PreToolUse":[]}}'
+    settings.write_bytes(payload)
+    project = SimpleNamespace(root=root.resolve(), name=root.name, key="synthetic:legacy-drop")
+    data = tmp_path / "legacy-drop-state"
+    pending = project_adoption.start(project, data_root=data)
+    assert pending["state"] == "awaiting_operator"
+    item = next(i for i in pending["items"] if i["path"] == ".claude/settings.json")
+    assert list(item["options"]) == ["DROP"]
+    authority = lambda statement: {
+        "confirmed": True, "kind": "synthetic_fixture", "statement": statement,
+    }
+    project_adoption.decide(project, item["number"], "DROP", authority=authority, data_root=data)
+    activated = project_adoption.activate(project, authority=authority, data_root=data)
+    assert activated["state"] == "active"
+    assert not settings.exists()
+    scaffold = (root / "CLAUDE.md").read_bytes()
+    sd = project_adoption._state_dir(project, data)
+    saved = project_adoption._state(sd, project)
+
+    settings.write_bytes(payload)  # synthetic reappearance, not an executed hook
+    reported = project_adoption.status(project, data_root=data)
+    readiness = reported["legacy_configuration_readiness"]
+    assert readiness["state"] == "DRIFTED"
+    assert readiness["added"] == 1
+    with pytest.raises(AdoptionError, match="Active legacy Claude configuration"):
+        project_adoption.start(project, data_root=data)
+    assert project_adoption._state(sd, project) == saved
+    assert settings.read_bytes() == payload
+    assert (root / "CLAUDE.md").read_bytes() == scaffold
+
+
+def test_active_legacy_new_architecture_hold_is_diagnostic_not_state_mutation(tmp_path, monkeypatch):
+    project, data, sd = _active_legacy_with_saved_result(tmp_path)
+    saved = project_adoption._state(sd, project)
+    monkeypatch.setattr(
+        project_adoption, "_legacy_architecture_hold",
+        lambda _root: {"architecture_review_required": True},
+    )  # synthetic #174 hold; does not grant independent validation
+
+    observed = project_adoption.status(project, data_root=data)
+    readiness = observed["legacy_configuration_readiness"]
+    assert observed["state"] == "active"
+    assert readiness["state"] == "DRIFTED"
+    assert readiness["architecture_review_required"] is True
+    with pytest.raises(AdoptionError, match="manual review required"):
+        project_adoption.start(project, data_root=data)
+    assert project_adoption._state(sd, project) == saved
