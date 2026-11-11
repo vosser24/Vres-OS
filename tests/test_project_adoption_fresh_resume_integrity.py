@@ -542,7 +542,16 @@ def test_legacy_review_intent_append_only_does_not_unblock_start(tmp_path):
     assert after["owner_review"]["remediation_authorized"] is False
     assert project_adoption._state(sd, project) == saved
     assert keep.read_bytes() == edited
-    with pytest.raises(AdoptionError, match="already recorded"):
+    original = project_adoption._read_json(sd / "legacy_owner_reviews" / token / "001.json")
+    revision = project_adoption.record_legacy_review_intent(
+        project, 1, "DEFER", snapshot_token=token, authority=authority, data_root=data,
+    )
+    assert revision["revision"] == 2
+    assert project_adoption._read_json(sd / "legacy_owner_reviews" / token / "001.json") == original
+    later = project_adoption.status(project, data_root=data)["legacy_configuration_readiness"]
+    assert later["owner_review"]["recorded_intents"] == {"1": "DEFER"}
+    assert later["owner_review"]["intent_revision_counts"] == {"1": 2}
+    with pytest.raises(AdoptionError, match="Same review intent already recorded"):
         project_adoption.record_legacy_review_intent(
             project, 1, "DEFER", snapshot_token=token, authority=authority, data_root=data,
         )
@@ -645,3 +654,41 @@ def test_legacy_review_architecture_hold_never_grants_fable(tmp_path, monkeypatc
     with pytest.raises(AdoptionError, match="manual review required"):
         project_adoption.start(project, data_root=data)
     assert project_adoption._state(sd, project)["state"] == "active"
+
+
+def test_legacy_review_revision_gap_is_not_treated_as_owner_approval(tmp_path):
+    project, data, sd = _active_legacy_with_saved_result(tmp_path)
+    (project.root / "AGENTS.md").write_bytes(b"# synthetic owner edit\n")
+    token = project_adoption.status(project, data_root=data)[
+        "legacy_configuration_readiness"]["owner_review"]["snapshot_token"]
+    project_adoption.record_legacy_review_intent(
+        project, 1, "DEFER", snapshot_token=token,
+        authority=lambda s: {"confirmed": True, "kind": "synthetic_fixture"}, data_root=data,
+    )
+    # Simulate a forged later entry with missing revision 2.
+    project_adoption._write_json(
+        sd / "legacy_owner_reviews" / token / "001-r03.json", {"intent": "REQUEST_REVERSIBLE_PLAN"}
+    )
+    with pytest.raises(AdoptionError, match="revision gaps"):
+        project_adoption.status(project, data_root=data)
+    assert project_adoption._state(sd, project)["state"] == "active"
+
+
+def test_legacy_review_revision_predecessor_tamper_fails_closed(tmp_path):
+    project, data, sd = _active_legacy_with_saved_result(tmp_path)
+    (project.root / "AGENTS.md").write_bytes(b"# synthetic owner edit\n")
+    token = project_adoption.status(project, data_root=data)[
+        "legacy_configuration_readiness"]["owner_review"]["snapshot_token"]
+    authority = lambda s: {"confirmed": True, "kind": "synthetic_fixture"}
+    project_adoption.record_legacy_review_intent(
+        project, 1, "DEFER", snapshot_token=token, authority=authority, data_root=data,
+    )
+    project_adoption.record_legacy_review_intent(
+        project, 1, "INVESTIGATE", snapshot_token=token, authority=authority, data_root=data,
+    )
+    second = sd / "legacy_owner_reviews" / token / "001-r02.json"
+    altered = project_adoption._read_json(second)
+    altered["supersedes_intent"] = "REQUEST_REVERSIBLE_PLAN"
+    project_adoption._write_json(second, altered)
+    with pytest.raises(AdoptionError, match="review intent integrity failed"):
+        project_adoption.status(project, data_root=data)

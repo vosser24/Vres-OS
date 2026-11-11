@@ -86,6 +86,7 @@ _IGNORE_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".pytest
 _MAX_ITEMS, _MAX_BYTES, _MAX_DIRS = 300, 1024 * 1024, 5000
 _MAX_REVIEW_ITEMS = 60
 _LEGACY_REVIEW_INTENTS = frozenset({"DEFER", "INVESTIGATE", "REQUEST_REVERSIBLE_PLAN"})
+_MAX_LEGACY_REVIEW_REVISIONS = 8
 _INJECTION = re.compile(
     r"ignore (all |any )?(previous|prior|above) instructions|disregard (the |all )?(previous|prior|system)"
     r"|you are now\b|new system prompt|override (the )?(system|vres)|bypass (the )?(guard|validation|approval)"
@@ -1717,41 +1718,62 @@ def _legacy_review_directory(sd: Path, token: str, *, create: bool = False) -> P
     return directory / token
 
 
-def _saved_legacy_review_intents(sd: Path, review: dict[str, Any]) -> dict[str, str]:
-    """Read only exact-token findings; damaged evidence never becomes approval."""
+def _saved_legacy_review_history(
+    sd: Path, review: dict[str, Any],
+) -> tuple[dict[str, str], dict[str, int]]:
+    """Read bounded immutable revisions, reject gaps and broken predecessor chains."""
     token = review.get("snapshot_token")
     if type(token) is not str or re.fullmatch(r"[0-9a-f]{64}", token) is None:
-        return {}
+        return {}, {}
     directory = _legacy_review_directory(sd, token)
     if directory is None:
-        return {}
-    recorded: dict[str, str] = {}
+        return {}, {}
+    current: dict[str, str] = {}
+    counts: dict[str, int] = {}
+    base_keys = {
+        "version", "snapshot_token", "number", "finding_digest",
+        "intent", "confirmation_kind", "confirmed", "at",
+    }
     for finding in review["findings"]:
         number = finding["number"]
-        stored = _read_json(directory / f"{number:03d}.json")
-        if stored is None:
-            continue
-        if (
-            type(stored) is not dict
-            or set(stored) != {
-                "version", "snapshot_token", "number", "finding_digest",
-                "intent", "confirmation_kind", "confirmed", "at",
-            }
-            or stored.get("version") != VERSION
-            or stored.get("snapshot_token") != token
-            or type(stored.get("number")) is not int
-            or stored["number"] != number
-            or stored.get("finding_digest") != _legacy_review_finding_digest(finding)
-            or type(stored.get("intent")) is not str
-            or stored["intent"] not in _LEGACY_REVIEW_INTENTS
-            or stored.get("confirmed") is not True
-            or type(stored.get("confirmation_kind")) is not str
-            or re.fullmatch(r"[A-Za-z0-9_.:-]{1,64}", stored["confirmation_kind"]) is None
-            or type(stored.get("at")) is not str or not stored["at"]
-        ):
-            raise AdoptionError("Legacy review intent integrity failed; manual review required")
-        recorded[str(number)] = stored["intent"]
-    return recorded
+        previous_intent = None
+        gap = False
+        for revision in range(1, _MAX_LEGACY_REVIEW_REVISIONS + 1):
+            name = f"{number:03d}.json" if revision == 1 else f"{number:03d}-r{revision:02d}.json"
+            stored = _read_json(directory / name)
+            if stored is None:
+                gap = True
+                continue
+            if gap:
+                raise AdoptionError("Legacy review history contains revision gaps; manual review required")
+            expected = base_keys if revision == 1 else base_keys | {"revision", "supersedes_intent"}
+            if (
+                type(stored) is not dict
+                or set(stored) != expected
+                or stored.get("version") != VERSION
+                or stored.get("snapshot_token") != token
+                or type(stored.get("number")) is not int
+                or stored["number"] != number
+                or stored.get("finding_digest") != _legacy_review_finding_digest(finding)
+                or type(stored.get("intent")) is not str
+                or stored["intent"] not in _LEGACY_REVIEW_INTENTS
+                or (revision > 1 and (
+                    type(stored.get("revision")) is not int
+                    or stored["revision"] != revision
+                    or stored.get("supersedes_intent") != previous_intent
+                    or stored["intent"] == previous_intent
+                ))
+                or stored.get("confirmed") is not True
+                or type(stored.get("confirmation_kind")) is not str
+                or re.fullmatch(r"[A-Za-z0-9_.:-]{1,64}", stored["confirmation_kind"]) is None
+                or type(stored.get("at")) is not str or not stored["at"]
+            ):
+                raise AdoptionError("Legacy review intent integrity failed; manual review required")
+            previous_intent = stored["intent"]
+            counts[str(number)] = revision
+        if previous_intent is not None:
+            current[str(number)] = previous_intent
+    return current, counts
 
 
 def status(project, *, data_root: Path | None = None) -> dict[str, Any]:
@@ -1794,7 +1816,7 @@ def status(project, *, data_root: Path | None = None) -> dict[str, Any]:
             sd, project, record, include_review=True
         )
         review = out["legacy_configuration_readiness"]["owner_review"]
-        review["recorded_intents"] = _saved_legacy_review_intents(sd, review)
+        review["recorded_intents"], review["intent_revision_counts"] = _saved_legacy_review_history(sd, review)
         review["pending_displayed_numbers"] = [
             finding["number"] for finding in review["findings"]
             if str(finding["number"]) not in review["recorded_intents"]
@@ -1846,10 +1868,18 @@ def record_legacy_review_intent(
     finding = next((f for f in review["findings"] if f["number"] == number), None)
     if finding is None:
         raise AdoptionError("Only numbered displayed findings can receive review intent")
-    if str(number) in review["recorded_intents"]:
-        raise AdoptionError("Review intent already recorded; preserve append-only history")
+    previous = review["recorded_intents"].get(str(number))
+    if previous == intent:
+        raise AdoptionError("Same review intent already recorded; no duplicate revision")
+    next_revision = review["intent_revision_counts"].get(str(number), 0) + 1
+    if next_revision > _MAX_LEGACY_REVIEW_REVISIONS:
+        raise AdoptionError("Legacy review revision limit reached; manual review required")
 
-    statement = f"RECORD LEGACY REVIEW {number} {intent} {snapshot_token[:12]}"
+    statement = (
+        f"RECORD LEGACY REVIEW {number} {intent} {snapshot_token[:12]}"
+        if next_revision == 1 else
+        f"REVISE LEGACY REVIEW {number} REVISION {next_revision} {intent} {snapshot_token[:12]}"
+    )
     evidence = _evidence(authority, statement)
     kind = evidence.get("kind")
     if type(kind) is not str or re.fullmatch(r"[A-Za-z0-9_.:-]{1,64}", kind) is None:
@@ -1865,8 +1895,11 @@ def record_legacy_review_intent(
         or finding not in live_review.get("findings", [])
     ):
         raise AdoptionError("Legacy review source changed during confirmation; no intent recorded")
-    if str(number) in live_review["recorded_intents"]:
-        raise AdoptionError("Review intent already recorded; no replacement allowed")
+    if (
+        live_review["recorded_intents"].get(str(number)) != previous
+        or live_review["intent_revision_counts"].get(str(number), 0) + 1 != next_revision
+    ):
+        raise AdoptionError("Legacy review history changed during confirmation; retry review")
 
     sd = _state_dir(project, data_root)
     _refuse_interrupted_journal(sd)
@@ -1877,13 +1910,16 @@ def record_legacy_review_intent(
         "intent": intent, "confirmed": True, "confirmation_kind": kind,
         "at": datetime.now(UTC).isoformat(),
     }
+    filename = f"{number:03d}.json" if next_revision == 1 else f"{number:03d}-r{next_revision:02d}.json"
+    if next_revision > 1:
+        payload["revision"], payload["supersedes_intent"] = next_revision, previous
     try:
-        _write_exclusive_journal(directory / f"{number:03d}.json", payload)
+        _write_exclusive_journal(directory / filename, payload)
     except AdoptionError:
         raise AdoptionError("Legacy review intent already exists; no replacement allowed") from None
     return {
         "number": number, "intent": intent, "snapshot_token": snapshot_token,
-        "intent_recorded": True, "project_changes_performed": False,
+        "revision": next_revision, "intent_recorded": True, "project_changes_performed": False,
         "original_keep_drop_unchanged": True,
         "remediation_authorized": False, "activation_allowed": False,
         "independent_fable_authority": "NOT_GRANTED",
