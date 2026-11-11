@@ -3,6 +3,7 @@ root, injected operator evidence. No PostgreSQL, credential store, model or proj
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -226,6 +227,31 @@ def test_activation_changes_only_approved_paths_then_rollback_restores_exact_byt
 
     rolled = project_adoption.rollback(project, authority=_yes, data_root=data_root)
     assert rolled["state"] == "awaiting_operator" and _tree(project.root) == before
+
+
+def test_activation_records_verified_preimage_digest_for_disposable_legacy_file(tmp_path, data_root):
+    """Exact prepared bytes and digest must persist through reversible activation.
+
+    AUTHORED NOT_RUN: only existing synthetic tmp_path fixtures, no native host,
+    PostgreSQL, installed P2, credentials or non-disposable project.
+    """
+    project = _project(tmp_path / "synthetic-legacy")
+    _legacy(project.root, injection=False)
+    project_adoption.start(project, data_root=data_root)
+    _decide_all(project, data_root, set())
+    original = (project.root / ".mcp.json").read_bytes()
+
+    result = project_adoption.activate(project, authority=_yes, data_root=data_root)
+    sd = project_adoption._state_dir(project, data_root)
+    activation_dir = sd / "activations" / result["activation"]
+    manifest = json.loads((activation_dir / "result.json").read_text(encoding="utf-8"))
+    saved = manifest["pre"][".mcp.json"]
+
+    assert saved["existed"] is True
+    assert saved["sha256"] == hashlib.sha256(original).hexdigest()
+    assert (activation_dir / "pre" / saved["copy"]).read_bytes() == original
+    assert project_adoption.rollback(project, authority=_yes, data_root=data_root)["state"] == "awaiting_operator"
+    assert (project.root / ".mcp.json").read_bytes() == original
 
 
 def test_rollback_refuses_when_activated_files_changed_afterwards(tmp_path, data_root):

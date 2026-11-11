@@ -1604,7 +1604,7 @@ def activate(project, *, authority: Authority, data_root: Path | None = None) ->
                     "Project surface changed or became unsafe during activation preparation"
                 ) from None
             _write_new(pre_dir / f"{index:04d}", data)
-            pre[rel] = {"existed": True, "copy": f"{index:04d}", "sha256": digest}
+            pre[rel] = {"existed": True, "copy": f"{index:04d}", "sha256": expected_sha}
     # Keep source, decision and architecture evidence bound to approved bytes.
     # A final scan is cooperative, not an atomic filesystem transaction.
     if (
