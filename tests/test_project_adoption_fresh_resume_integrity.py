@@ -513,3 +513,135 @@ def test_active_legacy_owner_review_missing_created_scaffold_is_drift_not_unveri
     assert not scaffold.exists()
     assert (project.root / "AGENTS.md").read_bytes() == original_keep
     assert project_adoption._state(sd, project) == saved
+
+
+def test_legacy_review_intent_append_only_does_not_unblock_start(tmp_path):
+    project, data, sd = _active_legacy_with_saved_result(tmp_path)
+    saved = project_adoption._state(sd, project)
+    keep = project.root / "AGENTS.md"
+    edited = b"# synthetic owner edit needing a separate plan\n"
+    keep.write_bytes(edited)
+    review = project_adoption.status(project, data_root=data)[
+        "legacy_configuration_readiness"]["owner_review"]
+    token = review["snapshot_token"]
+    assert token and len(token) == 64
+    seen = []
+    def authority(statement):
+        seen.append(statement)
+        return {"confirmed": True, "kind": "synthetic_fixture"}
+    receipt = project_adoption.record_legacy_review_intent(
+        project, 1, "REQUEST_REVERSIBLE_PLAN", snapshot_token=token,
+        authority=authority, data_root=data,
+    )
+    assert seen == [f"RECORD LEGACY REVIEW 1 REQUEST_REVERSIBLE_PLAN {token[:12]}"]
+    assert receipt["remediation_authorized"] is False
+    after = project_adoption.status(project, data_root=data)["legacy_configuration_readiness"]
+    assert after["state"] == "DRIFTED"
+    assert after["owner_review"]["recorded_intents"] == {"1": "REQUEST_REVERSIBLE_PLAN"}
+    assert after["owner_review"]["all_findings_have_recorded_intents"] is True
+    assert after["owner_review"]["remediation_authorized"] is False
+    assert project_adoption._state(sd, project) == saved
+    assert keep.read_bytes() == edited
+    with pytest.raises(AdoptionError, match="already recorded"):
+        project_adoption.record_legacy_review_intent(
+            project, 1, "DEFER", snapshot_token=token, authority=authority, data_root=data,
+        )
+    with pytest.raises(AdoptionError, match="manual review required"):
+        project_adoption.start(project, data_root=data)
+
+
+def test_legacy_review_intent_requires_token_and_operator_confirmation(tmp_path):
+    project, data, sd = _active_legacy_with_saved_result(tmp_path)
+    (project.root / "AGENTS.md").write_bytes(b"# synthetic changed instructions\n")
+    token = project_adoption.status(project, data_root=data)[
+        "legacy_configuration_readiness"]["owner_review"]["snapshot_token"]
+    refuse = lambda _statement: {"confirmed": False}
+    with pytest.raises(AdoptionError, match="snapshot is stale"):
+        project_adoption.record_legacy_review_intent(
+            project, 1, "INVESTIGATE", snapshot_token="0" * 64,
+            authority=refuse, data_root=data,
+        )
+    with pytest.raises(AdoptionError, match="was not given"):
+        project_adoption.record_legacy_review_intent(
+            project, 1, "INVESTIGATE", snapshot_token=token,
+            authority=refuse, data_root=data,
+        )
+    with pytest.raises(AdoptionError, match="Invalid legacy review"):
+        project_adoption.record_legacy_review_intent(
+            project, 1, "KEEP_AS_APPROVED", snapshot_token=token,
+            authority=refuse, data_root=data,
+        )
+    assert not (sd / "legacy_owner_reviews").exists()
+
+
+def test_legacy_review_intent_rejects_source_changed_during_confirmation(tmp_path):
+    project, data, sd = _active_legacy_with_saved_result(tmp_path)
+    keep = project.root / "AGENTS.md"
+    keep.write_bytes(b"# first synthetic owner edit\n")
+    token = project_adoption.status(project, data_root=data)[
+        "legacy_configuration_readiness"]["owner_review"]["snapshot_token"]
+    def change(_statement):
+        keep.write_bytes(b"# second synthetic owner edit\n")
+        return {"confirmed": True, "kind": "synthetic_fixture"}
+    with pytest.raises(AdoptionError, match="source changed during confirmation"):
+        project_adoption.record_legacy_review_intent(
+            project, 1, "DEFER", snapshot_token=token, authority=change, data_root=data,
+        )
+    assert not (sd / "legacy_owner_reviews").exists()
+
+
+def test_legacy_review_intent_refuses_unhashed_secret_named_surface(tmp_path):
+    project, data, sd = _active_legacy_with_saved_result(tmp_path)
+    secret_named = project.root / ".claude" / "credentials.json"
+    secret_named.parent.mkdir()
+    secret_named.write_text('{"token":"SYNTHETIC_ONLY"}')
+    review = project_adoption.status(project, data_root=data)[
+        "legacy_configuration_readiness"]["owner_review"]
+    assert review["snapshot_token"] is None
+    with pytest.raises(AdoptionError, match="stale or unverifiable"):
+        project_adoption.record_legacy_review_intent(
+            project, 1, "INVESTIGATE", snapshot_token="0" * 64,
+            authority=lambda s: {"confirmed": True, "kind": "synthetic_fixture"},
+            data_root=data,
+        )
+    assert not (sd / "legacy_owner_reviews").exists()
+
+
+def test_legacy_review_intent_corrupt_saved_record_fails_closed(tmp_path):
+    project, data, sd = _active_legacy_with_saved_result(tmp_path)
+    (project.root / "AGENTS.md").write_bytes(b"# synthetic changed KEEP\n")
+    token = project_adoption.status(project, data_root=data)[
+        "legacy_configuration_readiness"]["owner_review"]["snapshot_token"]
+    project_adoption.record_legacy_review_intent(
+        project, 1, "DEFER", snapshot_token=token,
+        authority=lambda s: {"confirmed": True, "kind": "synthetic_fixture"},
+        data_root=data,
+    )
+    path = sd / "legacy_owner_reviews" / token / "001.json"
+    project_adoption._write_json(path, {"intent": "APPROVED"})
+    with pytest.raises(AdoptionError, match="review intent integrity failed"):
+        project_adoption.status(project, data_root=data)
+    assert project_adoption._state(sd, project)["state"] == "active"
+
+
+def test_legacy_review_architecture_hold_never_grants_fable(tmp_path, monkeypatch):
+    project, data, sd = _active_legacy_with_saved_result(tmp_path)
+    monkeypatch.setattr(
+        project_adoption, "_legacy_architecture_hold",
+        lambda _root: {"architecture_review_required": True},
+    )
+    review = project_adoption.status(project, data_root=data)[
+        "legacy_configuration_readiness"]["owner_review"]
+    assert review["findings"][0]["change"] == "ARCHITECTURE_HOLD"
+    token = review["snapshot_token"]
+    assert token
+    receipt = project_adoption.record_legacy_review_intent(
+        project, 1, "REQUEST_REVERSIBLE_PLAN", snapshot_token=token,
+        authority=lambda s: {"confirmed": True, "kind": "synthetic_fixture"},
+        data_root=data,
+    )
+    assert receipt["independent_fable_authority"] == "NOT_GRANTED"
+    assert receipt["activation_allowed"] is False
+    with pytest.raises(AdoptionError, match="manual review required"):
+        project_adoption.start(project, data_root=data)
+    assert project_adoption._state(sd, project)["state"] == "active"

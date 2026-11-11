@@ -85,6 +85,7 @@ _IGNORE_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".pytest
                 ".ruff_cache", "build", "dist", ".next", "site-packages", "coverage", ".vres"}
 _MAX_ITEMS, _MAX_BYTES, _MAX_DIRS = 300, 1024 * 1024, 5000
 _MAX_REVIEW_ITEMS = 60
+_LEGACY_REVIEW_INTENTS = frozenset({"DEFER", "INVESTIGATE", "REQUEST_REVERSIBLE_PLAN"})
 _INJECTION = re.compile(
     r"ignore (all |any )?(previous|prior|above) instructions|disregard (the |all )?(previous|prior|system)"
     r"|you are now\b|new system prompt|override (the )?(system|vres)|bypass (the )?(guard|validation|approval)"
@@ -877,6 +878,7 @@ def _legacy_configuration_readiness(
         state: str, *, added: int = 0, missing: int = 0, changed: int = 0,
         unverifiable: int = 0, architecture_hold: bool = False,
         findings: list[dict[str, Any]] | None = None,
+        snapshot_token: str | None = None,
     ) -> dict[str, Any]:
         outcome = {
             "state": state,
@@ -890,6 +892,8 @@ def _legacy_configuration_readiness(
             reviewed = findings if findings is not None else []
             outcome["owner_review"] = {
                 "mode": "READ_ONLY_TRIAGE_NOT_A_REMEDIATION_OR_APPROVAL",
+                "snapshot_token": snapshot_token,
+                "remediation_authorized": False,
                 "findings": reviewed[:_MAX_REVIEW_ITEMS],
                 "total_findings": len(reviewed),
                 "truncated": len(reviewed) > _MAX_REVIEW_ITEMS,
@@ -1060,10 +1064,31 @@ def _legacy_configuration_readiness(
             "DRIFTED" if added or missing or changed or architecture else
             "UNVERIFIABLE" if unverifiable else "UNCHANGED"
         )
+        # The token binds the observed project to its original activation,
+        # original KEEP/DROP record and current scanned bytes. Never seal
+        # sensitive/unreadable paths whose current content cannot be verified.
+        # A token is NOT owner approval, Fable validation or an execution grant.
+        snapshot_token = None
+        if (
+            include_review and state == "DRIFTED" and not unverifiable
+            and all(
+                item["status"] == "ok" and item["sha256"] is not None
+                for item in current["items"]
+            )
+        ):
+            binding = {
+                "project_key": project.key, "project_root": str(root),
+                "saved_state": record, "original_snapshot": saved,
+                "original_decisions": choices, "activation_result": result,
+                "current_inventory": current, "architecture": architecture,
+            }
+            snapshot_token = hashlib.sha256(
+                json.dumps(binding, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest()
         return report(
             state, added=added, missing=missing, changed=changed,
             unverifiable=unverifiable, architecture_hold=bool(architecture),
-            findings=findings,
+            findings=findings, snapshot_token=snapshot_token,
         )
     except (AdoptionError, OSError, ValueError, TypeError, KeyError, AttributeError):
         # A read failure cannot turn historical saved work into an approved
@@ -1669,6 +1694,66 @@ def rollback(project, *, authority: Authority, data_root: Path | None = None) ->
     return {"state": "awaiting_operator", "restored": sorted(result["pre"])}
 
 
+
+# --------------------------------------------------- append-only original legacy review intent
+def _legacy_review_finding_digest(finding: dict[str, Any]) -> str:
+    return hashlib.sha256(
+        json.dumps(finding, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _legacy_review_directory(sd: Path, token: str, *, create: bool = False) -> Path | None:
+    """Existing personal project state; refuse a review directory link/reparse."""
+    directory = sd / "legacy_owner_reviews"
+    for part in (directory, directory / token):
+        info = _lstat(part)
+        if info is None:
+            if not create:
+                return None
+            part.mkdir(mode=0o700)
+            info = _lstat(part)
+        if info is None or _is_link(info) or not stat.S_ISDIR(info.st_mode):
+            raise AdoptionError("Legacy owner-review history is not a safe directory")
+    return directory / token
+
+
+def _saved_legacy_review_intents(sd: Path, review: dict[str, Any]) -> dict[str, str]:
+    """Read only exact-token findings; damaged evidence never becomes approval."""
+    token = review.get("snapshot_token")
+    if type(token) is not str or re.fullmatch(r"[0-9a-f]{64}", token) is None:
+        return {}
+    directory = _legacy_review_directory(sd, token)
+    if directory is None:
+        return {}
+    recorded: dict[str, str] = {}
+    for finding in review["findings"]:
+        number = finding["number"]
+        stored = _read_json(directory / f"{number:03d}.json")
+        if stored is None:
+            continue
+        if (
+            type(stored) is not dict
+            or set(stored) != {
+                "version", "snapshot_token", "number", "finding_digest",
+                "intent", "confirmation_kind", "confirmed", "at",
+            }
+            or stored.get("version") != VERSION
+            or stored.get("snapshot_token") != token
+            or type(stored.get("number")) is not int
+            or stored["number"] != number
+            or stored.get("finding_digest") != _legacy_review_finding_digest(finding)
+            or type(stored.get("intent")) is not str
+            or stored["intent"] not in _LEGACY_REVIEW_INTENTS
+            or stored.get("confirmed") is not True
+            or type(stored.get("confirmation_kind")) is not str
+            or re.fullmatch(r"[A-Za-z0-9_.:-]{1,64}", stored["confirmation_kind"]) is None
+            or type(stored.get("at")) is not str or not stored["at"]
+        ):
+            raise AdoptionError("Legacy review intent integrity failed; manual review required")
+        recorded[str(number)] = stored["intent"]
+    return recorded
+
+
 def status(project, *, data_root: Path | None = None) -> dict[str, Any]:
     """Read the ORIGINAL #168 adoption state without creating directories.
 
@@ -1708,6 +1793,16 @@ def status(project, *, data_root: Path | None = None) -> dict[str, Any]:
         out["legacy_configuration_readiness"] = _legacy_configuration_readiness(
             sd, project, record, include_review=True
         )
+        review = out["legacy_configuration_readiness"]["owner_review"]
+        review["recorded_intents"] = _saved_legacy_review_intents(sd, review)
+        review["pending_displayed_numbers"] = [
+            finding["number"] for finding in review["findings"]
+            if str(finding["number"]) not in review["recorded_intents"]
+        ]
+        review["all_findings_have_recorded_intents"] = (
+            review["snapshot_token"] is not None and not review["truncated"]
+            and not review["pending_displayed_numbers"]
+        )  # Coverage only: never activation approval.
     if record.get("state") == "awaiting_operator":
         version = record.get("inventory_version")
         if type(version) is not str or re.fullmatch(r"[0-9a-f]{64}", version) is None:
@@ -1723,6 +1818,77 @@ def status(project, *, data_root: Path | None = None) -> dict[str, Any]:
     if _lstat(journal) is not None:
         return interrupted()
     return out
+
+
+def record_legacy_review_intent(
+    project, number: int, intent: str, *, snapshot_token: str,
+    authority: Authority, data_root: Path | None = None,
+) -> dict[str, Any]:
+    """Record one explicitly confirmed plan intention in the ORIGINAL project state.
+
+    A changed snapshot renders old choices inert without erasing original
+    historical KEEP/DROP, activation or rollback evidence. There is NO project
+    file modification, automatic remediation, native Claude or Fable grant.
+    """
+    if (
+        type(number) is not int or number < 1
+        or type(intent) is not str or intent.strip().upper() not in _LEGACY_REVIEW_INTENTS
+        or type(snapshot_token) is not str
+        or re.fullmatch(r"[0-9a-f]{64}", snapshot_token) is None
+    ):
+        raise AdoptionError("Invalid legacy review number, intent or snapshot token")
+    intent = intent.strip().upper()
+    observed = status(project, data_root=data_root)
+    readiness = observed.get("legacy_configuration_readiness", {})
+    review = readiness.get("owner_review", {})
+    if readiness.get("state") != "DRIFTED" or review.get("snapshot_token") != snapshot_token:
+        raise AdoptionError("Legacy review snapshot is stale or unverifiable; no intent recorded")
+    finding = next((f for f in review["findings"] if f["number"] == number), None)
+    if finding is None:
+        raise AdoptionError("Only numbered displayed findings can receive review intent")
+    if str(number) in review["recorded_intents"]:
+        raise AdoptionError("Review intent already recorded; preserve append-only history")
+
+    statement = f"RECORD LEGACY REVIEW {number} {intent} {snapshot_token[:12]}"
+    evidence = _evidence(authority, statement)
+    kind = evidence.get("kind")
+    if type(kind) is not str or re.fullmatch(r"[A-Za-z0-9_.:-]{1,64}", kind) is None:
+        raise AdoptionError("Legacy review operator provenance invalid; no intent recorded")
+
+    # A source/manifest/architecture change during confirmation is a hard stop.
+    latest = status(project, data_root=data_root)
+    live_readiness = latest.get("legacy_configuration_readiness", {})
+    live_review = live_readiness.get("owner_review", {})
+    if (
+        live_readiness.get("state") != "DRIFTED"
+        or live_review.get("snapshot_token") != snapshot_token
+        or finding not in live_review.get("findings", [])
+    ):
+        raise AdoptionError("Legacy review source changed during confirmation; no intent recorded")
+    if str(number) in live_review["recorded_intents"]:
+        raise AdoptionError("Review intent already recorded; no replacement allowed")
+
+    sd = _state_dir(project, data_root)
+    _refuse_interrupted_journal(sd)
+    directory = _legacy_review_directory(sd, snapshot_token, create=True)
+    payload = {
+        "version": VERSION, "snapshot_token": snapshot_token,
+        "number": number, "finding_digest": _legacy_review_finding_digest(finding),
+        "intent": intent, "confirmed": True, "confirmation_kind": kind,
+        "at": datetime.now(UTC).isoformat(),
+    }
+    try:
+        _write_exclusive_journal(directory / f"{number:03d}.json", payload)
+    except AdoptionError:
+        raise AdoptionError("Legacy review intent already exists; no replacement allowed") from None
+    return {
+        "number": number, "intent": intent, "snapshot_token": snapshot_token,
+        "intent_recorded": True, "project_changes_performed": False,
+        "original_keep_drop_unchanged": True,
+        "remediation_authorized": False, "activation_allowed": False,
+        "independent_fable_authority": "NOT_GRANTED",
+    }
+
 
 # ----------------------------------------------------------------------- offline architecture plan check
 
