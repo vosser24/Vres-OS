@@ -87,6 +87,17 @@ _MAX_ITEMS, _MAX_BYTES, _MAX_DIRS = 300, 1024 * 1024, 5000
 _MAX_REVIEW_ITEMS = 60
 _LEGACY_REVIEW_INTENTS = frozenset({"DEFER", "INVESTIGATE", "REQUEST_REVERSIBLE_PLAN"})
 _MAX_LEGACY_REVIEW_REVISIONS = 8
+# Candidate TARGETS, not remediation commands. The original #168 adoption
+# owner retains all KEEP/DROP, preimage and rollback decisions.
+_LEGACY_PLAN_TARGETS = {
+    "CHANGED_KEEP": ("RESTORE_ORIGINAL_KEEP_FOR_REVIEW", "RETAIN_CURRENT_FOR_REVIEW"),
+    "MISSING_KEEP": ("RESTORE_ORIGINAL_KEEP_FOR_REVIEW", "ACKNOWLEDGE_MISSING_FOR_REVIEW"),
+    "NEW_SURFACE": ("ISOLATE_NEW_SURFACE_FOR_REVIEW", "RETAIN_NEW_SURFACE_FOR_REVIEW"),
+    "DROP_REAPPEARED": ("REISOLATE_ORIGINAL_DROP_FOR_REVIEW",),
+    "CHANGED_SCAFFOLD": ("REBUILD_CANONICAL_SCAFFOLD_FOR_REVIEW",),
+    "MISSING_SCAFFOLD": ("REBUILD_CANONICAL_SCAFFOLD_FOR_REVIEW",),
+    "ARCHITECTURE_HOLD": ("PREPARE_PROTECTED_ALIGNMENT_REVIEW",),
+}
 _INJECTION = re.compile(
     r"ignore (all |any )?(previous|prior|above) instructions|disregard (the |all )?(previous|prior|system)"
     r"|you are now\b|new system prompt|override (the )?(system|vres)|bypass (the )?(guard|validation|approval)"
@@ -1734,6 +1745,29 @@ def _saved_legacy_review_history(
         "version", "snapshot_token", "number", "finding_digest",
         "intent", "confirmation_kind", "confirmed", "at",
     }
+    # Do not silently ignore a ninth revision, a foreign finding record,
+    # a linked leaf, or an abandoned unrecognized file in this snapshot.
+    allowed = {
+        (f"{finding['number']:03d}.json" if revision == 1
+         else f"{finding['number']:03d}-r{revision:02d}.json")
+        for finding in review["findings"]
+        for revision in range(1, _MAX_LEGACY_REVIEW_REVISIONS + 1)
+    }
+    try:
+        with os.scandir(directory) as entries:
+            seen = 0
+            for entry in entries:
+                seen += 1
+                if seen > _MAX_REVIEW_ITEMS * _MAX_LEGACY_REVIEW_REVISIONS:
+                    raise AdoptionError("Legacy review history exceeds bounded record count")
+                info = _lstat(directory / entry.name)
+                if (entry.name not in allowed or info is None
+                        or _is_link(info) or not stat.S_ISREG(info.st_mode)):
+                    raise AdoptionError(
+                        "Legacy review history contains unexpected or unsafe records"
+                    )
+    except OSError:
+        raise AdoptionError("Legacy review history directory is unreadable") from None
     for finding in review["findings"]:
         number = finding["number"]
         previous_intent = None
@@ -1821,6 +1855,14 @@ def status(project, *, data_root: Path | None = None) -> dict[str, Any]:
             finding["number"] for finding in review["findings"]
             if str(finding["number"]) not in review["recorded_intents"]
         ]
+        # Internal Chairman-facing choices are exposed ONLY after an original
+        # confirmed request for a reversible plan, never as automatic action.
+        review["plan_target_options"] = {
+            str(finding["number"]): list(_LEGACY_PLAN_TARGETS.get(finding["change"], ()))
+            for finding in review["findings"]
+            if (review["recorded_intents"].get(str(finding["number"]))
+                == "REQUEST_REVERSIBLE_PLAN")
+        }
         review["all_findings_have_recorded_intents"] = (
             review["snapshot_token"] is not None and not review["truncated"]
             and not review["pending_displayed_numbers"]
@@ -1925,6 +1967,102 @@ def record_legacy_review_intent(
         "independent_fable_authority": "NOT_GRANTED",
     }
 
+
+
+def draft_legacy_reversible_plan(
+    project, *, snapshot_token: str, targets: dict[int, str],
+    data_root: Path | None = None,
+) -> dict[str, Any]:
+    """Build a bounded, NO-WRITE personal owner-target plan discussion preview.
+
+    Caller-selected targets are UNTRUSTED input, not verified owner consent.
+    Only findings with an existing confirmed REQUEST_REVERSIBLE_PLAN intent can
+    participate. This does not modify Claude configuration, original KEEP/DROP,
+    activation results, journal, or project state and cannot grant Fable/high.
+    The conversational Chairman may consume the status options and this draft
+    internally; no extra mandatory user-facing command is introduced.
+    """
+    if (type(snapshot_token) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", snapshot_token) is None):
+        raise AdoptionError("Legacy plan requires an exact snapshot token")
+    observed = status(project, data_root=data_root)
+    readiness = observed.get("legacy_configuration_readiness", {})
+    review = readiness.get("owner_review", {})
+    if (readiness.get("state") != "DRIFTED"
+            or review.get("snapshot_token") != snapshot_token
+            or review.get("truncated") is not False):
+        raise AdoptionError("Legacy plan snapshot stale, incomplete or unverifiable")
+
+    options = review.get("plan_target_options", {})
+    requested = {int(number): values for number, values in options.items()}
+    if (type(targets) is not dict or not requested
+            or set(targets) != set(requested)
+            or any(type(number) is not int or type(value) is not str
+                   for number, value in targets.items())):
+        raise AdoptionError("Every requested plan finding needs one explicit target")
+    findings = {finding["number"]: finding for finding in review["findings"]}
+    entries = []
+    for number in sorted(requested):
+        selected = targets[number]
+        if selected not in requested[number] or not requested[number]:
+            raise AdoptionError("Target incompatible with the original finding and review")
+        finding = findings[number]
+        entries.append({
+            "number": number,
+            "finding_change": finding["change"],
+            "risk": finding["risk"],
+            "display_path": finding["path"],
+            "path_redacted": finding["path_redacted"],
+            "confirmed_plan_intent_revision": review["intent_revision_counts"][str(number)],
+            "caller_selected_target": selected,
+            "execution_authorized": False,
+            "preimage_and_rollback_verification_required": True,
+        })
+
+    binding = {
+        "snapshot_token": snapshot_token,
+        "recorded_intents": review["recorded_intents"],
+        "intent_revision_counts": review["intent_revision_counts"],
+        "entries": entries,
+    }
+    digest = hashlib.sha256(
+        json.dumps(binding, sort_keys=True, separators=(",", ":"),
+                   ensure_ascii=False, allow_nan=False).encode("utf-8")
+    ).hexdigest()
+    output = {
+        "status": "OWNER_TARGET_DISCUSSION_DRAFT_NOT_APPROVED",
+        "plan_digest": digest,
+        "snapshot_token": snapshot_token,
+        "project_key": project.key,
+        "entries": entries,
+        "pending_owner_review_numbers": list(review["pending_displayed_numbers"]),
+        "caller_targets_are_verified_owner_consent": False,
+        "original_keep_drop_unchanged": True,
+        "project_changes_performed": False,
+        "remediation_authorized": False,
+        "activation_allowed": False,
+        "independent_fable_authority": "NOT_GRANTED",
+        "required_next_gates": [
+            "RECHECK_EXACT_PROJECT_SNAPSHOT_AND_ORIGINAL_ACTIVATION",
+            "VERIFY_SAVED_PREIMAGES_AND_REVERSIBLE_RESTORE_FOR_EACH_TARGET",
+            "SEPARATE_EXPLICIT_OWNER_APPROVAL_BEFORE_ANY_PROJECT_WRITE",
+            "INDEPENDENT_PROTECTED_FABLE_HIGH_VALIDATION_FOR_ARCHITECTURE_CHANGE",
+            "REVIEW_ALL_UNRESOLVED_AND_UNVERIFIABLE_FINDINGS",
+        ],
+        "note": (
+            "This is a bounded discussion plan, not a migration, rebaseline, "
+            "Fable result, owner signature, Claude launch or filesystem permission."
+        ),
+    }
+    encoded = json.dumps(
+        output, sort_keys=True, separators=(",", ":"),
+        ensure_ascii=False, allow_nan=False,
+    ).encode("utf-8")
+    if len(encoded) > 65536:
+        raise AdoptionError("Legacy reversible-plan preview exceeds bounded limit")
+    if status(project, data_root=data_root) != observed:
+        raise AdoptionError("Legacy plan snapshot or owner intentions changed during drafting")
+    return output
 
 # ----------------------------------------------------------------------- offline architecture plan check
 

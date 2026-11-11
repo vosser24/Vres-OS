@@ -692,3 +692,142 @@ def test_legacy_review_revision_predecessor_tamper_fails_closed(tmp_path):
     project_adoption._write_json(second, altered)
     with pytest.raises(AdoptionError, match="review intent integrity failed"):
         project_adoption.status(project, data_root=data)
+
+
+def test_legacy_review_history_ninth_revision_is_not_silently_ignored(tmp_path):
+    project, data, sd = _active_legacy_with_saved_result(tmp_path)
+    (project.root / "AGENTS.md").write_bytes(b"# synthetic changed KEEP\n")
+    token = project_adoption.status(project, data_root=data)[
+        "legacy_configuration_readiness"]["owner_review"]["snapshot_token"]
+    project_adoption.record_legacy_review_intent(
+        project, 1, "DEFER", snapshot_token=token,
+        authority=lambda s: {"confirmed": True, "kind": "synthetic_fixture"},
+        data_root=data,
+    )
+    project_adoption._write_json(
+        sd / "legacy_owner_reviews" / token / "001-r09.json", {"intent": "INVESTIGATE"}
+    )
+    with pytest.raises(AdoptionError, match="unexpected or unsafe records"):
+        project_adoption.status(project, data_root=data)
+
+
+def test_legacy_review_history_foreign_finding_record_fails_closed(tmp_path):
+    project, data, sd = _active_legacy_with_saved_result(tmp_path)
+    (project.root / "AGENTS.md").write_bytes(b"# synthetic changed KEEP\n")
+    token = project_adoption.status(project, data_root=data)[
+        "legacy_configuration_readiness"]["owner_review"]["snapshot_token"]
+    project_adoption.record_legacy_review_intent(
+        project, 1, "INVESTIGATE", snapshot_token=token,
+        authority=lambda s: {"confirmed": True, "kind": "synthetic_fixture"},
+        data_root=data,
+    )
+    project_adoption._write_json(
+        sd / "legacy_owner_reviews" / token / "061.json", {"intent": "DEFER"}
+    )
+    with pytest.raises(AdoptionError, match="unexpected or unsafe records"):
+        project_adoption.status(project, data_root=data)
+
+
+def test_legacy_reversible_plan_targets_are_readonly_and_snapshot_bound(tmp_path):
+    project, data, sd = _active_legacy_with_saved_result(tmp_path)
+    keep = project.root / "AGENTS.md"
+    keep.write_bytes(b"# synthetic owner edit\n")
+    before = project_adoption._state(sd, project)
+    review = project_adoption.status(project, data_root=data)[
+        "legacy_configuration_readiness"]["owner_review"]
+    token = review["snapshot_token"]
+    project_adoption.record_legacy_review_intent(
+        project, 1, "REQUEST_REVERSIBLE_PLAN", snapshot_token=token,
+        authority=lambda s: {"confirmed": True, "kind": "synthetic_fixture"},
+        data_root=data,
+    )
+    options = project_adoption.status(project, data_root=data)[
+        "legacy_configuration_readiness"]["owner_review"]["plan_target_options"]
+    assert options == {"1": [
+        "RESTORE_ORIGINAL_KEEP_FOR_REVIEW", "RETAIN_CURRENT_FOR_REVIEW"
+    ]}
+    plan = project_adoption.draft_legacy_reversible_plan(
+        project, snapshot_token=token,
+        targets={1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}, data_root=data,
+    )
+    assert plan["entries"][0]["confirmed_plan_intent_revision"] == 1
+    assert plan["entries"][0]["caller_selected_target"] == "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"
+    assert plan["remediation_authorized"] is False
+    assert plan["caller_targets_are_verified_owner_consent"] is False
+    assert plan["independent_fable_authority"] == "NOT_GRANTED"
+    assert len(plan["plan_digest"]) == 64
+    assert keep.read_bytes() == b"# synthetic owner edit\n"
+    assert project_adoption._state(sd, project) == before
+    assert project_adoption.status(project, data_root=data)[
+        "legacy_configuration_readiness"]["state"] == "DRIFTED"
+
+
+def test_legacy_reversible_plan_refuses_unrequested_and_bad_targets(tmp_path):
+    project, data, sd = _active_legacy_with_saved_result(tmp_path)
+    (project.root / "AGENTS.md").write_bytes(b"# synthetic owner edit\n")
+    token = project_adoption.status(project, data_root=data)[
+        "legacy_configuration_readiness"]["owner_review"]["snapshot_token"]
+    for unwanted in ({1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}, {}, {True: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}):
+        with pytest.raises(AdoptionError):
+            project_adoption.draft_legacy_reversible_plan(
+                project, snapshot_token=token, targets=unwanted, data_root=data,
+            )
+    project_adoption.record_legacy_review_intent(
+        project, 1, "DEFER", snapshot_token=token,
+        authority=lambda s: {"confirmed": True, "kind": "synthetic_fixture"},
+        data_root=data,
+    )
+    with pytest.raises(AdoptionError, match="Every requested plan finding"):
+        project_adoption.draft_legacy_reversible_plan(
+            project, snapshot_token=token,
+            targets={1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}, data_root=data,
+        )
+
+
+def test_legacy_reversible_plan_refuses_stale_token_and_wrong_kind(tmp_path):
+    project, data, sd = _active_legacy_with_saved_result(tmp_path)
+    keep = project.root / "AGENTS.md"
+    keep.write_bytes(b"# synthetic first owner edit\n")
+    token = project_adoption.status(project, data_root=data)[
+        "legacy_configuration_readiness"]["owner_review"]["snapshot_token"]
+    project_adoption.record_legacy_review_intent(
+        project, 1, "REQUEST_REVERSIBLE_PLAN", snapshot_token=token,
+        authority=lambda s: {"confirmed": True, "kind": "synthetic_fixture"},
+        data_root=data,
+    )
+    with pytest.raises(AdoptionError, match="Target incompatible"):
+        project_adoption.draft_legacy_reversible_plan(
+            project, snapshot_token=token,
+            targets={1: "REISOLATE_ORIGINAL_DROP_FOR_REVIEW"}, data_root=data,
+        )
+    keep.write_bytes(b"# synthetic newer owner edit\n")
+    with pytest.raises(AdoptionError, match="snapshot stale"):
+        project_adoption.draft_legacy_reversible_plan(
+            project, snapshot_token=token,
+            targets={1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}, data_root=data,
+        )
+
+
+def test_legacy_architecture_plan_preview_remains_fable_held(tmp_path, monkeypatch):
+    project, data, sd = _active_legacy_with_saved_result(tmp_path)
+    monkeypatch.setattr(
+        project_adoption, "_legacy_architecture_hold",
+        lambda _root: {"architecture_review_required": True},
+    )
+    review = project_adoption.status(project, data_root=data)[
+        "legacy_configuration_readiness"]["owner_review"]
+    token = review["snapshot_token"]
+    project_adoption.record_legacy_review_intent(
+        project, 1, "REQUEST_REVERSIBLE_PLAN", snapshot_token=token,
+        authority=lambda s: {"confirmed": True, "kind": "synthetic_fixture"},
+        data_root=data,
+    )
+    plan = project_adoption.draft_legacy_reversible_plan(
+        project, snapshot_token=token,
+        targets={1: "PREPARE_PROTECTED_ALIGNMENT_REVIEW"}, data_root=data,
+    )
+    assert plan["entries"][0]["finding_change"] == "ARCHITECTURE_HOLD"
+    assert plan["activation_allowed"] is False
+    assert plan["independent_fable_authority"] == "NOT_GRANTED"
+    with pytest.raises(AdoptionError, match="manual review required"):
+        project_adoption.start(project, data_root=data)
