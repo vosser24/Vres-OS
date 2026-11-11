@@ -842,6 +842,19 @@ def _attest_active_record(sd: Path, project, record: dict[str, Any]) -> None:
     result = _read_json(sd / "activations" / activation / "result.json")
     if type(result) is not dict or result.get("inventory_version") != version:
         raise AdoptionError("Saved active legacy activation result is missing or inconsistent; manual review required")
+    # activate() always persists _evidence(authority, "ACTIVATE") in this
+    # original result. A manifest alone is not evidence of an operator-approved
+    # legacy activation. Match the historical _evidence contract rather than
+    # demanding new fields that would invalidate earlier valid callbacks.
+    evidence = result.get("authority")
+    if (
+        type(evidence) is not dict
+        or evidence.get("confirmed") is not True
+        or not evidence.get("kind")
+    ):
+        raise AdoptionError(
+            "Saved active legacy activation operator evidence is missing or inconsistent; manual review required"
+        )
     _validate_restore_manifest(Path(project.root), result.get("pre"), result.get("post"))
     _validate_restore_operations(
         result["pre"], result["post"], record.get("removed"), record.get("created")

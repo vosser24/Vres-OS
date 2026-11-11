@@ -276,3 +276,25 @@ def test_missing_saved_legacy_result_refuses_active_without_state_write(tmp_path
         with pytest.raises(AdoptionError, match="legacy activation result"):
             read(project, data_root=data)
     assert project_adoption._state(sd, project) == saved
+
+@pytest.mark.parametrize("damage", ["missing", "unconfirmed", "no_kind"])
+def test_active_legacy_result_without_original_confirmation_refuses_readonly(tmp_path, damage):
+    project, data, sd = _active_legacy_with_saved_result(tmp_path)
+    saved = project_adoption._state(sd, project)
+    result_path = sd / "activations" / saved["activation"] / "result.json"
+    result = project_adoption._read_json(result_path)
+    if damage == "missing":
+        result.pop("authority")
+    elif damage == "unconfirmed":
+        result["authority"]["confirmed"] = False
+    else:
+        result["authority"].pop("kind")
+    project_adoption._write_json(result_path, result)
+    kept = (project.root / "AGENTS.md").read_bytes()
+    scaffold = (project.root / "CLAUDE.md").read_bytes()
+    for read in (project_adoption.status, project_adoption.start):
+        with pytest.raises(AdoptionError, match="legacy activation operator evidence"):
+            read(project, data_root=data)
+    assert project_adoption._state(sd, project) == saved
+    assert (project.root / "AGENTS.md").read_bytes() == kept
+    assert (project.root / "CLAUDE.md").read_bytes() == scaffold
