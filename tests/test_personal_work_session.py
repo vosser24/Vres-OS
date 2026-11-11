@@ -1188,6 +1188,9 @@ def test_session_owner_plan_bridge_refuses_unapproved_target_or_implicit_state(t
     assert plan["entries"][0]["saved_original_keep_source_verified"] is True
     assert plan["entries"][0]["current_target_observation"] == "PRESENT_BOUNDED_SHA_ATTESTED"
     assert plan["current_target_observation_count"] == 1
+    assert plan["entries"][0]["target_preparation_contract"]["phase"] == "HELD_CANDIDATE_CHANGE"
+    assert plan["entries"][0]["target_preparation_contract"]["durable_current_target_preimage_saved"] is False
+    assert plan["separate_owner_consent_contract"]["project_write_permission"] is False
     assert plan["entries"][0]["proposed_target_rollback_verified"] is False
     assert plan["remediation_authorized"] is False
     assert packet["writes_performed"] is False

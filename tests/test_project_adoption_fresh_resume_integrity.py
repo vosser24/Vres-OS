@@ -1059,3 +1059,93 @@ def test_target_plan_refuses_current_target_change_after_selected_read(
             targets={1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}, data_root=data)
     assert changed == [True]
     assert keep.read_bytes() == b"# Synthetic late current-target change\n"
+
+
+def test_target_preparation_present_keep_requires_durable_preimage_and_separate_consent(tmp_path):
+    """AUTHORED NOT_RUN; original #168 preview only, synthetic temporary files."""
+    project, data, sd, keep, copy, token = _selected_original_keep_plan_fixture(tmp_path)
+    original_keep = keep.read_bytes()
+    original_copy = copy.read_bytes()
+    state_before = project_adoption._state(sd, project)
+    first = project_adoption.draft_legacy_reversible_plan(
+        project, snapshot_token=token,
+        targets={1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}, data_root=data)
+    second = project_adoption.draft_legacy_reversible_plan(
+        project, snapshot_token=token,
+        targets={1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}, data_root=data)
+    contract = first["entries"][0]["target_preparation_contract"]
+    assert first["plan_digest"] == second["plan_digest"]
+    assert contract["version"] == 1
+    assert contract["phase"] == "HELD_CANDIDATE_CHANGE"
+    assert contract["candidate_source"] == "VERIFIED_SAVED_ORIGINAL_KEEP_COPY"
+    assert contract["current_target_preimage_requirement"] == "DURABLE_EXACT_CURRENT_BYTES_AND_IDENTITY_REQUIRED"
+    assert contract["reverse_operation_requirement"] == "RESTORE_EXACT_CAPTURED_CURRENT_BYTES_REQUIRED"
+    assert contract["durable_current_target_preimage_saved"] is False
+    assert contract["actual_filesystem_rollback_verified"] is False
+    assert contract["project_write_authorized"] is False
+    assert first["held_project_mutation_candidate_count"] == 1
+    assert first["separate_owner_consent_contract"]["review_intent_is_not_project_write_approval"] is True
+    assert first["separate_owner_consent_contract"]["project_write_permission"] is False
+    assert keep.read_bytes() == original_keep and copy.read_bytes() == original_copy
+    assert project_adoption._state(sd, project) == state_before
+
+
+def test_target_preparation_missing_keep_requires_proven_absence_for_reversal(tmp_path):
+    """AUTHORED NOT_RUN; missing disposable selected target is not a rollback."""
+    project, data, _sd = _active_legacy_with_saved_result(tmp_path)
+    keep = project.root / "AGENTS.md"
+    keep.unlink()
+    token = project_adoption.status(project, data_root=data)[
+        "legacy_configuration_readiness"]["owner_review"]["snapshot_token"]
+    project_adoption.record_legacy_review_intent(
+        project, 1, "REQUEST_REVERSIBLE_PLAN", snapshot_token=token,
+        authority=lambda s: {"confirmed": True, "kind": "synthetic_fixture"},
+        data_root=data,
+    )
+    plan = project_adoption.draft_legacy_reversible_plan(
+        project, snapshot_token=token,
+        targets={1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}, data_root=data)
+    contract = plan["entries"][0]["target_preparation_contract"]
+    assert contract["current_target_preimage_requirement"] == "DURABLE_ABSENCE_AND_PARENT_IDENTITY_REQUIRED"
+    assert contract["reverse_operation_requirement"] == "RESTORE_CAPTURED_ABSENCE_REQUIRED"
+    assert contract["project_write_authorized"] is False
+    assert not keep.exists()
+
+
+def test_target_preparation_redacted_and_missing_parent_block_future_project_writes():
+    """AUTHORED NOT_RUN; pure original owner enums, no host or project access."""
+    helper = project_adoption._legacy_target_preparation_contract
+    for observed, expected in (
+        ("REDACTED_NO_TARGET_ATTESTATION", "BLOCK_REDACTED_OR_UNATTESTED_TARGET"),
+        ("ABSENT_PARENT_NOT_PRESENT", "BLOCK_MISSING_PARENT_REQUIRES_SEPARATE_STRUCTURE_PLAN"),
+    ):
+        contract = helper("REBUILD_CANONICAL_SCAFFOLD_FOR_REVIEW", observed, False)
+        assert contract["phase"] == "HELD_CANDIDATE_CHANGE"
+        assert contract["current_target_preimage_requirement"] == expected
+        assert contract["project_write_authorized"] is False
+        assert contract["durable_current_target_preimage_saved"] is False
+
+
+def test_target_preparation_review_and_architecture_lanes_are_nonexecuting():
+    """AUTHORED NOT_RUN; no filesystem operations or synthetic approvals."""
+    helper = project_adoption._legacy_target_preparation_contract
+    review = helper("RETAIN_CURRENT_FOR_REVIEW", "PRESENT_BOUNDED_SHA_ATTESTED", False)
+    architecture = helper("PREPARE_PROTECTED_ALIGNMENT_REVIEW", "REDACTED_NO_TARGET_ATTESTATION", False)
+    assert review["phase"] == "REVIEW_ONLY_NO_PROJECT_CHANGE"
+    assert architecture["phase"] == "PROTECTED_ARCHITECTURE_REVIEW_ONLY"
+    for contract in (review, architecture):
+        assert contract["current_target_preimage_requirement"] == "NOT_APPLICABLE_NO_PROJECT_CHANGE"
+        assert contract["separate_owner_write_approval_verified"] is False
+        assert contract["independent_protected_fable_high_granted"] is False
+        assert contract["project_write_authorized"] is False
+
+
+def test_target_preparation_refuses_unverified_original_keep_and_absent_remove():
+    """AUTHORED NOT_RUN; impossible candidate source/target pair fails closed."""
+    helper = project_adoption._legacy_target_preparation_contract
+    with pytest.raises(AdoptionError, match="source must be verified"):
+        helper("RESTORE_ORIGINAL_KEEP_FOR_REVIEW", "PRESENT_BOUNDED_SHA_ATTESTED", False)
+    with pytest.raises(AdoptionError, match="absent selected surface"):
+        helper("REISOLATE_ORIGINAL_DROP_FOR_REVIEW", "ABSENT_LEAF_OBSERVED", False)
+    with pytest.raises(AdoptionError, match="Unsupported proposed"):
+        helper("ARBITRARY_WRITE", "PRESENT_BOUNDED_SHA_ATTESTED", False)

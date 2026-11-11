@@ -2031,6 +2031,74 @@ def _observe_current_selected_target(root: Path, rel: str) -> tuple[str, str | N
     except (AdoptionError, OSError, ValueError, TypeError, RuntimeError):
         raise AdoptionError("Selected current target could not be safely attested") from None
 
+
+def _legacy_target_preparation_contract(
+    target: str, current_state: str, source_verified: bool,
+) -> dict[str, Any]:
+    """Pure read-only #168/#174 target-specific reversible-preparation contract.
+
+    This describes missing future evidence; it does NOT capture today's bytes,
+    create a target preimage, rehearse filesystem rollback, authorize a project
+    write or accept a review intention as the owner's action approval.
+    """
+    review_only = {
+        "RETAIN_CURRENT_FOR_REVIEW", "ACKNOWLEDGE_MISSING_FOR_REVIEW",
+        "RETAIN_NEW_SURFACE_FOR_REVIEW",
+    }
+    phase = "HELD_CANDIDATE_CHANGE"
+    source = "NONE_NO_NEW_CONTENT"
+    requirement = "NOT_APPLICABLE_NO_PROJECT_CHANGE"
+    reverse = "NOT_APPLICABLE_NO_PROJECT_CHANGE"
+    if target in review_only:
+        phase = "REVIEW_ONLY_NO_PROJECT_CHANGE"
+    elif target == "PREPARE_PROTECTED_ALIGNMENT_REVIEW":
+        phase = "PROTECTED_ARCHITECTURE_REVIEW_ONLY"
+    else:
+        sources = {
+            "RESTORE_ORIGINAL_KEEP_FOR_REVIEW": "VERIFIED_SAVED_ORIGINAL_KEEP_COPY",
+            "ISOLATE_NEW_SURFACE_FOR_REVIEW": "NO_NEW_CONTENT_ISOLATION_CANDIDATE",
+            "REISOLATE_ORIGINAL_DROP_FOR_REVIEW": "NO_NEW_CONTENT_ISOLATION_CANDIDATE",
+            "REBUILD_CANONICAL_SCAFFOLD_FOR_REVIEW": "CANONICAL_SCAFFOLD_SOURCE_NOT_YET_PINNED",
+        }
+        if target not in sources:
+            raise AdoptionError("Unsupported proposed legacy target preparation contract")
+        source = sources[target]
+        if target == "RESTORE_ORIGINAL_KEEP_FOR_REVIEW" and source_verified is not True:
+            raise AdoptionError("Original KEEP source must be verified before discussing a replacement")
+        removal = target in {
+            "ISOLATE_NEW_SURFACE_FOR_REVIEW", "REISOLATE_ORIGINAL_DROP_FOR_REVIEW",
+        }
+        if current_state == "PRESENT_BOUNDED_SHA_ATTESTED":
+            requirement = "DURABLE_EXACT_CURRENT_BYTES_AND_IDENTITY_REQUIRED"
+            reverse = "RESTORE_EXACT_CAPTURED_CURRENT_BYTES_REQUIRED"
+        elif current_state == "ABSENT_LEAF_OBSERVED":
+            if removal:
+                raise AdoptionError("An absent selected surface cannot be planned for isolation")
+            requirement = "DURABLE_ABSENCE_AND_PARENT_IDENTITY_REQUIRED"
+            reverse = "RESTORE_CAPTURED_ABSENCE_REQUIRED"
+        elif current_state == "ABSENT_PARENT_NOT_PRESENT":
+            if removal:
+                raise AdoptionError("An absent selected surface cannot be planned for isolation")
+            requirement = "BLOCK_MISSING_PARENT_REQUIRES_SEPARATE_STRUCTURE_PLAN"
+            reverse = "BLOCK_UNTIL_PARENT_STRUCTURE_AND_ABSENCE_PROOF"
+        elif current_state == "REDACTED_NO_TARGET_ATTESTATION":
+            requirement = "BLOCK_REDACTED_OR_UNATTESTED_TARGET"
+            reverse = "BLOCK_UNTIL_MANUAL_TARGET_REVIEW"
+        else:
+            raise AdoptionError("Unrecognized original target observation")
+    return {
+        "version": 1,
+        "phase": phase,
+        "candidate_source": source,
+        "current_target_preimage_requirement": requirement,
+        "reverse_operation_requirement": reverse,
+        "durable_current_target_preimage_saved": False,
+        "actual_filesystem_rollback_verified": False,
+        "separate_owner_write_approval_verified": False,
+        "independent_protected_fable_high_granted": False,
+        "project_write_authorized": False,
+    }
+
 def draft_legacy_reversible_plan(
     project, *, snapshot_token: str, targets: dict[int, str],
     data_root: Path | None = None,
@@ -2156,6 +2224,9 @@ def draft_legacy_reversible_plan(
             "caller_selected_target": selected,
             "saved_original_keep_source_verified": source_verified,
             "current_target_observation": current_state,
+            "target_preparation_contract": _legacy_target_preparation_contract(
+                selected, current_state, source_verified,
+            ),
             "new_target_preimage_durably_captured": False,
             "proposed_target_rollback_verified": False,
             "execution_authorized": False,
@@ -2163,6 +2234,8 @@ def draft_legacy_reversible_plan(
         })
 
     binding = {
+        "contract_version": 1,
+        "project_key": project.key,
         "snapshot_token": snapshot_token,
         "recorded_intents": review["recorded_intents"],
         "intent_revision_counts": review["intent_revision_counts"],
@@ -2184,6 +2257,23 @@ def draft_legacy_reversible_plan(
         "current_target_observation_count": len(current_target_evidence),
         "current_target_identity_bound_to_plan_digest": bool(current_target_evidence),
         "current_target_content_and_raw_sha256_hidden": True,
+        "target_preparation_contract_version": 1,
+        "held_project_mutation_candidate_count": sum(
+            e["target_preparation_contract"]["phase"] == "HELD_CANDIDATE_CHANGE"
+            for e in entries
+        ),
+        "separate_owner_consent_contract": {
+            "state": "NOT_REQUESTED_OR_VERIFIED",
+            "review_intent_is_not_project_write_approval": True,
+            "required_future_binding": [
+                "HUMAN_ACTOR_PROVENANCE", "EXACT_PROJECT_AND_SNAPSHOT_TOKEN",
+                "PLAN_DIGEST_AND_SELECTED_EFFECTS",
+                "DURABLE_NEW_TARGET_PREIMAGE_MANIFEST_DIGEST",
+                "VERIFIED_TARGET_SPECIFIC_ROLLBACK_AND_POSTIMAGE",
+                "INDEPENDENT_PROTECTED_FABLE_HIGH_VALIDATION",
+            ],
+            "project_write_permission": False,
+        },
         "proposed_target_preimages_verified": False,
         "proposed_target_rollback_verified": False,
         "caller_targets_are_verified_owner_consent": False,
