@@ -924,3 +924,74 @@ def test_historical_activation_preimage_change_after_first_read_is_refused(
     assert not old.exists()
     assert extra.read_bytes() == b"# Later disposable local rule\n"
 
+def _selected_original_keep_plan_fixture(tmp_path):
+    project, data, sd = _active_legacy_with_saved_result(tmp_path)
+    keep = project.root / "AGENTS.md"
+    keep.write_bytes(b"# Synthetic later changed KEEP\n")
+    review = project_adoption.status(project, data_root=data)[
+        "legacy_configuration_readiness"]["owner_review"]
+    token = review["snapshot_token"]
+    assert token
+    project_adoption.record_legacy_review_intent(
+        project, 1, "REQUEST_REVERSIBLE_PLAN", snapshot_token=token,
+        authority=lambda s: {"confirmed": True, "kind": "synthetic_fixture"},
+        data_root=data,
+    )
+    copy = sd / "snapshots" / project_adoption._state(sd, project)["inventory_version"] / "0001"
+    return project, data, sd, keep, copy, token
+
+
+def test_target_original_keep_source_is_verified_without_rollback_approval(tmp_path):
+    project, data, sd, keep, copy, token = _selected_original_keep_plan_fixture(tmp_path)
+    before_state = project_adoption._state(sd, project)
+    before_source = copy.read_bytes()
+    plan = project_adoption.draft_legacy_reversible_plan(
+        project, snapshot_token=token,
+        targets={1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}, data_root=data)
+    selected = plan["entries"][0]
+    assert selected["saved_original_keep_source_verified"] is True
+    assert selected["new_target_preimage_durably_captured"] is False
+    assert selected["proposed_target_rollback_verified"] is False
+    assert plan["verified_original_keep_source_count"] == 1
+    assert plan["proposed_target_preimages_verified"] is False
+    assert plan["caller_targets_are_verified_owner_consent"] is False
+    assert plan["independent_fable_authority"] == "NOT_GRANTED"
+    assert str(project.root) not in str(plan)
+    assert str(data) not in str(plan)
+    assert copy.read_bytes() == before_source
+    assert keep.read_bytes() == b"# Synthetic later changed KEEP\n"
+    assert project_adoption._state(sd, project) == before_state
+
+
+def test_target_original_keep_source_corrupt_copy_refuses_draft(tmp_path):
+    project, data, _sd, keep, copy, token = _selected_original_keep_plan_fixture(tmp_path)
+    copy.write_bytes(b"Corrupted synthetic old KEEP source\n")
+    with pytest.raises(AdoptionError, match="original KEEP source copy could not be verified"):
+        project_adoption.draft_legacy_reversible_plan(
+            project, snapshot_token=token,
+            targets={1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}, data_root=data)
+    assert keep.read_bytes() == b"# Synthetic later changed KEEP\n"
+
+
+def test_target_original_keep_source_late_copy_replacement_refuses_draft(
+    tmp_path, monkeypatch,
+):
+    project, data, _sd, keep, copy, token = _selected_original_keep_plan_fixture(tmp_path)
+    real_read = project_adoption._read_verified_preimage
+    changed = []
+
+    def mutate_after_read(pre_dir, name, expected_sha, rel):
+        payload = real_read(pre_dir, name, expected_sha, rel)
+        if not changed:
+            copy.write_bytes(b"Corrupted during synthetic plan drafting\n")
+            changed.append(rel)
+        return payload
+
+    monkeypatch.setattr(project_adoption, "_read_verified_preimage", mutate_after_read)
+    with pytest.raises(AdoptionError, match="original KEEP source copy changed during review"):
+        project_adoption.draft_legacy_reversible_plan(
+            project, snapshot_token=token,
+            targets={1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}, data_root=data)
+    assert changed == ["AGENTS.md"]
+    assert keep.read_bytes() == b"# Synthetic later changed KEEP\n"
+

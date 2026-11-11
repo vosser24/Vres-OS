@@ -2001,12 +2001,76 @@ def draft_legacy_reversible_plan(
                    for number, value in targets.items())):
         raise AdoptionError("Every requested plan finding needs one explicit target")
     findings = {finding["number"]: finding for finding in review["findings"]}
+
+    # Read ONLY ORIGINAL pre-adoption KEEP copies for targets that explicitly
+    # propose restoring those bytes. This is candidate-source integrity, NOT
+    # a durable preimage of today's file or a verified rollback of a new change.
+    original_items: dict[str, dict[str, Any]] = {}
+    original_snapshot = None
+    original_snapshot_path = None
+    original_copies_dir = None
+    verified_sources: list[tuple[str, str, str]] = []
+    if "RESTORE_ORIGINAL_KEEP_FOR_REVIEW" in targets.values():
+        from .paths import data_dir_path
+
+        root = Path(project.root).resolve(strict=True)
+        base = Path(data_root) if data_root is not None else data_dir_path()
+        sd = base / "projects" / hashlib.sha256(project.key.encode("utf-8")).hexdigest()[:24]
+        record = _state(sd, project)
+        version = record.get("inventory_version") if type(record) is dict else None
+        if (
+            type(record) is not dict or record.get("state") != "active"
+            or type(version) is not str or re.fullmatch(r"[0-9a-f]{64}", version) is None
+        ):
+            raise AdoptionError("Original KEEP source evidence is unavailable")
+        original_snapshot_path = sd / "snapshots" / f"{version}.json"
+        original_copies_dir = sd / "snapshots" / version
+        original_snapshot = _read_json(original_snapshot_path)
+        if (
+            type(original_snapshot) is not dict
+            or original_snapshot.get("version") != version
+            or type(original_snapshot.get("items")) is not list
+            or len(original_snapshot["items"]) > _MAX_ITEMS
+        ):
+            raise AdoptionError("Original KEEP source snapshot is unavailable")
+        for saved_item in original_snapshot["items"]:
+            if type(saved_item) is not dict or type(saved_item.get("path")) is not str:
+                raise AdoptionError("Original KEEP source snapshot is malformed")
+            rel = saved_item["path"]
+            if rel in original_items:
+                raise AdoptionError("Original KEEP source snapshot contains duplicate paths")
+            original_items[rel] = saved_item
+
     entries = []
     for number in sorted(requested):
         selected = targets[number]
         if selected not in requested[number] or not requested[number]:
             raise AdoptionError("Target incompatible with the original finding and review")
         finding = findings[number]
+        source_verified = False
+        if selected == "RESTORE_ORIGINAL_KEEP_FOR_REVIEW":
+            rel = finding["path"]
+            saved_item = original_items.get(rel)
+            if (
+                type(rel) is not str or finding["path_redacted"] is not False
+                or type(saved_item) is not dict
+                or saved_item.get("status") != "ok"
+                or type(saved_item.get("options")) is not dict
+                or "KEEP" not in saved_item["options"]
+                or type(saved_item.get("number")) is not int
+                or not 1 <= saved_item["number"] <= _MAX_ITEMS
+                or type(saved_item.get("sha256")) is not str
+                or re.fullmatch(r"[0-9a-f]{64}", saved_item["sha256"]) is None
+            ):
+                raise AdoptionError("Selected original KEEP source is not verifiable")
+            filename = f"{saved_item['number']:04d}"
+            digest = saved_item["sha256"]
+            try:
+                _read_verified_preimage(original_copies_dir, filename, digest, rel)
+            except (AdoptionError, OSError, ValueError, TypeError):
+                raise AdoptionError("Selected original KEEP source copy could not be verified") from None
+            verified_sources.append((filename, digest, rel))
+            source_verified = True
         entries.append({
             "number": number,
             "finding_change": finding["change"],
@@ -2015,6 +2079,9 @@ def draft_legacy_reversible_plan(
             "path_redacted": finding["path_redacted"],
             "confirmed_plan_intent_revision": review["intent_revision_counts"][str(number)],
             "caller_selected_target": selected,
+            "saved_original_keep_source_verified": source_verified,
+            "new_target_preimage_durably_captured": False,
+            "proposed_target_rollback_verified": False,
             "execution_authorized": False,
             "preimage_and_rollback_verification_required": True,
         })
@@ -2036,6 +2103,9 @@ def draft_legacy_reversible_plan(
         "project_key": project.key,
         "entries": entries,
         "pending_owner_review_numbers": list(review["pending_displayed_numbers"]),
+        "verified_original_keep_source_count": len(verified_sources),
+        "proposed_target_preimages_verified": False,
+        "proposed_target_rollback_verified": False,
         "caller_targets_are_verified_owner_consent": False,
         "original_keep_drop_unchanged": True,
         "project_changes_performed": False,
@@ -2060,8 +2130,19 @@ def draft_legacy_reversible_plan(
     ).encode("utf-8")
     if len(encoded) > 65536:
         raise AdoptionError("Legacy reversible-plan preview exceeds bounded limit")
-    if status(project, data_root=data_root) != observed:
+    if (
+        status(project, data_root=data_root) != observed
+        or (original_snapshot_path is not None
+            and _read_json(original_snapshot_path) != original_snapshot)
+    ):
         raise AdoptionError("Legacy plan snapshot or owner intentions changed during drafting")
+    # Re-attest candidate copies after potentially lengthy status/source reads.
+    # This remains cooperative, not an atomic lock or a new rollback guarantee.
+    for filename, digest, rel in verified_sources:
+        try:
+            _read_verified_preimage(original_copies_dir, filename, digest, rel)
+        except (AdoptionError, OSError, ValueError, TypeError):
+            raise AdoptionError("Selected original KEEP source copy changed during review") from None
     return output
 
 
