@@ -831,3 +831,71 @@ def test_legacy_architecture_plan_preview_remains_fable_held(tmp_path, monkeypat
     assert plan["independent_fable_authority"] == "NOT_GRANTED"
     with pytest.raises(AdoptionError, match="manual review required"):
         project_adoption.start(project, data_root=data)
+
+
+def _synthetic_active_legacy_saved_preimage(tmp_path):
+    root = tmp_path / "synthetic-legacy-rollback-assets"
+    root.mkdir()
+    old = root / "AGENTS.md"
+    old.write_bytes(b"# Original disposable legacy fixture\n")
+    project = SimpleNamespace(root=root.resolve(), name=root.name, key="synthetic:rollback-assets")
+    data = tmp_path / "synthetic-rollback-state"
+    pending = project_adoption.start(project, data_root=data)
+    assert pending["state"] == "awaiting_operator"
+    authority = lambda statement: {"confirmed": True, "kind": "synthetic_fixture"}
+    project_adoption.decide(project, 1, "DROP", authority=authority, data_root=data)
+    assert project_adoption.activate(project, authority=authority, data_root=data)["state"] == "active"
+    extra = root / ".claude" / "rules" / "later.md"
+    extra.parent.mkdir(parents=True)
+    extra.write_bytes(b"# Later disposable local rule\n")
+    review = project_adoption.status(project, data_root=data)["legacy_configuration_readiness"]["owner_review"]
+    assert review["snapshot_token"]
+    return project, data, old, extra, review["snapshot_token"]
+
+
+def test_historical_activation_preimages_are_verified_not_new_plan_approval(tmp_path):
+    project, data, old, extra, token = _synthetic_active_legacy_saved_preimage(tmp_path)
+    report = project_adoption.inspect_legacy_activation_rollback_evidence(
+        project, snapshot_token=token, data_root=data)
+    assert report["saved_manifest_entry_count"] == 2
+    assert report["verified_saved_preimage_file_count"] == 1
+    assert report["saved_absent_preimage_count"] == 1
+    assert report["historical_postimage_surface_matches_saved_result"] is True
+    assert report["proposed_target_rollback_verified"] is False
+    assert report["remediation_owner_consent_verified"] is False
+    assert report["independent_fable_authority"] == "NOT_GRANTED"
+    assert str(project.root) not in str(report)
+    assert str(data) not in str(report)
+    assert not old.exists()
+    assert extra.read_bytes() == b"# Later disposable local rule\n"
+
+
+def test_historical_activation_corrupt_preimage_fails_closed(tmp_path):
+    project, data, old, extra, token = _synthetic_active_legacy_saved_preimage(tmp_path)
+    sd = project_adoption._state_dir(project, data)
+    record = project_adoption._state(sd, project)
+    saved = project_adoption._read_json(sd / "activations" / record["activation"] / "result.json")
+    entry = saved["pre"]["AGENTS.md"]
+    (sd / "activations" / record["activation"] / "pre" / entry["copy"]).write_bytes(
+        b"Corrupt synthetic saved preimage\n")
+    with pytest.raises(AdoptionError, match="historical rollback evidence could not be verified"):
+        project_adoption.inspect_legacy_activation_rollback_evidence(
+            project, snapshot_token=token, data_root=data)
+    assert not old.exists()
+    assert extra.read_bytes() == b"# Later disposable local rule\n"
+
+
+def test_historical_activation_changed_postimage_blocks_readiness(tmp_path):
+    project, data, old, extra, _token = _synthetic_active_legacy_saved_preimage(tmp_path)
+    (project.root / "CLAUDE.md").write_bytes(b"# Synthetic changed scaffold\n")
+    token = project_adoption.status(
+        project, data_root=data)["legacy_configuration_readiness"]["owner_review"]["snapshot_token"]
+    assert token
+    report = project_adoption.inspect_legacy_activation_rollback_evidence(
+        project, snapshot_token=token, data_root=data)
+    assert report["changed_or_unverifiable_historical_postimage_count"] > 0
+    assert report["historical_postimage_surface_matches_saved_result"] is False
+    assert report["proposed_target_rollback_verified"] is False
+    assert report["activation_allowed"] is False
+    assert not old.exists()
+    assert extra.exists()

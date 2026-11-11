@@ -2064,6 +2064,104 @@ def draft_legacy_reversible_plan(
         raise AdoptionError("Legacy plan snapshot or owner intentions changed during drafting")
     return output
 
+
+def inspect_legacy_activation_rollback_evidence(
+    project, *, snapshot_token: str, data_root: Path | None = None,
+) -> dict[str, Any]:
+    """Verify ORIGINAL #168 historical rollback assets without changing state.
+
+    This is NOT a proof for proposed remediation targets, owner consent, or
+    protected Fable/high validation. Reads existing local data only; no writes.
+    """
+    if type(snapshot_token) is not str or re.fullmatch(r"[0-9a-f]{64}", snapshot_token) is None:
+        raise AdoptionError("An exact original legacy snapshot token is required")
+    try:
+        observed = status(project, data_root=data_root)
+    except (AdoptionError, OSError, ValueError, TypeError):
+        raise AdoptionError("Original legacy rollback state could not be inspected") from None
+    readiness = observed.get("legacy_configuration_readiness", {})
+    review = readiness.get("owner_review", {})
+    if (
+        observed.get("state") != "active"
+        or readiness.get("state") != "DRIFTED"
+        or review.get("snapshot_token") != snapshot_token
+        or review.get("truncated") is not False
+    ):
+        raise AdoptionError("Original legacy review snapshot is stale or unavailable")
+    try:
+        from .paths import data_dir_path
+
+        root = Path(project.root).resolve(strict=True)
+        base = Path(data_root) if data_root is not None else data_dir_path()
+        sd = base / "projects" / hashlib.sha256(project.key.encode("utf-8")).hexdigest()[:24]
+        record = _state(sd, project)
+        if type(record) is not dict or record.get("state") != "active":
+            raise AdoptionError("Original activation state unavailable")
+        activation = _checked_activation_id(record.get("activation"))
+        result_path = sd / "activations" / activation / "result.json"
+        saved = _read_json(result_path)
+        if type(saved) is not dict or saved.get("inventory_version") != record.get("inventory_version"):
+            raise AdoptionError("Original activation result unavailable")
+        pre, post = saved.get("pre"), saved.get("post")
+        _validate_restore_manifest(root, pre, post)
+        _validate_restore_operations(pre, post, record.get("removed"), record.get("created"))
+
+        # Existing owner validates bounded pre-image bytes, link identity and
+        # SHA-256; contents and paths are never returned to the caller.
+        pre_dir = sd / "activations" / activation / "pre"
+        verified = 0
+        for rel, entry in pre.items():
+            if entry["existed"]:
+                _read_verified_preimage(pre_dir, entry["copy"], entry["sha256"], rel)
+                verified += 1
+
+        # Use the original bounded/secret-aware inventory, not unrestricted
+        # read_bytes over a caller-controlled project path.
+        current = inventory(root)
+        live = {item["path"]: item for item in current["items"]}
+        matching = 0
+        for rel, expected in post.items():
+            item = live.get(rel)
+            if (
+                (expected is None and item is None)
+                or (expected is not None and item is not None
+                    and item["status"] == "ok" and item["sha256"] == expected)
+            ):
+                matching += 1
+        # Cooperative closing read: this is never an atomic snapshot.
+        if (
+            status(project, data_root=data_root) != observed
+            or _state(sd, project) != record
+            or _read_json(result_path) != saved
+            or inventory(root) != current
+        ):
+            raise AdoptionError("Original rollback evidence changed during inspection")
+    except (AdoptionError, OSError, ValueError, TypeError, KeyError, AttributeError):
+        raise AdoptionError("Original historical rollback evidence could not be verified") from None
+
+    mismatch = len(post) - matching
+    return {
+        "status": "READ_ONLY_ORIGINAL_LEGACY_ACTIVATION_ROLLBACK_EVIDENCE",
+        "snapshot_token": snapshot_token,
+        "saved_manifest_entry_count": len(pre),
+        "verified_saved_preimage_file_count": verified,
+        "saved_absent_preimage_count": len(pre) - verified,
+        "exact_historical_postimage_count": matching,
+        "changed_or_unverifiable_historical_postimage_count": mismatch,
+        "historical_postimage_surface_matches_saved_result": mismatch == 0,
+        "proposed_target_preimages_verified": False,
+        "proposed_target_rollback_verified": False,
+        "remediation_owner_consent_verified": False,
+        "source_paths_and_preimage_hashes_hidden": True,
+        "original_keep_drop_unchanged": True,
+        "project_changes_performed": False,
+        "remediation_authorized": False,
+        "activation_allowed": False,
+        "independent_fable_authority": "NOT_GRANTED",
+        "native_claude_or_hooks_executed": False,
+        "database_contacted": False,
+    }
+
 # ----------------------------------------------------------------------- offline architecture plan check
 
 def _current_architecture_review(

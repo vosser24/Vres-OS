@@ -1252,3 +1252,36 @@ def test_session_legacy_final_guard_rechecks_result_and_owner_state(
         with pytest.raises(session.WorkSessionRefused, match="Legacy owner review changed"):
             session.review_session(desk_root, task, **kwargs)
         assert len(reads) == edit_on_read
+
+
+def test_session_original_rollback_evidence_is_opt_in_and_path_hidden(tmp_path):
+    desk_root, project, data, keep, token = _synthetic_legacy_work_review(tmp_path)
+    packet = session.review_session(
+        desk_root, "TASK-LEGACY-REVIEW",
+        project_root=project.root, project_key=project.key,
+        include_legacy_owner_review=True, legacy_review_data_root=data,
+        include_legacy_rollback_evidence=True)
+    report = packet["selected_legacy_owner_review"]["original_activation_rollback_evidence"]
+    assert report["status"] == "READ_ONLY_ORIGINAL_LEGACY_ACTIVATION_ROLLBACK_EVIDENCE"
+    assert report["snapshot_token"] == token
+    assert report["historical_postimage_surface_matches_saved_result"] is True
+    assert report["remediation_owner_consent_verified"] is False
+    assert report["proposed_target_rollback_verified"] is False
+    assert packet["writes_performed"] is False
+    assert str(project.root) not in json.dumps(packet)
+    assert str(data) not in json.dumps(packet)
+    assert keep.read_bytes() == b"# Synthetic owner edit\n"
+
+
+def test_session_rollback_evidence_requires_original_opt_in(tmp_path):
+    desk_root, project, data, _keep, _token = _synthetic_legacy_work_review(tmp_path)
+    kwargs = dict(project_root=project.root, project_key=project.key)
+    with pytest.raises(session.WorkSessionRefused, match="requires original legacy owner review"):
+        session.review_session(
+            desk_root, "TASK-LEGACY-REVIEW", **kwargs,
+            include_legacy_rollback_evidence=True)
+    with pytest.raises(session.WorkSessionRefused, match="exact boolean"):
+        session.review_session(
+            desk_root, "TASK-LEGACY-REVIEW", **kwargs,
+            include_legacy_owner_review=True, legacy_review_data_root=data,
+            include_legacy_rollback_evidence=1)

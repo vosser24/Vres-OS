@@ -266,6 +266,7 @@ def _selected_legacy_owner_review(
     project_root: str | Path, project_key: str, data_root: str | Path, *,
     snapshot_token: str | None = None,
     targets: dict[int, str] | None = None,
+    include_rollback_evidence: bool = False,
 ) -> dict[str, Any]:
     """#168 owner evidence in the existing Chairman work-session, read only.
 
@@ -296,6 +297,10 @@ def _selected_legacy_owner_review(
                 identity, snapshot_token=snapshot_token, targets=targets,
                 data_root=state_root,
             )
+        rollback_evidence = None
+        if include_rollback_evidence:
+            rollback_evidence = project_adoption.inspect_legacy_activation_rollback_evidence(
+                identity, snapshot_token=review["snapshot_token"], data_root=state_root)
         if first != project_adoption.status(identity, data_root=state_root):
             raise WorkSessionRefused("Legacy review changed during read")
     except (project_adoption.AdoptionError, OSError, ValueError, TypeError, KeyError):
@@ -310,6 +315,7 @@ def _selected_legacy_owner_review(
         "pending_displayed_numbers": review["pending_displayed_numbers"],
         "plan_target_options": review["plan_target_options"],
         "selected_reversible_plan": plan,
+        "original_activation_rollback_evidence": rollback_evidence,
         "project_and_state_paths_hidden": True,
         "caller_targets_are_verified_owner_consent": False,
         "project_changes_performed": False,
@@ -458,6 +464,7 @@ def review_session(desk: str | Path, task: str, *,
                    legacy_review_data_root: str | Path | None = None,
                    legacy_review_snapshot_token: str | None = None,
                    legacy_review_targets: dict[int, str] | None = None,
+                   include_legacy_rollback_evidence: bool = False,
                    include_experience_provenance: bool = False,
                    include_chairman_candidate: bool = False,
                    chairman_history_document: bytes | None = None,
@@ -477,6 +484,10 @@ def review_session(desk: str | Path, task: str, *,
         raise WorkSessionRefused("Project intake selection must be an exact boolean")
     if type(include_legacy_owner_review) is not bool:
         raise WorkSessionRefused("Legacy owner-review selection must be an exact boolean")
+    if type(include_legacy_rollback_evidence) is not bool:
+        raise WorkSessionRefused("Legacy rollback evidence selection must be an exact boolean")
+    if include_legacy_rollback_evidence and not include_legacy_owner_review:
+        raise WorkSessionRefused("Rollback evidence requires original legacy owner review")
     if include_legacy_owner_review:
         if (project_root is None or project_key is None
                 or legacy_review_data_root is None):
@@ -553,6 +564,7 @@ def review_session(desk: str | Path, task: str, *,
                     project_root, project_key, legacy_review_data_root,
                     snapshot_token=legacy_review_snapshot_token,
                     targets=legacy_review_targets,
+                    include_rollback_evidence=include_legacy_rollback_evidence,
                 )
             if include_chairman_candidate:
                 selected_chairman_candidate = _selected_chairman_candidate_preview(
@@ -577,6 +589,7 @@ def review_session(desk: str | Path, task: str, *,
                         project_root, project_key, legacy_review_data_root,
                         snapshot_token=legacy_review_snapshot_token,
                         targets=legacy_review_targets,
+                        include_rollback_evidence=include_legacy_rollback_evidence,
                     )
                     if fresh_legacy != selected_legacy_review:
                         raise WorkSessionRefused("Legacy owner review changed during task scan")
@@ -673,6 +686,7 @@ def review_session(desk: str | Path, task: str, *,
             project_root, project_key, legacy_review_data_root,
             snapshot_token=legacy_review_snapshot_token,
             targets=legacy_review_targets,
+            include_rollback_evidence=include_legacy_rollback_evidence,
         )
         if closing_legacy != selected_legacy_review:
             raise WorkSessionRefused("Legacy owner review changed during final work-session inspection")
@@ -691,7 +705,8 @@ def review_session(desk: str | Path, task: str, *,
             if _selected_legacy_owner_review(
                     project_root, project_key, legacy_review_data_root,
                     snapshot_token=legacy_review_snapshot_token,
-                    targets=legacy_review_targets) != selected_legacy_review:
+                    targets=legacy_review_targets,
+                    include_rollback_evidence=include_legacy_rollback_evidence) != selected_legacy_review:
                 raise WorkSessionRefused("Legacy owner review changed during closing result inspection")
     return {
         "schema": SCHEMA,
