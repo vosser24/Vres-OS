@@ -658,6 +658,41 @@ def review_session(desk: str | Path, task: str, *,
                     or handoff._exact_json(final_result["work_brief"])
                     != handoff._exact_json(brief)):
                 raise WorkSessionRefused("Result changed during final saved catalog read")
+    if include_legacy_owner_review:
+        # The earlier legacy recheck precedes selected-result inspection and
+        # the final saved-catalog read. Re-attest the ORIGINAL owners after
+        # those operations, so a late edit cannot be presented as the earlier
+        # owner-selected plan. These checks are cooperative, NOT atomic.
+        closing_brief = handoff.inspect_work_brief(
+            desk, task, project_root, project_key)
+        if (closing_brief["scratch_handoff"]["selected_note_sha256"] != selected_sha
+                or closing_brief["project_binding_sha256"] != project_binding
+                or handoff._exact_json(closing_brief) != handoff._exact_json(brief)):
+            raise WorkSessionRefused("Task or project scan changed during final legacy review")
+        closing_legacy = _selected_legacy_owner_review(
+            project_root, project_key, legacy_review_data_root,
+            snapshot_token=legacy_review_snapshot_token,
+            targets=legacy_review_targets,
+        )
+        if closing_legacy != selected_legacy_review:
+            raise WorkSessionRefused("Legacy owner review changed during final work-session inspection")
+        if observed is not None:
+            closing_result = result.inspect_work_result(
+                desk, task, project_root, project_key, result_file,
+                expected_checkpoint_sha256=inspected["checkpoint_sha256"])
+            if (closing_result["status"] != inspected["status"]
+                    or closing_result["checkpoint_sha256"] != inspected["checkpoint_sha256"]
+                    or closing_result["result_sha256"] != inspected["result_sha256"]
+                    or closing_result["result_bytes"] != inspected["result_bytes"]
+                    or handoff._exact_json(closing_result["work_brief"])
+                    != handoff._exact_json(brief)):
+                raise WorkSessionRefused("Result changed during final legacy review")
+            # The late result read could itself outlast a legacy-file edit.
+            if _selected_legacy_owner_review(
+                    project_root, project_key, legacy_review_data_root,
+                    snapshot_token=legacy_review_snapshot_token,
+                    targets=legacy_review_targets) != selected_legacy_review:
+                raise WorkSessionRefused("Legacy owner review changed during closing result inspection")
     return {
         "schema": SCHEMA,
         "status": ("ACTIVE_WORK_SESSION_REVIEW" if active

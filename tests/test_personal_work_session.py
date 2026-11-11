@@ -1207,3 +1207,48 @@ def test_session_owner_review_refuses_source_changed_during_task_scan(tmp_path, 
             project_root=project.root, project_key=project.key,
             include_legacy_owner_review=True, legacy_review_data_root=data,
         )
+
+
+@pytest.mark.parametrize("edit_on_read", (None, 1, 2))
+def test_session_legacy_final_guard_rechecks_result_and_owner_state(
+        tmp_path, monkeypatch, edit_on_read):
+    """Three synthetic orderings; result owner is mocked, not executed."""
+    desk_root, project, data, keep, _token = _synthetic_legacy_work_review(tmp_path)
+    task = "TASK-LEGACY-REVIEW"
+    # Freeze the coarse work-brief scan to isolate an AGENTS.md content edit
+    # that is visible to the original #168 cryptographic review snapshot.
+    brief = session.handoff.inspect_work_brief(
+        desk_root, task, project.root, project.key)
+    monkeypatch.setattr(
+        session.handoff, "inspect_work_brief",
+        lambda *_args, **_kwargs: brief,
+    )
+    reads = []
+
+    def synthetic_result_read(*_args, **_kwargs):
+        reads.append(True)
+        if len(reads) == edit_on_read:
+            keep.write_bytes(b"# Later edit during synthetic result inspection\\n")
+        return {
+            "status": "RESULT_EXACT_CONTEXT_CHECKPOINT_MATCH",
+            "checkpoint_sha256": "a" * 64,
+            "result_sha256": "b" * 64,
+            "result_bytes": 18,
+            "work_brief": brief,
+        }
+
+    monkeypatch.setattr(session.result, "inspect_work_result", synthetic_result_read)
+    kwargs = dict(
+        project_root=project.root, project_key=project.key,
+        include_legacy_owner_review=True, legacy_review_data_root=data,
+        result_file=tmp_path / "synthetic-result-owner-seam.md",
+    )
+    if edit_on_read is None:
+        packet = session.review_session(desk_root, task, **kwargs)
+        assert packet["selected_legacy_owner_review"]["remediation_authorized"] is False
+        assert packet["observed_result"]["result_sha256"] == "b" * 64
+        assert len(reads) == 2
+    else:
+        with pytest.raises(session.WorkSessionRefused, match="Legacy owner review changed"):
+            session.review_session(desk_root, task, **kwargs)
+        assert len(reads) == edit_on_read
