@@ -899,3 +899,28 @@ def test_historical_activation_changed_postimage_blocks_readiness(tmp_path):
     assert report["activation_allowed"] is False
     assert not old.exists()
     assert extra.exists()
+
+def test_historical_activation_preimage_change_after_first_read_is_refused(
+    tmp_path, monkeypatch,
+):
+    project, data, old, extra, token = _synthetic_active_legacy_saved_preimage(tmp_path)
+    genuine_read = project_adoption._read_verified_preimage
+    changed = []
+
+    def mutate_after_verified_read(pre_dir, name, expected_sha, rel):
+        content = genuine_read(pre_dir, name, expected_sha, rel)
+        if not changed:
+            # Simulate a concurrent local writer immediately after a valid
+            # preimage read; the inspector itself must perform no writes.
+            (pre_dir / name).write_bytes(b"Tampered synthetic rollback copy\n")
+            changed.append(rel)
+        return content
+
+    monkeypatch.setattr(project_adoption, "_read_verified_preimage", mutate_after_verified_read)
+    with pytest.raises(AdoptionError, match="historical rollback evidence could not be verified"):
+        project_adoption.inspect_legacy_activation_rollback_evidence(
+            project, snapshot_token=token, data_root=data)
+    assert changed == ["AGENTS.md"]
+    assert not old.exists()
+    assert extra.read_bytes() == b"# Later disposable local rule\n"
+

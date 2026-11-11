@@ -2136,6 +2136,15 @@ def inspect_legacy_activation_rollback_evidence(
             or inventory(root) != current
         ):
             raise AdoptionError("Original rollback evidence changed during inspection")
+
+        # Saved preimages are themselves mutable local files. A first successful
+        # read does not remain valid if a preimage is replaced while the
+        # status/manifest/inventory rechecks above are running. Re-attest the
+        # original bounded copies before publishing the verified counts.
+        # This limits observable races; it is not a filesystem lock.
+        for rel, entry in pre.items():
+            if entry["existed"]:
+                _read_verified_preimage(pre_dir, entry["copy"], entry["sha256"], rel)
     except (AdoptionError, OSError, ValueError, TypeError, KeyError, AttributeError):
         raise AdoptionError("Original historical rollback evidence could not be verified") from None
 
