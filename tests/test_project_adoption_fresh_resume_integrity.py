@@ -995,3 +995,67 @@ def test_target_original_keep_source_late_copy_replacement_refuses_draft(
     assert changed == ["AGENTS.md"]
     assert keep.read_bytes() == b"# Synthetic later changed KEEP\n"
 
+
+def test_target_plan_binds_live_current_bytes_without_saving_preimage(tmp_path):
+    project, data, sd, keep, copy, token = _selected_original_keep_plan_fixture(tmp_path)
+    before = keep.read_bytes()
+    plan = project_adoption.draft_legacy_reversible_plan(
+        project, snapshot_token=token,
+        targets={1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}, data_root=data)
+    entry = plan["entries"][0]
+    assert entry["current_target_observation"] == "PRESENT_BOUNDED_SHA_ATTESTED"
+    assert plan["current_target_observation_count"] == 1
+    assert plan["current_target_identity_bound_to_plan_digest"] is True
+    assert plan["current_target_content_and_raw_sha256_hidden"] is True
+    assert hashlib.sha256(before).hexdigest() not in str(plan)
+    assert entry["new_target_preimage_durably_captured"] is False
+    assert entry["proposed_target_rollback_verified"] is False
+    assert keep.read_bytes() == before
+
+
+def test_target_plan_observes_missing_original_keep_without_inventing_rollback(tmp_path):
+    project, data, sd = _active_legacy_with_saved_result(tmp_path)
+    keep = project.root / "AGENTS.md"
+    keep.unlink()
+    review = project_adoption.status(project, data_root=data)[
+        "legacy_configuration_readiness"]["owner_review"]
+    assert review["findings"][0]["change"] == "MISSING_KEEP"
+    token = review["snapshot_token"]
+    project_adoption.record_legacy_review_intent(
+        project, 1, "REQUEST_REVERSIBLE_PLAN", snapshot_token=token,
+        authority=lambda s: {"confirmed": True, "kind": "synthetic_fixture"},
+        data_root=data,
+    )
+    plan = project_adoption.draft_legacy_reversible_plan(
+        project, snapshot_token=token,
+        targets={1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}, data_root=data)
+    entry = plan["entries"][0]
+    assert entry["current_target_observation"] == "ABSENT_LEAF_OBSERVED"
+    assert entry["saved_original_keep_source_verified"] is True
+    assert entry["new_target_preimage_durably_captured"] is False
+    assert entry["proposed_target_rollback_verified"] is False
+    assert not keep.exists()
+
+
+def test_target_plan_refuses_current_target_change_after_selected_read(
+    tmp_path, monkeypatch,
+):
+    project, data, sd, keep, copy, token = _selected_original_keep_plan_fixture(tmp_path)
+    real_observe = project_adoption._observe_current_selected_target
+    changed = []
+
+    def change_after_observation(root, rel):
+        result = real_observe(root, rel)
+        if not changed:
+            keep.write_bytes(b"# Synthetic late current-target change\n")
+            changed.append(True)
+        return result
+
+    monkeypatch.setattr(project_adoption, "_observe_current_selected_target",
+                        change_after_observation)
+    with pytest.raises(AdoptionError):
+        project_adoption.draft_legacy_reversible_plan(
+            project, snapshot_token=token,
+            targets={1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}, data_root=data)
+    assert changed == [True]
+    assert keep.read_bytes() == b"# Synthetic late current-target change\n"

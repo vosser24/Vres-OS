@@ -1997,6 +1997,32 @@ def record_legacy_review_intent(
 
 
 
+
+def _observe_current_selected_target(root: Path, rel: str) -> tuple[str, str | None]:
+    """Read-only current-target identity, NOT a durable target preimage.
+
+    Contents and raw SHA never leave the original adoption owner. A subsequent
+    call rechecks selected bytes/absence; no filesystem change, approval or
+    promised atomic future rollback is produced.
+    """
+    if type(rel) is not str or not rel:
+        raise AdoptionError("Selected current target has no safe path")
+    try:
+        path = _within(root, rel)
+        ancestors = _record_ancestor_identity(path)
+        leaf = _lstat(path)
+        if leaf is None:
+            return (
+                ("ABSENT_PARENT_NOT_PRESENT" if ancestors is None
+                 else "ABSENT_LEAF_OBSERVED"), None
+            )
+        if ancestors is None or _is_link(leaf) or not stat.S_ISREG(leaf.st_mode):
+            raise AdoptionError("Selected current target is not an ordinary file")
+        data = _read_verified_preimage(root, rel, None, "selected current target")
+        return "PRESENT_BOUNDED_SHA_ATTESTED", hashlib.sha256(data).hexdigest()
+    except (AdoptionError, OSError, ValueError, TypeError, RuntimeError):
+        raise AdoptionError("Selected current target could not be safely attested") from None
+
 def draft_legacy_reversible_plan(
     project, *, snapshot_token: str, targets: dict[int, str],
     data_root: Path | None = None,
@@ -2029,6 +2055,12 @@ def draft_legacy_reversible_plan(
                    for number, value in targets.items())):
         raise AdoptionError("Every requested plan finding needs one explicit target")
     findings = {finding["number"]: finding for finding in review["findings"]}
+    try:
+        root = Path(project.root).resolve(strict=True)
+    except (OSError, ValueError, RuntimeError):
+        raise AdoptionError("Selected original project root is unavailable") from None
+    # Exact current target identities remain internal to the plan-digest input.
+    current_target_evidence: list[dict[str, Any]] = []
 
     # Read ONLY ORIGINAL pre-adoption KEEP copies for targets that explicitly
     # propose restoring those bytes. This is candidate-source integrity, NOT
@@ -2041,7 +2073,6 @@ def draft_legacy_reversible_plan(
     if "RESTORE_ORIGINAL_KEEP_FOR_REVIEW" in targets.values():
         from .paths import data_dir_path
 
-        root = Path(project.root).resolve(strict=True)
         base = Path(data_root) if data_root is not None else data_dir_path()
         sd = base / "projects" / hashlib.sha256(project.key.encode("utf-8")).hexdigest()[:24]
         record = _state(sd, project)
@@ -2075,6 +2106,14 @@ def draft_legacy_reversible_plan(
         if selected not in requested[number] or not requested[number]:
             raise AdoptionError("Target incompatible with the original finding and review")
         finding = findings[number]
+        current_state = "REDACTED_NO_TARGET_ATTESTATION"
+        if finding["path_redacted"] is False:
+            rel = finding["path"]
+            current_state, current_digest = _observe_current_selected_target(root, rel)
+            current_target_evidence.append({
+                "number": number, "target": selected,
+                "path": rel, "state": current_state, "sha256": current_digest,
+            })
         source_verified = False
         if selected == "RESTORE_ORIGINAL_KEEP_FOR_REVIEW":
             rel = finding["path"]
@@ -2108,6 +2147,7 @@ def draft_legacy_reversible_plan(
             "confirmed_plan_intent_revision": review["intent_revision_counts"][str(number)],
             "caller_selected_target": selected,
             "saved_original_keep_source_verified": source_verified,
+            "current_target_observation": current_state,
             "new_target_preimage_durably_captured": False,
             "proposed_target_rollback_verified": False,
             "execution_authorized": False,
@@ -2119,6 +2159,7 @@ def draft_legacy_reversible_plan(
         "recorded_intents": review["recorded_intents"],
         "intent_revision_counts": review["intent_revision_counts"],
         "entries": entries,
+        "current_target_evidence": current_target_evidence,
     }
     digest = hashlib.sha256(
         json.dumps(binding, sort_keys=True, separators=(",", ":"),
@@ -2132,6 +2173,9 @@ def draft_legacy_reversible_plan(
         "entries": entries,
         "pending_owner_review_numbers": list(review["pending_displayed_numbers"]),
         "verified_original_keep_source_count": len(verified_sources),
+        "current_target_observation_count": len(current_target_evidence),
+        "current_target_identity_bound_to_plan_digest": bool(current_target_evidence),
+        "current_target_content_and_raw_sha256_hidden": True,
         "proposed_target_preimages_verified": False,
         "proposed_target_rollback_verified": False,
         "caller_targets_are_verified_owner_consent": False,
@@ -2171,6 +2215,12 @@ def draft_legacy_reversible_plan(
             _read_verified_preimage(original_copies_dir, filename, digest, rel)
         except (AdoptionError, OSError, ValueError, TypeError):
             raise AdoptionError("Selected original KEEP source copy changed during review") from None
+    # Closing current-target re-attestation limits observable races after the
+    # original source rechecks. It is cooperative and cannot secure future writes.
+    for captured in current_target_evidence:
+        current = _observe_current_selected_target(root, captured["path"])
+        if current != (captured["state"], captured["sha256"]):
+            raise AdoptionError("Selected current target changed during plan review")
     return output
 
 
