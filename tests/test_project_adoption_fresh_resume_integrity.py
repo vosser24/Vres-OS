@@ -489,3 +489,27 @@ def test_active_legacy_owner_review_reports_architecture_hold_without_grant(tmp_
     assert finding["review_action"] == "PROTECTED_ARCHITECTURE_REVIEW"
     assert readiness["owner_review"]["independent_fable_authority"] == "NOT_GRANTED"
     assert project_adoption._state(sd, project) == saved
+
+
+def test_active_legacy_owner_review_missing_created_scaffold_is_drift_not_unverifiable(tmp_path):
+    project, data, sd = _active_legacy_with_saved_result(tmp_path)
+    saved = project_adoption._state(sd, project)
+    original_keep = (project.root / "AGENTS.md").read_bytes()
+    scaffold = project.root / "CLAUDE.md"
+    scaffold.unlink()  # offline fixture simulates externally missing generated post-image
+
+    readiness = project_adoption.status(project, data_root=data)["legacy_configuration_readiness"]
+    assert readiness["state"] == "DRIFTED"
+    assert readiness["missing"] == 1
+    assert readiness["owner_review"]["total_findings"] == 1
+    finding = readiness["owner_review"]["findings"][0]
+    assert finding["change"] == "MISSING_SCAFFOLD"
+    assert finding["path"] == "CLAUDE.md"
+    assert finding["risk"] == "scaffold"
+    assert finding["review_action"] == "SCAFFOLD_INTEGRITY_REVIEW"
+    assert finding["automatic_action_allowed"] is False
+    with pytest.raises(AdoptionError, match="Active legacy Claude configuration"):
+        project_adoption.start(project, data_root=data)
+    assert not scaffold.exists()
+    assert (project.root / "AGENTS.md").read_bytes() == original_keep
+    assert project_adoption._state(sd, project) == saved

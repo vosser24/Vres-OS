@@ -1011,7 +1011,9 @@ def _legacy_configuration_readiness(
                 else:
                     continue
 
-                risk = item["risk"] if item is not None else old["risk"]
+                risk = item["risk"] if item is not None else (
+                    old["risk"] if old is not None else "scaffold"
+                )
                 visible = (
                     len(rel) <= 180 and all(char.isprintable() for char in rel)
                     and "\\" not in rel and ":" not in rel
