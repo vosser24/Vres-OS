@@ -409,3 +409,83 @@ def test_active_legacy_new_architecture_hold_is_diagnostic_not_state_mutation(tm
     with pytest.raises(AdoptionError, match="manual review required"):
         project_adoption.start(project, data_root=data)
     assert project_adoption._state(sd, project) == saved
+
+
+def test_active_legacy_review_lists_new_hook_without_exposing_its_command(tmp_path):
+    project, data, sd = _active_legacy_with_saved_result(tmp_path)
+    saved = project_adoption._state(sd, project)
+    hook = project.root / ".claude" / "settings.json"
+    hook.parent.mkdir()
+    command = "echo SYNTHETIC_PRIVATE_COMMAND_NEVER_EXECUTED"
+    hook.write_text('{"hooks":{"PreToolUse":[{"command":"' + command + '"}]}}')
+
+    readiness = project_adoption.status(project, data_root=data)["legacy_configuration_readiness"]
+    review = readiness["owner_review"]
+    assert readiness["state"] == "DRIFTED"
+    assert review["mode"] == "READ_ONLY_TRIAGE_NOT_A_REMEDIATION_OR_APPROVAL"
+    assert review["explicit_owner_decisions_recorded"] is False
+    assert review["independent_fable_authority"] == "NOT_GRANTED"
+    assert review["project_changes_performed"] is False
+    assert review["total_findings"] == 1
+    assert review["findings"][0]["change"] == "NEW_SURFACE"
+    assert review["findings"][0]["path"] == ".claude/settings.json"
+    assert review["findings"][0]["risk"] == "executable"
+    assert review["findings"][0]["automatic_action_allowed"] is False
+    assert command not in str(review)
+    assert project_adoption._state(sd, project) == saved
+    assert command in hook.read_text()
+
+
+def test_active_legacy_owner_review_keeps_edited_keep_file_for_manual_choice(tmp_path):
+    project, data, sd = _active_legacy_with_saved_result(tmp_path)
+    saved = project_adoption._state(sd, project)
+    keep = project.root / "AGENTS.md"
+    edited = b"# A non-secret synthetic changed KEEP\n"
+    keep.write_bytes(edited)
+
+    readiness = project_adoption.status(project, data_root=data)["legacy_configuration_readiness"]
+    finding = readiness["owner_review"]["findings"][0]
+    assert readiness["state"] == "DRIFTED"
+    assert finding["change"] == "CHANGED_KEEP"
+    assert finding["path"] == "AGENTS.md"
+    assert finding["review_action"] == "OWNER_KEEP_OR_REMOVAL_REVIEW"
+    assert finding["automatic_action_allowed"] is False
+    assert keep.read_bytes() == edited
+    assert project_adoption._state(sd, project) == saved
+
+
+def test_active_legacy_owner_review_redacts_sensitive_added_name_and_bytes(tmp_path):
+    project, data, sd = _active_legacy_with_saved_result(tmp_path)
+    saved = project_adoption._state(sd, project)
+    sensitive = project.root / ".claude" / "credentials.json"
+    sensitive.parent.mkdir()
+    synthetic_value = "SYNTHETIC_VALUE_DO_NOT_EXPOSE"
+    sensitive.write_text('{"password":"' + synthetic_value + '"}')
+
+    readiness = project_adoption.status(project, data_root=data)["legacy_configuration_readiness"]
+    finding = readiness["owner_review"]["findings"][0]
+    assert readiness["state"] == "DRIFTED"
+    assert finding["change"] == "NEW_SURFACE"
+    assert finding["path"] is None
+    assert finding["path_redacted"] is True
+    assert finding["automatic_action_allowed"] is False
+    assert "credentials.json" not in str(readiness["owner_review"])
+    assert synthetic_value not in str(readiness["owner_review"])
+    assert sensitive.exists()
+    assert project_adoption._state(sd, project) == saved
+
+
+def test_active_legacy_owner_review_reports_architecture_hold_without_grant(tmp_path, monkeypatch):
+    project, data, sd = _active_legacy_with_saved_result(tmp_path)
+    saved = project_adoption._state(sd, project)
+    monkeypatch.setattr(project_adoption, "_legacy_architecture_hold",
+                        lambda _root: {"architecture_review_required": True})
+    readiness = project_adoption.status(project, data_root=data)["legacy_configuration_readiness"]
+    finding = readiness["owner_review"]["findings"][0]
+    assert readiness["state"] == "DRIFTED"
+    assert readiness["owner_review"]["total_findings"] == 1
+    assert finding["change"] == "ARCHITECTURE_HOLD"
+    assert finding["path"] is None
+    assert finding["review_action"] == "PROTECTED_ARCHITECTURE_REVIEW"
+    assert readiness["owner_review"]["independent_fable_authority"] == "NOT_GRANTED"
+    assert project_adoption._state(sd, project) == saved

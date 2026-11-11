@@ -84,6 +84,7 @@ _ROOT_SURFACES = ("CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", ".mcp.json")
 _IGNORE_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache",
                 ".ruff_cache", "build", "dist", ".next", "site-packages", "coverage", ".vres"}
 _MAX_ITEMS, _MAX_BYTES, _MAX_DIRS = 300, 1024 * 1024, 5000
+_MAX_REVIEW_ITEMS = 60
 _INJECTION = re.compile(
     r"ignore (all |any )?(previous|prior|above) instructions|disregard (the |all )?(previous|prior|system)"
     r"|you are now\b|new system prompt|override (the )?(system|vres)|bypass (the )?(guard|validation|approval)"
@@ -861,7 +862,9 @@ def _attest_active_record(sd: Path, project, record: dict[str, Any]) -> None:
     )
 
 
-def _legacy_configuration_readiness(sd: Path, project, record: dict[str, Any]) -> dict[str, Any]:
+def _legacy_configuration_readiness(
+    sd: Path, project, record: dict[str, Any], *, include_review: bool = False,
+) -> dict[str, Any]:
     """Read-only #168/#174 current legacy Claude configuration drift diagnostic.
 
     The persisted active state means a historical activation occurred; it is
@@ -873,8 +876,9 @@ def _legacy_configuration_readiness(sd: Path, project, record: dict[str, Any]) -
     def report(
         state: str, *, added: int = 0, missing: int = 0, changed: int = 0,
         unverifiable: int = 0, architecture_hold: bool = False,
+        findings: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        return {
+        outcome = {
             "state": state,
             "manual_review_required": state != "UNCHANGED",
             "added": added, "missing": missing, "changed": changed,
@@ -882,6 +886,18 @@ def _legacy_configuration_readiness(sd: Path, project, record: dict[str, Any]) -
             "architecture_review_required": architecture_hold,
             "authority": "READ_ONLY_LOCAL_CONSISTENCY_NOT_FABLE_VALIDATION",
         }
+        if include_review:
+            reviewed = findings if findings is not None else []
+            outcome["owner_review"] = {
+                "mode": "READ_ONLY_TRIAGE_NOT_A_REMEDIATION_OR_APPROVAL",
+                "findings": reviewed[:_MAX_REVIEW_ITEMS],
+                "total_findings": len(reviewed),
+                "truncated": len(reviewed) > _MAX_REVIEW_ITEMS,
+                "explicit_owner_decisions_recorded": False,
+                "independent_fable_authority": "NOT_GRANTED",
+                "project_changes_performed": False,
+            }
+        return outcome
 
     try:
         root = Path(project.root).resolve(strict=True)
@@ -972,6 +988,63 @@ def _legacy_configuration_readiness(sd: Path, project, record: dict[str, Any]) -
             ):
                 changed += 1
 
+        # Owner-facing read-only triage uses ORIGINAL KEEP/DROP choices and
+        # observed classification. It never suggests that a finding is approved,
+        # performs a fix, or shows file contents, scripts or credential values.
+        # Unsafe/unreadable/sensitive names and control-character paths stay redacted.
+        findings: list[dict[str, Any]] = []
+        if include_review:
+            for rel in sorted(live.keys() | expected.keys()):
+                item = live.get(rel)
+                old = original.get(rel)
+                if rel not in expected:
+                    change = "DROP_REAPPEARED" if rel in dropped else "NEW_SURFACE"
+                elif item is None:
+                    change = "MISSING_SCAFFOLD" if rel in record["created"] else "MISSING_KEEP"
+                elif expected[rel] is None or item["sha256"] is None:
+                    change = "UNVERIFIABLE_KEEP"
+                elif item["status"] != "ok" or item["sha256"] != expected[rel] or (
+                    rel in original and rel not in record["created"]
+                    and (item["risk"] != original[rel]["risk"] or "KEEP" not in item["options"])
+                ):
+                    change = "CHANGED_SCAFFOLD" if rel in record["created"] else "CHANGED_KEEP"
+                else:
+                    continue
+
+                risk = item["risk"] if item is not None else old["risk"]
+                visible = (
+                    len(rel) <= 180 and all(char.isprintable() for char in rel)
+                    and "\\" not in rel and ":" not in rel
+                    and not sensitive_path_reason(root / rel)
+                    and (item is None or item["status"] == "ok")
+                    and (old is None or old["status"] == "ok")
+                )
+                if change == "DROP_REAPPEARED":
+                    action = "ORIGINAL_DROP_MANUAL_ISOLATION_REVIEW"
+                elif change in {"CHANGED_SCAFFOLD", "MISSING_SCAFFOLD"}:
+                    action = "SCAFFOLD_INTEGRITY_REVIEW"
+                elif change == "UNVERIFIABLE_KEEP" or not visible:
+                    action = "SENSITIVE_OR_UNVERIFIABLE_MANUAL_REVIEW"
+                elif risk in {"executable", "active", "conflicting"}:
+                    action = "ACTIVE_SURFACE_MANUAL_REVIEW"
+                else:
+                    action = "OWNER_KEEP_OR_REMOVAL_REVIEW"
+                findings.append({
+                    "number": len(findings) + 1, "change": change,
+                    "path": rel if visible else None,
+                    "path_redacted": not visible, "risk": risk,
+                    "review_action": action, "automatic_action_allowed": False,
+                })
+            if architecture:
+                findings.append({
+                    "number": len(findings) + 1, "change": "ARCHITECTURE_HOLD",
+                    "path": None, "path_redacted": True, "risk": "architecture",
+                    "review_action": "PROTECTED_ARCHITECTURE_REVIEW",
+                    "automatic_action_allowed": False,
+                })
+            if len(findings) != added + missing + changed + unverifiable + bool(architecture):
+                return report("UNVERIFIABLE")
+
         # Cooperative final saved-record recheck, not an atomic filesystem
         # lock or cryptographic authentication. Never change the saved state.
         if (
@@ -988,6 +1061,7 @@ def _legacy_configuration_readiness(sd: Path, project, record: dict[str, Any]) -
         return report(
             state, added=added, missing=missing, changed=changed,
             unverifiable=unverifiable, architecture_hold=bool(architecture),
+            findings=findings,
         )
     except (AdoptionError, OSError, ValueError, TypeError, KeyError, AttributeError):
         # A read failure cannot turn historical saved work into an approved
@@ -1630,7 +1704,7 @@ def status(project, *, data_root: Path | None = None) -> dict[str, Any]:
         # Historical activation remains recorded; expose today's readiness
         # separately without silently invalidating KEEP/DROP or rollback.
         out["legacy_configuration_readiness"] = _legacy_configuration_readiness(
-            sd, project, record
+            sd, project, record, include_review=True
         )
     if record.get("state") == "awaiting_operator":
         version = record.get("inventory_version")
