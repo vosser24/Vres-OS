@@ -21,13 +21,12 @@ jobs:
       VRES_ALLOW_TEST_DB: "0"
       VRES_TEST_DATABASE_URL: ""
       GIT_CONFIG_NOSYSTEM: "1"
-      GIT_CONFIG_GLOBAL: /dev/null
 
     steps:
       - name: Checkout disposable GitHub-hosted worktree; no persisted credentials
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          fetch-depth: 2
+          fetch-depth: 3
           persist-credentials: false
           submodules: false
           lfs: false
@@ -38,8 +37,10 @@ jobs:
           set -euo pipefail
           test "$GITHUB_REF" = "refs/heads/feature/personal-offline-static-verification-20261112"
           test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
-          test "$(git rev-parse HEAD^)" = "37e41e536c059836e8c9b74fdd9966c0edb6e9cc"
-          test "$(git rev-parse HEAD^^{tree})" = "fedfb2ac06c4c2d9448c91e38f24f0f379dd9ed1"
+          test "$(git rev-parse HEAD^)" = "2b96f6d198759b956d06fbedf4db82866b4d3f08"
+          test "$(git rev-parse HEAD^^)" = "37e41e536c059836e8c9b74fdd9966c0edb6e9cc"
+          test "$(git rev-parse 37e41e536c059836e8c9b74fdd9966c0edb6e9cc^{tree})" = "fedfb2ac06c4c2d9448c91e38f24f0f379dd9ed1"
+          test "$(git diff --name-only 37e41e536c059836e8c9b74fdd9966c0edb6e9cc HEAD)" = ".github/workflows/personal-offline-static-verification.yml"
           changed="$(git diff-tree --no-commit-id --name-only -r HEAD)"
           test "$changed" = ".github/workflows/personal-offline-static-verification.yml"
           echo "PINNED_SOURCE_PARENT=37e41e536c059836e8c9b74fdd9966c0edb6e9cc"
@@ -105,3 +106,19 @@ jobs:
           print("WINDOWS_UAT=NOT_RUN; PROTECTED_APPROVAL=NOT_GRANTED")
           PY
           test -z "$(git status --porcelain --untracked-files=all)"
+      
+      - name: Export verified source SHA as a ZIP (no repository code run)
+        shell: bash
+        run: |
+          set -euo pipefail
+          git archive --format=zip --output="$RUNNER_TEMP/vres-source-37e41e53.zip" 37e41e536c059836e8c9b74fdd9966c0edb6e9cc
+          test -s "$RUNNER_TEMP/vres-source-37e41e53.zip"
+          sha256sum "$RUNNER_TEMP/vres-source-37e41e53.zip"
+
+      - name: Upload source ZIP to short-lived GitHub Actions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vres-pinned-full-source-37e41e53
+          path: ${{ runner.temp }}/vres-source-37e41e53.zip
+          retention-days: 1
+          if-no-files-found: error
