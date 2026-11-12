@@ -1263,6 +1263,85 @@ def test_legacy_plan_held_effect_is_bound_without_exposing_saved_source(tmp_path
     assert plan["project_changes_performed"] is False
 
 
+
+def test_missing_legacy_scaffold_reproduces_exact_historical_postimage_but_stays_held(tmp_path):
+    """AUTHORED NOT_RUN; original #168 source proof is not remediation consent."""
+    project, data, sd = _active_legacy_with_saved_result(tmp_path)
+    scaffold = project.root / "CLAUDE.md"
+    original = scaffold.read_bytes()
+    scaffold.unlink()  # synthetic removable fixture, never a user project
+    review = project_adoption.status(project, data_root=data)[
+        "legacy_configuration_readiness"]["owner_review"]
+    assert review["findings"][0]["change"] == "MISSING_SCAFFOLD"
+    token = review["snapshot_token"]
+    project_adoption.record_legacy_review_intent(
+        project, 1, "REQUEST_REVERSIBLE_PLAN", snapshot_token=token,
+        authority=lambda s: {"confirmed": True, "kind": "synthetic_fixture"},
+        data_root=data,
+    )
+    plan = project_adoption.draft_legacy_reversible_plan(
+        project, snapshot_token=token,
+        targets={1: "REBUILD_CANONICAL_SCAFFOLD_FOR_REVIEW"}, data_root=data)
+    entry = plan["entries"][0]
+    assert plan["canonical_scaffold_source_pinned_to_original_postimage"] is True
+    assert entry["canonical_scaffold_source_verified"] is True
+    assert entry["saved_original_keep_source_verified"] is False
+    assert entry["held_effect_blueprint"]["candidate_operation"] == (
+        "WRITE_REPRODUCED_PINNED_CANONICAL_SCAFFOLD")
+    assert entry["held_effect_blueprint"]["capture_gate"] == (
+        "HELD_DURABLE_PREIMAGE_AND_SEPARATE_APPROVAL_REQUIRED")
+    assert entry["held_effect_blueprint"]["project_write_authorized"] is False
+    assert hashlib.sha256(original).hexdigest() not in str(plan)
+    assert original.decode("utf-8") not in str(plan)
+    assert plan["project_changes_performed"] is False
+    assert plan["independent_fable_authority"] == "NOT_GRANTED"
+    assert not scaffold.exists()
+    assert project_adoption._state(sd, project)["state"] == "active"
+
+
+def test_missing_legacy_scaffold_mismatched_generated_source_remains_blocked(tmp_path, monkeypatch):
+    """AUTHORED NOT_RUN; changed generator bytes cannot reuse a historical SHA."""
+    project, data, sd = _active_legacy_with_saved_result(tmp_path)
+    scaffold = project.root / "CLAUDE.md"
+    scaffold.unlink()
+    review = project_adoption.status(project, data_root=data)[
+        "legacy_configuration_readiness"]["owner_review"]
+    token = review["snapshot_token"]
+    project_adoption.record_legacy_review_intent(
+        project, 1, "REQUEST_REVERSIBLE_PLAN", snapshot_token=token,
+        authority=lambda s: {"confirmed": True, "kind": "synthetic_fixture"},
+        data_root=data,
+    )
+    monkeypatch.setattr(
+        project_adoption, "scaffold_text", lambda name, facts: "# Different source\\n")
+    plan = project_adoption.draft_legacy_reversible_plan(
+        project, snapshot_token=token,
+        targets={1: "REBUILD_CANONICAL_SCAFFOLD_FOR_REVIEW"}, data_root=data)
+    effect = plan["entries"][0]["held_effect_blueprint"]
+    assert plan["canonical_scaffold_source_pinned_to_original_postimage"] is False
+    assert effect["candidate_operation"] == "BLOCK_UNPINNED_CANONICAL_SCAFFOLD"
+    assert effect["capture_gate"] == "BLOCK_CANONICAL_SOURCE_NOT_PINNED"
+    assert plan["entries"][0]["canonical_scaffold_source_verified"] is False
+    assert effect["project_write_authorized"] is False
+    assert not scaffold.exists()
+    assert project_adoption._state(sd, project)["state"] == "active"
+
+
+def test_canonical_held_effect_keeps_redacted_or_missing_parent_blocked():
+    """AUTHORED NOT_RUN; even a candidate source digest cannot authorize unsafe targets."""
+    helper = project_adoption._legacy_held_effect_blueprint
+    for state, required in (
+        ("REDACTED_NO_TARGET_ATTESTATION", "BLOCK_PARENT_OR_UNVERIFIABLE_TARGET"),
+        ("ABSENT_PARENT_NOT_PRESENT", "BLOCK_PARENT_OR_UNVERIFIABLE_TARGET"),
+    ):
+        preparation, effect = helper(
+            "REBUILD_CANONICAL_SCAFFOLD_FOR_REVIEW", state, True)
+        assert preparation["project_write_authorized"] is False
+        assert effect["capture_gate"] == required
+        assert effect["project_write_authorized"] is False
+        assert effect["durable_target_preimage_captured"] is False
+
+
 def test_target_plan_internal_identity_source_binding_and_future_capture_gate(tmp_path):
     """AUTHORED NOT_RUN; preview binds source/identity but grants zero authority."""
     project, data, sd, keep, copy, token = _selected_original_keep_plan_fixture(tmp_path)

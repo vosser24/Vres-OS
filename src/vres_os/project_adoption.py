@@ -2137,6 +2137,8 @@ def _legacy_target_preparation_contract(
         if target not in sources:
             raise AdoptionError("Unsupported proposed legacy target preparation contract")
         source = sources[target]
+        if target == "REBUILD_CANONICAL_SCAFFOLD_FOR_REVIEW" and source_verified is True:
+            source = "REPRODUCED_BYTES_MATCH_ORIGINAL_ACTIVATION_POSTIMAGE"
         if target == "RESTORE_ORIGINAL_KEEP_FOR_REVIEW" and source_verified is not True:
             raise AdoptionError("Original KEEP source must be verified before discussing a replacement")
         removal = target in {
@@ -2198,6 +2200,66 @@ def _legacy_original_plan_identity(project, root: Path, observed: dict[str, Any]
     }
 
 
+
+def _legacy_pinned_canonical_scaffold_source(
+    project, root: Path, sd: Path, record: dict[str, Any],
+) -> str | None:
+    """Reproduce ORIGINAL created CLAUDE.md bytes only against its saved post-SHA.
+
+    This is cooperative, read-only historical consistency evidence. The saved
+    activation result is not an independent signature or protected validator.
+    A matching candidate is STILL HELD for new-target capture, attributable
+    project-write consent, architecture validation and recovery rehearsal.
+    Never return the source bytes or SHA through the conversational plan.
+    """
+    if (
+        type(record) is not dict or record.get("state") != "active"
+        or record.get("created") != ["CLAUDE.md"]
+        or type(record.get("removed")) is not list
+    ):
+        raise AdoptionError("Original canonical scaffold activation is unavailable")
+    activation = _checked_activation_id(record.get("activation"))
+    result_path = sd / "activations" / activation / "result.json"
+    saved = _read_json(result_path)
+    if (
+        type(saved) is not dict
+        or saved.get("inventory_version") != record.get("inventory_version")
+        or type(saved.get("authority")) is not dict
+        or saved["authority"].get("confirmed") is not True
+        or not saved["authority"].get("kind")
+    ):
+        raise AdoptionError("Original canonical scaffold result has no valid authority evidence")
+    _validate_restore_manifest(root, saved.get("pre"), saved.get("post"))
+    _validate_restore_operations(
+        saved["pre"], saved["post"], record["removed"], record["created"])
+    original_post_sha = saved["post"].get("CLAUDE.md")
+    if type(original_post_sha) is not str or re.fullmatch(
+        r"[0-9a-f]{64}", original_post_sha
+    ) is None:
+        raise AdoptionError("Original canonical postimage digest is missing")
+    try:
+        candidate = scaffold_text(
+            project.name, detect_facts(root)).encode("utf-8")
+    except (OSError, ValueError, TypeError, UnicodeError):
+        return None
+    digest = hashlib.sha256(candidate).hexdigest() if len(candidate) <= _MAX_BYTES else None
+    if _read_json(result_path) != saved or _state(sd, project) != record:
+        raise AdoptionError("Original canonical scaffold evidence changed during reproduction")
+    if digest != original_post_sha:
+        return None
+    try:
+        closing = scaffold_text(
+            project.name, detect_facts(root)).encode("utf-8")
+    except (OSError, ValueError, TypeError, UnicodeError):
+        raise AdoptionError("Canonical source changed during reproduction") from None
+    if (
+        closing != candidate
+        or _read_json(result_path) != saved
+        or _state(sd, project) != record
+    ):
+        raise AdoptionError("Canonical scaffold candidate changed during reproduction")
+    return original_post_sha
+
 def _legacy_held_effect_blueprint(
     target: str, current_state: str, source_verified: bool,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -2225,6 +2287,12 @@ def _legacy_held_effect_blueprint(
             "BLOCK_UNPINNED_CANONICAL_SCAFFOLD", "UNKNOWN_UNTIL_SOURCE_PINNED",
             "CANONICAL_SOURCE_NOT_PINNED"),
     }
+    if target == "REBUILD_CANONICAL_SCAFFOLD_FOR_REVIEW" and source_verified is True:
+        effects[target] = (
+            "WRITE_REPRODUCED_PINNED_CANONICAL_SCAFFOLD",
+            "PRESENT_BOUND_HISTORICAL_CANONICAL_POSTIMAGE",
+            "REPRODUCED_BYTES_MATCH_ORIGINAL_ACTIVATION_POSTIMAGE",
+        )
     phase = preparation["phase"]
     if phase != "HELD_CANDIDATE_CHANGE":
         operation, postimage, source = (
@@ -2244,7 +2312,7 @@ def _legacy_held_effect_blueprint(
             "BLOCK_PARENT_OR_UNVERIFIABLE_TARGET"
             if current_state in {"ABSENT_PARENT_NOT_PRESENT", "REDACTED_NO_TARGET_ATTESTATION"}
             else "BLOCK_CANONICAL_SOURCE_NOT_PINNED"
-            if target == "REBUILD_CANONICAL_SCAFFOLD_FOR_REVIEW"
+            if target == "REBUILD_CANONICAL_SCAFFOLD_FOR_REVIEW" and not source_verified
             else "HELD_DURABLE_PREIMAGE_AND_SEPARATE_APPROVAL_REQUIRED"
         )
     return preparation, {
@@ -2299,6 +2367,29 @@ def draft_legacy_reversible_plan(
     # The saved activation/root must be explicitly pinned for future journal
     # preparation, even when no selected target restores an original KEEP copy.
     original_identity = _legacy_original_plan_identity(project, root, observed)
+    # The original historical activation postimage can pin a regenerated
+    # canonical scaffold only if its present deterministic bytes match exactly.
+    # No local project write is performed or authorized.
+    pinned_canonical_sha = None
+    pinned_canonical_sd = None
+    pinned_canonical_record = None
+    if "REBUILD_CANONICAL_SCAFFOLD_FOR_REVIEW" in targets.values():
+        from .paths import data_dir_path
+
+        base = Path(data_root) if data_root is not None else data_dir_path()
+        pinned_canonical_sd = (
+            base / "projects" / hashlib.sha256(project.key.encode("utf-8")).hexdigest()[:24])
+        pinned_canonical_record = _state(pinned_canonical_sd, project)
+        if (
+            type(pinned_canonical_record) is not dict
+            or pinned_canonical_record.get("inventory_version")
+            != original_identity["original_inventory_version"]
+            or _checked_activation_id(pinned_canonical_record.get("activation"))
+            != original_identity["original_activation"]
+        ):
+            raise AdoptionError("Original canonical scaffold project identity changed")
+        pinned_canonical_sha = _legacy_pinned_canonical_scaffold_source(
+            project, root, pinned_canonical_sd, pinned_canonical_record)
     # Exact current target identities remain internal to the plan-digest input.
     current_target_evidence: list[dict[str, Any]] = []
 
@@ -2312,6 +2403,7 @@ def draft_legacy_reversible_plan(
     verified_sources: list[tuple[str, str, str]] = []
     # INTERNAL only; never expose saved original KEEP bytes/digests to Chairman.
     verified_source_digests: dict[int, str] = {}
+    verified_canonical_source_digests: dict[int, str] = {}
     if "RESTORE_ORIGINAL_KEEP_FOR_REVIEW" in targets.values():
         from .paths import data_dir_path
 
@@ -2383,6 +2475,15 @@ def draft_legacy_reversible_plan(
             verified_sources.append((filename, digest, rel))
             verified_source_digests[number] = digest
             source_verified = True
+        canonical_verified = (
+            selected == "REBUILD_CANONICAL_SCAFFOLD_FOR_REVIEW"
+            and finding["path_redacted"] is False
+            and finding["path"] == "CLAUDE.md"
+            and pinned_canonical_sha is not None
+        )
+        if canonical_verified:
+            verified_canonical_source_digests[number] = pinned_canonical_sha
+            source_verified = True
         preparation, held_effect = _legacy_held_effect_blueprint(
             selected, current_state, source_verified)
         entries.append({
@@ -2393,7 +2494,9 @@ def draft_legacy_reversible_plan(
             "path_redacted": finding["path_redacted"],
             "confirmed_plan_intent_revision": review["intent_revision_counts"][str(number)],
             "caller_selected_target": selected,
-            "saved_original_keep_source_verified": source_verified,
+            "saved_original_keep_source_verified": (
+                selected == "RESTORE_ORIGINAL_KEEP_FOR_REVIEW" and source_verified),
+            "canonical_scaffold_source_verified": canonical_verified,
             "current_target_observation": current_state,
             "target_preparation_contract": preparation,
             "held_effect_blueprint": held_effect,
@@ -2405,7 +2508,7 @@ def draft_legacy_reversible_plan(
 
     future_capture_spec = _legacy_future_preimage_capture_spec()
     binding = {
-        "contract_version": 3,
+        "contract_version": 4,
         "original_project_activation_identity": original_identity,
         "project_key": project.key,
         "snapshot_token": snapshot_token,
@@ -2414,6 +2517,7 @@ def draft_legacy_reversible_plan(
         "entries": entries,
         "current_target_evidence": current_target_evidence,
         "verified_original_keep_source_digests": verified_source_digests,
+        "verified_reproduced_canonical_postimage_digests": verified_canonical_source_digests,
         "future_preimage_capture_contract": future_capture_spec,
     }
     digest = hashlib.sha256(
@@ -2437,6 +2541,9 @@ def draft_legacy_reversible_plan(
         "current_target_leaf_and_ancestor_identity_bound_to_plan_digest": bool(current_target_evidence),
         "saved_original_keep_source_sha256_bound_to_plan_digest": bool(verified_source_digests),
         "saved_original_keep_source_raw_sha256_hidden": True,
+        "canonical_scaffold_source_pinned_to_original_postimage": bool(
+            verified_canonical_source_digests),
+        "canonical_scaffold_source_raw_sha256_and_bytes_hidden": True,
         "future_preimage_capture_contract": future_capture_spec,
         "target_preparation_contract_version": 1,
         "held_project_mutation_candidate_count": sum(
@@ -2496,6 +2603,14 @@ def draft_legacy_reversible_plan(
             raise AdoptionError("Selected original KEEP source copy changed during review") from None
     # Closing current-target re-attestation limits observable races after the
     # original source rechecks. It is cooperative and cannot secure future writes.
+    if pinned_canonical_sha is not None:
+        if (
+            _state(pinned_canonical_sd, project) != pinned_canonical_record
+            or _legacy_pinned_canonical_scaffold_source(
+                project, root, pinned_canonical_sd, pinned_canonical_record)
+            != pinned_canonical_sha
+        ):
+            raise AdoptionError("Verified canonical scaffold source changed during plan review")
     for captured in current_target_evidence:
         current = _observe_current_selected_target(root, captured["path"])
         if current != (captured["state"], captured["sha256"]):
