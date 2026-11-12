@@ -916,6 +916,17 @@ def _workday_owner_snapshot(desk: str | Path) -> tuple[dict[str, Any], dict[str,
     """Cross-check ORIGINAL daily receipts and lifecycle history, no mutations."""
     daily = handoff._review(lifecycle.read_daily_review(desk))
     history = lifecycle.list_history(desk, show_result_paths=False)
+    attention = lifecycle.inspect_pending_revision_attention(desk)
+    if (type(attention) is not dict
+            or attention.get("schema") != lifecycle.SCHEMA
+            or attention.get("status") != "READ_ONLY_PENDING_REVISION_ATTENTION"
+            or type(attention.get("pending_revision_staging_present")) is not bool
+            or attention.get("manual_recovery_attention_required")
+               is not attention["pending_revision_staging_present"]
+            or attention.get("pending_contents_opened") is not False
+            or attention.get("automatic_recovery_performed") is not False
+            or attention.get("writes_performed") is not False):
+        raise WorkSessionRefused("Original pending revision state refused")
     if (history.get("schema") != lifecycle.SCHEMA
             or history.get("status") != "READ_ONLY_PERSONAL_HISTORY"
             or history.get("writes_performed") is not False
@@ -965,7 +976,7 @@ def _workday_owner_snapshot(desk: str | Path) -> tuple[dict[str, Any], dict[str,
                     or type(linked.get("checkpoint_sha256")) is not str
                     or not workbench._SHA.fullmatch(linked["checkpoint_sha256"])):
                 raise WorkSessionRefused("Original linked result is not historical-only")
-    return daily, history
+    return daily, history, attention
 
 
 def review_workday(
@@ -999,7 +1010,7 @@ def review_workday(
             or project_root is not None and (
                 selected_task is None or snapshot_sha256 is not None)):
         raise WorkSessionRefused("Workday selection and optional project disagree")
-    before, history = _workday_owner_snapshot(desk)
+    before, history, pending_before = _workday_owner_snapshot(desk)
     active = [
         {"task_key_claimed": row["task_key_claimed"],
          "note_sha256": row["sha256"], "note_bytes": row["bytes"]}
@@ -1079,9 +1090,11 @@ def review_workday(
                 selection["selected_project_intake_summary"] = brief[
                     "project_intake_summary"]
                 final_brief = brief
-    after, again = _workday_owner_snapshot(desk)
+    after, again, pending_after = _workday_owner_snapshot(desk)
     if (handoff._exact_json(before) != handoff._exact_json(after)
-            or handoff._exact_json(history) != handoff._exact_json(again)):
+            or handoff._exact_json(history) != handoff._exact_json(again)
+            or handoff._exact_json(pending_before)
+               != handoff._exact_json(pending_after)):
         raise WorkSessionRefused("Workday task or history changed during review")
     if selection is not None:
         if snapshot_sha256 is not None:
@@ -1112,6 +1125,9 @@ def review_workday(
         "revision_snapshot_count": before["revision_count"],
         "saved_history": historical,
         "selected_review": selection,
+        "manual_revision_recovery_attention_required": (
+            pending_before["manual_recovery_attention_required"]),
+        "automatic_revision_recovery_performed": False,
         "automatic_task_selection_performed": False,
         "history_has_timestamps": False,
         "historical_document_current_bytes_verified": False,
@@ -1133,7 +1149,10 @@ def render_workday(packet: dict[str, Any]) -> str:
             or packet.get("status") != "READ_ONLY_INTEGRATED_PERSONAL_WORKDAY_HOME"
             or packet.get("writes_performed") is not False
             or packet.get("native_claude_or_hooks_executed") is not False
-            or packet.get("database_contacted") is not False):
+            or packet.get("database_contacted") is not False
+            or type(packet.get("manual_revision_recovery_attention_required"))
+               is not bool
+            or packet.get("automatic_revision_recovery_performed") is not False):
         raise WorkSessionRefused("Workday text contract refused")
     lines = [
         "Vres-OS PERSONAL WORKDAY HOME -- READ ONLY",
@@ -1143,6 +1162,11 @@ def render_workday(packet: dict[str, Any]) -> str:
         "  " + row["task_key_claimed"] + " | note=" + row["note_sha256"]
         for row in packet["active_tasks"]
     )
+    if packet["manual_revision_recovery_attention_required"]:
+        lines.append("ATTENTION: interrupted task revision staging detected. "
+                     "Manual recovery review required; nothing was repaired.")
+    else:
+        lines.append("No pending revision staging observed (cooperative read only).")
     lines.append("Saved completed snapshots (UNDATED): "
                  + str(packet["completed_snapshot_count"]))
     for row in packet["saved_history"]:

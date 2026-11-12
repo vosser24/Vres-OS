@@ -331,6 +331,31 @@ def read_daily_review(value: str | Path) -> dict[str, Any]:
             'task_binding_authoritative': False, 'writes_performed': False,
             'installed_vres_modified': False}
 
+def inspect_pending_revision_attention(value: str | Path) -> dict[str, Any]:
+    """Report original-owner interrupted revision staging without opening files.
+
+    A leftover staging entry can follow a failed or interrupted revision.
+    Presence requires human inspection; absence is only a cooperative
+    read-only observation, never crash-safe recovery or write authority.
+    """
+    root = _root(value)
+    hist = _history(root, create=False)
+    present = False
+    if hist is not None:
+        pending = hist / 'pending'
+        if workbench._stat(pending) is not None:
+            workbench._plain(pending, directory=True)
+            present = next(pending.iterdir(), None) is not None
+    return {
+        'schema': SCHEMA,
+        'status': 'READ_ONLY_PENDING_REVISION_ATTENTION',
+        'pending_revision_staging_present': present,
+        'manual_recovery_attention_required': present,
+        'pending_contents_opened': False,
+        'automatic_recovery_performed': False,
+        'writes_performed': False,
+    }
+
 
 def render_daily_review(report: dict[str, Any]) -> str:
     """Human-readable display of verified metadata; never disclose note text."""

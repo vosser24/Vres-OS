@@ -1554,3 +1554,48 @@ def test_integrated_workday_single_desk_entrance_and_text_json(tmp_path, capsys)
                      "--show-selected-action"]) == 2
     assert "REFUSED" in capsys.readouterr().err
     assert result.inspect_work_result(*ctx)["checkpoint_sha256"] == checkpoint
+
+
+def test_integrated_workday_surfaces_interrupted_original_revision_staging(tmp_path):
+    """AUTHORED NOT_RUN; existing pending revision must not silently vanish."""
+    ctx, checkpoint = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    assert session.review_workday(selected)[
+        "manual_revision_recovery_attention_required"] is False
+    root = lifecycle._root(selected)
+    hist = lifecycle._history(root, create=True)
+    pending = hist / "pending" / ("Vres-Workbench-P" + "1" * 32)
+    pending.mkdir()
+    packet = session.review_workday(selected, selected_task=task)
+    assert packet["status"] == "READ_ONLY_INTEGRATED_PERSONAL_WORKDAY_HOME"
+    assert packet["manual_revision_recovery_attention_required"] is True
+    assert packet["automatic_revision_recovery_performed"] is False
+    assert "Manual recovery review required" in session.render_workday(packet)
+    assert pending.is_dir()
+    assert packet["writes_performed"] is False
+    assert result.inspect_work_result(*ctx)["checkpoint_sha256"] == checkpoint
+
+
+def test_integrated_workday_refuses_pending_revision_state_drift(
+    tmp_path, monkeypatch,
+):
+    """AUTHORED NOT_RUN; early/late staging states must agree."""
+    ctx, checkpoint = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    original = session.lifecycle.inspect_pending_revision_attention
+    calls = {"count": 0}
+
+    def changed_pending(desk_root):
+        packet = original(desk_root)
+        calls["count"] += 1
+        if calls["count"] >= 2:
+            packet["pending_revision_staging_present"] = True
+            packet["manual_recovery_attention_required"] = True
+        return packet
+
+    monkeypatch.setattr(session.lifecycle, "inspect_pending_revision_attention",
+                        changed_pending)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_workday(selected)
+    assert calls["count"] >= 2
+    assert result.inspect_work_result(*ctx)["checkpoint_sha256"] == checkpoint
