@@ -1644,6 +1644,50 @@ def test_held_capture_refuses_symlinked_base_before_any_directory_creation(
     assert not (sd / "legacy_target_preparation.json").exists()
 
 
+def test_held_capture_refuses_linked_higher_state_ancestor_before_mkdir(
+    tmp_path, monkeypatch,
+):
+    """AUTHORED NOT_RUN; nested link cannot write into a state root via an alias."""
+    project, data, sd, keep, old, token = _selected_original_keep_plan_fixture(tmp_path)
+    actual = tmp_path / "ordinary_outside_state"
+    (actual / "nested").mkdir(parents=True)
+    alias = tmp_path / "linked_parent_of_state"
+    try:
+        alias.symlink_to(actual, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("Synthetic filesystem does not support directory symlinks")
+    targets = {1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}
+    plan = project_adoption.draft_legacy_reversible_plan(
+        project, snapshot_token=token, targets=targets, data_root=data)
+    before = keep.read_bytes()
+    def never_create_state(*_args, **_kwargs):
+        raise AssertionError("A linked higher ancestor must fail before _state_dir")
+    monkeypatch.setattr(project_adoption, "_state_dir", never_create_state)
+    with pytest.raises(AdoptionError, match="unsafe ancestor"):
+        project_adoption.capture_legacy_target_preimages(
+            project, snapshot_token=token, targets=targets,
+            plan_digest=plan["plan_digest"], authority=_synthetic_held_capture_authority,
+            data_root=alias / "nested")
+    assert keep.read_bytes() == before
+    assert not (actual / "nested" / "projects").exists()
+
+
+def test_held_capture_refuses_missing_state_base_before_creating_it(tmp_path):
+    """AUTHORED NOT_RUN; absent caller-provided base cannot be mkdir'd implicitly."""
+    project, data, sd, keep, old, token = _selected_original_keep_plan_fixture(tmp_path)
+    missing = tmp_path / "missing_capture_state"
+    targets = {1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}
+    plan = project_adoption.draft_legacy_reversible_plan(
+        project, snapshot_token=token, targets=targets, data_root=data)
+    with pytest.raises(AdoptionError, match="must already be an ordinary directory"):
+        project_adoption.capture_legacy_target_preimages(
+            project, snapshot_token=token, targets=targets,
+            plan_digest=plan["plan_digest"], authority=_synthetic_held_capture_authority,
+            data_root=missing)
+    assert not missing.exists()
+    assert not (sd / "legacy_target_preparation.json").exists()
+
+
 def test_held_inspector_refuses_project_nested_storage_even_without_journal(tmp_path):
     """AUTHORED NOT_RUN; inspector cannot claim safe NOT_PREPARED on project root."""
     project, data, sd, keep, old, token = _selected_original_keep_plan_fixture(tmp_path)
@@ -1751,6 +1795,9 @@ def test_held_inverse_hash_contract_for_present_copy_is_readonly(tmp_path):
     assert inverse["hypothetical_forward_write_count"] == 1
     assert inverse["inverse_restore_captured_bytes_count"] == 1
     assert inverse["inverse_restore_captured_absence_count"] == 0
+    assert inverse["structural_forward_inverse_contract_valid"] is True
+    assert inverse["forward_and_inverse_hash_contract_consistent"] is True
+    assert inverse["original_captured_bytes_rechecked_by_inspector"] is True
     assert inverse["filesystem_rollback_rehearsed"] is False
     assert inverse["project_write_authorized"] is False
     assert keep.read_bytes() == before
@@ -1783,6 +1830,25 @@ def test_held_inverse_hash_contract_for_absent_scaffold_preserves_absence(tmp_pa
     assert inverse["actual_postimage_observed"] is False
     assert inverse["owner_project_write_consent_verified"] is False
     assert not scaffold.exists()
+
+
+def test_held_inverse_pure_blueprint_never_self_attests_fabricated_hashes():
+    """AUTHORED NOT_RUN; shape checks cannot certify invented bytes or sources."""
+    invented = {
+        "operation": "WRITE_VERIFIED_ORIGINAL_KEEP",
+        "expected_postimage": "PRESENT_BOUND_SAVED_KEEP",
+        "selected_source_sha256": "b" * 64,
+        "current_state": "PRESENT_BOUNDED_SHA_ATTESTED",
+        "current_sha256": "a" * 64,
+        "inverse_restore": "RESTORE_EXACT_CAPTURED_BYTES",
+    }
+    result = project_adoption._held_nonexecuting_inverse_preflight([invented])
+    assert result["structural_forward_inverse_contract_valid"] is True
+    assert result["forward_and_inverse_hash_contract_consistent"] is False
+    assert result["original_captured_bytes_rechecked_by_inspector"] is False
+    assert result["filesystem_rollback_rehearsed"] is False
+    assert result["independent_signature_verified"] is False
+    assert result["project_write_authorized"] is False
 
 
 def test_held_inverse_blueprint_rejects_unbound_or_inconsistent_hashes():

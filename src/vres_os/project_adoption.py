@@ -2657,10 +2657,11 @@ def _held_capture_private_storage_available() -> bool:
 def _held_nonexecuting_inverse_preflight(proofs: list[dict[str, Any]]) -> dict[str, Any]:
     """Validate a hypothetical forward-effect/inverse hash contract in memory.
 
-    The manifest's saved preimages and sources must already be independently
-    re-read by inspect_legacy_target_preimages. This detects inconsistent
-    operation/absence/postimage combinations; it does NOT write, replay,
-    simulate filesystem races, authenticate the seal or rehearse recovery.
+    This PURE check accepts structural proof descriptions only: fabricated
+    digest-shaped strings cannot attest actual saved bytes. Only the ORIGINAL
+    #168 inspector, after its bounded source, target, manifest and closing
+    readbacks, may mark the separate hash-evidence booleans true. Neither
+    path writes, replays, authenticates a seal or rehearses filesystem recovery.
     """
     if type(proofs) is not list or not 1 <= len(proofs) <= _MAX_REVIEW_ITEMS:
         raise AdoptionError("Held inverse blueprint has no bounded target set")
@@ -2708,8 +2709,9 @@ def _held_nonexecuting_inverse_preflight(proofs: list[dict[str, Any]]) -> dict[s
         "hypothetical_forward_remove_count": hypothetical_removals,
         "inverse_restore_captured_bytes_count": restored_bytes,
         "inverse_restore_captured_absence_count": restored_absence,
-        "forward_and_inverse_hash_contract_consistent": True,
-        "original_captured_bytes_rechecked_by_inspector": True,
+        "structural_forward_inverse_contract_valid": True,
+        "forward_and_inverse_hash_contract_consistent": False,
+        "original_captured_bytes_rechecked_by_inspector": False,
         "actual_postimage_observed": False,
         "filesystem_rollback_rehearsed": False,
         "independent_signature_verified": False,
@@ -2802,7 +2804,15 @@ def capture_legacy_target_preimages(
     # Reject static symlink/junction/reparse aliases even if they resolve outside
     # the project. This remains cooperative, not an atomic openat lock.
     root_probe = base / ".vres-held-capture-root-probe"
-    base_ancestors = _record_ancestor_identity(root_probe)
+    try:
+        base_ancestors = _record_ancestor_identity(root_probe)
+    except (AdoptionError, OSError, ValueError, RuntimeError):
+        # The generic record-inspection exception differs for a linked base
+        # versus a linked higher ancestor; one fail-closed capture denial
+        # covers both without exposing the caller's absolute state path.
+        raise AdoptionError(
+            "Held capture state base has an unsafe ancestor; no state was created"
+        ) from None
     if base_ancestors is None:
         raise AdoptionError("Held capture state base must already be an ordinary directory")
     plan = draft_legacy_reversible_plan(
@@ -3189,7 +3199,15 @@ def inspect_legacy_target_preimages(
                 _read_verified_preimage(
                     directory, proof["preimage_copy"], proof["current_sha256"],
                     "saved held target")
-        inverse = _held_nonexecuting_inverse_preflight(proofs)
+        # Promote only the two LOCAL hash-evidence claims at this boundary,
+        # after the owner inspector has reread the held manifest, its source
+        # dependencies, current targets, seal and every captured preimage.
+        # This remains cooperative readback, NOT authenticated authority.
+        inverse = {
+            **_held_nonexecuting_inverse_preflight(proofs),
+            "forward_and_inverse_hash_contract_consistent": True,
+            "original_captured_bytes_rechecked_by_inspector": True,
+        }
         return {
             "state": "HELD_CAPTURE_VERIFIED", "captured_target_count": len(proofs),
             "nonexecuting_inverse_blueprint_preflight": inverse,
