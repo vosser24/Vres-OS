@@ -300,9 +300,16 @@ def _selected_legacy_owner_review(
         # Original #168 alone verifies any held preparation. The Chairman only
         # receives its redacted read-only state for the EXACT selected plan.
         held_capture = None
+        held_recovery_triage = None
         if plan is not None:
             held_capture = project_adoption.inspect_legacy_target_preimages(
                 identity, data_root=state_root)
+            held_recovery_triage = project_adoption.review_legacy_held_capture_recovery(
+                identity, data_root=state_root)
+            if (held_recovery_triage["state"] != held_capture["state"]
+                    or (held_capture["state"] == "HELD_CAPTURE_VERIFIED"
+                        and held_recovery_triage["plan_digest"] != held_capture["plan_digest"])):
+                raise WorkSessionRefused("Held capture evidence changed during read")
             if (held_capture["state"] == "HELD_CAPTURE_VERIFIED"
                     and held_capture.get("plan_digest") != plan["plan_digest"]):
                 held_capture = {
@@ -313,7 +320,16 @@ def _selected_legacy_owner_review(
                     "activation_allowed": False,
                     "independent_fable_authority": "NOT_GRANTED",
                 }
+                held_recovery_triage = {
+                    **held_recovery_triage,
+                    "recovery_class": "OTHER_SELECTED_PLAN_CAPTURE",
+                    "same_selected_plan_readback_verified": False,
+                }
             elif held_capture["state"] == "HELD_CAPTURE_VERIFIED":
+                held_recovery_triage = {
+                    **held_recovery_triage,
+                    "same_selected_plan_readback_verified": True,
+                }
                 held_capture = {
                     **held_capture,
                     "state": "HELD_CAPTURE_READBACK_FOR_SELECTED_PLAN",
@@ -340,6 +356,7 @@ def _selected_legacy_owner_review(
         "plan_target_options": review["plan_target_options"],
         "selected_reversible_plan": plan,
         "selected_plan_held_capture_status": held_capture,
+        "selected_plan_held_recovery_triage": held_recovery_triage,
         "original_activation_rollback_evidence": rollback_evidence,
         "project_and_state_paths_hidden": True,
         "caller_targets_are_verified_owner_consent": False,

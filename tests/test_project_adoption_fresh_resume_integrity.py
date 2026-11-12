@@ -1829,6 +1829,8 @@ def test_held_inverse_hash_contract_for_absent_scaffold_preserves_absence(tmp_pa
     assert inverse["inverse_restore_captured_absence_count"] == 1
     assert inverse["actual_postimage_observed"] is False
     assert inverse["owner_project_write_consent_verified"] is False
+    # Absence can be parent-bound; no captured bytes existed to be reread.
+    assert inverse["original_captured_bytes_rechecked_by_inspector"] is False
     assert not scaffold.exists()
 
 
@@ -1848,6 +1850,100 @@ def test_held_inverse_pure_blueprint_never_self_attests_fabricated_hashes():
     assert result["original_captured_bytes_rechecked_by_inspector"] is False
     assert result["filesystem_rollback_rehearsed"] is False
     assert result["independent_signature_verified"] is False
+    assert result["project_write_authorized"] is False
+
+
+
+def test_held_recovery_triage_not_prepared_is_readonly_and_redacted(tmp_path):
+    """AUTHORED NOT_RUN; no capture never becomes permission to resume."""
+    project, data, sd, keep, old, token = _selected_original_keep_plan_fixture(tmp_path)
+    result = project_adoption.review_legacy_held_capture_recovery(project, data_root=data)
+    assert result["state"] == "NOT_PREPARED"
+    assert result["recovery_class"] == "NO_HELD_CAPTURE"
+    assert result["automatic_resume_allowed"] is False
+    assert result["project_write_authorized"] is False
+    assert not (sd / "legacy_target_preparation.json").exists()
+    assert str(project.root) not in str(result)
+    assert str(data) not in str(result)
+
+
+def test_held_recovery_triage_orphaned_copy_root_requires_manual_review(tmp_path):
+    """AUTHORED NOT_RUN; orphan backup is not an empty capture."""
+    project, data, sd, keep, old, token = _selected_original_keep_plan_fixture(tmp_path)
+    (sd / "legacy_target_preimages").mkdir()
+    result = project_adoption.review_legacy_held_capture_recovery(project, data_root=data)
+    assert result["state"] == "RECOVERY_REQUIRED"
+    assert result["recovery_class"] == "ORPHANED_PREIMAGE_ROOT"
+    assert result["operator_recovery_review_required"] is True
+    assert (sd / "legacy_target_preimages").is_dir()
+
+
+def test_held_recovery_triage_invalid_journal_is_nonexecuting(tmp_path):
+    """AUTHORED NOT_RUN; parsing refusal never repairs a corrupt state."""
+    project, data, sd, keep, old, token = _selected_original_keep_plan_fixture(tmp_path)
+    journal = sd / "legacy_target_preparation.json"
+    journal.write_text("{synthetic-broken", encoding="utf-8")
+    journal.chmod(0o600)
+    before = journal.read_bytes()
+    result = project_adoption.review_legacy_held_capture_recovery(project, data_root=data)
+    assert result["state"] == "RECOVERY_REQUIRED"
+    assert result["recovery_class"] == "UNREADABLE_OR_INVALID_JOURNAL"
+    assert journal.read_bytes() == before
+    assert result["automatic_discard_allowed"] is False
+
+
+def test_held_recovery_triage_missing_manifest_and_seal_remains_held(tmp_path):
+    """AUTHORED NOT_RUN; incomplete journal is never resumable evidence."""
+    project, data, sd, keep, old, token = _selected_original_keep_plan_fixture(tmp_path)
+    capture_id = "a" * 32
+    journal = sd / "legacy_target_preparation.json"
+    project_adoption._held_private_exclusive_json(journal, {
+        "version": 1, "kind": "CAPTURE_ONLY_HELD", "capture_id": capture_id})
+    partial = sd / "legacy_target_preimages" / capture_id
+    partial.mkdir(parents=True, mode=0o700)
+    result = project_adoption.review_legacy_held_capture_recovery(project, data_root=data)
+    assert result["state"] == "RECOVERY_REQUIRED"
+    assert result["recovery_class"] == "INCOMPLETE_OR_UNPRIVATE_CAPTURE_ARTIFACTS"
+    assert result["automatic_resume_allowed"] is False
+    assert not (partial / "manifest.json").exists()
+
+
+def test_held_recovery_triage_verified_then_stale_never_grants_write(tmp_path):
+    """AUTHORED NOT_RUN; only original inspector promotes local readback."""
+    project, data, sd, keep, old, token = _selected_original_keep_plan_fixture(tmp_path)
+    targets = {1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}
+    plan = project_adoption.draft_legacy_reversible_plan(
+        project, snapshot_token=token, targets=targets, data_root=data)
+    original_bytes = keep.read_bytes()
+    project_adoption.capture_legacy_target_preimages(
+        project, snapshot_token=token, targets=targets,
+        plan_digest=plan["plan_digest"], authority=_synthetic_held_capture_authority,
+        data_root=data)
+    ready = project_adoption.review_legacy_held_capture_recovery(project, data_root=data)
+    assert ready["state"] == "HELD_CAPTURE_VERIFIED"
+    assert ready["recovery_class"] == "HELD_READBACK_ONLY"
+    assert ready["local_readback_verified_by_original_inspector"] is True
+    assert ready["project_write_authorized"] is False
+    capture_id = project_adoption._read_json(sd / "legacy_target_preparation.json")["capture_id"]
+    (sd / "legacy_target_preimages" / capture_id / "001").write_bytes(b"changed synthetic copy")
+    held = project_adoption.review_legacy_held_capture_recovery(project, data_root=data)
+    assert held["state"] == "RECOVERY_REQUIRED"
+    assert held["recovery_class"] == "ATTESTATION_OR_SELECTED_PLAN_DRIFT"
+    assert held["local_readback_verified_by_original_inspector"] is False
+    assert keep.read_bytes() == original_bytes
+    assert str(project.root) not in str(held)
+
+
+def test_held_recovery_triage_windows_private_store_is_not_inferred(tmp_path, monkeypatch):
+    """AUTHORED NOT_RUN; mock unavailable private storage only, no Windows access."""
+    project, data, sd, keep, old, token = _selected_original_keep_plan_fixture(tmp_path)
+    project_adoption._held_private_exclusive_json(
+        sd / "legacy_target_preparation.json", {
+            "version": 1, "kind": "CAPTURE_ONLY_HELD", "capture_id": "a" * 32})
+    monkeypatch.setattr(project_adoption, "_held_capture_private_storage_available", lambda: False)
+    result = project_adoption.review_legacy_held_capture_recovery(project, data_root=data)
+    assert result["state"] == "RECOVERY_REQUIRED"
+    assert result["recovery_class"] == "PRIVATE_STORAGE_UNVERIFIED"
     assert result["project_write_authorized"] is False
 
 

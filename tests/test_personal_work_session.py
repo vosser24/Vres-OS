@@ -1316,6 +1316,9 @@ def test_chairman_readonly_bridge_reports_original_held_capture_not_prepared(tmp
     held = packet["selected_legacy_owner_review"]["selected_plan_held_capture_status"]
     assert held["state"] == "NOT_PREPARED"
     assert held["project_write_authorized"] is False
+    triage = packet["selected_legacy_owner_review"]["selected_plan_held_recovery_triage"]
+    assert triage["recovery_class"] == "NO_HELD_CAPTURE"
+    assert triage["automatic_resume_allowed"] is False
     assert not (project_adoption._state_dir(project, data) / "legacy_target_preparation.json").exists()
     assert keep.read_bytes() == b"# Synthetic owner edit\n"
     assert packet["writes_performed"] is False
@@ -1347,6 +1350,10 @@ def test_chairman_readonly_bridge_reads_matching_capture_without_grant(tmp_path)
     assert held["state"] == "HELD_CAPTURE_READBACK_FOR_SELECTED_PLAN"
     assert held["same_selected_plan_readback_verified"] is True
     assert held["project_write_authorized"] is False
+    triage = packet["selected_legacy_owner_review"]["selected_plan_held_recovery_triage"]
+    assert triage["recovery_class"] == "HELD_READBACK_ONLY"
+    assert triage["same_selected_plan_readback_verified"] is True
+    assert triage["project_write_authorized"] is False
     assert held["independent_fable_authority"] == "NOT_GRANTED"
     inverse = held["nonexecuting_inverse_blueprint_preflight"]
     assert inverse["state"] == "READ_ONLY_INVERSE_BLUEPRINT_PRECHECK"
@@ -1378,6 +1385,9 @@ def test_chairman_readonly_bridge_reports_partial_capture_as_recovery_hold(tmp_p
     held = packet["selected_legacy_owner_review"]["selected_plan_held_capture_status"]
     assert held["state"] == "RECOVERY_REQUIRED"
     assert held["project_write_authorized"] is False
+    triage = packet["selected_legacy_owner_review"]["selected_plan_held_recovery_triage"]
+    assert triage["operator_recovery_review_required"] is True
+    assert triage["automatic_discard_allowed"] is False
     assert journal.exists()
     assert packet["writes_performed"] is False
 

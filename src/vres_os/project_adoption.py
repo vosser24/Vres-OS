@@ -3206,7 +3206,10 @@ def inspect_legacy_target_preimages(
         inverse = {
             **_held_nonexecuting_inverse_preflight(proofs),
             "forward_and_inverse_hash_contract_consistent": True,
-            "original_captured_bytes_rechecked_by_inspector": True,
+            "original_captured_bytes_rechecked_by_inspector": any(
+                proof["current_state"] == "PRESENT_BOUNDED_SHA_ATTESTED"
+                for proof in proofs
+            ),
         }
         return {
             "state": "HELD_CAPTURE_VERIFIED", "captured_target_count": len(proofs),
@@ -3220,6 +3223,81 @@ def inspect_legacy_target_preimages(
     except (AdoptionError, OSError, ValueError, TypeError, KeyError, AttributeError, RuntimeError):
         return failure
 
+
+
+def review_legacy_held_capture_recovery(
+    project, *, data_root: Path | None = None,
+) -> dict[str, Any]:
+    """Read-only, non-authorizing triage of original #168 HELD capture artifacts.
+
+    Only inspect_legacy_target_preimages can establish bounded LOCAL readback.
+    Recovery class is provisional metadata for the current user, never a cleanup,
+    resume, filesystem write, approval, independently signed proof or Fable result.
+    Generic categories intentionally omit paths, bytes, callback metadata and IDs.
+    """
+    inspected = inspect_legacy_target_preimages(project, data_root=data_root)
+    state = inspected["state"]
+    category = {
+        "NOT_PREPARED": "NO_HELD_CAPTURE",
+        "HELD_CAPTURE_VERIFIED": "HELD_READBACK_ONLY",
+        "RECOVERY_REQUIRED": "UNSAFE_OR_UNREADABLE_STATE",
+    }[state]
+    if state == "RECOVERY_REQUIRED":
+        try:
+            from .paths import data_dir_path
+
+            base = Path(data_root) if data_root is not None else data_dir_path()
+            root = Path(project.root).resolve(strict=True)
+            sd = base / "projects" / hashlib.sha256(project.key.encode("utf-8")).hexdigest()[:24]
+            journal_path = sd / "legacy_target_preparation.json"
+            if not base.is_absolute() or sd.resolve(strict=False).is_relative_to(root):
+                category = "UNSAFE_STATE_LOCATION"
+            elif _record_ancestor_identity(journal_path) is None:
+                category = "MISSING_STATE_ANCESTRY"
+            else:
+                journal_info = _lstat(journal_path)
+                copies_info = _lstat(sd / "legacy_target_preimages")
+                if journal_info is None:
+                    category = ("ORPHANED_PREIMAGE_ROOT" if copies_info is not None
+                                else "MISSING_JOURNAL_ON_RECHECK")
+                elif (not _held_capture_private_storage_available()
+                      or not _held_private_entry(journal_path)):
+                    category = "PRIVATE_STORAGE_UNVERIFIED"
+                else:
+                    try:
+                        journal = _read_json(journal_path)
+                    except (AdoptionError, OSError, ValueError, TypeError, RuntimeError):
+                        journal = None
+                    if (type(journal) is not dict or journal.get("version") != 1
+                            or journal.get("kind") != "CAPTURE_ONLY_HELD"
+                            or type(journal.get("capture_id")) is not str
+                            or re.fullmatch(r"[0-9a-f]{32}", journal["capture_id"]) is None):
+                        category = "UNREADABLE_OR_INVALID_JOURNAL"
+                    else:
+                        capture = sd / "legacy_target_preimages" / journal["capture_id"]
+                        if (not _held_private_entry(capture.parent, directory=True)
+                                or not _held_private_entry(capture, directory=True)
+                                or not _held_private_entry(capture / "manifest.json")
+                                or not _held_private_entry(capture / "seal.json")):
+                            category = "INCOMPLETE_OR_UNPRIVATE_CAPTURE_ARTIFACTS"
+                        else:
+                            category = "ATTESTATION_OR_SELECTED_PLAN_DRIFT"
+        except (AdoptionError, OSError, ValueError, TypeError, KeyError, RuntimeError):
+            category = "UNSAFE_OR_UNREADABLE_STATE"
+    return {
+        "state": state,
+        "recovery_class": category,
+        "plan_digest": inspected.get("plan_digest") if state == "HELD_CAPTURE_VERIFIED" else None,
+        "local_readback_verified_by_original_inspector": state == "HELD_CAPTURE_VERIFIED",
+        "diagnostic_is_provisional_not_authority": True,
+        "operator_recovery_review_required": state == "RECOVERY_REQUIRED",
+        "automatic_resume_allowed": False,
+        "automatic_discard_allowed": False,
+        "filesystem_rollback_rehearsed": False,
+        "project_changes_performed": False,
+        "project_write_authorized": False,
+        "independent_fable_authority": "NOT_GRANTED",
+    }
 
 def inspect_legacy_activation_rollback_evidence(
     project, *, snapshot_token: str, data_root: Path | None = None,
