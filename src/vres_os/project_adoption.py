@@ -3284,6 +3284,16 @@ def review_legacy_held_capture_recovery(
                             category = "ATTESTATION_OR_SELECTED_PLAN_DRIFT"
         except (AdoptionError, OSError, ValueError, TypeError, KeyError, RuntimeError):
             category = "UNSAFE_OR_UNREADABLE_STATE"
+    # Recovery triage is a separate, potentially lengthy read after the
+    # original inspector. Refuse a torn observation if its saved state changes
+    # before we return, including an initially absent journal appearing late.
+    # This is a cooperative closing check, NOT an atomic filesystem lock.
+    try:
+        closing = inspect_legacy_target_preimages(project, data_root=data_root)
+    except (AdoptionError, OSError, ValueError, TypeError, KeyError, RuntimeError):
+        closing = None
+    if closing != inspected:
+        state, category = "RECOVERY_REQUIRED", "CHANGED_DURING_RECOVERY_REVIEW"
     return {
         "state": state,
         "recovery_class": category,

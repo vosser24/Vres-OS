@@ -1947,6 +1947,75 @@ def test_held_recovery_triage_windows_private_store_is_not_inferred(tmp_path, mo
     assert result["project_write_authorized"] is False
 
 
+def test_held_recovery_triage_refuses_late_appearing_journal(tmp_path, monkeypatch):
+    """AUTHORED NOT_RUN; a new journal between reads is not NO_HELD_CAPTURE."""
+    project, data, sd, keep, old, token = _selected_original_keep_plan_fixture(tmp_path)
+    inspect = project_adoption.inspect_legacy_target_preimages
+    calls = 0
+    journal = sd / "legacy_target_preparation.json"
+
+    def appearance_between_reads(selected, *, data_root=None):
+        nonlocal calls
+        result = inspect(selected, data_root=data_root)
+        calls += 1
+        if calls == 1:
+            project_adoption._held_private_exclusive_json(journal, {
+                "version": 1, "kind": "CAPTURE_ONLY_HELD", "capture_id": "b" * 32,
+            })
+        return result
+
+    monkeypatch.setattr(project_adoption, "inspect_legacy_target_preimages",
+                        appearance_between_reads)
+    triage = project_adoption.review_legacy_held_capture_recovery(
+        project, data_root=data)
+    assert calls == 2
+    assert triage["state"] == "RECOVERY_REQUIRED"
+    assert triage["recovery_class"] == "CHANGED_DURING_RECOVERY_REVIEW"
+    assert triage["local_readback_verified_by_original_inspector"] is False
+    assert triage["automatic_resume_allowed"] is False
+    assert triage["project_write_authorized"] is False
+    assert journal.exists()
+    assert str(project.root) not in str(triage)
+
+
+def test_held_recovery_triage_refuses_late_preimage_mutation(tmp_path, monkeypatch):
+    """AUTHORED NOT_RUN; a closing read must not reuse a stale verified capture."""
+    project, data, sd, keep, old, token = _selected_original_keep_plan_fixture(tmp_path)
+    targets = {1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}
+    plan = project_adoption.draft_legacy_reversible_plan(
+        project, snapshot_token=token, targets=targets, data_root=data)
+    project_adoption.capture_legacy_target_preimages(
+        project, snapshot_token=token, targets=targets,
+        plan_digest=plan["plan_digest"], authority=_synthetic_held_capture_authority,
+        data_root=data)
+    capture_id = project_adoption._read_json(
+        sd / "legacy_target_preparation.json")["capture_id"]
+    saved_copy = sd / "legacy_target_preimages" / capture_id / "001"
+    inspect = project_adoption.inspect_legacy_target_preimages
+    calls = 0
+
+    def mutate_after_first_read(selected, *, data_root=None):
+        nonlocal calls
+        result = inspect(selected, data_root=data_root)
+        calls += 1
+        if calls == 1:
+            assert result["state"] == "HELD_CAPTURE_VERIFIED"
+            saved_copy.write_bytes(b"changed synthetic held copy")
+        return result
+
+    monkeypatch.setattr(project_adoption, "inspect_legacy_target_preimages",
+                        mutate_after_first_read)
+    triage = project_adoption.review_legacy_held_capture_recovery(
+        project, data_root=data)
+    assert calls == 2
+    assert triage["state"] == "RECOVERY_REQUIRED"
+    assert triage["recovery_class"] == "CHANGED_DURING_RECOVERY_REVIEW"
+    assert triage["plan_digest"] is None
+    assert triage["local_readback_verified_by_original_inspector"] is False
+    assert triage["automatic_discard_allowed"] is False
+    assert triage["project_write_authorized"] is False
+
+
 def test_held_inverse_blueprint_rejects_unbound_or_inconsistent_hashes():
     """AUTHORED NOT_RUN; no state, project, or secret is touched by pure check."""
     fake = {
