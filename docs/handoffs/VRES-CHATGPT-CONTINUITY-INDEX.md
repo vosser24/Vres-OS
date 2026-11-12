@@ -1,6 +1,6 @@
 # Vres-OS — ChatGPT-led CURRENT continuity index
 
-**Updated:** 2026-11-11, Europe/Athens.
+**Updated:** 2026-11-12, Europe/Athens.
 **Canonical documentation branch:** docs/chatgpt-continuity-20261023.
 Historical preproduction C2B/K0, Windows personal release, all source acceptances/rejections and original V-01..V-42 roadmap are preserved, never silently superseded.
 
