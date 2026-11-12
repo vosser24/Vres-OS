@@ -2654,6 +2654,71 @@ def _held_capture_private_storage_available() -> bool:
     return os.name != "nt"
 
 
+def _held_nonexecuting_inverse_preflight(proofs: list[dict[str, Any]]) -> dict[str, Any]:
+    """Validate a hypothetical forward-effect/inverse hash contract in memory.
+
+    The manifest's saved preimages and sources must already be independently
+    re-read by inspect_legacy_target_preimages. This detects inconsistent
+    operation/absence/postimage combinations; it does NOT write, replay,
+    simulate filesystem races, authenticate the seal or rehearse recovery.
+    """
+    if type(proofs) is not list or not 1 <= len(proofs) <= _MAX_REVIEW_ITEMS:
+        raise AdoptionError("Held inverse blueprint has no bounded target set")
+    expected_posts = {
+        "WRITE_VERIFIED_ORIGINAL_KEEP": "PRESENT_BOUND_SAVED_KEEP",
+        "WRITE_REPRODUCED_PINNED_CANONICAL_SCAFFOLD":
+            "PRESENT_BOUND_HISTORICAL_CANONICAL_POSTIMAGE",
+        "REMOVE_EXACT_SELECTED_LEAF": "ABSENT_AFTER_REMOVAL",
+    }
+    restored_bytes = restored_absence = hypothetical_writes = hypothetical_removals = 0
+    for proof in proofs:
+        if type(proof) is not dict:
+            raise AdoptionError("Held inverse blueprint entry is invalid")
+        operation = proof.get("operation")
+        if (type(operation) is not str or operation not in expected_posts
+                or proof.get("expected_postimage") != expected_posts[operation]):
+            raise AdoptionError("Held inverse blueprint operation/postimage disagree")
+        source_sha = proof.get("selected_source_sha256")
+        if operation == "REMOVE_EXACT_SELECTED_LEAF":
+            if source_sha is not None:
+                raise AdoptionError("Remove-only effect cannot carry postimage bytes")
+            hypothetical_removals += 1
+        else:
+            if (type(source_sha) is not str
+                    or re.fullmatch(r"[0-9a-f]{64}", source_sha) is None):
+                raise AdoptionError("Proposed write has no verified source digest")
+            hypothetical_writes += 1
+        state, current_sha = proof.get("current_state"), proof.get("current_sha256")
+        if state == "PRESENT_BOUNDED_SHA_ATTESTED":
+            if (type(current_sha) is not str
+                    or re.fullmatch(r"[0-9a-f]{64}", current_sha) is None
+                    or proof.get("inverse_restore") != "RESTORE_EXACT_CAPTURED_BYTES"):
+                raise AdoptionError("Present target has no exact inverse preimage")
+            restored_bytes += 1
+        elif state == "ABSENT_LEAF_OBSERVED":
+            if (current_sha is not None
+                    or proof.get("inverse_restore") != "RESTORE_CAPTURED_LEAF_ABSENCE"):
+                raise AdoptionError("Absent target has no parent-bound inverse")
+            restored_absence += 1
+        else:
+            raise AdoptionError("Unverifiable held target cannot have an inverse")
+    return {
+        "state": "READ_ONLY_INVERSE_BLUEPRINT_PRECHECK",
+        "hypothetical_forward_write_count": hypothetical_writes,
+        "hypothetical_forward_remove_count": hypothetical_removals,
+        "inverse_restore_captured_bytes_count": restored_bytes,
+        "inverse_restore_captured_absence_count": restored_absence,
+        "forward_and_inverse_hash_contract_consistent": True,
+        "original_captured_bytes_rechecked_by_inspector": True,
+        "actual_postimage_observed": False,
+        "filesystem_rollback_rehearsed": False,
+        "independent_signature_verified": False,
+        "owner_project_write_consent_verified": False,
+        "protected_fable_high_granted": False,
+        "project_write_authorized": False,
+    }
+
+
 def _held_private_entry(path: Path, *, directory: bool = False) -> bool:
     """Check held state type and POSIX owner-only mode; Windows ACL remains UNPROVEN."""
     info = _lstat(path)
@@ -3124,8 +3189,10 @@ def inspect_legacy_target_preimages(
                 _read_verified_preimage(
                     directory, proof["preimage_copy"], proof["current_sha256"],
                     "saved held target")
+        inverse = _held_nonexecuting_inverse_preflight(proofs)
         return {
             "state": "HELD_CAPTURE_VERIFIED", "captured_target_count": len(proofs),
+            "nonexecuting_inverse_blueprint_preflight": inverse,
             "durable_preimages_readback_verified": True,
             "plan_digest": journal["plan_digest"],
             "requires_separate_owner_write_consent": True,

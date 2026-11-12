@@ -1733,3 +1733,71 @@ def test_held_inspector_rechecks_late_preimage_change(
     assert outcome["state"] == "RECOVERY_REQUIRED"
     assert outcome["activation_allowed"] is False
     assert keep.read_bytes() == b"# Synthetic later changed KEEP\n"
+
+
+def test_held_inverse_hash_contract_for_present_copy_is_readonly(tmp_path):
+    """AUTHORED NOT_RUN; saved bytes support only hypothetical inverse counts."""
+    project, data, sd, keep, old, token = _selected_original_keep_plan_fixture(tmp_path)
+    before = keep.read_bytes()
+    targets = {1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}
+    plan = project_adoption.draft_legacy_reversible_plan(
+        project, snapshot_token=token, targets=targets, data_root=data)
+    captured = project_adoption.capture_legacy_target_preimages(
+        project, snapshot_token=token, targets=targets,
+        plan_digest=plan["plan_digest"], authority=_synthetic_held_capture_authority,
+        data_root=data)
+    inverse = captured["nonexecuting_inverse_blueprint_preflight"]
+    assert inverse["state"] == "READ_ONLY_INVERSE_BLUEPRINT_PRECHECK"
+    assert inverse["hypothetical_forward_write_count"] == 1
+    assert inverse["inverse_restore_captured_bytes_count"] == 1
+    assert inverse["inverse_restore_captured_absence_count"] == 0
+    assert inverse["filesystem_rollback_rehearsed"] is False
+    assert inverse["project_write_authorized"] is False
+    assert keep.read_bytes() == before
+    assert str(project.root) not in str(inverse)
+    assert str(data) not in str(inverse)
+
+
+def test_held_inverse_hash_contract_for_absent_scaffold_preserves_absence(tmp_path):
+    """AUTHORED NOT_RUN; no scaffold created or inverse filesystem replay."""
+    project, data, sd = _active_legacy_with_saved_result(tmp_path)
+    scaffold = project.root / "CLAUDE.md"
+    scaffold.unlink()
+    token = project_adoption.status(project, data_root=data)[
+        "legacy_configuration_readiness"]["owner_review"]["snapshot_token"]
+    project_adoption.record_legacy_review_intent(
+        project, 1, "REQUEST_REVERSIBLE_PLAN", snapshot_token=token,
+        authority=lambda s: {"confirmed": True, "kind": "synthetic_fixture"},
+        data_root=data)
+    targets = {1: "REBUILD_CANONICAL_SCAFFOLD_FOR_REVIEW"}
+    plan = project_adoption.draft_legacy_reversible_plan(
+        project, snapshot_token=token, targets=targets, data_root=data)
+    captured = project_adoption.capture_legacy_target_preimages(
+        project, snapshot_token=token, targets=targets,
+        plan_digest=plan["plan_digest"], authority=_synthetic_held_capture_authority,
+        data_root=data)
+    inverse = captured["nonexecuting_inverse_blueprint_preflight"]
+    assert inverse["hypothetical_forward_write_count"] == 1
+    assert inverse["inverse_restore_captured_bytes_count"] == 0
+    assert inverse["inverse_restore_captured_absence_count"] == 1
+    assert inverse["actual_postimage_observed"] is False
+    assert inverse["owner_project_write_consent_verified"] is False
+    assert not scaffold.exists()
+
+
+def test_held_inverse_blueprint_rejects_unbound_or_inconsistent_hashes():
+    """AUTHORED NOT_RUN; no state, project, or secret is touched by pure check."""
+    fake = {
+        "operation": "WRITE_VERIFIED_ORIGINAL_KEEP",
+        "expected_postimage": "PRESENT_BOUND_SAVED_KEEP",
+        "selected_source_sha256": None,
+        "current_state": "PRESENT_BOUNDED_SHA_ATTESTED",
+        "current_sha256": "a" * 64,
+        "inverse_restore": "RESTORE_EXACT_CAPTURED_BYTES",
+    }
+    with pytest.raises(AdoptionError, match="verified source digest"):
+        project_adoption._held_nonexecuting_inverse_preflight([fake])
+    fake["selected_source_sha256"] = "b" * 64
+    fake["inverse_restore"] = "RESTORE_CAPTURED_LEAF_ABSENCE"
+    with pytest.raises(AdoptionError, match="exact inverse preimage"):
+        project_adoption._held_nonexecuting_inverse_preflight([fake])

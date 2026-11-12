@@ -1348,6 +1348,12 @@ def test_chairman_readonly_bridge_reads_matching_capture_without_grant(tmp_path)
     assert held["same_selected_plan_readback_verified"] is True
     assert held["project_write_authorized"] is False
     assert held["independent_fable_authority"] == "NOT_GRANTED"
+    inverse = held["nonexecuting_inverse_blueprint_preflight"]
+    assert inverse["state"] == "READ_ONLY_INVERSE_BLUEPRINT_PRECHECK"
+    assert inverse["hypothetical_forward_write_count"] == 1
+    assert inverse["inverse_restore_captured_bytes_count"] == 1
+    assert inverse["filesystem_rollback_rehearsed"] is False
+    assert inverse["project_write_authorized"] is False
     assert packet["writes_performed"] is False
     assert keep.read_bytes() == b"# Synthetic owner edit\n"
     assert str(project.root) not in json.dumps(packet)
