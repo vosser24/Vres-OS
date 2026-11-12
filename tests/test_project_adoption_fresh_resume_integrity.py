@@ -2102,3 +2102,69 @@ def test_held_inverse_blueprint_rejects_unbound_or_inconsistent_hashes():
     fake["inverse_restore"] = "RESTORE_CAPTURED_LEAF_ABSENCE"
     with pytest.raises(AdoptionError, match="exact inverse preimage"):
         project_adoption._held_nonexecuting_inverse_preflight([fake])
+
+
+def test_held_windows_preimage_candidate_context_binds_each_dimension():
+    """AUTHORED NOT_RUN; pure binding only, not Windows DPAPI/security proof."""
+    from vres_os._windows_held_privacy import _preimage_context
+
+    values = dict(
+        project_key="synthetic-private-project-name",
+        capture_id="a" * 32, number=1,
+        plan_digest="b" * 64, expected_sha256="c" * 64)
+    original = _preimage_context(**values)
+    assert original == _preimage_context(**values)
+    assert b"synthetic-private-project-name" not in original
+    for name, replacement in (
+        ("project_key", "other-synthetic-private-project"),
+        ("capture_id", "d" * 32), ("number", 2),
+        ("plan_digest", "e" * 64), ("expected_sha256", "f" * 64),
+    ):
+        assert _preimage_context(**{**values, name: replacement}) != original
+
+
+def test_held_windows_preimage_candidate_rejects_invalid_identity():
+    """AUTHORED NOT_RUN; bool numbers, malformed digests and keys fail closed."""
+    from vres_os._windows_held_privacy import (
+        HeldWindowsPrivacyError, _preimage_context,
+    )
+
+    good = dict(
+        project_key="synthetic:project", capture_id="a" * 32,
+        number=1, plan_digest="b" * 64, expected_sha256="c" * 64)
+    for key, bad in (
+        ("project_key", ""), ("project_key", "bad\nkey"),
+        ("project_key", "\ud800"),
+        ("capture_id", "A" * 32), ("capture_id", "../fake"),
+        ("number", True), ("number", 0), ("number", 61),
+        ("plan_digest", "b" * 63), ("plan_digest", "z" * 64),
+        ("expected_sha256", "C" * 64),
+    ):
+        with pytest.raises(HeldWindowsPrivacyError):
+            _preimage_context(**{**good, key: bad})
+
+
+def test_held_windows_dpapi_candidate_does_not_enable_capture():
+    """AUTHORED NOT_RUN; pure contract stays unverified, no Windows API invoked."""
+    from vres_os._windows_held_privacy import _preimage_context
+
+    assert _preimage_context(
+        project_key="synthetic:test", capture_id="a" * 32, number=1,
+        plan_digest="b" * 64, expected_sha256="c" * 64)
+    assert project_adoption._held_capture_private_storage_available() is (os.name != "nt")
+    if os.name != "nt":
+        with pytest.raises(AdoptionError, match="candidate refused"):
+            project_adoption._held_windows_protect_preimage_candidate(
+                b"nonsensitive synthetic preimage",
+                project_key="synthetic:test", capture_id="a" * 32,
+                number=1, plan_digest="b" * 64)
+    assert project_adoption._held_capture_private_storage_available() is (os.name != "nt")
+
+
+def test_held_windows_dpapi_candidate_rejects_binary_before_os_access():
+    """AUTHORED NOT_RUN; refusal cannot depend on Windows token or DPAPI."""
+    with pytest.raises(AdoptionError, match="text-only preimage"):
+        project_adoption._held_windows_protect_preimage_candidate(
+            b"nonsensitive\x00synthetic",
+            project_key="synthetic:test", capture_id="a" * 32,
+            number=1, plan_digest="b" * 64)

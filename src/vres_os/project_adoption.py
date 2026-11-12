@@ -2645,6 +2645,55 @@ def draft_legacy_reversible_plan(
 
 # ------------------------------------------------------------- HELD legacy target capture (#168/#174)
 
+def _held_windows_protect_preimage_candidate(
+    raw: bytes, *, project_key: str, capture_id: str, number: int,
+    plan_digest: str,
+) -> bytes:
+    """Original #168 in-memory DPAPI candidate, NOT active capture/storage.
+
+    Future callers must ALSO reject secret-looking selected *paths* via the
+    existing #168 policy; this helper refuses secret/binary content itself.
+    """
+    if type(raw) is not bytes or len(raw) > _MAX_BYTES or b"\x00" in raw:
+        raise AdoptionError("Held Windows candidate requires bounded text-only preimage")
+    try:
+        decoded = raw.decode("utf-8")
+    except UnicodeError:
+        raise AdoptionError("Held Windows candidate requires bounded text-only preimage") from None
+    if sanitize_extracted_text(decoded).status in {
+        SENSITIVE_SANITIZED, SENSITIVE_REVIEW_REQUIRED,
+    }:
+        raise AdoptionError("Held Windows candidate refuses sensitive content")
+    from ._windows_held_privacy import (
+        HeldWindowsPrivacyError, protect_held_preimage,
+    )
+
+    try:
+        return protect_held_preimage(
+            raw, project_key=project_key, capture_id=capture_id,
+            number=number, plan_digest=plan_digest)
+    except HeldWindowsPrivacyError:
+        raise AdoptionError("Held Windows preimage candidate refused") from None
+
+
+def _held_windows_recover_preimage_candidate(
+    envelope: bytes, *, project_key: str, capture_id: str, number: int,
+    plan_digest: str, expected_sha256: str,
+) -> bytes:
+    """Original #168 exact-context decrypt candidate; no project remediation."""
+    from ._windows_held_privacy import (
+        HeldWindowsPrivacyError, recover_held_preimage,
+    )
+
+    try:
+        return recover_held_preimage(
+            envelope, project_key=project_key, capture_id=capture_id,
+            number=number, plan_digest=plan_digest,
+            expected_sha256=expected_sha256)
+    except HeldWindowsPrivacyError:
+        raise AdoptionError("Held Windows preimage candidate refused") from None
+
+
 def _held_capture_private_storage_available() -> bool:
     """Fail closed on Windows until a verified current-user ACL/encryption store exists.
 
