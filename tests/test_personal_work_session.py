@@ -1297,3 +1297,80 @@ def test_session_rollback_evidence_requires_original_opt_in(tmp_path):
             desk_root, "TASK-LEGACY-REVIEW", **kwargs,
             include_legacy_owner_review=True, legacy_review_data_root=data,
             include_legacy_rollback_evidence=1)
+
+
+def test_chairman_readonly_bridge_reports_original_held_capture_not_prepared(tmp_path):
+    """AUTHORED NOT_RUN; original #165 reads same #168 held plan, never prepares."""
+    from vres_os import project_adoption
+    desk_root, project, data, keep, token = _synthetic_legacy_work_review(tmp_path)
+    project_adoption.record_legacy_review_intent(
+        project, 1, "REQUEST_REVERSIBLE_PLAN", snapshot_token=token,
+        authority=lambda s: {"confirmed": True, "kind": "synthetic_fixture"}, data_root=data)
+    packet = session.review_session(
+        desk_root, "TASK-LEGACY-REVIEW",
+        project_root=project.root, project_key=project.key,
+        include_legacy_owner_review=True, legacy_review_data_root=data,
+        legacy_review_snapshot_token=token,
+        legacy_review_targets={1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"},
+    )
+    held = packet["selected_legacy_owner_review"]["selected_plan_held_capture_status"]
+    assert held["state"] == "NOT_PREPARED"
+    assert held["project_write_authorized"] is False
+    assert not (project_adoption._state_dir(project, data) / "legacy_target_preparation.json").exists()
+    assert keep.read_bytes() == b"# Synthetic owner edit\n"
+    assert packet["writes_performed"] is False
+
+
+def test_chairman_readonly_bridge_reads_matching_capture_without_grant(tmp_path):
+    """AUTHORED NOT_RUN; capture authority is synthetic, never project consent."""
+    from vres_os import project_adoption
+    desk_root, project, data, keep, token = _synthetic_legacy_work_review(tmp_path)
+    project_adoption.record_legacy_review_intent(
+        project, 1, "REQUEST_REVERSIBLE_PLAN", snapshot_token=token,
+        authority=lambda s: {"confirmed": True, "kind": "synthetic_fixture"}, data_root=data)
+    targets = {1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}
+    plan = project_adoption.draft_legacy_reversible_plan(
+        project, snapshot_token=token, targets=targets, data_root=data)
+    def fixture_authority(statement):
+        return {"confirmed": True, "kind": "operator_console",
+                "statement": statement, "user": "synthetic_fixture", "at": "fixture_only"}
+    captured = project_adoption.capture_legacy_target_preimages(
+        project, snapshot_token=token, targets=targets, plan_digest=plan["plan_digest"],
+        authority=fixture_authority, data_root=data)
+    assert captured["state"] == "HELD_CAPTURE_VERIFIED"
+    packet = session.review_session(
+        desk_root, "TASK-LEGACY-REVIEW",
+        project_root=project.root, project_key=project.key,
+        include_legacy_owner_review=True, legacy_review_data_root=data,
+        legacy_review_snapshot_token=token, legacy_review_targets=targets)
+    held = packet["selected_legacy_owner_review"]["selected_plan_held_capture_status"]
+    assert held["state"] == "HELD_CAPTURE_READBACK_FOR_SELECTED_PLAN"
+    assert held["same_selected_plan_readback_verified"] is True
+    assert held["project_write_authorized"] is False
+    assert held["independent_fable_authority"] == "NOT_GRANTED"
+    assert packet["writes_performed"] is False
+    assert keep.read_bytes() == b"# Synthetic owner edit\n"
+    assert str(project.root) not in json.dumps(packet)
+    assert str(data) not in json.dumps(packet)
+
+
+def test_chairman_readonly_bridge_reports_partial_capture_as_recovery_hold(tmp_path):
+    """AUTHORED NOT_RUN; interrupted journal is not silently cleared."""
+    from vres_os import project_adoption
+    desk_root, project, data, keep, token = _synthetic_legacy_work_review(tmp_path)
+    project_adoption.record_legacy_review_intent(
+        project, 1, "REQUEST_REVERSIBLE_PLAN", snapshot_token=token,
+        authority=lambda s: {"confirmed": True, "kind": "synthetic_fixture"}, data_root=data)
+    journal = project_adoption._state_dir(project, data) / "legacy_target_preparation.json"
+    journal.write_text('{"version":1,"kind":"CAPTURE_ONLY_HELD"}', encoding="utf-8")
+    packet = session.review_session(
+        desk_root, "TASK-LEGACY-REVIEW",
+        project_root=project.root, project_key=project.key,
+        include_legacy_owner_review=True, legacy_review_data_root=data,
+        legacy_review_snapshot_token=token,
+        legacy_review_targets={1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"})
+    held = packet["selected_legacy_owner_review"]["selected_plan_held_capture_status"]
+    assert held["state"] == "RECOVERY_REQUIRED"
+    assert held["project_write_authorized"] is False
+    assert journal.exists()
+    assert packet["writes_performed"] is False

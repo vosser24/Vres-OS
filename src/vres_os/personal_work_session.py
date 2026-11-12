@@ -297,6 +297,30 @@ def _selected_legacy_owner_review(
                 identity, snapshot_token=snapshot_token, targets=targets,
                 data_root=state_root,
             )
+        # Original #168 alone verifies any held preparation. The Chairman only
+        # receives its redacted read-only state for the EXACT selected plan.
+        held_capture = None
+        if plan is not None:
+            held_capture = project_adoption.inspect_legacy_target_preimages(
+                identity, data_root=state_root)
+            if (held_capture["state"] == "HELD_CAPTURE_VERIFIED"
+                    and held_capture.get("plan_digest") != plan["plan_digest"]):
+                held_capture = {
+                    "state": "OTHER_PLAN_CAPTURE_PRESENT",
+                    "same_selected_plan_readback_verified": False,
+                    "project_changes_performed": False,
+                    "project_write_authorized": False,
+                    "activation_allowed": False,
+                    "independent_fable_authority": "NOT_GRANTED",
+                }
+            elif held_capture["state"] == "HELD_CAPTURE_VERIFIED":
+                held_capture = {
+                    **held_capture,
+                    "state": "HELD_CAPTURE_READBACK_FOR_SELECTED_PLAN",
+                    "same_selected_plan_readback_verified": True,
+                    "project_write_authorized": False,
+                    "activation_allowed": False,
+                }
         rollback_evidence = None
         if include_rollback_evidence:
             rollback_evidence = project_adoption.inspect_legacy_activation_rollback_evidence(
@@ -315,6 +339,7 @@ def _selected_legacy_owner_review(
         "pending_displayed_numbers": review["pending_displayed_numbers"],
         "plan_target_options": review["plan_target_options"],
         "selected_reversible_plan": plan,
+        "selected_plan_held_capture_status": held_capture,
         "original_activation_rollback_evidence": rollback_evidence,
         "project_and_state_paths_hidden": True,
         "caller_targets_are_verified_owner_consent": False,
