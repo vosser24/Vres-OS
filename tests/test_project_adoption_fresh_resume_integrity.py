@@ -2219,3 +2219,132 @@ def test_held_windows_private_root_candidate_exact_path_shape_and_bounds():
                 r"C:\endswith."):
         with pytest.raises(HeldWindowsRootError):
             _local_drive_components(bad)
+
+
+def _synthetic_windows_journal_record():
+    """Non-sensitive typed policy fixture; no source files or Windows APIs."""
+    return {
+        "version": 1,
+        "kind": "VRES_168_WINDOWS_ENCRYPTED_HELD_JOURNAL_CANDIDATE_V1",
+        "project_key_sha256": "a" * 64,
+        "capture_id": "b" * 32,
+        "plan_digest": "c" * 64,
+        "selected_numbers": [1, 4],
+        "revision": 1,
+        "predecessor_sha256": None,
+        "phase": "PREPARING",
+        "envelope_set_sha256": None,
+        "manifest_sha256": None,
+        "project_write_authorized": False,
+        "protected_fable_high_authority": "NOT_GRANTED",
+    }
+
+
+def test_held_windows_root_path_refuses_superscript_device_aliases():
+    """AUTHORED NOT_RUN; Windows reserves COM/LPT superscript device names."""
+    from vres_os._windows_held_storage_probe import (
+        HeldWindowsRootError, _local_drive_components,
+    )
+
+    for prefix in ("COM", "LPT", "com", "lpt"):
+        for number in "¹²³":
+            for suffix in ("", ".log"):
+                with pytest.raises(HeldWindowsRootError):
+                    _local_drive_components(r"C:\Dummy" + "\\" + prefix + number + suffix)
+
+
+def test_held_windows_journal_policy_genesis_and_seal_are_non_authorizing():
+    """AUTHORED NOT_RUN; no durable journal or Windows execution is attempted."""
+    from vres_os._windows_held_journal_policy import _record_sha256
+
+    before = _synthetic_windows_journal_record()
+    planned = project_adoption._held_windows_journal_transition_candidate(
+        None, before)
+    assert planned["proposed_phase"] == "PREPARING"
+    assert planned["storage_written"] is False
+    assert planned["project_write_authorized"] is False
+    assert planned["protected_fable_high_granted"] is False
+    after = {
+        **before, "phase": "COPIES_SEALED_HELD", "revision": 2,
+        "predecessor_sha256": _record_sha256(before),
+        "envelope_set_sha256": "d" * 64,
+        "manifest_sha256": "e" * 64,
+    }
+    sealed = project_adoption._held_windows_journal_transition_candidate(
+        before, after)
+    assert sealed["proposed_phase"] == "COPIES_SEALED_HELD"
+    assert sealed["authenticated_readback_proven"] is False
+    assert sealed["exclusive_durable_journal_proven"] is False
+    assert sealed["automatic_recovery_allowed"] is False
+
+
+def test_held_windows_journal_policy_refuses_lineage_downgrade_and_identity_drift():
+    """AUTHORED NOT_RUN; hashes are structural, never security authorization."""
+    from vres_os._windows_held_journal_policy import _record_sha256
+
+    before = _synthetic_windows_journal_record()
+    valid = {
+        **before, "phase": "COPIES_SEALED_HELD", "revision": 2,
+        "predecessor_sha256": _record_sha256(before),
+        "envelope_set_sha256": "d" * 64,
+        "manifest_sha256": "e" * 64,
+    }
+    for modification in (
+        {"revision": 3},
+        {"predecessor_sha256": "f" * 64},
+        {"plan_digest": "f" * 64},
+        {"capture_id": "f" * 32},
+        {"selected_numbers": [1, 5]},
+        {"project_key_sha256": "f" * 64},
+        {"phase": "PREPARING"},
+    ):
+        with pytest.raises(AdoptionError, match="transition candidate refused"):
+            project_adoption._held_windows_journal_transition_candidate(
+                before, {**valid, **modification})
+    with pytest.raises(AdoptionError, match="transition candidate refused"):
+        project_adoption._held_windows_journal_transition_candidate(
+            valid, {**valid, "phase": "PREPARING", "revision": 3,
+                    "predecessor_sha256": _record_sha256(valid),
+                    "envelope_set_sha256": None, "manifest_sha256": None})
+
+
+def test_held_windows_journal_policy_refuses_forged_authority_or_secret_metadata():
+    """AUTHORED NOT_RUN; arbitrary assertion, unknown keys and paths refused."""
+    before = _synthetic_windows_journal_record()
+    for modification in (
+        {"project_write_authorized": True},
+        {"protected_fable_high_authority": "PASS"},
+        {"secret_key": "sensitive-unsafe-field"},
+        {"project_path": r"C:\SensitiveProject"},
+        {"selected_numbers": [1, 1]},
+        {"selected_numbers": [True, 4]},
+        {"revision": True},
+        {"envelope_set_sha256": "e" * 64},
+        {"manifest_sha256": "f" * 64},
+    ):
+        with pytest.raises(AdoptionError, match="transition candidate refused"):
+            project_adoption._held_windows_journal_transition_candidate(
+                None, {**before, **modification})
+
+
+def test_held_windows_journal_restart_triage_never_automates_recovery():
+    """AUTHORED NOT_RUN; ALL restart cases require independent manual readback."""
+    from vres_os._windows_held_journal_policy import _record_sha256
+
+    preparing = _synthetic_windows_journal_record()
+    sealed = {
+        **preparing, "phase": "COPIES_SEALED_HELD", "revision": 2,
+        "predecessor_sha256": _record_sha256(preparing),
+        "envelope_set_sha256": "d" * 64,
+        "manifest_sha256": "e" * 64,
+    }
+    for record in (None, {}, preparing, sealed,
+                   {**sealed, "project_write_authorized": True}):
+        review = project_adoption._held_windows_journal_restart_triage_candidate(
+            record)
+        assert review["state"] == "RECOVERY_REQUIRED"
+        assert review["authenticated_storage_readback_proven"] is False
+        assert review["automatic_resume_allowed"] is False
+        assert review["automatic_discard_allowed"] is False
+        assert review["project_write_authorized"] is False
+        assert review["protected_fable_high_granted"] is False

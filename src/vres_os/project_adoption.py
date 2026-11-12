@@ -2710,6 +2710,28 @@ def _held_windows_private_root_diagnostic_candidate(
         raise AdoptionError("Held Windows private-root candidate refused") from None
 
 
+
+def _held_windows_journal_transition_candidate(
+    before: object, after: object,
+) -> dict[str, object]:
+    """ORIGINAL #168 pure Windows journal policy; never creates state."""
+    from ._windows_held_journal_policy import (
+        HeldWindowsJournalPolicyError, propose_held_windows_journal_transition,
+    )
+
+    try:
+        return propose_held_windows_journal_transition(before, after)
+    except HeldWindowsJournalPolicyError:
+        raise AdoptionError("Held Windows journal transition candidate refused") from None
+
+
+def _held_windows_journal_restart_triage_candidate(record: object) -> dict[str, object]:
+    """ORIGINAL #168 untrusted restart classification; no automatic action."""
+    from ._windows_held_journal_policy import triage_held_windows_journal_candidate
+
+    return triage_held_windows_journal_candidate(record)
+
+
 def _held_capture_private_storage_available() -> bool:
     """Fail closed on Windows until a verified current-user ACL/encryption store exists.
 

@@ -43,6 +43,9 @@ def _local_drive_components(path: str) -> tuple[str, ...]:
         "CON", "PRN", "AUX", "NUL",
         *(f"COM{i}" for i in range(10)),
         *(f"LPT{i}" for i in range(10)),
+        # Windows also reserves ISO-8859-1 superscript COM/LPT digits.
+        *(f"{prefix}{digit}" for prefix in ("COM", "LPT")
+          for digit in "¹²³"),
     }
     for name in names:
         if (not name or len(name) > 120 or name in {".", ".."}
