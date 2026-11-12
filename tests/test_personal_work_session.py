@@ -1415,3 +1415,142 @@ def test_chairman_readonly_bridge_corrupt_journal_returns_recovery_hold(tmp_path
     assert held["project_write_authorized"] is False
     assert journal.read_text(encoding="utf-8") == "{broken"
     assert packet["writes_performed"] is False
+
+
+def test_integrated_workday_home_shows_active_and_saved_history_without_leaks(tmp_path):
+    """AUTHORED NOT_RUN; one read-only outcome from original task/result owners."""
+    ctx, checkpoint = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    first = session.review_workday(selected)
+    assert first["status"] == "READ_ONLY_INTEGRATED_PERSONAL_WORKDAY_HOME"
+    assert first["active_count"] == 1
+    assert first["active_tasks"][0]["task_key_claimed"] == task
+    assert first["saved_history"] == []
+    assert first["selected_review"] is None
+    assert first["automatic_task_selection_performed"] is False
+    assert first["writes_performed"] is False
+    assert str(project) not in json.dumps(first)
+    _finish(ctx, checkpoint)
+    second = session.review_workday(selected)
+    assert second["active_count"] == 0
+    assert second["completed_snapshot_count"] == 1
+    assert len(second["saved_history"]) == 1
+    row = second["saved_history"][0]
+    assert row["saved_result_linked"] is True
+    assert row["saved_checkpoint_sha256"] == checkpoint
+    assert row["current_result_bytes_verified"] is False
+    assert second["historical_document_current_bytes_verified"] is False
+    assert str(project) not in json.dumps(second)
+    assert "UNDATED" in session.render_workday(second)
+
+
+def test_integrated_workday_explicit_active_selection_and_project_preview(tmp_path):
+    """AUTHORED NOT_RUN; user-owned selected note/project, not native Chairman."""
+    ctx, _checkpoint = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    packet = session.review_workday(
+        selected, selected_task=task,
+        show_selected_action=True,
+        project_root=project, project_key=key)
+    chosen = packet["selected_review"]
+    assert chosen["kind"] == "EXPLICIT_ACTIVE_TASK"
+    assert chosen["task_key_claimed"] == task
+    assert chosen["next_action_disclosed"] is True
+    assert chosen["next_action_untrusted_not_a_command"] is True
+    assert chosen["selected_project_binding_sha256"]
+    assert chosen["native_chairman_task_bound"] is False
+    assert "UNTRUSTED NOTE ACTION" in session.render_workday(packet)
+    assert str(project) not in json.dumps(packet)
+    assert str(document) not in json.dumps(packet)
+    assert packet["database_contacted"] is False
+    assert packet["native_claude_or_hooks_executed"] is False
+
+
+def test_integrated_workday_saved_selection_is_read_only_and_requires_exact_sha(tmp_path):
+    """AUTHORED NOT_RUN; history selection cannot auto-reopen or replay bytes."""
+    ctx, checkpoint = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    _finish(ctx, checkpoint)
+    saved_note = session.review_workday(selected)["saved_history"][0]["note_sha256"]
+    packet = session.review_workday(
+        selected, selected_task=task, snapshot_sha256=saved_note)
+    chosen = packet["selected_review"]
+    assert chosen["kind"] == "EXPLICIT_SAVED_COMPLETED_SNAPSHOT"
+    assert chosen["saved_checkpoint_sha256"] == checkpoint
+    assert chosen["current_document_bytes_verified"] is False
+    assert chosen["task_reopened"] is False
+    assert chosen["result_replayed"] is False
+    assert packet["active_count"] == 0
+    assert "historical only" in session.render_workday(packet)
+    assert str(document) not in json.dumps(packet)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_workday(selected, selected_task=task)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_workday(selected, selected_task=task, snapshot_sha256="a" * 64)
+    assert desk._existing_tasks(desk._desk(selected, must_exist=True)) == []
+
+
+def test_integrated_workday_refuses_ambiguous_or_implicit_authority(tmp_path):
+    """AUTHORED NOT_RUN; no default focus, bare project or saved auto-replay."""
+    ctx, checkpoint = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    for kwargs in (
+        {"show_selected_action": True},
+        {"show_selected_action": 1, "selected_task": task},
+        {"selected_task": task, "project_root": project},
+        {"project_root": project, "project_key": key},
+        {"selected_task": task, "snapshot_sha256": "x" * 64},
+        {"snapshot_sha256": "a" * 64},
+        {"selected_task": task, "snapshot_sha256": "a" * 64,
+         "show_selected_action": True},
+        {"selected_task": task, "snapshot_sha256": "a" * 64,
+         "project_root": project, "project_key": key},
+    ):
+        with pytest.raises(session.WorkSessionRefused):
+            session.review_workday(selected, **kwargs)
+    assert session.review_workday(selected)["selected_review"] is None
+    assert result.inspect_work_result(*ctx)["checkpoint_sha256"] == checkpoint
+
+
+def test_integrated_workday_detects_history_or_task_drift_without_writes(
+    tmp_path, monkeypatch,
+):
+    """AUTHORED NOT_RUN; cooperative readback refuses a changing owner view."""
+    ctx, _checkpoint = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    original = session.lifecycle.read_daily_review
+    calls = {"count": 0}
+    def changed_between_reads(desk_root):
+        packet = original(desk_root)
+        calls["count"] += 1
+        if calls["count"] >= 2:
+            packet["active_tasks"] = []
+            packet["active_count"] = 0
+        return packet
+    monkeypatch.setattr(session.lifecycle, "read_daily_review",
+                        changed_between_reads)
+    with pytest.raises(Exception):
+        session.review_workday(selected)
+    assert calls["count"] >= 2
+    assert desk._existing_tasks(desk._desk(selected, must_exist=True)) == [task]
+
+
+def test_integrated_workday_single_desk_entrance_and_text_json(tmp_path, capsys):
+    """AUTHORED NOT_RUN; one normal source CLI route, no extra application."""
+    ctx, checkpoint = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    assert cli.main(["home", "--desk", str(selected)]) == 0
+    text_output = capsys.readouterr().out
+    assert "Vres-OS PERSONAL WORKDAY HOME" in text_output
+    assert task in text_output
+    assert str(project) not in text_output
+    assert cli.main(["home", "--desk", str(selected),
+                     "--task-key", task, "--format", "json"]) == 0
+    json_output = json.loads(capsys.readouterr().out)
+    assert json_output["selected_review"]["kind"] == "EXPLICIT_ACTIVE_TASK"
+    assert json_output["selected_review"]["next_action_disclosed"] is False
+    assert json_output["writes_performed"] is False
+    assert cli.main(["home", "--desk", str(selected),
+                     "--show-selected-action"]) == 2
+    assert "REFUSED" in capsys.readouterr().err
+    assert result.inspect_work_result(*ctx)["checkpoint_sha256"] == checkpoint

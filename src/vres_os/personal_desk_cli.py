@@ -48,6 +48,11 @@ Usage: python -I -S -B personal_desk_cli.py COMMAND [command options]
   work-finish  User-confirm exact task + result and complete existing scratch task
             --desk ABS --select TASK-* --project-root ABS --project-key project:*
             --result-file ABS --expected-checkpoint-sha256 HEX --yes
+  home      One READ-ONLY workday view across existing task/history owners
+            --desk ABS-Vres-Desk-* [--task-key TASK-*]
+            [--show-selected-action] [--project-root ABS --project-key project:*]
+            [--snapshot-sha256 HEX with --task-key] [--format text|json]
+            Never auto-focus, reopen/replay or access installed Vres
   work-session  Internal one-task start/review/finish/reopen/replay
             start --desk ABS --task-key TASK-* --note-file ABS
             --project-root ABS --project-key project:* --yes (empty project)
@@ -85,7 +90,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     action, rest = args[0], args[1:]
     # Constant dispatch only. Never import arbitrary modules from operator data.
-    if action not in {"prepare", "create", "inspect", "open", "today", "today-here", "work", "work-result", "work-finish", "work-session", "undo", "desk"}:
+    if action not in {"prepare", "create", "inspect", "open", "today", "today-here", "work", "work-result", "work-finish", "work-session", "home", "undo", "desk"}:
         print("VRES_DESK_REFUSED: unknown command; run 'help'.", file=sys.stderr)
         return 2
     try:
@@ -113,9 +118,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif action == "work-finish":
             from vres_os import personal_work_completion as owner
             outcome = owner.main(rest)
-        elif action == "work-session":
+        elif action in {"work-session", "home"}:
             from vres_os import personal_work_session as owner
-            outcome = owner.main(rest)
+            outcome = owner.main(["home", *rest] if action == "home" else rest)
         else:  # today
             from vres_os import personal_daily_focus as owner
             outcome = owner.main(rest)

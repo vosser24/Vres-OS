@@ -908,14 +908,289 @@ def replay_saved(desk: str | Path, task: str, snapshot_sha256: str, *,
     }
 
 
+
+WORKDAY_SCHEMA = "vres-personal-integrated-workday-home/1"
+
+
+def _workday_owner_snapshot(desk: str | Path) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Cross-check ORIGINAL daily receipts and lifecycle history, no mutations."""
+    daily = handoff._review(lifecycle.read_daily_review(desk))
+    history = lifecycle.list_history(desk, show_result_paths=False)
+    if (history.get("schema") != lifecycle.SCHEMA
+            or history.get("status") != "READ_ONLY_PERSONAL_HISTORY"
+            or history.get("writes_performed") is not False
+            or history.get("authoritative_task_store") is not False
+            or history.get("document_current_bytes_verified") is not False
+            or type(history.get("count")) is not int
+            or type(history.get("snapshots")) is not list
+            or history["count"] != len(history["snapshots"])
+            or not 0 <= history["count"] <= 48):
+        raise WorkSessionRefused("Original personal history contract refused")
+    rows = history["snapshots"]
+    # The two original read paths must describe the SAME bounded history
+    # inventory. A stale or interrupted result link must never be promoted.
+    completed = [
+        {"task_key_claimed": row["task_key_claimed"],
+         "sha256": row["sha256"], "bytes": row["bytes"]}
+        for row in rows if row["state"] == "completed"
+    ]
+    if (sorted(completed, key=lambda r: (r["task_key_claimed"], r["sha256"]))
+            != sorted(daily["completed_snapshots"],
+                      key=lambda r: (r["task_key_claimed"], r["sha256"]))
+            or sum(row["state"] == "archived" for row in rows)
+               != daily["archived_count"]
+            or sum(row["state"] == "revisions" for row in rows)
+               != daily["revision_count"]):
+        raise WorkSessionRefused("Original task and history inventory changed")
+    for row in rows:
+        if (type(row) is not dict
+                or type(row.get("task_key_claimed")) is not str
+                or not workbench._TASK_KEY.fullmatch(row["task_key_claimed"])
+                or type(row.get("sha256")) is not str
+                or not workbench._SHA.fullmatch(row["sha256"])
+                or type(row.get("bytes")) is not int
+                or not 0 < row["bytes"] <= 32 * 1024
+                or row.get("state") not in {"completed", "archived", "revisions"}):
+            raise WorkSessionRefused("Original historical receipt malformed")
+        linked = row.get("result_evidence")
+        if linked is not None:
+            if (row["state"] != "completed" or type(linked) is not dict
+                    or linked.get("schema") != "vres-personal-result-history-link/1"
+                    or linked.get("document_path_hidden") is not True
+                    or linked.get("document_current_bytes_verified") is not False
+                    or linked.get("document_quality_validated") is not False
+                    or linked.get("native_chairman_task_bound") is not False
+                    or type(linked.get("result_sha256")) is not str
+                    or not workbench._SHA.fullmatch(linked["result_sha256"])
+                    or type(linked.get("checkpoint_sha256")) is not str
+                    or not workbench._SHA.fullmatch(linked["checkpoint_sha256"])):
+                raise WorkSessionRefused("Original linked result is not historical-only")
+    return daily, history
+
+
+def review_workday(
+    desk: str | Path, *, selected_task: str | None = None,
+    snapshot_sha256: str | None = None,
+    show_selected_action: bool = False,
+    project_root: str | Path | None = None,
+    project_key: str | None = None,
+) -> dict[str, Any]:
+    """One read-only home over ORIGINAL task, saved-result and project owners.
+
+    No implicit focus, task reopen, saved-result replay, project mutation,
+    native Chairman/Claude, credential lookup, PostgreSQL or duplicate store.
+    With no selection this only inventories up to six active task receipts
+    and up to 48 historical snapshots. Source paths and note text stay hidden.
+    """
+    if type(show_selected_action) is not bool:
+        raise WorkSessionRefused("Workday action disclosure requires exact boolean")
+    if selected_task is not None and (
+            type(selected_task) is not str
+            or not workbench._TASK_KEY.fullmatch(selected_task)):
+        raise WorkSessionRefused("Workday requires exact selected task")
+    if snapshot_sha256 is not None and (
+            type(snapshot_sha256) is not str
+            or not workbench._SHA.fullmatch(snapshot_sha256)):
+        raise WorkSessionRefused("Workday requires exact saved snapshot SHA-256")
+    if (snapshot_sha256 is not None and selected_task is None
+            or show_selected_action and (selected_task is None
+                                         or snapshot_sha256 is not None)
+            or (project_root is None) != (project_key is None)
+            or project_root is not None and (
+                selected_task is None or snapshot_sha256 is not None)):
+        raise WorkSessionRefused("Workday selection and optional project disagree")
+    before, history = _workday_owner_snapshot(desk)
+    active = [
+        {"task_key_claimed": row["task_key_claimed"],
+         "note_sha256": row["sha256"], "note_bytes": row["bytes"]}
+        for row in before["active_tasks"]
+    ]
+    historical = []
+    for row in history["snapshots"]:
+        evidence = row.get("result_evidence")
+        historical.append({
+            "task_key_claimed": row["task_key_claimed"],
+            "note_sha256": row["sha256"],
+            "state": row["state"],
+            "saved_result_linked": evidence is not None,
+            "saved_result_sha256": (
+                evidence["result_sha256"] if evidence is not None else None),
+            "saved_checkpoint_sha256": (
+                evidence["checkpoint_sha256"] if evidence is not None else None),
+            "current_result_bytes_verified": False,
+        })
+    selection: dict[str, Any] | None = None
+    final_brief: dict[str, Any] | None = None
+    if selected_task is not None:
+        if snapshot_sha256 is not None:
+            saved = _saved_completed(desk, selected_task, snapshot_sha256)
+            evidence = saved["result_evidence"]
+            selection = {
+                "kind": "EXPLICIT_SAVED_COMPLETED_SNAPSHOT",
+                "task_key_claimed": selected_task,
+                "note_sha256": snapshot_sha256,
+                "saved_checkpoint_sha256": evidence["checkpoint_sha256"],
+                "saved_result_sha256": evidence["result_sha256"],
+                "saved_result_bytes": evidence["result_bytes"],
+                "saved_result_is_historical_not_current": True,
+                "task_reopened": False,
+                "result_replayed": False,
+                "current_document_bytes_verified": False,
+            }
+        else:
+            matches = [
+                row for row in active if row["task_key_claimed"] == selected_task
+            ]
+            if len(matches) != 1:
+                raise WorkSessionRefused("Workday active task selection unavailable")
+            chosen = handoff.inspect_handoff(
+                desk, selected_task, show_selected_action=show_selected_action)
+            if (chosen.get("status")
+                    != "VERIFIED_SCRATCH_SELECTION_FOR_UNTRUSTED_CHAIRMAN_HANDOFF"
+                    or chosen.get("selected_note_sha256") != matches[0]["note_sha256"]
+                    or chosen.get("writes_performed") is not False
+                    or chosen.get("chairman_task_bound") is not False):
+                raise WorkSessionRefused("Workday task receipt changed")
+            selection = {
+                "kind": "EXPLICIT_ACTIVE_TASK",
+                "task_key_claimed": selected_task,
+                "note_sha256": chosen["selected_note_sha256"],
+                "next_action_disclosed": show_selected_action,
+                "next_action_untrusted_not_a_command": True,
+                "selected_project_binding_sha256": None,
+                "selected_project_intake_summary": None,
+                "native_chairman_task_bound": False,
+            }
+            if show_selected_action:
+                selection["selected_next_action_untrusted"] = chosen[
+                    "selected_next_action_untrusted"]
+            if project_root is not None:
+                brief = handoff.inspect_work_brief(
+                    desk, selected_task, project_root, project_key,
+                    show_selected_action=show_selected_action)
+                if (brief.get("status") != "EXPLICIT_SCRATCH_AND_PROJECT_READ_ONLY_PREVIEW"
+                        or brief.get("scratch_handoff") != chosen
+                        or brief.get("read_only") is not True
+                        or brief.get("files_written") is not False
+                        or brief.get("operator_approval_granted") is not False):
+                    raise WorkSessionRefused("Workday project binding refused")
+                selection["selected_project_binding_sha256"] = brief[
+                    "project_binding_sha256"]
+                selection["selected_project_intake_summary"] = brief[
+                    "project_intake_summary"]
+                final_brief = brief
+    after, again = _workday_owner_snapshot(desk)
+    if (handoff._exact_json(before) != handoff._exact_json(after)
+            or handoff._exact_json(history) != handoff._exact_json(again)):
+        raise WorkSessionRefused("Workday task or history changed during review")
+    if selection is not None:
+        if snapshot_sha256 is not None:
+            closing = _saved_completed(desk, selected_task, snapshot_sha256)
+            if handoff._exact_json(closing) != handoff._exact_json(saved):
+                raise WorkSessionRefused("Saved result changed during workday review")
+        else:
+            closing = handoff.inspect_handoff(
+                desk, selected_task, show_selected_action=show_selected_action)
+            if handoff._exact_json(closing) != handoff._exact_json(chosen):
+                raise WorkSessionRefused("Selected active task changed during review")
+            if final_brief is not None:
+                fresh_brief = handoff.inspect_work_brief(
+                    desk, selected_task, project_root, project_key,
+                    show_selected_action=show_selected_action)
+                if (handoff._exact_json(fresh_brief)
+                        != handoff._exact_json(final_brief)):
+                    raise WorkSessionRefused("Project preview changed during workday review")
+    # Closing readback is cooperative, not a filesystem transaction or proof
+    # against malicious same-user races. No implied current result validity.
+    return {
+        "schema": WORKDAY_SCHEMA,
+        "status": "READ_ONLY_INTEGRATED_PERSONAL_WORKDAY_HOME",
+        "active_count": before["active_count"],
+        "active_tasks": active,
+        "completed_snapshot_count": before["completed_count"],
+        "archived_snapshot_count": before["archived_count"],
+        "revision_snapshot_count": before["revision_count"],
+        "saved_history": historical,
+        "selected_review": selection,
+        "automatic_task_selection_performed": False,
+        "history_has_timestamps": False,
+        "historical_document_current_bytes_verified": False,
+        "result_quality_validated": False,
+        "task_reopened_or_completed": False,
+        "native_chairman_task_bound": False,
+        "native_claude_or_hooks_executed": False,
+        "database_contacted": False,
+        "writes_performed": False,
+        "new_store_created": False,
+        "installed_vres_modified": False,
+    }
+
+
+def render_workday(packet: dict[str, Any]) -> str:
+    """Short path-redacted readable workday; task note text stays opt-in."""
+    if (type(packet) is not dict
+            or packet.get("schema") != WORKDAY_SCHEMA
+            or packet.get("status") != "READ_ONLY_INTEGRATED_PERSONAL_WORKDAY_HOME"
+            or packet.get("writes_performed") is not False
+            or packet.get("native_claude_or_hooks_executed") is not False
+            or packet.get("database_contacted") is not False):
+        raise WorkSessionRefused("Workday text contract refused")
+    lines = [
+        "Vres-OS PERSONAL WORKDAY HOME -- READ ONLY",
+        "Active scratch tasks: " + str(packet["active_count"]),
+    ]
+    lines.extend(
+        "  " + row["task_key_claimed"] + " | note=" + row["note_sha256"]
+        for row in packet["active_tasks"]
+    )
+    lines.append("Saved completed snapshots (UNDATED): "
+                 + str(packet["completed_snapshot_count"]))
+    for row in packet["saved_history"]:
+        if row["state"] == "completed":
+            linked = "linked historical result" if row["saved_result_linked"] else "no result link"
+            lines.append("  " + row["task_key_claimed"] + " | note="
+                         + row["note_sha256"] + " | " + linked)
+    lines.append("Archived: " + str(packet["archived_snapshot_count"])
+                 + "; revisions: " + str(packet["revision_snapshot_count"]))
+    selected = packet["selected_review"]
+    if selected is None:
+        lines.append("No task automatically selected. Choose an exact TASK-* to inspect.")
+    elif selected["kind"] == "EXPLICIT_ACTIVE_TASK":
+        lines.append("Selected active task: " + selected["task_key_claimed"])
+        if selected["next_action_disclosed"]:
+            lines.append("UNTRUSTED NOTE ACTION (NOT a command): "
+                         + json.dumps(selected["selected_next_action_untrusted"],
+                                      ensure_ascii=True))
+        else:
+            lines.append("Task note action hidden. Explicit disclosure required.")
+        if selected["selected_project_binding_sha256"] is not None:
+            lines.append("Explicit project scan binding: "
+                         + selected["selected_project_binding_sha256"])
+    else:
+        lines.append("Explicit SAVED completed snapshot: "
+                     + selected["task_key_claimed"] + " | note="
+                     + selected["note_sha256"])
+        lines.append("Saved checkpoint (historical only): "
+                     + selected["saved_checkpoint_sha256"])
+    lines.append("History has no timestamps. Saved result bytes are NOT verified current.")
+    lines.append("No task resumed/finished, no project writes, no native Claude/DB.")
+    return "\n".join(lines)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _SafeParser(
         description="Internal source-only personal workflow over original task owners")
     subs = parser.add_subparsers(dest="command", required=True)
-    for name in ("start", "review", "finish", "reopen", "replay"):
+    for name in ("home", "start", "review", "finish", "reopen", "replay"):
         sub = subs.add_parser(name)
         sub.add_argument("--desk", required=True)
-        sub.add_argument("--task-key", required=True)
+        sub.add_argument("--task-key", required=(name != "home"))
+        if name == "home":
+            sub.add_argument("--snapshot-sha256")
+            sub.add_argument("--show-selected-action", action="store_true")
+            sub.add_argument("--project-root")
+            sub.add_argument("--project-key")
+            sub.add_argument("--format", choices=("text", "json"), default="text")
         if name == "start":
             sub.add_argument("--note-file", required=True)
             sub.add_argument("--project-root", required=True)
@@ -939,7 +1214,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             sub.add_argument("--snapshot-sha256", required=True)
     try:
         args = parser.parse_args(argv)
-        if args.command == "start":
+        if args.command == "home":
+            packet = review_workday(
+                args.desk, selected_task=args.task_key,
+                snapshot_sha256=args.snapshot_sha256,
+                show_selected_action=args.show_selected_action,
+                project_root=args.project_root, project_key=args.project_key)
+        elif args.command == "start":
             packet = start_session(
                 args.desk, args.task_key, args.note_file,
                 args.project_root, args.project_key, approved=args.yes)
@@ -966,7 +1247,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.desk, args.task_key, args.snapshot_sha256, approved=args.yes,
                 include_experience_provenance=args.include_experience_provenance,
                 include_project_intake=args.include_project_intake)
-        print(json.dumps(packet, sort_keys=True, ensure_ascii=True))
+        if args.command == "home" and args.format == "text":
+            print(render_workday(packet))
+        else:
+            print(json.dumps(packet, sort_keys=True, ensure_ascii=True))
     except Exception:
         print("VRES_WORK_SESSION_REFUSED: inspect exact task and history; do not retry blindly.",
               file=sys.stderr)
