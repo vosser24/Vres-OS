@@ -1186,6 +1186,8 @@ def test_session_owner_plan_bridge_refuses_unapproved_target_or_implicit_state(t
     assert len(plan["plan_digest"]) == 64
     assert plan["caller_targets_are_verified_owner_consent"] is False
     assert plan["entries"][0]["saved_original_keep_source_verified"] is True
+    assert plan["exact_original_project_root_activation_bound_to_plan_digest"] is True
+    assert plan["entries"][0]["held_effect_blueprint"]["project_write_authorized"] is False
     assert plan["entries"][0]["current_target_observation"] == "PRESENT_BOUNDED_SHA_ATTESTED"
     assert plan["current_target_observation_count"] == 1
     assert plan["current_target_leaf_and_ancestor_identity_bound_to_plan_digest"] is True

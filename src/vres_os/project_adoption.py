@@ -2173,6 +2173,93 @@ def _legacy_target_preparation_contract(
         "project_write_authorized": False,
     }
 
+def _legacy_original_plan_identity(project, root: Path, observed: dict[str, Any]) -> dict[str, str]:
+    """Pin the ORIGINAL active project/root/activation, not only a user-picked token.
+
+    An identical repository key can describe another checkout. The original
+    persisted adoption identity is required for any later capture/journal.
+    This is a read-only digest input, never an owner or Fable approval.
+    """
+    version = observed.get("inventory_version")
+    if (
+        observed.get("state") != "active"
+        or observed.get("project_key") != project.key
+        or observed.get("project_root") != str(project.root)
+        or type(version) is not str
+        or re.fullmatch(r"[0-9a-f]{64}", version) is None
+    ):
+        raise AdoptionError("Exact original legacy project identity unavailable")
+    return {
+        "project_key": project.key,
+        "recorded_root": str(project.root),
+        "resolved_root": str(root),
+        "original_activation": _checked_activation_id(observed.get("activation")),
+        "original_inventory_version": version,
+    }
+
+
+def _legacy_held_effect_blueprint(
+    target: str, current_state: str, source_verified: bool,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Project-write-free expected-postimage and inverse-recovery blueprint.
+
+    A blueprint does not persist today's preimage, pin canonical scaffold
+    bytes, rehearse rollback, or accept requested targets as consent. A later
+    durable journal MUST re-attest the exact original record and all leaves,
+    save bounded preimages or absence, and obtain independent permissions.
+    No raw target/source digest or bytes are returned to the Chairman.
+    """
+    preparation = _legacy_target_preparation_contract(
+        target, current_state, source_verified)
+    effects = {
+        "RESTORE_ORIGINAL_KEEP_FOR_REVIEW": (
+            "WRITE_VERIFIED_ORIGINAL_KEEP", "PRESENT_BOUND_SAVED_KEEP",
+            "VERIFIED_SAVED_ORIGINAL_KEEP"),
+        "ISOLATE_NEW_SURFACE_FOR_REVIEW": (
+            "REMOVE_EXACT_SELECTED_LEAF", "ABSENT_AFTER_REMOVAL",
+            "NO_NEW_CONTENT_REQUIRED"),
+        "REISOLATE_ORIGINAL_DROP_FOR_REVIEW": (
+            "REMOVE_EXACT_SELECTED_LEAF", "ABSENT_AFTER_REMOVAL",
+            "NO_NEW_CONTENT_REQUIRED"),
+        "REBUILD_CANONICAL_SCAFFOLD_FOR_REVIEW": (
+            "BLOCK_UNPINNED_CANONICAL_SCAFFOLD", "UNKNOWN_UNTIL_SOURCE_PINNED",
+            "CANONICAL_SOURCE_NOT_PINNED"),
+    }
+    phase = preparation["phase"]
+    if phase != "HELD_CANDIDATE_CHANGE":
+        operation, postimage, source = (
+            "NO_PROJECT_CHANGE", "CURRENT_TARGET_UNCHANGED",
+            "NOT_APPLICABLE_NO_NEW_CONTENT")
+        inverse = "NO_INVERSE_NEEDED"
+        gate = "REVIEW_ONLY"
+    else:
+        operation, postimage, source = effects[target]
+        inverse = {
+            "PRESENT_BOUNDED_SHA_ATTESTED": "RESTORE_EXACT_CAPTURED_BYTES",
+            "ABSENT_LEAF_OBSERVED": "RESTORE_CAPTURED_LEAF_ABSENCE",
+            "ABSENT_PARENT_NOT_PRESENT": "BLOCK_UNVERIFIED_PARENT_STRUCTURE",
+            "REDACTED_NO_TARGET_ATTESTATION": "BLOCK_UNVERIFIABLE_TARGET",
+        }[current_state]
+        gate = (
+            "BLOCK_PARENT_OR_UNVERIFIABLE_TARGET"
+            if current_state in {"ABSENT_PARENT_NOT_PRESENT", "REDACTED_NO_TARGET_ATTESTATION"}
+            else "BLOCK_CANONICAL_SOURCE_NOT_PINNED"
+            if target == "REBUILD_CANONICAL_SCAFFOLD_FOR_REVIEW"
+            else "HELD_DURABLE_PREIMAGE_AND_SEPARATE_APPROVAL_REQUIRED"
+        )
+    return preparation, {
+        "version": 1,
+        "candidate_operation": operation,
+        "expected_postimage": postimage,
+        "inverse_restore": inverse,
+        "source_readiness": source,
+        "capture_gate": gate,
+        "durable_target_preimage_captured": False,
+        "postimage_or_rollback_verified": False,
+        "project_write_authorized": False,
+    }
+
+
 def draft_legacy_reversible_plan(
     project, *, snapshot_token: str, targets: dict[int, str],
     data_root: Path | None = None,
@@ -2209,6 +2296,9 @@ def draft_legacy_reversible_plan(
         root = Path(project.root).resolve(strict=True)
     except (OSError, ValueError, RuntimeError):
         raise AdoptionError("Selected original project root is unavailable") from None
+    # The saved activation/root must be explicitly pinned for future journal
+    # preparation, even when no selected target restores an original KEEP copy.
+    original_identity = _legacy_original_plan_identity(project, root, observed)
     # Exact current target identities remain internal to the plan-digest input.
     current_target_evidence: list[dict[str, Any]] = []
 
@@ -2293,6 +2383,8 @@ def draft_legacy_reversible_plan(
             verified_sources.append((filename, digest, rel))
             verified_source_digests[number] = digest
             source_verified = True
+        preparation, held_effect = _legacy_held_effect_blueprint(
+            selected, current_state, source_verified)
         entries.append({
             "number": number,
             "finding_change": finding["change"],
@@ -2303,9 +2395,8 @@ def draft_legacy_reversible_plan(
             "caller_selected_target": selected,
             "saved_original_keep_source_verified": source_verified,
             "current_target_observation": current_state,
-            "target_preparation_contract": _legacy_target_preparation_contract(
-                selected, current_state, source_verified,
-            ),
+            "target_preparation_contract": preparation,
+            "held_effect_blueprint": held_effect,
             "new_target_preimage_durably_captured": False,
             "proposed_target_rollback_verified": False,
             "execution_authorized": False,
@@ -2314,7 +2405,8 @@ def draft_legacy_reversible_plan(
 
     future_capture_spec = _legacy_future_preimage_capture_spec()
     binding = {
-        "contract_version": 2,
+        "contract_version": 3,
+        "original_project_activation_identity": original_identity,
         "project_key": project.key,
         "snapshot_token": snapshot_token,
         "recorded_intents": review["recorded_intents"],
@@ -2337,6 +2429,9 @@ def draft_legacy_reversible_plan(
         "pending_owner_review_numbers": list(review["pending_displayed_numbers"]),
         "verified_original_keep_source_count": len(verified_sources),
         "current_target_observation_count": len(current_target_evidence),
+        "exact_original_project_root_activation_bound_to_plan_digest": True,
+        "selected_effect_postimage_and_inverse_blueprints_bound": True,
+        "held_effect_blueprint_version": 1,
         "current_target_identity_bound_to_plan_digest": bool(current_target_evidence),
         "current_target_content_and_raw_sha256_hidden": True,
         "current_target_leaf_and_ancestor_identity_bound_to_plan_digest": bool(current_target_evidence),

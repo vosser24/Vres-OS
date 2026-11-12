@@ -1196,6 +1196,73 @@ def test_selected_entry_identity_rejects_inconsistent_target_state(tmp_path):
             root, "not-there/AGENTS.md", "PRESENT_BOUNDED_SHA_ATTESTED")
 
 
+@pytest.mark.parametrize(
+    "target,state,source_verified,operation,postimage",
+    [
+        ("RESTORE_ORIGINAL_KEEP_FOR_REVIEW", "PRESENT_BOUNDED_SHA_ATTESTED",
+         True, "WRITE_VERIFIED_ORIGINAL_KEEP", "PRESENT_BOUND_SAVED_KEEP"),
+        ("ISOLATE_NEW_SURFACE_FOR_REVIEW", "PRESENT_BOUNDED_SHA_ATTESTED",
+         False, "REMOVE_EXACT_SELECTED_LEAF", "ABSENT_AFTER_REMOVAL"),
+        ("REISOLATE_ORIGINAL_DROP_FOR_REVIEW", "PRESENT_BOUNDED_SHA_ATTESTED",
+         False, "REMOVE_EXACT_SELECTED_LEAF", "ABSENT_AFTER_REMOVAL"),
+        ("REBUILD_CANONICAL_SCAFFOLD_FOR_REVIEW", "ABSENT_LEAF_OBSERVED",
+         False, "BLOCK_UNPINNED_CANONICAL_SCAFFOLD", "UNKNOWN_UNTIL_SOURCE_PINNED"),
+        ("ACKNOWLEDGE_MISSING_FOR_REVIEW", "ABSENT_LEAF_OBSERVED",
+         False, "NO_PROJECT_CHANGE", "CURRENT_TARGET_UNCHANGED"),
+        ("PREPARE_PROTECTED_ALIGNMENT_REVIEW", "REDACTED_NO_TARGET_ATTESTATION",
+         False, "NO_PROJECT_CHANGE", "CURRENT_TARGET_UNCHANGED"),
+    ],
+)
+def test_legacy_held_effect_blueprints_refuse_implicit_authority(
+    target, state, source_verified, operation, postimage,
+):
+    """AUTHORED NOT_RUN; every blueprint remains a held non-write contract."""
+    preparation, effect = project_adoption._legacy_held_effect_blueprint(
+        target, state, source_verified)
+    assert preparation["project_write_authorized"] is False
+    assert effect["candidate_operation"] == operation
+    assert effect["expected_postimage"] == postimage
+    assert effect["durable_target_preimage_captured"] is False
+    assert effect["postimage_or_rollback_verified"] is False
+    assert effect["project_write_authorized"] is False
+
+
+def test_original_legacy_plan_identity_rejects_missing_activation_or_wrong_root(tmp_path):
+    """AUTHORED NOT_RUN; Git key alone cannot authorize a different checkout."""
+    from types import SimpleNamespace
+    project = SimpleNamespace(key="synthetic-identity", root=tmp_path)
+    valid = {"state": "active", "project_key": project.key,
+             "project_root": str(tmp_path),
+             "activation": "20261112T000000Z-1234abcd",
+             "inventory_version": "a" * 64}
+    identity = project_adoption._legacy_original_plan_identity(project, tmp_path, valid)
+    assert identity["original_activation"] == valid["activation"]
+    for change in ({"activation": "forged"}, {"project_root": str(tmp_path / "other")},
+                   {"inventory_version": None}, {"state": "awaiting_operator"}):
+        altered = dict(valid, **change)
+        with pytest.raises(AdoptionError):
+            project_adoption._legacy_original_plan_identity(project, tmp_path, altered)
+
+
+def test_legacy_plan_held_effect_is_bound_without_exposing_saved_source(tmp_path):
+    """AUTHORED NOT_RUN; original #168 plan remains review-only via #165."""
+    project, data, sd, keep, copy, token = _selected_original_keep_plan_fixture(tmp_path)
+    plan = project_adoption.draft_legacy_reversible_plan(
+        project, snapshot_token=token,
+        targets={1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}, data_root=data)
+    assert plan["exact_original_project_root_activation_bound_to_plan_digest"] is True
+    assert plan["selected_effect_postimage_and_inverse_blueprints_bound"] is True
+    assert plan["held_effect_blueprint_version"] == 1
+    effect = plan["entries"][0]["held_effect_blueprint"]
+    assert effect["candidate_operation"] == "WRITE_VERIFIED_ORIGINAL_KEEP"
+    assert effect["expected_postimage"] == "PRESENT_BOUND_SAVED_KEEP"
+    assert effect["inverse_restore"] == "RESTORE_EXACT_CAPTURED_BYTES"
+    assert effect["capture_gate"] == "HELD_DURABLE_PREIMAGE_AND_SEPARATE_APPROVAL_REQUIRED"
+    assert effect["project_write_authorized"] is False
+    assert hashlib.sha256(copy.read_bytes()).hexdigest() not in str(plan)
+    assert plan["project_changes_performed"] is False
+
+
 def test_target_plan_internal_identity_source_binding_and_future_capture_gate(tmp_path):
     """AUTHORED NOT_RUN; preview binds source/identity but grants zero authority."""
     project, data, sd, keep, copy, token = _selected_original_keep_plan_fixture(tmp_path)
