@@ -1374,3 +1374,28 @@ def test_chairman_readonly_bridge_reports_partial_capture_as_recovery_hold(tmp_p
     assert held["project_write_authorized"] is False
     assert journal.exists()
     assert packet["writes_performed"] is False
+
+
+
+def test_chairman_readonly_bridge_corrupt_journal_returns_recovery_hold(tmp_path):
+    """AUTHORED NOT_RUN; malformed state produces redacted hold, not an exception."""
+    from vres_os import project_adoption
+    desk_root, project, data, keep, token = _synthetic_legacy_work_review(tmp_path)
+    project_adoption.record_legacy_review_intent(
+        project, 1, "REQUEST_REVERSIBLE_PLAN", snapshot_token=token,
+        authority=lambda s: {"confirmed": True, "kind": "synthetic_fixture"},
+        data_root=data)
+    journal = project_adoption._state_dir(project, data) / "legacy_target_preparation.json"
+    journal.write_text("{broken", encoding="utf-8")
+    journal.chmod(0o600)  # isolate the malformed-JSON recovery path
+    packet = session.review_session(
+        desk_root, "TASK-LEGACY-REVIEW",
+        project_root=project.root, project_key=project.key,
+        include_legacy_owner_review=True, legacy_review_data_root=data,
+        legacy_review_snapshot_token=token,
+        legacy_review_targets={1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"})
+    held = packet["selected_legacy_owner_review"]["selected_plan_held_capture_status"]
+    assert held["state"] == "RECOVERY_REQUIRED"
+    assert held["project_write_authorized"] is False
+    assert journal.read_text(encoding="utf-8") == "{broken"
+    assert packet["writes_performed"] is False

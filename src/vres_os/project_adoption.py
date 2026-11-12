@@ -2645,6 +2645,53 @@ def draft_legacy_reversible_plan(
 
 # ------------------------------------------------------------- HELD legacy target capture (#168/#174)
 
+def _held_private_entry(path: Path, *, directory: bool = False) -> bool:
+    """Check held state type and POSIX owner-only mode; Windows ACL remains UNPROVEN."""
+    info = _lstat(path)
+    if info is None or _is_link(info):
+        return False
+    if not (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode)):
+        return False
+    return os.name == "nt" or not (stat.S_IMODE(info.st_mode) & 0o077)
+
+
+def _held_private_exclusive_bytes(path: Path, raw: bytes) -> None:
+    """Exclusive, bounded, owner-mode held state write; NOT Windows ACL proof.
+
+    The original capture journal must already exist before writing target
+    copies. Failures leave state for manual recovery rather than deleting it.
+    """
+    if len(raw) > _MAX_ADOPTION_RECORD_BYTES:
+        raise AdoptionError("Held capture record exceeds the bounded limit")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags, 0o600)
+    except FileExistsError:
+        raise AdoptionError("Held capture state already exists; recovery required") from None
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode) or (
+            os.name != "nt" and stat.S_IMODE(opened.st_mode) & 0o077
+        ):
+            raise AdoptionError("Held capture state storage is not owner-only")
+        with os.fdopen(descriptor, "wb") as handle:
+            descriptor = -1
+            handle.write(raw)
+            handle.flush()
+            os.fsync(handle.fileno())
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _held_private_exclusive_json(path: Path, value: dict[str, Any]) -> None:
+    encoded = json.dumps(
+        value, indent=2, sort_keys=True, ensure_ascii=False, default=str
+    ).encode("utf-8")
+    _held_private_exclusive_bytes(path, encoded)
+
+
+
 def capture_legacy_target_preimages(
     project, *, snapshot_token: str, targets: dict[int, str],
     plan_digest: str, authority: Authority, data_root: Path | None = None,
@@ -2663,6 +2710,15 @@ def capture_legacy_target_preimages(
     """
     if type(plan_digest) is not str or re.fullmatch(r"[0-9a-f]{64}", plan_digest) is None:
         raise AdoptionError("Exact held-plan digest required for capture")
+    # State-backed capture is NEVER permitted to write under the selected project,
+    # including when the caller supplies data_root. Reject before state creation.
+    from .paths import data_dir_path
+
+    root = Path(project.root).resolve(strict=True)
+    base = Path(data_root) if data_root is not None else data_dir_path()
+    sd = base / "projects" / hashlib.sha256(project.key.encode("utf-8")).hexdigest()[:24]
+    if not base.is_absolute() or sd.resolve(strict=False).is_relative_to(root):
+        raise AdoptionError("Held capture state root must be absolute and outside selected project")
     plan = draft_legacy_reversible_plan(
         project, snapshot_token=snapshot_token, targets=targets, data_root=data_root)
     if plan["plan_digest"] != plan_digest:
@@ -2680,10 +2736,6 @@ def capture_legacy_target_preimages(
                 for entry in selected
             )):
         raise AdoptionError("Held target set is incomplete, blocked or not capturable")
-    from .paths import data_dir_path
-
-    base = Path(data_root) if data_root is not None else data_dir_path()
-    sd = base / "projects" / hashlib.sha256(project.key.encode("utf-8")).hexdigest()[:24]
     journal_path = sd / "legacy_target_preparation.json"
     if _lstat(journal_path) is not None:
         raise AdoptionError("Existing legacy target preparation requires recovery review")
@@ -2694,14 +2746,24 @@ def capture_legacy_target_preimages(
             or type(evidence.get("user")) is not str or not evidence["user"]
             or type(evidence.get("at")) is not str or not evidence["at"]):
         raise AdoptionError("Current-user capture requires attributable interactive console consent")
+    if (len(evidence["user"]) > 128 or len(evidence["at"]) > 96
+            or any(ord(char) < 32 for char in evidence["user"] + evidence["at"])):
+        raise AdoptionError("Current-user capture provenance is not bounded")
+    # Never copy arbitrary caller-supplied consent metadata (including secrets)
+    # into the permanent original #168 journal.
+    capture_authority = {
+        key: evidence[key] for key in ("confirmed", "kind", "statement", "user", "at")
+    }
     if draft_legacy_reversible_plan(
         project, snapshot_token=snapshot_token, targets=targets, data_root=data_root
     ) != plan:
         raise AdoptionError("Held plan changed during capture authorization")
-    root = Path(project.root).resolve(strict=True)
     observed = status(project, data_root=data_root)
     identity = _legacy_original_plan_identity(project, root, observed)
     sd = _state_dir(project, data_root)
+    if (sd.resolve(strict=False).is_relative_to(root)
+            or _record_ancestor_identity(journal_path) is None):
+        raise AdoptionError("Held capture state ancestry is unsafe or inside the project")
     _refuse_interrupted_journal(sd)
     record = _state(sd, project)
     if (record is None or record.get("inventory_version")
@@ -2716,12 +2778,12 @@ def capture_legacy_target_preimages(
         "version": 1, "kind": "CAPTURE_ONLY_HELD", "capture_id": capture_id,
         "project_key": project.key, "original_identity": identity,
         "snapshot_token": snapshot_token, "plan_digest": plan_digest,
-        "selected_targets": frozen_targets, "capture_authority": evidence,
+        "selected_targets": frozen_targets, "capture_authority": capture_authority,
         "created_at": datetime.now(UTC).isoformat(),
         "project_write_authorized": False,
         "protected_fable_high_authority": "NOT_GRANTED",
     }
-    _write_exclusive_journal(journal_path, journal)
+    _held_private_exclusive_json(journal_path, journal)
     parent = sd / "legacy_target_preimages"
     directory = parent / capture_id
     # These are current-user Vres *state* paths, never project paths. An
@@ -2730,9 +2792,8 @@ def capture_legacy_target_preimages(
         if _lstat(target_dir) is not None:
             raise AdoptionError("Legacy preimage directory already exists or is unsafe")
         target_dir.mkdir(mode=0o700)
-        info = _lstat(target_dir)
-        if info is None or _is_link(info) or not stat.S_ISDIR(info.st_mode):
-            raise AdoptionError("Legacy preimage directory was replaced")
+        if not _held_private_entry(target_dir, directory=True):
+            raise AdoptionError("Legacy preimage directory is not a private ordinary directory")
     proofs: list[dict[str, Any]] = []
     total_bytes = 0
     for entry in selected:
@@ -2761,10 +2822,9 @@ def capture_legacy_target_preimages(
             if total_bytes > 8 * _MAX_BYTES:
                 raise AdoptionError("Held target captures exceed the total bounded limit")
             copy_name = f"{number:03d}"
-            with open(directory / copy_name, "xb") as handle:
-                handle.write(data)
-                handle.flush()
-                os.fsync(handle.fileno())
+            _held_private_exclusive_bytes(directory / copy_name, data)
+            if not _held_private_entry(directory / copy_name):
+                raise AdoptionError("Saved held preimage is not private")
             _read_verified_preimage(directory, copy_name, digest, rel)
         operation = entry["held_effect_blueprint"]["candidate_operation"]
         source_sha = None
@@ -2826,8 +2886,8 @@ def capture_legacy_target_preimages(
         manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     if len(manifest_bytes) > 65536:
         raise AdoptionError("Held capture manifest exceeds bounded size")
-    _write_exclusive_journal(directory / "manifest.json", manifest)
-    _write_exclusive_journal(directory / "seal.json", {
+    _held_private_exclusive_json(directory / "manifest.json", manifest)
+    _held_private_exclusive_json(directory / "seal.json", {
         "version": 1, "capture_id": capture_id,
         "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
     })
@@ -2846,16 +2906,30 @@ def inspect_legacy_target_preimages(
 
     base = Path(data_root) if data_root is not None else data_dir_path()
     sd = base / "projects" / hashlib.sha256(project.key.encode("utf-8")).hexdigest()[:24]
-    journal = _read_json(sd / "legacy_target_preparation.json")
+    journal_path = sd / "legacy_target_preparation.json"
     held = {
         "project_changes_performed": False, "project_write_authorized": False,
         "activation_allowed": False, "separate_owner_project_write_consent": False,
         "independent_fable_authority": "NOT_GRANTED",
         "rollback_rehearsed": False,
     }
-    if journal is None:
-        return {"state": "NOT_PREPARED", **held}
     failure = {"state": "RECOVERY_REQUIRED", "reason": "PARTIAL_OR_STALE_HELD_CAPTURE", **held}
+    try:
+        ancestors = _record_ancestor_identity(journal_path)
+        journal_info = _lstat(journal_path) if ancestors is not None else None
+        copy_info = _lstat(sd / "legacy_target_preimages") if ancestors is not None else None
+        if journal_info is None:
+            # Orphan backups without the exclusive journal cannot be trusted.
+            if copy_info is not None:
+                return failure
+            return {"state": "NOT_PREPARED", **held}
+        if not _held_private_entry(journal_path):
+            return failure
+        journal = _read_json(journal_path)
+        if journal is None:
+            return failure
+    except (AdoptionError, OSError, ValueError, TypeError, RuntimeError):
+        return failure
     if (type(journal) is not dict or journal.get("version") != 1
             or journal.get("kind") != "CAPTURE_ONLY_HELD"
             or journal.get("project_key") != project.key
@@ -2868,11 +2942,24 @@ def inspect_legacy_target_preimages(
             or type(journal.get("snapshot_token")) is not str
             or re.fullmatch(r"[0-9a-f]{64}", journal["snapshot_token"]) is None):
         return failure
+    capture_evidence = journal.get("capture_authority")
+    if (type(capture_evidence) is not dict
+            or set(capture_evidence) != {"confirmed", "kind", "statement", "user", "at"}
+            or capture_evidence["confirmed"] is not True
+            or capture_evidence["kind"] != "operator_console"
+            or capture_evidence["statement"] != f"CAPTURE_REVIEW_PREIMAGES {journal['plan_digest']}"
+            or type(capture_evidence["user"]) is not str
+            or not 0 < len(capture_evidence["user"]) <= 128
+            or type(capture_evidence["at"]) is not str
+            or not 0 < len(capture_evidence["at"]) <= 96
+            or any(ord(c) < 32 for c in capture_evidence["user"] + capture_evidence["at"])):
+        return failure
     directory = sd / "legacy_target_preimages" / journal["capture_id"]
     try:
-        directory_info = _lstat(directory)
-        if (directory_info is None or _is_link(directory_info)
-                or not stat.S_ISDIR(directory_info.st_mode)):
+        if (not _held_private_entry(directory.parent, directory=True)
+                or not _held_private_entry(directory, directory=True)
+                or not _held_private_entry(directory / "manifest.json")
+                or not _held_private_entry(directory / "seal.json")):
             return failure
         manifest = _read_json(directory / "manifest.json")
         seal = _read_json(directory / "seal.json")
@@ -2966,6 +3053,8 @@ def inspect_legacy_target_preimages(
                 return failure
             if state == "PRESENT_BOUNDED_SHA_ATTESTED":
                 if proof.get("preimage_copy") != f"{proof['number']:03d}":
+                    return failure
+                if not _held_private_entry(directory / proof["preimage_copy"]):
                     return failure
                 _read_verified_preimage(
                     directory, proof["preimage_copy"], digest, "saved held target")

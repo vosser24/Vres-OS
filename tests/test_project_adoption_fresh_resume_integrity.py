@@ -3,6 +3,7 @@
 AUTHORED NOT_RUN. No host, DB, native Claude, credential or real-project action.
 """
 import hashlib
+import os
 import stat
 from pathlib import Path
 from types import SimpleNamespace
@@ -1510,3 +1511,89 @@ def test_build_manifest_symbolic_link_metadata_never_opens_linked_contents(
     facts = project_adoption.detect_facts(root)
     assert facts["types"] == ["unknown"]
     assert facts["commands"] == []
+
+
+
+def test_held_capture_refuses_project_nested_state_root_before_any_write(tmp_path):
+    """AUTHORED NOT_RUN; caller must not redirect a state write into project."""
+    project, data, sd, keep, old, token = _selected_original_keep_plan_fixture(tmp_path)
+    target = {1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}
+    plan = project_adoption.draft_legacy_reversible_plan(
+        project, snapshot_token=token, targets=target, data_root=data)
+    before = keep.read_bytes()
+    with pytest.raises(AdoptionError, match="outside selected project"):
+        project_adoption.capture_legacy_target_preimages(
+            project, snapshot_token=token, targets=target,
+            plan_digest=plan["plan_digest"],
+            authority=_synthetic_held_capture_authority, data_root=project.root)
+    assert keep.read_bytes() == before
+    assert not (project.root / "projects").exists()
+    assert not (sd / "legacy_target_preparation.json").exists()
+
+
+def test_held_inspector_failcloses_corrupt_journal_and_orphaned_backup(tmp_path):
+    """AUTHORED NOT_RUN; corruption or orphan never means NOT_PREPARED."""
+    project, data, sd, keep, old, token = _selected_original_keep_plan_fixture(tmp_path)
+    journal = sd / "legacy_target_preparation.json"
+    journal.write_text("{not-valid-json", encoding="utf-8")
+    journal.chmod(0o600)  # avoid matching solely on the POSIX private-mode guard
+    before = journal.read_bytes()
+    assert project_adoption.inspect_legacy_target_preimages(
+        project, data_root=data)["state"] == "RECOVERY_REQUIRED"
+    assert journal.read_bytes() == before
+    journal.unlink()
+    orphan = sd / "legacy_target_preimages"
+    orphan.mkdir()
+    assert project_adoption.inspect_legacy_target_preimages(
+        project, data_root=data)["state"] == "RECOVERY_REQUIRED"
+    assert orphan.is_dir()
+
+
+def test_held_capture_persists_allowlisted_evidence_and_private_files(tmp_path):
+    """AUTHORED NOT_RUN; secrets in extra callback members never enter journal."""
+    project, data, sd, keep, old, token = _selected_original_keep_plan_fixture(tmp_path)
+    targets = {1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}
+    plan = project_adoption.draft_legacy_reversible_plan(
+        project, snapshot_token=token, targets=targets, data_root=data)
+    def synthetic_extra_metadata(statement):
+        return {**_synthetic_held_capture_authority(statement),
+                "password": "SYNTHETIC_SECRET_DO_NOT_PERSIST",
+                "nested": {"api_key": "SYNTHETIC_SECRET_DO_NOT_PERSIST"}}
+    result = project_adoption.capture_legacy_target_preimages(
+        project, snapshot_token=token, targets=targets,
+        plan_digest=plan["plan_digest"],
+        authority=synthetic_extra_metadata, data_root=data)
+    assert result["state"] == "HELD_CAPTURE_VERIFIED"
+    journal_path = sd / "legacy_target_preparation.json"
+    journal = project_adoption._read_json(journal_path)
+    assert set(journal["capture_authority"]) == {
+        "confirmed", "kind", "statement", "user", "at"}
+    assert "SYNTHETIC_SECRET_DO_NOT_PERSIST" not in journal_path.read_text(encoding="utf-8")
+    capture = sd / "legacy_target_preimages" / journal["capture_id"]
+    checked = [journal_path, capture / "manifest.json", capture / "seal.json", capture / "001"]
+    if os.name != "nt":
+        for path in checked:
+            assert stat.S_IMODE(path.stat().st_mode) & 0o077 == 0
+        for path in (capture.parent, capture):
+            assert stat.S_IMODE(path.stat().st_mode) & 0o077 == 0
+    assert keep.read_bytes() == b"# Synthetic later changed KEEP\n"
+
+
+def test_held_inspector_refuses_tampered_capture_evidence(tmp_path):
+    """AUTHORED NOT_RUN; self-consistent bytes never upgrade console authority."""
+    project, data, sd, keep, old, token = _selected_original_keep_plan_fixture(tmp_path)
+    targets = {1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}
+    plan = project_adoption.draft_legacy_reversible_plan(
+        project, snapshot_token=token, targets=targets, data_root=data)
+    project_adoption.capture_legacy_target_preimages(
+        project, snapshot_token=token, targets=targets,
+        plan_digest=plan["plan_digest"],
+        authority=_synthetic_held_capture_authority, data_root=data)
+    journal_path = sd / "legacy_target_preparation.json"
+    journal = project_adoption._read_json(journal_path)
+    journal["capture_authority"]["kind"] = "untrusted_agent_claim"
+    project_adoption._write_json(journal_path, journal)
+    journal_path.chmod(0o600)  # isolate malformed consent from mode denial
+    assert project_adoption.inspect_legacy_target_preimages(
+        project, data_root=data)["state"] == "RECOVERY_REQUIRED"
+    assert keep.read_bytes() == b"# Synthetic later changed KEEP\n"
