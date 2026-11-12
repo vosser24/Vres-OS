@@ -1,0 +1,107 @@
+# Static evidence only. Do not import any Vres module, pytest/conftest, or host hooks.
+# This gate deliberately avoids the normal PR CI (which starts PostgreSQL).
+# It is NOT a runtime test, Windows UAT, F1/Fable grant or release clearance.
+name: Personal pinned source integrity - static only (no DB or native runtime)
+
+on:
+  push:
+    branches:
+      - feature/personal-offline-static-verification-20261112
+
+permissions:
+  contents: read
+
+jobs:
+  pinned-static:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      PYTHONNOUSERSITE: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      VRES_ALLOW_TEST_DB: "0"
+      VRES_TEST_DATABASE_URL: ""
+      GIT_CONFIG_NOSYSTEM: "1"
+      GIT_CONFIG_GLOBAL: /dev/null
+
+    steps:
+      - name: Checkout disposable GitHub-hosted worktree; no persisted credentials
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+          submodules: false
+          lfs: false
+
+      - name: Refuse unexpected parent, tree or delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/feature/personal-offline-static-verification-20261112"
+          test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD^)" = "37e41e536c059836e8c9b74fdd9966c0edb6e9cc"
+          test "$(git rev-parse HEAD^^{tree})" = "fedfb2ac06c4c2d9448c91e38f24f0f379dd9ed1"
+          changed="$(git diff-tree --no-commit-id --name-only -r HEAD)"
+          test "$changed" = ".github/workflows/personal-offline-static-verification.yml"
+          echo "PINNED_SOURCE_PARENT=37e41e536c059836e8c9b74fdd9966c0edb6e9cc"
+          echo "PINNED_SOURCE_TREE=fedfb2ac06c4c2d9448c91e38f24f0f379dd9ed1"
+
+      - name: Verify every checked-out Git blob and compile Python WITHOUT executing it
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -I -S -B - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+          import stat
+          import subprocess
+
+          root = Path.cwd()
+          rows = subprocess.check_output(
+              ["git", "ls-tree", "-rz", "--full-tree", "HEAD"], cwd=root
+          ).split(b"\0")
+          rows = [row for row in rows if row]
+          if len(rows) != 552:
+              raise SystemExit("REFUSED: unexpected complete tracked-file count")
+          counts = {"python": 0, "src": 0, "tests": 0}
+          inventory = hashlib.sha256()
+          for row in rows:
+              metadata, raw_path = row.split(b"\t", 1)
+              mode, kind, expected_git_sha = metadata.decode("ascii").split()
+              if mode != "100644" or kind != "blob":
+                  raise SystemExit("REFUSED: unexpected Git mode or object type")
+              path = Path(os.fsdecode(raw_path))
+              if path.is_absolute() or ".." in path.parts:
+                  raise SystemExit("REFUSED: unsafe repository path")
+              actual = root / path
+              info = actual.lstat()
+              if not stat.S_ISREG(info.st_mode):
+                  raise SystemExit("REFUSED: missing, linked or non-regular file")
+              data = actual.read_bytes()
+              sha1 = hashlib.sha1(
+                  b"blob " + str(len(data)).encode("ascii") + b"\0" + data
+              ).hexdigest()
+              if sha1 != expected_git_sha:
+                  raise SystemExit("REFUSED: checked-out Git blob differs")
+              inventory.update(len(raw_path).to_bytes(4, "big"))
+              inventory.update(raw_path)
+              inventory.update(hashlib.sha256(data).digest())
+              if path.suffix == ".py":
+                  # compile() produces a code object IN MEMORY. It NEVER runs it.
+                  compile(data, str(path), "exec", dont_inherit=True)
+                  counts["python"] += 1
+                  if path.parts[:2] == ("src", "vres_os"):
+                      counts["src"] += 1
+                  if path.parts[0] == "tests":
+                      counts["tests"] += 1
+          if counts != {"python": 397, "src": 147, "tests": 247}:
+              raise SystemExit("REFUSED: unexpected exact Python inventory")
+          print("STATIC_GIT_BLOB_INTEGRITY=PASS")
+          print("STATIC_PYTHON_COMPILE=PASS (NO IMPORTS / NO EXECUTION)")
+          print("TRACKED_BLOBS=552; PYTHON_FILES=397; SRC=147; TESTS=247")
+          print("INVENTORY_SHA256=" + inventory.hexdigest())
+          print("RUNTIME_TESTS=NOT_RUN; CONFTST_IMPORT=NOT_RUN")
+          print("POSTGRESQL_CONTACT=NOT_ATTEMPTED; NATIVE_CLAUDE=NOT_RUN")
+          print("WINDOWS_UAT=NOT_RUN; PROTECTED_APPROVAL=NOT_GRANTED")
+          PY
+          test -z "$(git status --porcelain --untracked-files=all)"
