@@ -3225,6 +3225,103 @@ def inspect_legacy_target_preimages(
 
 
 
+def _held_recovery_consistency_snapshot(
+    project, *, data_root: Path | None = None,
+) -> tuple[Any, ...] | None:
+    """Opaque, bounded read-only consistency witness for #168 recovery triage.
+
+    Capture both malformed and valid journal bytes, bounded manifest/seal bytes,
+    selected named preimages, directory identities and state ancestry. Unlike
+    the public inspector result this can notice two different *invalid* states.
+    It never leaves this function or authorizes work. Cooperative checks are
+    NOT an atomic lock, authenticated storage or protected Windows proof.
+    """
+    try:
+        from .paths import data_dir_path
+
+        base = Path(data_root) if data_root is not None else data_dir_path()
+        root = Path(project.root).resolve(strict=True)
+        sd = base / "projects" / hashlib.sha256(project.key.encode("utf-8")).hexdigest()[:24]
+        journal_path = sd / "legacy_target_preparation.json"
+        if not base.is_absolute() or sd.resolve(strict=False).is_relative_to(root):
+            return None
+        ancestry = _record_ancestor_identity(journal_path)
+        if ancestry is None:
+            return ("MISSING_STATE_ANCESTRY",)
+
+        def witness(path: Path, *, directory: bool = False) -> tuple[Any, ...]:
+            info = _lstat(path)
+            if info is None:
+                return ("ABSENT",)
+            stamp = (
+                info.st_dev, info.st_ino, info.st_mode, info.st_nlink,
+                info.st_size, info.st_mtime_ns, getattr(info, "st_ctime_ns", 0),
+                getattr(info, "st_file_attributes", 0),
+            )
+            if _is_link(info):
+                return ("UNSAFE_LINK", stamp)
+            if directory:
+                return (("DIRECTORY" if stat.S_ISDIR(info.st_mode)
+                         else "UNSAFE_TYPE"), stamp)
+            if not stat.S_ISREG(info.st_mode):
+                return ("UNSAFE_TYPE", stamp)
+            # Windows private ACL / DPAPI is still HELD. Do not read Windows
+            # plaintext journal/copy bytes or assume POSIX mode proves an ACL.
+            if (not _held_capture_private_storage_available()
+                    or not _held_private_entry(path)):
+                return ("PRIVATE_STORAGE_UNVERIFIED", stamp)
+            if info.st_size < 0 or info.st_size > _MAX_BYTES:
+                return ("UNBOUNDED", stamp)
+            try:
+                raw = _read_verified_preimage(
+                    path.parent, path.name, None, "held recovery state")
+            except (AdoptionError, OSError, ValueError, TypeError, RuntimeError):
+                return ("UNREADABLE", stamp)
+            return ("BOUNDED_FILE", stamp, hashlib.sha256(raw).hexdigest())
+
+        copies_root = sd / "legacy_target_preimages"
+        snapshot: list[Any] = [
+            ("ANCESTRY", ancestry),
+            ("JOURNAL", witness(journal_path)),
+            ("COPIES_ROOT", witness(copies_root, directory=True)),
+        ]
+        if snapshot[1][1][0] == "BOUNDED_FILE":
+            try:
+                journal = _read_json(journal_path)
+            except (AdoptionError, OSError, ValueError, TypeError, RuntimeError):
+                journal = None
+            capture_id = journal.get("capture_id") if type(journal) is dict else None
+            if (type(capture_id) is str
+                    and re.fullmatch(r"[0-9a-f]{32}", capture_id) is not None):
+                captured = copies_root / capture_id
+                snapshot.append(("CAPTURE_DIR", witness(captured, directory=True)))
+                manifest_path = captured / "manifest.json"
+                snapshot.append(("MANIFEST", witness(manifest_path)))
+                snapshot.append(("SEAL", witness(captured / "seal.json")))
+                if snapshot[-2][1][0] == "BOUNDED_FILE":
+                    try:
+                        manifest = _read_json(manifest_path)
+                    except (AdoptionError, OSError, ValueError, TypeError, RuntimeError):
+                        manifest = None
+                    proofs = manifest.get("targets") if type(manifest) is dict else None
+                    if type(proofs) is list and len(proofs) <= _MAX_REVIEW_ITEMS:
+                        names = set()
+                        for proof in proofs:
+                            if type(proof) is dict and type(proof.get("number")) is int:
+                                number = proof["number"]
+                                if (1 <= number <= _MAX_REVIEW_ITEMS
+                                        and proof.get("preimage_copy") == f"{number:03d}"):
+                                    names.add(f"{number:03d}")
+                        for name in sorted(names):
+                            snapshot.append(("COPY", name, witness(captured / name)))
+        # Refuse even a provisional witness when state ancestry itself drifted.
+        if _record_ancestor_identity(journal_path) != ancestry:
+            return None
+        return tuple(snapshot)
+    except (AdoptionError, OSError, ValueError, TypeError, KeyError, RuntimeError):
+        return None
+
+
 def review_legacy_held_capture_recovery(
     project, *, data_root: Path | None = None,
 ) -> dict[str, Any]:
@@ -3235,6 +3332,7 @@ def review_legacy_held_capture_recovery(
     resume, filesystem write, approval, independently signed proof or Fable result.
     Generic categories intentionally omit paths, bytes, callback metadata and IDs.
     """
+    opening_witness = _held_recovery_consistency_snapshot(project, data_root=data_root)
     inspected = inspect_legacy_target_preimages(project, data_root=data_root)
     state = inspected["state"]
     category = {
@@ -3292,7 +3390,9 @@ def review_legacy_held_capture_recovery(
         closing = inspect_legacy_target_preimages(project, data_root=data_root)
     except (AdoptionError, OSError, ValueError, TypeError, KeyError, RuntimeError):
         closing = None
-    if closing != inspected:
+    closing_witness = _held_recovery_consistency_snapshot(project, data_root=data_root)
+    if (closing != inspected or opening_witness is None
+            or closing_witness is None or closing_witness != opening_witness):
         state, category = "RECOVERY_REQUIRED", "CHANGED_DURING_RECOVERY_REVIEW"
     return {
         "state": state,

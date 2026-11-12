@@ -2016,6 +2016,76 @@ def test_held_recovery_triage_refuses_late_preimage_mutation(tmp_path, monkeypat
     assert triage["project_write_authorized"] is False
 
 
+def test_held_recovery_triage_refuses_same_state_invalid_journal_drift(tmp_path, monkeypatch):
+    """AUTHORED NOT_RUN; two RECOVERY_REQUIRED classifications can hide changed bytes."""
+    project, data, sd, keep, old, token = _selected_original_keep_plan_fixture(tmp_path)
+    journal = sd / "legacy_target_preparation.json"
+    project_adoption._held_private_exclusive_json(
+        journal, {"version": 1, "kind": "INVALID_A", "capture_id": "a" * 32})
+    original_inspect = project_adoption.inspect_legacy_target_preimages
+    calls = 0
+
+    def drift_invalid_journal(selected, *, data_root=None):
+        nonlocal calls
+        result = original_inspect(selected, data_root=data_root)
+        calls += 1
+        assert result["state"] == "RECOVERY_REQUIRED"
+        if calls == 1:
+            journal.write_bytes(journal.read_bytes().replace(b"INVALID_A", b"INVALID_B"))
+        return result
+
+    monkeypatch.setattr(project_adoption, "inspect_legacy_target_preimages",
+                        drift_invalid_journal)
+    review = project_adoption.review_legacy_held_capture_recovery(
+        project, data_root=data)
+    assert calls == 2
+    assert review["state"] == "RECOVERY_REQUIRED"
+    assert review["recovery_class"] == "CHANGED_DURING_RECOVERY_REVIEW"
+    assert review["local_readback_verified_by_original_inspector"] is False
+    assert review["plan_digest"] is None
+    assert review["project_write_authorized"] is False
+    assert str(project.root) not in str(review)
+
+
+def test_held_recovery_triage_refuses_same_state_corrupt_preimage_drift(tmp_path, monkeypatch):
+    """AUTHORED NOT_RUN; moving between two corrupt copies is not stable recovery."""
+    project, data, sd, keep, old, token = _selected_original_keep_plan_fixture(tmp_path)
+    targets = {1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}
+    plan = project_adoption.draft_legacy_reversible_plan(
+        project, snapshot_token=token, targets=targets, data_root=data)
+    project_adoption.capture_legacy_target_preimages(
+        project, snapshot_token=token, targets=targets,
+        plan_digest=plan["plan_digest"], authority=_synthetic_held_capture_authority,
+        data_root=data)
+    capture_id = project_adoption._read_json(
+        sd / "legacy_target_preparation.json")["capture_id"]
+    saved_copy = sd / "legacy_target_preimages" / capture_id / "001"
+    saved_copy.write_bytes(b"synthetic corrupt copy A")
+    original_inspect = project_adoption.inspect_legacy_target_preimages
+    calls = 0
+
+    def drift_corrupt_copy(selected, *, data_root=None):
+        nonlocal calls
+        result = original_inspect(selected, data_root=data_root)
+        calls += 1
+        assert result["state"] == "RECOVERY_REQUIRED"
+        if calls == 1:
+            saved_copy.write_bytes(b"synthetic corrupt copy B")
+        return result
+
+    monkeypatch.setattr(project_adoption, "inspect_legacy_target_preimages",
+                        drift_corrupt_copy)
+    review = project_adoption.review_legacy_held_capture_recovery(
+        project, data_root=data)
+    assert calls == 2
+    assert review["state"] == "RECOVERY_REQUIRED"
+    assert review["recovery_class"] == "CHANGED_DURING_RECOVERY_REVIEW"
+    assert review["local_readback_verified_by_original_inspector"] is False
+    assert review["automatic_resume_allowed"] is False
+    assert review["automatic_discard_allowed"] is False
+    assert review["project_write_authorized"] is False
+
+
 def test_held_inverse_blueprint_rejects_unbound_or_inconsistent_hashes():
     """AUTHORED NOT_RUN; no state, project, or secret is touched by pure check."""
     fake = {
