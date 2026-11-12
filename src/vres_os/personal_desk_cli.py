@@ -63,7 +63,14 @@ Usage: python -I -S -B personal_desk_cli.py COMMAND [command options]
             --expected-checkpoint-sha256 HEX --yes
             reopen|replay --desk ABS --task-key TASK-*
             --snapshot-sha256 HEX --yes
+            review|finish: [--include-chairman-candidate
+            --chairman-history-file ABS --chairman-template-file ABS
+            --expected-chairman-history-sha256 HEX
+            --expected-chairman-proposal-sha256 HEX
+            --expected-chairman-template-sha256 HEX]
             replay: [--include-experience-provenance] [--include-project-intake]
+            [--include-saved-chairman-candidate]
+            Chairman lineage is source-only, NEVER host evidence or Fable approval
   undo      Delete ONLY an unchanged owned scratch draft with approval
             --workspace ABS --sha256 HEX --yes
   desk      Portable daily desk: init/add/focus/open/remove without manual SHA

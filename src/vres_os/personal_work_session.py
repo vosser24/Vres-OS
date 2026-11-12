@@ -808,7 +808,8 @@ def reopen_saved(desk: str | Path, task: str, snapshot_sha256: str, *,
 def replay_saved(desk: str | Path, task: str, snapshot_sha256: str, *,
                  approved: bool = False,
                  include_experience_provenance: bool = False,
-                 include_project_intake: bool = False) -> dict[str, Any]:
+                 include_project_intake: bool = False,
+                 include_saved_chairman_candidate: bool = False) -> dict[str, Any]:
     """Explicit opt-in to inspect the SAVED path and compare current exact bytes.
 
     Caller must reopen the exact original note first. On mismatch, leave
@@ -820,8 +821,12 @@ def replay_saved(desk: str | Path, task: str, snapshot_sha256: str, *,
         raise WorkSessionRefused("Historical experience source selection must be boolean")
     if type(include_project_intake) is not bool:
         raise WorkSessionRefused("Historical project intake selection must be boolean")
+    if type(include_saved_chairman_candidate) is not bool:
+        raise WorkSessionRefused("Saved Chairman source selection must be boolean")
     old = _saved_completed(desk, task, snapshot_sha256, show_result_paths=True)
     link = old["result_evidence"]
+    if include_saved_chairman_candidate and 'chairman_candidate' not in link:
+        raise WorkSessionRefused('Saved result contains no original Chairman candidate source link')
     checked = result.inspect_work_result(
         desk, task, link["project_root"], link["project_key"],
         link["result_file"],
@@ -895,6 +900,9 @@ def replay_saved(desk: str | Path, task: str, snapshot_sha256: str, *,
         "result_bytes": checked["result_bytes"],
         "selected_experience_provenance": selected_experience,
         "selected_project_intake": selected_intake,
+        "selected_saved_chairman_candidate": (
+            link['chairman_candidate'] if include_saved_chairman_candidate else None),
+        "saved_chairman_context_is_host_authority": False,
         "result_rechecked_after_selected_intake": include_project_intake,
         "project_activation_authorized": False,
         "current_result_bytes_matched_in_this_read": True,
@@ -966,7 +974,9 @@ def _workday_owner_snapshot(desk: str | Path) -> tuple[dict[str, Any], dict[str,
         linked = row.get("result_evidence")
         if linked is not None:
             if (row["state"] != "completed" or type(linked) is not dict
-                    or linked.get("schema") != "vres-personal-result-history-link/1"
+                    or linked.get("schema") not in (
+                        lifecycle._RESULT_LINK_SCHEMA,
+                        lifecycle._RESULT_LINK_CHAIRMAN_SCHEMA)
                     or linked.get("document_path_hidden") is not True
                     or linked.get("document_current_bytes_verified") is not False
                     or linked.get("document_quality_validated") is not False
@@ -976,6 +986,20 @@ def _workday_owner_snapshot(desk: str | Path) -> tuple[dict[str, Any], dict[str,
                     or type(linked.get("checkpoint_sha256")) is not str
                     or not workbench._SHA.fullmatch(linked["checkpoint_sha256"])):
                 raise WorkSessionRefused("Original linked result is not historical-only")
+            candidate = linked.get('chairman_candidate')
+            if linked['schema'] == lifecycle._RESULT_LINK_CHAIRMAN_SCHEMA:
+                if (type(candidate) is not dict
+                        or candidate.get('host_evidence_status')
+                           != 'NO_HOST_MODEL_EVIDENCE_STOP'
+                        or candidate.get('caller_supplied_source_not_authenticated') is not True
+                        or candidate.get('source_material_reverified_this_read') is not False
+                        or candidate.get('host_observed_chairman_verified') is not False
+                        or candidate.get('protected_f1_fable_authority_granted') is not False
+                        or type(candidate.get('source_link_sha256')) is not str
+                        or not workbench._SHA.fullmatch(candidate['source_link_sha256'])):
+                    raise WorkSessionRefused('Saved Chairman source cannot become host authority')
+            elif candidate is not None:
+                raise WorkSessionRefused('Legacy result must not claim a Chairman source link')
     return daily, history, attention
 
 
@@ -1026,6 +1050,8 @@ def review_workday(
             "saved_result_linked": evidence is not None,
             "saved_result_sha256": (
                 evidence["result_sha256"] if evidence is not None else None),
+            "saved_chairman_candidate_linked": (
+                evidence is not None and 'chairman_candidate' in evidence),
             "saved_checkpoint_sha256": (
                 evidence["checkpoint_sha256"] if evidence is not None else None),
             "current_result_bytes_verified": False,
@@ -1044,6 +1070,7 @@ def review_workday(
                 "saved_result_sha256": evidence["result_sha256"],
                 "saved_result_bytes": evidence["result_bytes"],
                 "saved_result_is_historical_not_current": True,
+                "saved_chairman_candidate_linked": 'chairman_candidate' in evidence,
                 "task_reopened": False,
                 "result_replayed": False,
                 "current_document_bytes_verified": False,
@@ -1201,6 +1228,48 @@ def render_workday(packet: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _read_selected_chairman_source(path: str, *, maximum: int) -> bytes:
+    # Read only a user-selected bounded regular file, never profile discovery.
+    selected = Path(path)
+    if (not selected.is_absolute() or '..' in selected.parts):
+        raise WorkSessionRefused('Explicit absolute Chairman source file required')
+    for directory in reversed(selected.parents):
+        workbench._plain(directory, directory=True)
+    before = workbench._plain(selected, directory=False)
+    if not 0 < before.st_size <= maximum:
+        raise WorkSessionRefused('Bounded Chairman source file required')
+    data = selected.read_bytes()
+    after = workbench._plain(selected, directory=False)
+    if (not 0 < len(data) <= maximum or len(data) != before.st_size
+            or (before.st_dev, before.st_ino, before.st_mtime_ns)
+               != (after.st_dev, after.st_ino, after.st_mtime_ns)):
+        raise WorkSessionRefused('Chairman source file changed during read')
+    return data
+
+
+def _chairman_cli_options(args: argparse.Namespace) -> dict[str, Any]:
+    fields = (args.chairman_history_file, args.chairman_template_file,
+              args.expected_chairman_history_sha256,
+              args.expected_chairman_proposal_sha256,
+              args.expected_chairman_template_sha256)
+    if not args.include_chairman_candidate:
+        if any(field is not None for field in fields):
+            raise WorkSessionRefused('Chairman files require explicit opt-in')
+        return {}
+    if not all(field is not None for field in fields):
+        raise WorkSessionRefused('Complete Chairman sources and hashes required')
+    return {
+        'include_chairman_candidate': True,
+        'chairman_history_document': _read_selected_chairman_source(
+            args.chairman_history_file, maximum=256 * 1024),
+        'chairman_template': _read_selected_chairman_source(
+            args.chairman_template_file, maximum=64 * 1024),
+        'expected_chairman_history_sha256': args.expected_chairman_history_sha256,
+        'expected_chairman_proposal_sha256': args.expected_chairman_proposal_sha256,
+        'expected_chairman_template_sha256': args.expected_chairman_template_sha256,
+    }
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _SafeParser(
         description="Internal source-only personal workflow over original task owners")
@@ -1225,6 +1294,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             sub.add_argument("--result-file", required=(name == "finish"))
             sub.add_argument("--expected-checkpoint-sha256",
                              required=(name == "finish"))
+        if name in ('review', 'finish'):
+            sub.add_argument('--include-chairman-candidate', action='store_true')
+            sub.add_argument('--chairman-history-file')
+            sub.add_argument('--chairman-template-file')
+            sub.add_argument('--expected-chairman-history-sha256')
+            sub.add_argument('--expected-chairman-proposal-sha256')
+            sub.add_argument('--expected-chairman-template-sha256')
         if name == "review":
             sub.add_argument("--show-result-paths", action="store_true")
             sub.add_argument("--include-project-intake", action="store_true")
@@ -1232,6 +1308,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if name in ("start", "finish", "reopen", "replay"):
             sub.add_argument("--yes", action="store_true")
         if name == "replay":
+            sub.add_argument('--include-saved-chairman-candidate', action='store_true')
             sub.add_argument("--include-experience-provenance", action="store_true")
             sub.add_argument("--include-project-intake", action="store_true")
         if name in ("reopen", "replay"):
@@ -1256,13 +1333,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 expected_checkpoint_sha256=args.expected_checkpoint_sha256,
                 show_result_paths=args.show_result_paths,
                 include_project_intake=args.include_project_intake,
-                include_experience_provenance=args.include_experience_provenance)
+                include_experience_provenance=args.include_experience_provenance,
+                **_chairman_cli_options(args))
         elif args.command == "finish":
             packet = completion.finish_work(
                 args.desk, args.task_key, args.project_root, args.project_key,
                 args.result_file,
                 expected_checkpoint_sha256=args.expected_checkpoint_sha256,
-                approved=args.yes)
+                approved=args.yes, **_chairman_cli_options(args))
         elif args.command == "reopen":
             packet = reopen_saved(
                 args.desk, args.task_key, args.snapshot_sha256, approved=args.yes)
@@ -1270,7 +1348,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             packet = replay_saved(
                 args.desk, args.task_key, args.snapshot_sha256, approved=args.yes,
                 include_experience_provenance=args.include_experience_provenance,
-                include_project_intake=args.include_project_intake)
+                include_project_intake=args.include_project_intake,
+                include_saved_chairman_candidate=args.include_saved_chairman_candidate)
         if args.command == "home" and args.format == "text":
             print(render_workday(packet))
         else:

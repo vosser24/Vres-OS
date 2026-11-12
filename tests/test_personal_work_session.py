@@ -1599,3 +1599,156 @@ def test_integrated_workday_refuses_pending_revision_state_drift(
         session.review_workday(selected)
     assert calls["count"] >= 2
     assert result.inspect_work_result(*ctx)["checkpoint_sha256"] == checkpoint
+
+
+# #165 substantive original-owner integration: one bounded Chairman source
+# candidate → selected scratch task → project result → existing completion
+# history → explicitly reopened exact-byte replay. No native host or DB.
+
+
+def test_chairman_candidate_to_verified_result_completion_and_saved_replay(tmp_path):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    chairman = _synthetic_chairman_history_selection()
+    preview = session.review_session(
+        selected, task, project_root=project, project_key=key,
+        result_file=document, expected_checkpoint_sha256=token,
+        include_chairman_candidate=True, **chairman)
+    candidate = preview['selected_chairman_candidate']
+    assert candidate['host_evidence_status'] == 'NO_HOST_MODEL_EVIDENCE_STOP'
+    assert preview['observed_result']['checkpoint_sha256'] == token
+    completed = completion.finish_work(
+        *ctx, expected_checkpoint_sha256=token, approved=True,
+        include_chairman_candidate=True, **chairman)
+    assert completed['chairman_source_candidate_history_linked'] is True
+    assert completed['native_chairman_task_completed'] is False
+    assert completed['chairman_host_evidence_status'] == 'NO_HOST_MODEL_EVIDENCE_STOP'
+    rows = lifecycle.list_history(selected)['snapshots']
+    assert len(rows) == 1
+    evidence = rows[0]['result_evidence']
+    assert evidence['schema'] == 'vres-personal-result-history-link/2'
+    assert evidence['document_path_hidden'] is True
+    assert evidence['chairman_candidate']['source_link_sha256'] == candidate['source_link_sha256']
+    assert evidence['chairman_candidate']['host_observed_chairman_verified'] is False
+    assert evidence['chairman_candidate']['protected_f1_fable_authority_granted'] is False
+    assert str(project) not in json.dumps(evidence)
+    home = session.review_workday(selected, selected_task=task,
+                                  snapshot_sha256=rows[0]['sha256'])
+    assert home['saved_history'][0]['saved_chairman_candidate_linked'] is True
+    assert home['selected_review']['saved_chairman_candidate_linked'] is True
+    assert home['selected_review']['current_document_bytes_verified'] is False
+    with pytest.raises((session.WorkSessionRefused, result.WorkResultRefused)):
+        session.replay_saved(selected, task, rows[0]['sha256'], approved=True,
+                             include_saved_chairman_candidate=True)
+    session.reopen_saved(selected, task, rows[0]['sha256'], approved=True)
+    replay = session.replay_saved(selected, task, rows[0]['sha256'], approved=True,
+                                  include_saved_chairman_candidate=True)
+    assert replay['status'] == 'SAVED_WORK_SESSION_EXACT_CONTEXT_REPLAY_MATCH'
+    assert replay['checkpoint_sha256'] == token
+    assert replay['selected_saved_chairman_candidate']['source_link_sha256'] == candidate['source_link_sha256']
+    assert replay['selected_saved_chairman_candidate']['source_material_reverified_this_read'] is False
+    assert replay['saved_chairman_context_is_host_authority'] is False
+    assert replay['native_chairman_authority_granted'] is False
+    document.write_text('# Changed after saved completion\n', encoding='utf-8')
+    with pytest.raises(result.WorkResultRefused):
+        session.replay_saved(selected, task, rows[0]['sha256'], approved=True,
+                             include_saved_chairman_candidate=True)
+
+
+def test_chairman_candidate_full_existing_desk_cli_journey(tmp_path, capsys):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    chairman = _synthetic_chairman_history_selection()
+    history_file = tmp_path / 'synthetic-chairman-history.json'
+    template_file = tmp_path / 'synthetic-chairman-template.md'
+    history_file.write_bytes(chairman['chairman_history_document'])
+    template_file.write_bytes(chairman['chairman_template'])
+    extra = [
+        '--include-chairman-candidate',
+        '--chairman-history-file', str(history_file),
+        '--chairman-template-file', str(template_file),
+        '--expected-chairman-history-sha256', chairman['expected_chairman_history_sha256'],
+        '--expected-chairman-proposal-sha256', chairman['expected_chairman_proposal_sha256'],
+        '--expected-chairman-template-sha256', chairman['expected_chairman_template_sha256'],
+    ]
+    work = [
+        '--desk', str(selected), '--task-key', task,
+        '--project-root', str(project), '--project-key', key,
+        '--result-file', str(document), '--expected-checkpoint-sha256', token,
+    ]
+    assert cli.main(['work-session', 'review', *work, *extra]) == 0
+    review = json.loads(capsys.readouterr().out)
+    assert review['selected_chairman_candidate']['host_evidence_status'] == 'NO_HOST_MODEL_EVIDENCE_STOP'
+    assert str(project) not in json.dumps(review)
+    assert cli.main(['work-session', 'finish', *work, *extra, '--yes']) == 0
+    finish = json.loads(capsys.readouterr().out)
+    assert finish['chairman_source_candidate_history_linked'] is True
+    sha = finish['selected_note_sha256']
+    assert cli.main(['home', '--desk', str(selected), '--task-key', task,
+                     '--snapshot-sha256', sha, '--format', 'json']) == 0
+    home = json.loads(capsys.readouterr().out)
+    assert home['selected_review']['saved_chairman_candidate_linked'] is True
+    assert cli.main(['work-session', 'reopen', '--desk', str(selected),
+                     '--task-key', task, '--snapshot-sha256', sha, '--yes']) == 0
+    capsys.readouterr()
+    assert cli.main(['work-session', 'replay', '--desk', str(selected),
+                     '--task-key', task, '--snapshot-sha256', sha,
+                     '--include-saved-chairman-candidate', '--yes']) == 0
+    replay = json.loads(capsys.readouterr().out)
+    assert replay['checkpoint_sha256'] == token
+    assert replay['selected_saved_chairman_candidate']['host_observed_chairman_verified'] is False
+    assert str(project) not in json.dumps(replay)
+
+
+def test_chairman_candidate_completion_refuses_stale_or_implicit_authority(tmp_path):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    chairman = _synthetic_chairman_history_selection()
+    with pytest.raises(completion.WorkCompletionRefused):
+        completion.finish_work(*ctx, expected_checkpoint_sha256=token,
+                               approved=True, **chairman)
+    with pytest.raises(completion.WorkCompletionRefused):
+        completion.finish_work(*ctx, expected_checkpoint_sha256=token,
+                               approved=True, include_chairman_candidate=True)
+    stale = dict(chairman)
+    stale['expected_chairman_history_sha256'] = '0' * 64
+    with pytest.raises(completion.WorkCompletionRefused):
+        completion.finish_work(*ctx, expected_checkpoint_sha256=token,
+                               approved=True, include_chairman_candidate=True, **stale)
+    assert lifecycle.list_history(selected)['count'] == 0
+    assert session.review_session(selected, task)['active'] is True
+
+
+def test_legacy_result_link_preserved_without_candidate_and_no_false_saved_replay(tmp_path):
+    ctx, token = _new(tmp_path)
+    selected, task, _, _, _ = ctx
+    finished = _finish(ctx, token)
+    assert finished['chairman_source_candidate_history_linked'] is False
+    history = lifecycle.list_history(selected)['snapshots'][0]
+    assert history['result_evidence']['schema'] == 'vres-personal-result-history-link/1'
+    assert 'chairman_candidate' not in history['result_evidence']
+    sha = history['sha256']
+    session.reopen_saved(selected, task, sha, approved=True)
+    with pytest.raises(session.WorkSessionRefused):
+        session.replay_saved(selected, task, sha, approved=True,
+                             include_saved_chairman_candidate=True)
+    old = session.replay_saved(selected, task, sha, approved=True)
+    assert old['checkpoint_sha256'] == token
+    assert old['selected_saved_chairman_candidate'] is None
+
+
+def test_saved_chairman_link_refuses_host_promotion_in_existing_history(tmp_path):
+    ctx, token = _new(tmp_path)
+    selected, task, _, _, _ = ctx
+    completed = completion.finish_work(
+        *ctx, expected_checkpoint_sha256=token, approved=True,
+        include_chairman_candidate=True, **_synthetic_chairman_history_selection())
+    assert completed['chairman_source_candidate_history_linked'] is True
+    sidecars = list((selected / 'Vres-Lifecycle-History' / 'completed').glob('Vres-Result-H*.json'))
+    assert len(sidecars) == 1
+    altered = json.loads(sidecars[0].read_text(encoding='ascii'))
+    altered['chairman_candidate']['host_evidence_status'] = 'CALLER_CLAIM_MATCH_UNVERIFIED'
+    sidecars[0].write_text(json.dumps(altered, sort_keys=True, separators=(',', ':'),
+                                      ensure_ascii=True) + '\n', encoding='ascii')
+    with pytest.raises(lifecycle.LifecycleRefused):
+        lifecycle.list_history(selected)

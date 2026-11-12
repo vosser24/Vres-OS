@@ -36,6 +36,12 @@ _BUCKETS = ('revisions', 'completed', 'archived', 'pending')
 _STATES = ('completed', 'archived')
 _MAX_HISTORY_ENTRIES = 48
 _RESULT_LINK_SCHEMA = 'vres-personal-result-history-link/1'
+_RESULT_LINK_CHAIRMAN_SCHEMA = 'vres-personal-result-history-link/2'
+_CHAIRMAN_SOURCE_KEYS = frozenset({
+    'source_link_sha256', 'history_sha256', 'latest_proposal_sha256',
+    'template_sha256', 'rendered_candidate_sha256', 'requested_family',
+    'requested_effort', 'host_evidence_status',
+})
 _RESULT_NAME = re.compile(r'Vres-Result-H[a-f0-9]{64}\.json\Z', re.ASCII)
 _PROJECT_KEY = re.compile(r'project:[A-Za-z0-9][A-Za-z0-9_.:-]{0,95}\Z', re.ASCII)
 _RESULT_TYPES = frozenset(('.md', '.txt', '.py', '.json', '.csv',
@@ -102,7 +108,11 @@ def _result_bytes(record: dict[str, Any]) -> bytes:
             'project_binding_sha256', 'result_sha256', 'result_bytes',
             'checkpoint_sha256', 'result_contents_disclosed',
             'result_quality_validated', 'native_chairman_task_bound'}
-    if type(record) is not dict or set(record) != keys or record['schema'] != _RESULT_LINK_SCHEMA:
+    if type(record) is not dict or record.get('schema') not in (
+            _RESULT_LINK_SCHEMA, _RESULT_LINK_CHAIRMAN_SCHEMA):
+        raise LifecycleRefused('Malformed history result record')
+    with_chairman = record['schema'] == _RESULT_LINK_CHAIRMAN_SCHEMA
+    if set(record) != (keys | {'chairman_candidate'} if with_chairman else keys):
         raise LifecycleRefused('Malformed history result record')
     key, note, project_key, root, rel = (
         record['task_key_claimed'], record['selected_note_sha256'],
@@ -141,6 +151,26 @@ def _result_bytes(record: dict[str, Any]) -> bytes:
     if (record['project_binding_sha256'] != binding
             or record['checkpoint_sha256'] != checkpoint):
         raise LifecycleRefused('History result replay identity mismatch')
+    if with_chairman:
+        candidate = record['chairman_candidate']
+        if (type(candidate) is not dict or set(candidate) != _CHAIRMAN_SOURCE_KEYS
+                or candidate.get('host_evidence_status') != 'NO_HOST_MODEL_EVIDENCE_STOP'
+                or candidate.get('requested_family') not in ('opus', 'sonnet')
+                or candidate.get('requested_effort') not in ('low', 'medium', 'high')):
+            raise LifecycleRefused('History cannot promote Chairman candidate to authority')
+        for name in ('source_link_sha256', 'history_sha256',
+                     'latest_proposal_sha256', 'template_sha256',
+                     'rendered_candidate_sha256'):
+            if (type(candidate[name]) is not str
+                    or not workbench._SHA.fullmatch(candidate[name])):
+                raise LifecycleRefused('Invalid Chairman candidate source digest')
+        linked = hashlib.sha256(canonical([
+            'vres-personal-work-chairman-source-link/1', key, note, binding,
+            candidate['history_sha256'], candidate['latest_proposal_sha256'],
+            candidate['template_sha256'], candidate['rendered_candidate_sha256'],
+        ])).hexdigest()
+        if candidate['source_link_sha256'] != linked:
+            raise LifecycleRefused('Chairman source lineage differs from completed task')
     encoded = canonical(record) + b'\n'
     if len(encoded) > _MAX_RESULT_LINK_BYTES:
         raise LifecycleRefused('History result record exceeds byte bound')
@@ -150,7 +180,8 @@ def _result_bytes(record: dict[str, Any]) -> bytes:
 def prepare_result_link(*, task: str, note_sha256: str, project_root: str | Path,
                         project_key: str, relative_result_path: str,
                         project_binding_sha256: str, result_sha256: str,
-                        result_bytes: int, checkpoint_sha256: str) -> dict[str, Any]:
+                        result_bytes: int, checkpoint_sha256: str,
+                        chairman_candidate: dict[str, Any] | None = None) -> dict[str, Any]:
     """Validate record before any completion mutation; no disk write."""
     record = {
         'schema': _RESULT_LINK_SCHEMA, 'task_key_claimed': task,
@@ -162,6 +193,29 @@ def prepare_result_link(*, task: str, note_sha256: str, project_root: str | Path
         'result_contents_disclosed': False, 'result_quality_validated': False,
         'native_chairman_task_bound': False,
     }
+    if chairman_candidate is not None:
+        if (type(chairman_candidate) is not dict
+                or chairman_candidate.get('status')
+                   != 'NONAUTHORITATIVE_CHAIRMAN_CANDIDATE_TASK_SOURCE_ONLY'
+                or chairman_candidate.get('task_key_claimed') != task
+                or chairman_candidate.get('selected_note_sha256') != note_sha256
+                or chairman_candidate.get('selected_project_binding_sha256')
+                   != project_binding_sha256
+                or chairman_candidate.get('approval_or_f1_fable_authority_granted') is not False
+                or chairman_candidate.get('installed_chairman_verified') is not False
+                or chairman_candidate.get('task_bound_in_live_chairman') is not False
+                or chairman_candidate.get('policy_or_worker_routing_modified') is not False
+                or chairman_candidate.get('native_claude_or_hooks_executed') is not False
+                or chairman_candidate.get('database_contacted') is not False
+                or chairman_candidate.get('files_written') is not False):
+            raise LifecycleRefused('Chairman provenance is not a verified source-only preview')
+        record['schema'] = _RESULT_LINK_CHAIRMAN_SCHEMA
+        try:
+            record['chairman_candidate'] = {
+                field: chairman_candidate[field] for field in _CHAIRMAN_SOURCE_KEYS
+            }
+        except KeyError:
+            raise LifecycleRefused('Missing Chairman candidate provenance') from None
     _result_bytes(record)
     return record
 
@@ -193,6 +247,14 @@ def _public_result(record: dict[str, Any], *, show_result_paths: bool) -> dict[s
         'document_quality_validated': False,
         'native_chairman_task_bound': False,
     }
+    if record['schema'] == _RESULT_LINK_CHAIRMAN_SCHEMA:
+        public['chairman_candidate'] = {
+            **record['chairman_candidate'],
+            'caller_supplied_source_not_authenticated': True,
+            'source_material_reverified_this_read': False,
+            'host_observed_chairman_verified': False,
+            'protected_f1_fable_authority_granted': False,
+        }
     if show_result_paths:
         public.update({
             'project_root': record['project_root'],

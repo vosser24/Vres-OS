@@ -35,6 +35,12 @@ def finish_work(
     project_key: str, result_file: str | Path, *,
     expected_checkpoint_sha256: str,
     approved: bool = False,
+    include_chairman_candidate: bool = False,
+    chairman_history_document: bytes | None = None,
+    chairman_template: bytes | None = None,
+    expected_chairman_history_sha256: str | None = None,
+    expected_chairman_proposal_sha256: str | None = None,
+    expected_chairman_template_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Verify exact result replay, then move one matching scratch task to history.
 
@@ -44,7 +50,40 @@ def finish_work(
     """
     if approved is not True or type(expected_checkpoint_sha256) is not str:
         raise WorkCompletionRefused("Explicit exact-context user confirmation required")
+    if type(include_chairman_candidate) is not bool:
+        raise WorkCompletionRefused("Chairman source selection requires exact boolean opt-in")
+    chairman_fields = (chairman_history_document, chairman_template,
+                       expected_chairman_history_sha256,
+                       expected_chairman_proposal_sha256,
+                       expected_chairman_template_sha256)
+    if ((not include_chairman_candidate and any(x is not None for x in chairman_fields))
+            or (include_chairman_candidate and not all(x is not None for x in chairman_fields))):
+        raise WorkCompletionRefused("Exact Chairman source selection or explicit opt-in missing")
     try:
+        chairman_candidate = None
+        if include_chairman_candidate:
+            # Reuse the ORIGINAL work-session Chairman review, not a new model,
+            # policy, validator, task store, or a caller-provided approval claim.
+            from . import personal_work_session as session
+            reviewed = session.review_session(
+                desk, task, project_root=project_root, project_key=project_key,
+                result_file=result_file,
+                expected_checkpoint_sha256=expected_checkpoint_sha256,
+                include_chairman_candidate=True,
+                chairman_history_document=chairman_history_document,
+                chairman_template=chairman_template,
+                expected_chairman_history_sha256=expected_chairman_history_sha256,
+                expected_chairman_proposal_sha256=expected_chairman_proposal_sha256,
+                expected_chairman_template_sha256=expected_chairman_template_sha256)
+            chairman_candidate = reviewed['selected_chairman_candidate']
+            if (reviewed.get('status') != 'ACTIVE_WORK_SESSION_REVIEW'
+                    or reviewed.get('observed_result', {}).get('status')
+                       != 'RESULT_EXACT_CONTEXT_CHECKPOINT_MATCH'
+                    or reviewed['observed_result']['checkpoint_sha256']
+                       != expected_checkpoint_sha256
+                    or chairman_candidate.get('host_evidence_status')
+                       != 'NO_HOST_MODEL_EVIDENCE_STOP'):
+                raise WorkCompletionRefused('Unverified Chairman-to-result source lineage')
         inspected = result.inspect_work_result(
             desk, task, project_root, project_key, result_file,
             expected_checkpoint_sha256=expected_checkpoint_sha256,
@@ -69,6 +108,7 @@ def finish_work(
             result_sha256=inspected["result_sha256"],
             result_bytes=inspected["result_bytes"],
             checkpoint_sha256=inspected["checkpoint_sha256"],
+            chairman_candidate=chairman_candidate,
         )
         move = lifecycle.move_out(
             desk, task, state="completed", approved=True,
@@ -110,6 +150,10 @@ def finish_work(
             raise WorkCompletionRefused("Completed task snapshot could not be verified")
         if matches[0]['result_evidence'].get('result_file') != str(file_path):
             raise WorkCompletionRefused('Stored result location does not match selection')
+        if include_chairman_candidate and (
+                matches[0]['result_evidence'].get('chairman_candidate', {}).get(
+                    'source_link_sha256') != chairman_candidate['source_link_sha256']):
+            raise WorkCompletionRefused('Saved Chairman source lineage differs from selection')
     except Exception:
         raise WorkCompletionRefused(
             "Task may be completed; inspect existing history before any retry"
@@ -128,6 +172,8 @@ def finish_work(
         "existing_lifecycle_reopen_available": True,
         "user_confirmed_scratch_completion": True,
         "document_to_history_link_persisted": True,
+        "chairman_source_candidate_history_linked": include_chairman_candidate,
+        "chairman_host_evidence_status": "NO_HOST_MODEL_EVIDENCE_STOP",
         "checkpoint_persisted": True,
         "history_result_current_bytes_verified": False,
         "result_quality_validated": False,
