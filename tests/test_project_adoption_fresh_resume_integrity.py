@@ -1597,3 +1597,139 @@ def test_held_inspector_refuses_tampered_capture_evidence(tmp_path):
     assert project_adoption.inspect_legacy_target_preimages(
         project, data_root=data)["state"] == "RECOVERY_REQUIRED"
     assert keep.read_bytes() == b"# Synthetic later changed KEEP\n"
+
+
+def test_held_capture_refuses_unverified_windows_private_store_before_write(
+    tmp_path, monkeypatch,
+):
+    """AUTHORED NOT_RUN; no Windows plaintext held copies without ACL proof."""
+    project, data, sd, keep, old, token = _selected_original_keep_plan_fixture(tmp_path)
+    targets = {1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}
+    plan = project_adoption.draft_legacy_reversible_plan(
+        project, snapshot_token=token, targets=targets, data_root=data)
+    before = keep.read_bytes()
+    monkeypatch.setattr(project_adoption, "_held_capture_private_storage_available", lambda: False)
+    with pytest.raises(AdoptionError, match="Windows held capture storage is withheld"):
+        project_adoption.capture_legacy_target_preimages(
+            project, snapshot_token=token, targets=targets,
+            plan_digest=plan["plan_digest"], authority=_synthetic_held_capture_authority,
+            data_root=data)
+    assert keep.read_bytes() == before
+    assert not (sd / "legacy_target_preparation.json").exists()
+
+
+def test_held_capture_refuses_symlinked_base_before_any_directory_creation(
+    tmp_path, monkeypatch,
+):
+    """AUTHORED NOT_RUN; a linked state-root ancestor must refuse pre-write."""
+    project, data, sd, keep, old, token = _selected_original_keep_plan_fixture(tmp_path)
+    alias = tmp_path / "linked_state_base"
+    try:
+        alias.symlink_to(data, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("Synthetic filesystem does not support directory symlinks")
+    targets = {1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}
+    plan = project_adoption.draft_legacy_reversible_plan(
+        project, snapshot_token=token, targets=targets, data_root=data)
+    before = keep.read_bytes()
+    def never_create_state(*_args, **_kwargs):
+        raise AssertionError("_state_dir must not be reached through a linked base")
+    monkeypatch.setattr(project_adoption, "_state_dir", never_create_state)
+    with pytest.raises(AdoptionError, match="unsafe ancestor"):
+        project_adoption.capture_legacy_target_preimages(
+            project, snapshot_token=token, targets=targets,
+            plan_digest=plan["plan_digest"], authority=_synthetic_held_capture_authority,
+            data_root=alias)
+    assert keep.read_bytes() == before
+    assert not (sd / "legacy_target_preparation.json").exists()
+
+
+def test_held_inspector_refuses_project_nested_storage_even_without_journal(tmp_path):
+    """AUTHORED NOT_RUN; inspector cannot claim safe NOT_PREPARED on project root."""
+    project, data, sd, keep, old, token = _selected_original_keep_plan_fixture(tmp_path)
+    observed = project_adoption.inspect_legacy_target_preimages(
+        project, data_root=project.root)
+    assert observed["state"] == "RECOVERY_REQUIRED"
+    assert observed["project_write_authorized"] is False
+    assert not (project.root / "projects").exists()
+
+
+def test_held_inspector_refuses_unverified_windows_storage_readback(
+    tmp_path, monkeypatch,
+):
+    """AUTHORED NOT_RUN; old Windows journals do not become trusted evidence."""
+    project, data, sd, keep, old, token = _selected_original_keep_plan_fixture(tmp_path)
+    targets = {1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}
+    plan = project_adoption.draft_legacy_reversible_plan(
+        project, snapshot_token=token, targets=targets, data_root=data)
+    project_adoption.capture_legacy_target_preimages(
+        project, snapshot_token=token, targets=targets,
+        plan_digest=plan["plan_digest"], authority=_synthetic_held_capture_authority,
+        data_root=data)
+    monkeypatch.setattr(project_adoption, "_held_capture_private_storage_available", lambda: False)
+    result = project_adoption.inspect_legacy_target_preimages(project, data_root=data)
+    assert result["state"] == "RECOVERY_REQUIRED"
+    assert result["activation_allowed"] is False
+    assert (sd / "legacy_target_preparation.json").exists()
+
+
+def test_held_inspector_rechecks_late_journal_replacement(
+    tmp_path, monkeypatch,
+):
+    """AUTHORED NOT_RUN; changed evidence after first read invalidates return."""
+    project, data, sd, keep, old, token = _selected_original_keep_plan_fixture(tmp_path)
+    targets = {1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}
+    plan = project_adoption.draft_legacy_reversible_plan(
+        project, snapshot_token=token, targets=targets, data_root=data)
+    project_adoption.capture_legacy_target_preimages(
+        project, snapshot_token=token, targets=targets,
+        plan_digest=plan["plan_digest"], authority=_synthetic_held_capture_authority,
+        data_root=data)
+    journal_path = sd / "legacy_target_preparation.json"
+    real_status = project_adoption.status
+    changed = []
+    def change_after_observed_status(*args, **kwargs):
+        answer = real_status(*args, **kwargs)
+        if not changed:
+            record = project_adoption._read_json(journal_path)
+            record["capture_authority"]["user"] = "late_synthetic_other"
+            project_adoption._write_json(journal_path, record)
+            journal_path.chmod(0o600)
+            changed.append(True)
+        return answer
+    monkeypatch.setattr(project_adoption, "status", change_after_observed_status)
+    outcome = project_adoption.inspect_legacy_target_preimages(project, data_root=data)
+    assert changed == [True]
+    assert outcome["state"] == "RECOVERY_REQUIRED"
+    assert outcome["project_write_authorized"] is False
+    assert keep.read_bytes() == b"# Synthetic later changed KEEP\n"
+
+
+def test_held_inspector_rechecks_late_preimage_change(
+    tmp_path, monkeypatch,
+):
+    """AUTHORED NOT_RUN; a late saved copy mutation invalidates verified status."""
+    project, data, sd, keep, old, token = _selected_original_keep_plan_fixture(tmp_path)
+    targets = {1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}
+    plan = project_adoption.draft_legacy_reversible_plan(
+        project, snapshot_token=token, targets=targets, data_root=data)
+    project_adoption.capture_legacy_target_preimages(
+        project, snapshot_token=token, targets=targets,
+        plan_digest=plan["plan_digest"], authority=_synthetic_held_capture_authority,
+        data_root=data)
+    journal = project_adoption._read_json(sd / "legacy_target_preparation.json")
+    capture_dir = sd / "legacy_target_preimages" / journal["capture_id"]
+    real_read = project_adoption._read_verified_preimage
+    changed = []
+    def replace_after_first_copy_read(pre_dir, name, expected_sha, rel):
+        answer = real_read(pre_dir, name, expected_sha, rel)
+        if Path(pre_dir) == capture_dir and name == "001" and not changed:
+            (capture_dir / "001").write_bytes(b"Synthetic late tampering\n")
+            changed.append(True)
+        return answer
+    monkeypatch.setattr(project_adoption, "_read_verified_preimage", replace_after_first_copy_read)
+    outcome = project_adoption.inspect_legacy_target_preimages(project, data_root=data)
+    assert changed == [True]
+    assert outcome["state"] == "RECOVERY_REQUIRED"
+    assert outcome["activation_allowed"] is False
+    assert keep.read_bytes() == b"# Synthetic later changed KEEP\n"

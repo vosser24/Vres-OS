@@ -2645,6 +2645,15 @@ def draft_legacy_reversible_plan(
 
 # ------------------------------------------------------------- HELD legacy target capture (#168/#174)
 
+def _held_capture_private_storage_available() -> bool:
+    """Fail closed on Windows until a verified current-user ACL/encryption store exists.
+
+    POSIX owner-only mode is a bounded local guard, not adversarial tamper
+    resistance or a claim about Windows security descriptors.
+    """
+    return os.name != "nt"
+
+
 def _held_private_entry(path: Path, *, directory: bool = False) -> bool:
     """Check held state type and POSIX owner-only mode; Windows ACL remains UNPROVEN."""
     info = _lstat(path)
@@ -2708,6 +2717,10 @@ def capture_legacy_target_preimages(
     Captures reject secret-looking paths, detected secret contents and binary
     data rather than silently storing them as plaintext backup copies.
     """
+    if not _held_capture_private_storage_available():
+        raise AdoptionError(
+            "Windows held capture storage is withheld: private ACL and encryption are not verified"
+        )
     if type(plan_digest) is not str or re.fullmatch(r"[0-9a-f]{64}", plan_digest) is None:
         raise AdoptionError("Exact held-plan digest required for capture")
     # State-backed capture is NEVER permitted to write under the selected project,
@@ -2719,6 +2732,14 @@ def capture_legacy_target_preimages(
     sd = base / "projects" / hashlib.sha256(project.key.encode("utf-8")).hexdigest()[:24]
     if not base.is_absolute() or sd.resolve(strict=False).is_relative_to(root):
         raise AdoptionError("Held capture state root must be absolute and outside selected project")
+    # A caller-provided base (including its parents) must be an existing chain
+    # of ordinary directories BEFORE _state_dir can create anything.
+    # Reject static symlink/junction/reparse aliases even if they resolve outside
+    # the project. This remains cooperative, not an atomic openat lock.
+    root_probe = base / ".vres-held-capture-root-probe"
+    base_ancestors = _record_ancestor_identity(root_probe)
+    if base_ancestors is None:
+        raise AdoptionError("Held capture state base must already be an ordinary directory")
     plan = draft_legacy_reversible_plan(
         project, snapshot_token=snapshot_token, targets=targets, data_root=data_root)
     if plan["plan_digest"] != plan_digest:
@@ -2761,7 +2782,8 @@ def capture_legacy_target_preimages(
     observed = status(project, data_root=data_root)
     identity = _legacy_original_plan_identity(project, root, observed)
     sd = _state_dir(project, data_root)
-    if (sd.resolve(strict=False).is_relative_to(root)
+    if (base_ancestors != _record_ancestor_identity(root_probe)
+            or sd.resolve(strict=False).is_relative_to(root)
             or _record_ancestor_identity(journal_path) is None):
         raise AdoptionError("Held capture state ancestry is unsafe or inside the project")
     _refuse_interrupted_journal(sd)
@@ -2874,6 +2896,12 @@ def capture_legacy_target_preimages(
         if proof["preimage_copy"] is not None:
             _read_verified_preimage(
                 directory, proof["preimage_copy"], proof["current_sha256"], proof["path"])
+    # Refuse observable state-root replacement before creating the final seal.
+    # The incomplete journal and copies remain for explicit recovery review.
+    if (base_ancestors != _record_ancestor_identity(root_probe)
+            or sd.resolve(strict=False).is_relative_to(root)
+            or _record_ancestor_identity(journal_path) is None):
+        raise AdoptionError("Held capture storage changed before sealing; recovery required")
     manifest = {
         "version": 1, "capture_id": capture_id,
         "plan_digest": plan_digest, "snapshot_token": snapshot_token,
@@ -2915,6 +2943,11 @@ def inspect_legacy_target_preimages(
     }
     failure = {"state": "RECOVERY_REQUIRED", "reason": "PARTIAL_OR_STALE_HELD_CAPTURE", **held}
     try:
+        # Old or caller-forged journal state is never trusted merely because it
+        # exists. The read-only inspector must enforce the same project fence.
+        root = Path(project.root).resolve(strict=True)
+        if not base.is_absolute() or sd.resolve(strict=False).is_relative_to(root):
+            return failure
         ancestors = _record_ancestor_identity(journal_path)
         journal_info = _lstat(journal_path) if ancestors is not None else None
         copy_info = _lstat(sd / "legacy_target_preimages") if ancestors is not None else None
@@ -2923,6 +2956,10 @@ def inspect_legacy_target_preimages(
             if copy_info is not None:
                 return failure
             return {"state": "NOT_PREPARED", **held}
+        # Existing Windows plaintext captures cannot be upgraded to VERIFIED
+        # while private ACL/encrypted storage remains unproven.
+        if not _held_capture_private_storage_available():
+            return failure
         if not _held_private_entry(journal_path):
             return failure
         journal = _read_json(journal_path)
@@ -3063,6 +3100,30 @@ def inspect_legacy_target_preimages(
                     return failure
             else:
                 return failure
+        # A first verified read is not a stable proof if the journal, seal,
+        # selected plan or saved copies are later replaced during inspection.
+        # Re-attest them at the return boundary; still no atomic filesystem lock.
+        if (not _held_private_entry(journal_path)
+                or not _held_private_entry(directory.parent, directory=True)
+                or not _held_private_entry(directory, directory=True)
+                or not _held_private_entry(directory / "manifest.json")
+                or not _held_private_entry(directory / "seal.json")
+                or _read_json(journal_path) != journal
+                or _read_json(directory / "manifest.json") != manifest
+                or _read_json(directory / "seal.json") != seal
+                or draft_legacy_reversible_plan(
+                    project, snapshot_token=journal["snapshot_token"],
+                    targets=targets, data_root=data_root
+                ) != plan):
+            return failure
+        for proof in proofs:
+            if proof["current_state"] == "PRESENT_BOUNDED_SHA_ATTESTED":
+                copy = directory / proof["preimage_copy"]
+                if not _held_private_entry(copy):
+                    return failure
+                _read_verified_preimage(
+                    directory, proof["preimage_copy"], proof["current_sha256"],
+                    "saved held target")
         return {
             "state": "HELD_CAPTURE_VERIFIED", "captured_target_count": len(proofs),
             "durable_preimages_readback_verified": True,
