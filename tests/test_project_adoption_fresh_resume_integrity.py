@@ -1386,3 +1386,127 @@ def test_target_plan_refuses_same_byte_leaf_replacement_during_preview(tmp_path,
             targets={1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}, data_root=data)
     assert replaced == [True]
     assert copy.is_file()
+
+
+def _synthetic_held_capture_authority(statement):
+    """Synthetic fixture emulates a typed console event; NEVER real user permission."""
+    return {
+        "confirmed": True, "kind": "operator_console", "statement": statement,
+        "user": "synthetic_fixture", "at": "fixture_only",
+    }
+
+
+def test_held_target_capture_backs_up_changed_keep_only_in_current_user_state(tmp_path):
+    """AUTHORED NOT_RUN; bounded current bytes, journal, seal and no project write."""
+    project, data, sd, keep, old, token = _selected_original_keep_plan_fixture(tmp_path)
+    before = keep.read_bytes()
+    targets = {1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}
+    plan = project_adoption.draft_legacy_reversible_plan(
+        project, snapshot_token=token, targets=targets, data_root=data)
+    outcome = project_adoption.capture_legacy_target_preimages(
+        project, snapshot_token=token, targets=targets,
+        plan_digest=plan["plan_digest"],
+        authority=_synthetic_held_capture_authority, data_root=data)
+    assert outcome["state"] == "HELD_CAPTURE_VERIFIED"
+    assert outcome["captured_target_count"] == 1
+    assert outcome["project_write_authorized"] is False
+    assert outcome["rollback_rehearsed"] is False
+    assert outcome["independent_fable_authority"] == "NOT_GRANTED"
+    assert keep.read_bytes() == before
+    assert old.read_bytes() != before
+    assert project_adoption._state(sd, project)["state"] == "active"
+    assert hashlib.sha256(before).hexdigest() not in str(outcome)
+    assert before.decode("utf-8") not in str(outcome)
+    assert project_adoption.inspect_legacy_target_preimages(
+        project, data_root=data)["state"] == "HELD_CAPTURE_VERIFIED"
+    with pytest.raises(AdoptionError, match="requires recovery"):
+        project_adoption.capture_legacy_target_preimages(
+            project, snapshot_token=token, targets=targets,
+            plan_digest=plan["plan_digest"],
+            authority=_synthetic_held_capture_authority, data_root=data)
+
+
+def test_held_target_capture_records_parent_bound_absence_without_creating_scaffold(tmp_path):
+    """AUTHORED NOT_RUN; missing target creates no project file."""
+    project, data, sd = _active_legacy_with_saved_result(tmp_path)
+    scaffold = project.root / "CLAUDE.md"
+    scaffold.unlink()
+    review = project_adoption.status(project, data_root=data)[
+        "legacy_configuration_readiness"]["owner_review"]
+    token = review["snapshot_token"]
+    project_adoption.record_legacy_review_intent(
+        project, 1, "REQUEST_REVERSIBLE_PLAN", snapshot_token=token,
+        authority=lambda s: {"confirmed": True, "kind": "synthetic_fixture"}, data_root=data)
+    targets = {1: "REBUILD_CANONICAL_SCAFFOLD_FOR_REVIEW"}
+    plan = project_adoption.draft_legacy_reversible_plan(
+        project, snapshot_token=token, targets=targets, data_root=data)
+    outcome = project_adoption.capture_legacy_target_preimages(
+        project, snapshot_token=token, targets=targets,
+        plan_digest=plan["plan_digest"],
+        authority=_synthetic_held_capture_authority, data_root=data)
+    assert outcome["state"] == "HELD_CAPTURE_VERIFIED"
+    assert not scaffold.exists()
+    assert outcome["project_changes_performed"] is False
+    assert project_adoption._state(sd, project)["state"] == "active"
+
+
+def test_held_target_capture_requires_current_digest_and_separate_console_consent(tmp_path):
+    """AUTHORED NOT_RUN; preview and review intention cannot create backup state."""
+    project, data, sd, keep, old, token = _selected_original_keep_plan_fixture(tmp_path)
+    targets = {1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}
+    plan = project_adoption.draft_legacy_reversible_plan(
+        project, snapshot_token=token, targets=targets, data_root=data)
+    with pytest.raises(AdoptionError, match="plan changed"):
+        project_adoption.capture_legacy_target_preimages(
+            project, snapshot_token=token, targets=targets,
+            plan_digest="0" * 64,
+            authority=_synthetic_held_capture_authority, data_root=data)
+    with pytest.raises(AdoptionError, match="authorization"):
+        project_adoption.capture_legacy_target_preimages(
+            project, snapshot_token=token, targets=targets,
+            plan_digest=plan["plan_digest"],
+            authority=lambda s: {"confirmed": False}, data_root=data)
+    assert not (sd / "legacy_target_preparation.json").exists()
+    assert keep.read_bytes() == b"# Synthetic later changed KEEP\n"
+
+
+def test_held_target_capture_interruption_is_recovery_required_and_no_blind_retry(tmp_path):
+    """AUTHORED NOT_RUN; interrupted metadata is never erased by inspection."""
+    project, data, sd, keep, old, token = _selected_original_keep_plan_fixture(tmp_path)
+    journal = sd / "legacy_target_preparation.json"
+    journal.write_text('{"version":1,"kind":"CAPTURE_ONLY_HELD"}', encoding="utf-8")
+    assert project_adoption.inspect_legacy_target_preimages(
+        project, data_root=data)["state"] == "RECOVERY_REQUIRED"
+    targets = {1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}
+    plan = project_adoption.draft_legacy_reversible_plan(
+        project, snapshot_token=token, targets=targets, data_root=data)
+    with pytest.raises(AdoptionError, match="requires recovery"):
+        project_adoption.capture_legacy_target_preimages(
+            project, snapshot_token=token, targets=targets,
+            plan_digest=plan["plan_digest"],
+            authority=_synthetic_held_capture_authority, data_root=data)
+    assert journal.exists()
+    assert keep.read_bytes() == b"# Synthetic later changed KEEP\n"
+
+
+def test_build_manifest_symbolic_link_metadata_never_opens_linked_contents(
+    tmp_path, monkeypatch,
+):
+    """AUTHORED NOT_RUN; canonical fact extraction declines linked manifests."""
+    root = tmp_path / "synthetic-untrusted-facts"
+    root.mkdir()
+    package = root / "package.json"
+    makefile = root / "Makefile"
+    package.write_text('{"scripts":{"test":"secret_command"}}', encoding="utf-8")
+    makefile.write_text("test:\n\techo hidden\n", encoding="utf-8")
+    original = project_adoption._lstat
+
+    def linked_metadata(path):
+        if Path(path) in {package, makefile}:
+            return SimpleNamespace(st_mode=stat.S_IFLNK, st_size=12, st_file_attributes=0)
+        return original(path)
+
+    monkeypatch.setattr(project_adoption, "_lstat", linked_metadata)
+    facts = project_adoption.detect_facts(root)
+    assert facts["types"] == ["unknown"]
+    assert facts["commands"] == []

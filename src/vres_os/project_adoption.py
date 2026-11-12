@@ -174,8 +174,9 @@ def detect_facts(root: Path) -> dict[str, Any]:
         types.append(".NET")
         add("build", "dotnet build", "solution/project file")
     makefile = root / "Makefile"
-    if makefile.is_file() and makefile.stat().st_size <= _MAX_BYTES:
-        targets = set(re.findall(r"^([A-Za-z][\w-]*):", makefile.read_text(encoding="utf-8", errors="replace"), re.M))
+    makefile_text = _bounded_manifest_text(makefile)
+    if makefile_text is not None:
+        targets = set(re.findall(r"^([A-Za-z][\w-]*):", makefile_text, re.M))
         for purpose in ("build", "test", "lint"):
             if purpose in targets and not any(c["purpose"] == purpose for c in commands):
                 add(purpose, f"make {purpose}", "Makefile")
@@ -184,22 +185,42 @@ def detect_facts(root: Path) -> dict[str, Any]:
             "unknown": [p for p in ("build", "test", "lint") if p not in found]}
 
 
-def _json_file(path: Path) -> Any:
+def _bounded_manifest_text(path: Path) -> str | None:
+    """Read build facts without following a linked manifest or a changed entry.
+
+    Legacy canonical-scaffold reproduction must never inspect a manifest outside
+    the selected project. Failure produces UNKNOWN facts, never claimed proof.
+    The common reader is cooperative, not an atomic Windows filesystem lock.
+    """
     try:
-        if path.is_file() and path.stat().st_size <= _MAX_BYTES:
-            return json.loads(path.read_text(encoding="utf-8-sig"))
-    except (OSError, ValueError):
-        pass
-    return None
+        info = _lstat(path)
+        if (info is None or _is_link(info) or not stat.S_ISREG(info.st_mode)
+                or info.st_size < 0 or info.st_size > _MAX_BYTES):
+            return None
+        return _read_verified_preimage(
+            path.parent, path.name, None, "project build manifest").decode("utf-8-sig")
+    except (AdoptionError, OSError, UnicodeError, ValueError, RuntimeError):
+        return None
+
+
+def _json_file(path: Path) -> Any:
+    raw = _bounded_manifest_text(path)
+    if raw is None:
+        return None
+    try:
+        return json.loads(raw)
+    except ValueError:
+        return None
 
 
 def _toml_file(path: Path) -> dict | None:
+    raw = _bounded_manifest_text(path)
+    if raw is None:
+        return None
     try:
-        if path.is_file() and path.stat().st_size <= _MAX_BYTES:
-            return tomllib.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        return tomllib.loads(raw)
+    except ValueError:
         return {}
-    return None
 
 
 def scaffold_text(name: str, facts: dict[str, Any]) -> str:
@@ -2619,6 +2640,350 @@ def draft_legacy_reversible_plan(
                 != captured["leaf_and_ancestor_identity"]):
             raise AdoptionError("Selected current target identity changed during plan review")
     return output
+
+
+
+# ------------------------------------------------------------- HELD legacy target capture (#168/#174)
+
+def capture_legacy_target_preimages(
+    project, *, snapshot_token: str, targets: dict[int, str],
+    plan_digest: str, authority: Authority, data_root: Path | None = None,
+) -> dict[str, Any]:
+    """Capture bounded CURRENT-target bytes/absence into the ORIGINAL state owner.
+
+    This opt-in current-user *state-data* write is not a project remediation.
+    It needs a separately typed interactive CAPTURE statement, not a Chairman
+    suggestion or earlier KEEP/DROP/review intent. No code path here writes a
+    project file, grants Fable/high, performs an inverse or authorizes activation.
+
+    An exclusive journal is written BEFORE any backup. On any interruption it
+    remains for read-only inspection; no automatic deletion or blind retry.
+    Captures reject secret-looking paths, detected secret contents and binary
+    data rather than silently storing them as plaintext backup copies.
+    """
+    if type(plan_digest) is not str or re.fullmatch(r"[0-9a-f]{64}", plan_digest) is None:
+        raise AdoptionError("Exact held-plan digest required for capture")
+    plan = draft_legacy_reversible_plan(
+        project, snapshot_token=snapshot_token, targets=targets, data_root=data_root)
+    if plan["plan_digest"] != plan_digest:
+        raise AdoptionError("Held plan changed before target capture")
+    selected = [
+        entry for entry in plan["entries"]
+        if entry["target_preparation_contract"]["phase"] == "HELD_CANDIDATE_CHANGE"
+    ]
+    if (not selected or len(selected) > _MAX_REVIEW_ITEMS
+            or plan["pending_owner_review_numbers"]
+            or any(
+                entry["path_redacted"] is not False
+                or entry["held_effect_blueprint"]["capture_gate"]
+                   != "HELD_DURABLE_PREIMAGE_AND_SEPARATE_APPROVAL_REQUIRED"
+                for entry in selected
+            )):
+        raise AdoptionError("Held target set is incomplete, blocked or not capturable")
+    from .paths import data_dir_path
+
+    base = Path(data_root) if data_root is not None else data_dir_path()
+    sd = base / "projects" / hashlib.sha256(project.key.encode("utf-8")).hexdigest()[:24]
+    journal_path = sd / "legacy_target_preparation.json"
+    if _lstat(journal_path) is not None:
+        raise AdoptionError("Existing legacy target preparation requires recovery review")
+    statement = f"CAPTURE_REVIEW_PREIMAGES {plan_digest}"
+    evidence = _evidence(authority, statement)
+    if (evidence.get("kind") != "operator_console"
+            or evidence.get("statement") != statement
+            or type(evidence.get("user")) is not str or not evidence["user"]
+            or type(evidence.get("at")) is not str or not evidence["at"]):
+        raise AdoptionError("Current-user capture requires attributable interactive console consent")
+    if draft_legacy_reversible_plan(
+        project, snapshot_token=snapshot_token, targets=targets, data_root=data_root
+    ) != plan:
+        raise AdoptionError("Held plan changed during capture authorization")
+    root = Path(project.root).resolve(strict=True)
+    observed = status(project, data_root=data_root)
+    identity = _legacy_original_plan_identity(project, root, observed)
+    sd = _state_dir(project, data_root)
+    _refuse_interrupted_journal(sd)
+    record = _state(sd, project)
+    if (record is None or record.get("inventory_version")
+            != identity["original_inventory_version"]
+            or record.get("activation") != identity["original_activation"]):
+        raise AdoptionError("Original activation identity changed before target capture")
+    if _lstat(journal_path) is not None:
+        raise AdoptionError("Legacy preparation was concurrently started")
+    capture_id = uuid.uuid4().hex
+    frozen_targets = {str(k): targets[k] for k in sorted(targets)}
+    journal = {
+        "version": 1, "kind": "CAPTURE_ONLY_HELD", "capture_id": capture_id,
+        "project_key": project.key, "original_identity": identity,
+        "snapshot_token": snapshot_token, "plan_digest": plan_digest,
+        "selected_targets": frozen_targets, "capture_authority": evidence,
+        "created_at": datetime.now(UTC).isoformat(),
+        "project_write_authorized": False,
+        "protected_fable_high_authority": "NOT_GRANTED",
+    }
+    _write_exclusive_journal(journal_path, journal)
+    parent = sd / "legacy_target_preimages"
+    directory = parent / capture_id
+    # These are current-user Vres *state* paths, never project paths. An
+    # interrupted failure preserves the exclusive journal for manual recovery.
+    for target_dir in (parent, directory):
+        if _lstat(target_dir) is not None:
+            raise AdoptionError("Legacy preimage directory already exists or is unsafe")
+        target_dir.mkdir(mode=0o700)
+        info = _lstat(target_dir)
+        if info is None or _is_link(info) or not stat.S_ISDIR(info.st_mode):
+            raise AdoptionError("Legacy preimage directory was replaced")
+    proofs: list[dict[str, Any]] = []
+    total_bytes = 0
+    for entry in selected:
+        number = entry["number"]
+        rel = entry["display_path"]
+        if (type(number) is not int or type(rel) is not str
+                or sensitive_path_reason(root / rel)):
+            raise AdoptionError("Selected held target is not safe for capture")
+        state, digest = _observe_current_selected_target(root, rel)
+        if state != entry["current_target_observation"]:
+            raise AdoptionError("Held target state changed during capture")
+        stamp = _selected_target_entry_identity(root, rel, state)
+        if state not in {"PRESENT_BOUNDED_SHA_ATTESTED", "ABSENT_LEAF_OBSERVED"}:
+            raise AdoptionError("Held target lacks a verifiable preimage or parent")
+        copy_name = None
+        if state == "PRESENT_BOUNDED_SHA_ATTESTED":
+            data = _read_verified_preimage(root, rel, digest, "held current target")
+            try:
+                text = data.decode("utf-8")
+            except UnicodeError:
+                raise AdoptionError("Binary current target cannot be copied unprotected") from None
+            if (b"\x00" in data or sanitize_extracted_text(text).status
+                    in {SENSITIVE_SANITIZED, SENSITIVE_REVIEW_REQUIRED}):
+                raise AdoptionError("Sensitive current target requires manual safe handling")
+            total_bytes += len(data)
+            if total_bytes > 8 * _MAX_BYTES:
+                raise AdoptionError("Held target captures exceed the total bounded limit")
+            copy_name = f"{number:03d}"
+            with open(directory / copy_name, "xb") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            _read_verified_preimage(directory, copy_name, digest, rel)
+        operation = entry["held_effect_blueprint"]["candidate_operation"]
+        source_sha = None
+        if operation == "WRITE_VERIFIED_ORIGINAL_KEEP":
+            version = identity["original_inventory_version"]
+            original = _read_json(sd / "snapshots" / f"{version}.json")
+            items = original.get("items") if type(original) is dict else None
+            matches = [x for x in items if type(x) is dict and x.get("path") == rel] if type(items) is list else []
+            if (len(matches) != 1 or matches[0].get("status") != "ok"
+                    or type(matches[0].get("options")) is not dict
+                    or "KEEP" not in matches[0]["options"]
+                    or type(matches[0].get("number")) is not int
+                    or not 1 <= matches[0]["number"] <= _MAX_ITEMS
+                    or type(matches[0].get("sha256")) is not str
+                    or re.fullmatch(r"[0-9a-f]{64}", matches[0]["sha256"]) is None):
+                raise AdoptionError("Original KEEP replacement source is unverified")
+            source_sha = matches[0]["sha256"]
+            _read_verified_preimage(
+                sd / "snapshots" / version, f"{matches[0]['number']:04d}",
+                source_sha, rel)
+        elif operation == "WRITE_REPRODUCED_PINNED_CANONICAL_SCAFFOLD":
+            source_sha = _legacy_pinned_canonical_scaffold_source(project, root, sd, record)
+            if source_sha is None:
+                raise AdoptionError("Canonical replacement source no longer matches history")
+        elif operation != "REMOVE_EXACT_SELECTED_LEAF":
+            raise AdoptionError("Unsupported held target effect during capture")
+        proofs.append({
+            "number": number, "path": rel, "selected_target": entry["caller_selected_target"],
+            "operation": operation, "expected_postimage": entry["held_effect_blueprint"]["expected_postimage"],
+            "inverse_restore": entry["held_effect_blueprint"]["inverse_restore"],
+            "current_state": state, "current_sha256": digest,
+            "current_entry_identity": json.loads(json.dumps(stamp)),
+            "preimage_copy": copy_name, "selected_source_sha256": source_sha,
+        })
+    # Every copied preimage and ALL current leaves are re-attested before seal.
+    if draft_legacy_reversible_plan(
+        project, snapshot_token=snapshot_token, targets=targets, data_root=data_root
+    ) != plan:
+        raise AdoptionError("Held plan changed before capture sealing")
+    for proof in proofs:
+        if _observe_current_selected_target(root, proof["path"]) != (
+            proof["current_state"], proof["current_sha256"]
+        ) or json.loads(json.dumps(_selected_target_entry_identity(
+            root, proof["path"], proof["current_state"]
+        ))) != proof["current_entry_identity"]:
+            raise AdoptionError("Held target changed before preimage sealing")
+        if proof["preimage_copy"] is not None:
+            _read_verified_preimage(
+                directory, proof["preimage_copy"], proof["current_sha256"], proof["path"])
+    manifest = {
+        "version": 1, "capture_id": capture_id,
+        "plan_digest": plan_digest, "snapshot_token": snapshot_token,
+        "original_identity": identity, "targets": proofs,
+        "project_write_authorized": False, "rollback_rehearsed": False,
+        "separate_owner_project_write_consent": False,
+        "independent_fable_high_authority": "NOT_GRANTED",
+    }
+    manifest_bytes = json.dumps(
+        manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    if len(manifest_bytes) > 65536:
+        raise AdoptionError("Held capture manifest exceeds bounded size")
+    _write_exclusive_journal(directory / "manifest.json", manifest)
+    _write_exclusive_journal(directory / "seal.json", {
+        "version": 1, "capture_id": capture_id,
+        "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+    })
+    return inspect_legacy_target_preimages(project, data_root=data_root)
+
+
+def inspect_legacy_target_preimages(
+    project, *, data_root: Path | None = None,
+) -> dict[str, Any]:
+    """Read-only, fail-closed restart inspection of ORIGINAL held #168 capture.
+
+    Does not restore, discard, write, approve or replay a target. A partial or
+    stale journal is a manual RECOVERY_REQUIRED state; no implicit cleanup.
+    """
+    from .paths import data_dir_path
+
+    base = Path(data_root) if data_root is not None else data_dir_path()
+    sd = base / "projects" / hashlib.sha256(project.key.encode("utf-8")).hexdigest()[:24]
+    journal = _read_json(sd / "legacy_target_preparation.json")
+    held = {
+        "project_changes_performed": False, "project_write_authorized": False,
+        "activation_allowed": False, "separate_owner_project_write_consent": False,
+        "independent_fable_authority": "NOT_GRANTED",
+        "rollback_rehearsed": False,
+    }
+    if journal is None:
+        return {"state": "NOT_PREPARED", **held}
+    failure = {"state": "RECOVERY_REQUIRED", "reason": "PARTIAL_OR_STALE_HELD_CAPTURE", **held}
+    if (type(journal) is not dict or journal.get("version") != 1
+            or journal.get("kind") != "CAPTURE_ONLY_HELD"
+            or journal.get("project_key") != project.key
+            or journal.get("project_write_authorized") is not False
+            or journal.get("protected_fable_high_authority") != "NOT_GRANTED"
+            or type(journal.get("capture_id")) is not str
+            or re.fullmatch(r"[0-9a-f]{32}", journal["capture_id"]) is None
+            or type(journal.get("plan_digest")) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", journal["plan_digest"]) is None
+            or type(journal.get("snapshot_token")) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", journal["snapshot_token"]) is None):
+        return failure
+    directory = sd / "legacy_target_preimages" / journal["capture_id"]
+    try:
+        directory_info = _lstat(directory)
+        if (directory_info is None or _is_link(directory_info)
+                or not stat.S_ISDIR(directory_info.st_mode)):
+            return failure
+        manifest = _read_json(directory / "manifest.json")
+        seal = _read_json(directory / "seal.json")
+        if type(manifest) is not dict or type(seal) is not dict:
+            return failure
+        encoded = json.dumps(
+            manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        if (len(encoded) > 65536 or seal.get("version") != 1
+                or seal.get("capture_id") != journal["capture_id"]
+                or seal.get("manifest_sha256") != hashlib.sha256(encoded).hexdigest()
+                or manifest.get("capture_id") != journal["capture_id"]
+                or manifest.get("plan_digest") != journal["plan_digest"]
+                or manifest.get("snapshot_token") != journal["snapshot_token"]
+                or manifest.get("original_identity") != journal.get("original_identity")
+                or manifest.get("project_write_authorized") is not False
+                or manifest.get("rollback_rehearsed") is not False
+                or manifest.get("separate_owner_project_write_consent") is not False
+                or manifest.get("independent_fable_high_authority") != "NOT_GRANTED"):
+            return failure
+        proofs = manifest.get("targets")
+        if type(proofs) is not list or not 1 <= len(proofs) <= _MAX_REVIEW_ITEMS:
+            return failure
+        root = Path(project.root).resolve(strict=True)
+        observed = status(project, data_root=data_root)
+        if _legacy_original_plan_identity(project, root, observed) != journal["original_identity"]:
+            return failure
+        selected = journal.get("selected_targets")
+        if (type(selected) is not dict or not selected
+                or any(type(key) is not str or re.fullmatch(r"[1-9][0-9]*", key) is None
+                       or type(value) is not str for key, value in selected.items())):
+            return failure
+        targets = {int(key): value for key, value in selected.items()}
+        plan = draft_legacy_reversible_plan(
+            project, snapshot_token=journal["snapshot_token"],
+            targets=targets, data_root=data_root)
+        if plan["plan_digest"] != journal["plan_digest"]:
+            return failure
+        expected = {
+            e["number"]: e for e in plan["entries"]
+            if e["target_preparation_contract"]["phase"] == "HELD_CANDIDATE_CHANGE"
+        }
+        if (len(proofs) != len(expected)
+                or any(type(p) is not dict or type(p.get("number")) is not int
+                       for p in proofs)
+                or {p["number"] for p in proofs} != set(expected)):
+            return failure
+        for proof in proofs:
+            entry = expected[proof["number"]]
+            rel = entry["display_path"]
+            if (entry["path_redacted"] is not False or proof.get("path") != rel
+                    or proof.get("selected_target") != entry["caller_selected_target"]
+                    or proof.get("operation") != entry["held_effect_blueprint"]["candidate_operation"]
+                    or proof.get("expected_postimage") != entry["held_effect_blueprint"]["expected_postimage"]
+                    or proof.get("inverse_restore") != entry["held_effect_blueprint"]["inverse_restore"]
+                    or sensitive_path_reason(root / rel)):
+                return failure
+            state, digest = _observe_current_selected_target(root, rel)
+            stamp = json.loads(json.dumps(_selected_target_entry_identity(root, rel, state)))
+            if (proof.get("current_state") != state
+                    or proof.get("current_sha256") != digest
+                    or proof.get("current_entry_identity") != stamp):
+                return failure
+            operation = proof["operation"]
+            if operation == "WRITE_VERIFIED_ORIGINAL_KEEP":
+                version = journal["original_identity"]["original_inventory_version"]
+                snapshot = _read_json(sd / "snapshots" / f"{version}.json")
+                items = snapshot.get("items") if type(snapshot) is dict else None
+                matching = [x for x in items if type(x) is dict and x.get("path") == rel] if type(items) is list else []
+                if (len(matching) != 1 or matching[0].get("status") != "ok"
+                        or type(matching[0].get("options")) is not dict
+                        or "KEEP" not in matching[0]["options"]
+                        or type(matching[0].get("number")) is not int
+                        or not 1 <= matching[0]["number"] <= _MAX_ITEMS
+                        or type(matching[0].get("sha256")) is not str
+                        or re.fullmatch(r"[0-9a-f]{64}", matching[0]["sha256"]) is None):
+                    return failure
+                source_sha = matching[0]["sha256"]
+                _read_verified_preimage(
+                    sd / "snapshots" / version, f"{matching[0]['number']:04d}",
+                    source_sha, rel)
+            elif operation == "WRITE_REPRODUCED_PINNED_CANONICAL_SCAFFOLD":
+                source_sha = _legacy_pinned_canonical_scaffold_source(
+                    project, root, sd, _state(sd, project))
+                if source_sha is None:
+                    return failure
+            elif operation == "REMOVE_EXACT_SELECTED_LEAF":
+                source_sha = None
+            else:
+                return failure
+            if proof.get("selected_source_sha256") != source_sha:
+                return failure
+            if state == "PRESENT_BOUNDED_SHA_ATTESTED":
+                if proof.get("preimage_copy") != f"{proof['number']:03d}":
+                    return failure
+                _read_verified_preimage(
+                    directory, proof["preimage_copy"], digest, "saved held target")
+            elif state == "ABSENT_LEAF_OBSERVED":
+                if proof.get("preimage_copy") is not None:
+                    return failure
+            else:
+                return failure
+        return {
+            "state": "HELD_CAPTURE_VERIFIED", "captured_target_count": len(proofs),
+            "durable_preimages_readback_verified": True,
+            "plan_digest": journal["plan_digest"],
+            "requires_separate_owner_write_consent": True,
+            "requires_independent_protected_fable_high": True,
+            **held,
+        }
+    except (AdoptionError, OSError, ValueError, TypeError, KeyError, AttributeError, RuntimeError):
+        return failure
 
 
 def inspect_legacy_activation_rollback_evidence(
