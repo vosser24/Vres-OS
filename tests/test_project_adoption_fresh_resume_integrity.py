@@ -2168,3 +2168,54 @@ def test_held_windows_dpapi_candidate_rejects_binary_before_os_access():
             b"nonsensitive\x00synthetic",
             project_key="synthetic:test", capture_id="a" * 32,
             number=1, plan_digest="b" * 64)
+
+
+def test_held_windows_private_root_candidate_rejects_unsafe_path_shapes():
+    """AUTHORED NOT_RUN; pure path refusal, no Windows filesystem access."""
+    from vres_os._windows_held_storage_probe import (
+        HeldWindowsRootError, _local_drive_components,
+    )
+
+    assert _local_drive_components(r"C:\Users\Sample\AppData\Local\VresOS") == (
+        "C:", "Users", "Sample", "AppData", "Local", "VresOS")
+    for invalid in (
+        r"\\server\share", r"\\?\C:\Users", r"C:relative",
+        r"C:\bad\..\state", r"C:\bad\.\state", r"C:\bad\state.",
+        r"C:\bad\state ", r"C:\bad\secret:stream",
+        "C:/bad/state", "C:\\bad\\\x00state", r"C:\CON\state",
+    ):
+        with pytest.raises(HeldWindowsRootError):
+            _local_drive_components(invalid)
+
+
+def test_held_windows_private_root_candidate_never_grants_write_authority():
+    """AUTHORED NOT_RUN; non-Windows fails before OS access; gate unchanged."""
+    from vres_os._windows_held_storage_probe import (
+        HeldWindowsRootError, inspect_held_windows_root_candidate,
+    )
+
+    if os.name != "nt":
+        with pytest.raises(HeldWindowsRootError, match="binding refused"):
+            inspect_held_windows_root_candidate(
+                project_key="synthetic-key",
+                project_root=r"C:\DummyProject",
+                state_root=r"C:\Users\Dummy\AppData\Local\VresOS\projects\bad")
+        with pytest.raises(AdoptionError, match="candidate refused"):
+            project_adoption._held_windows_private_root_diagnostic_candidate(
+                project_key="synthetic-key",
+                project_root=r"C:\DummyProject",
+                state_root=r"C:\Users\Dummy\AppData\Local\VresOS\projects\bad")
+    assert project_adoption._held_capture_private_storage_available() is (os.name != "nt")
+
+
+def test_held_windows_private_root_candidate_exact_path_shape_and_bounds():
+    """AUTHORED NOT_RUN; intentionally rejects ambiguous local paths."""
+    from vres_os._windows_held_storage_probe import (
+        HeldWindowsRootError, _local_drive_components,
+    )
+
+    for bad in ("", r"C:\bad\\child", "C:\\" + "x" * 121,
+                r"C:\LPT1.log", r"C:\file?.txt", r"C:\bad\parent\..\child",
+                r"C:\endswith."):
+        with pytest.raises(HeldWindowsRootError):
+            _local_drive_components(bad)

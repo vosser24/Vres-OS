@@ -92,6 +92,24 @@ def _trusted_current_token_sid() -> str:
             ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
         advapi.ConvertSidToStringSidW.restype = wintypes.BOOL
 
+        # A process token SID does not describe an impersonated thread.
+        # DPAPI under impersonation has a different current-user context.
+        # Refuse all thread tokens rather than guessing or loading profiles.
+        kernel.GetCurrentThread.argtypes = []
+        kernel.GetCurrentThread.restype = wintypes.HANDLE
+        advapi.OpenThreadToken.argtypes = [
+            wintypes.HANDLE, wintypes.DWORD, wintypes.BOOL,
+            ctypes.POINTER(wintypes.HANDLE)]
+        advapi.OpenThreadToken.restype = wintypes.BOOL
+        impersonation_token = wintypes.HANDLE()
+        if advapi.OpenThreadToken(
+                kernel.GetCurrentThread(), 0x0008, True,
+                ctypes.byref(impersonation_token)):
+            kernel.CloseHandle(impersonation_token)
+            raise HeldWindowsPrivacyError("Windows token identity refused")
+        if ctypes.get_last_error() != 1008:  # ERROR_NO_TOKEN
+            raise HeldWindowsPrivacyError("Windows token identity refused")
+
         class SidAndAttributes(ctypes.Structure):
             _fields_ = [("sid", ctypes.c_void_p), ("attributes", wintypes.DWORD)]
 

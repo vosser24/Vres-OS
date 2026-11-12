@@ -2694,6 +2694,22 @@ def _held_windows_recover_preimage_candidate(
         raise AdoptionError("Held Windows preimage candidate refused") from None
 
 
+def _held_windows_private_root_diagnostic_candidate(
+    *, project_key: str, project_root: str, state_root: str,
+) -> dict[str, object]:
+    """Original #168 read-only root/ACL/handle candidate; NEVER grants capture."""
+    from ._windows_held_storage_probe import (
+        HeldWindowsRootError, inspect_held_windows_root_candidate,
+    )
+
+    try:
+        return inspect_held_windows_root_candidate(
+            project_key=project_key, project_root=project_root,
+            state_root=state_root)
+    except HeldWindowsRootError:
+        raise AdoptionError("Held Windows private-root candidate refused") from None
+
+
 def _held_capture_private_storage_available() -> bool:
     """Fail closed on Windows until a verified current-user ACL/encryption store exists.
 
