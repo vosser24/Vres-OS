@@ -2032,6 +2032,80 @@ def _observe_current_selected_target(root: Path, rel: str) -> tuple[str, str | N
         raise AdoptionError("Selected current target could not be safely attested") from None
 
 
+def _selected_target_entry_identity(
+    root: Path, rel: str, expected_state: str,
+) -> dict[str, Any]:
+    """Read-only bounded current leaf and ancestor identity for INTERNAL plan binding.
+
+    A SHA-256 proves the selected bytes, not that a directory entry is the
+    same file. Bind the lstat identity of an existing leaf AND every ancestor;
+    bind parent ancestry for an absent leaf. This is cooperative read-only
+    race detection, never an OS-atomic lock, durable preimage or write permit.
+    Nothing about this identity is returned in the conversational plan.
+    """
+    def stamp(info: os.stat_result | None) -> tuple[int, ...] | None:
+        if info is None:
+            return None
+        return (
+            info.st_dev, info.st_ino, info.st_mode, info.st_size,
+            info.st_mtime_ns, getattr(info, "st_ctime_ns", 0),
+            getattr(info, "st_file_attributes", 0),
+        )
+
+    try:
+        path = _within(root, rel)
+        ancestors = _record_ancestor_identity(path)
+        leaf = _lstat(path)
+        if leaf is not None and (
+            ancestors is None or _is_link(leaf) or not stat.S_ISREG(leaf.st_mode)
+        ):
+            raise AdoptionError("Selected target entry is unsafe")
+        state = (
+            "PRESENT_BOUNDED_SHA_ATTESTED" if leaf is not None
+            else ("ABSENT_PARENT_NOT_PRESENT" if ancestors is None
+                  else "ABSENT_LEAF_OBSERVED")
+        )
+        if state != expected_state:
+            raise AdoptionError("Selected target entry no longer matches observation")
+        if (
+            _record_ancestor_identity(path) != ancestors
+            or stamp(_lstat(path)) != stamp(leaf)
+        ):
+            raise AdoptionError("Selected target entry changed while inspecting identity")
+        return {"ancestor_chain": ancestors, "leaf_lstat": stamp(leaf)}
+    except (AdoptionError, OSError, ValueError, TypeError, RuntimeError):
+        raise AdoptionError("Selected current target identity could not be safely attested") from None
+
+
+def _legacy_future_preimage_capture_spec() -> dict[str, Any]:
+    """Shared prospective #168 target-capture/recovery schema; creates no evidence.
+
+    The future prepared manifest is NOT accepted from the caller as an approval.
+    Original project adoption must independently create, seal, verify and own it,
+    before separately attributable human approval and protected validation.
+    """
+    return {
+        "version": 1,
+        "state": "REQUIREMENTS_ONLY_NOT_CAPTURED",
+        "required_future_manifest_fields": [
+            "EXACT_PROJECT_KEY_ROOT_AND_ORIGINAL_ACTIVATION",
+            "EXACT_SNAPSHOT_TOKEN_PLAN_DIGEST_AND_TARGET_NUMBERS",
+            "SELECTED_EFFECTS_AND_INTERNAL_SOURCE_DIGEST_OR_NO_CONTENT",
+            "CURRENT_TARGET_SHA256_AND_LEAF_ANCESTOR_IDENTITY",
+            "DURABLE_BOUNDED_NOFOLLOW_PREIMAGE_OR_PROVEN_PARENT_ABSENCE",
+            "EXPECTED_POSTIMAGE_AND_INVERSE_RESTORE_PER_TARGET",
+            "EXCLUSIVE_PREPARATION_JOURNAL_AND_RECOVERY_REPLAY",
+            "CAPTURE_RECHECK_BEFORE_SEPARATE_OWNER_WRITE_APPROVAL",
+            "INDEPENDENT_PROTECTED_FABLE_HIGH_FOR_ARCHITECTURE_CHANGE",
+        ],
+        "durable_capture_manifest_verified": False,
+        "proposed_postimage_rollback_verified": False,
+        "independent_protected_validation_granted": False,
+        "separate_attributable_owner_write_consent": False,
+        "project_write_authorized": False,
+    }
+
+
 def _legacy_target_preparation_contract(
     target: str, current_state: str, source_verified: bool,
 ) -> dict[str, Any]:
@@ -2146,6 +2220,8 @@ def draft_legacy_reversible_plan(
     original_snapshot_path = None
     original_copies_dir = None
     verified_sources: list[tuple[str, str, str]] = []
+    # INTERNAL only; never expose saved original KEEP bytes/digests to Chairman.
+    verified_source_digests: dict[int, str] = {}
     if "RESTORE_ORIGINAL_KEEP_FOR_REVIEW" in targets.values():
         from .paths import data_dir_path
 
@@ -2186,9 +2262,11 @@ def draft_legacy_reversible_plan(
         if finding["path_redacted"] is False:
             rel = finding["path"]
             current_state, current_digest = _observe_current_selected_target(root, rel)
+            entry_identity = _selected_target_entry_identity(root, rel, current_state)
             current_target_evidence.append({
                 "number": number, "target": selected,
                 "path": rel, "state": current_state, "sha256": current_digest,
+                "leaf_and_ancestor_identity": entry_identity,
             })
         source_verified = False
         if selected == "RESTORE_ORIGINAL_KEEP_FOR_REVIEW":
@@ -2213,6 +2291,7 @@ def draft_legacy_reversible_plan(
             except (AdoptionError, OSError, ValueError, TypeError):
                 raise AdoptionError("Selected original KEEP source copy could not be verified") from None
             verified_sources.append((filename, digest, rel))
+            verified_source_digests[number] = digest
             source_verified = True
         entries.append({
             "number": number,
@@ -2233,14 +2312,17 @@ def draft_legacy_reversible_plan(
             "preimage_and_rollback_verification_required": True,
         })
 
+    future_capture_spec = _legacy_future_preimage_capture_spec()
     binding = {
-        "contract_version": 1,
+        "contract_version": 2,
         "project_key": project.key,
         "snapshot_token": snapshot_token,
         "recorded_intents": review["recorded_intents"],
         "intent_revision_counts": review["intent_revision_counts"],
         "entries": entries,
         "current_target_evidence": current_target_evidence,
+        "verified_original_keep_source_digests": verified_source_digests,
+        "future_preimage_capture_contract": future_capture_spec,
     }
     digest = hashlib.sha256(
         json.dumps(binding, sort_keys=True, separators=(",", ":"),
@@ -2257,6 +2339,10 @@ def draft_legacy_reversible_plan(
         "current_target_observation_count": len(current_target_evidence),
         "current_target_identity_bound_to_plan_digest": bool(current_target_evidence),
         "current_target_content_and_raw_sha256_hidden": True,
+        "current_target_leaf_and_ancestor_identity_bound_to_plan_digest": bool(current_target_evidence),
+        "saved_original_keep_source_sha256_bound_to_plan_digest": bool(verified_source_digests),
+        "saved_original_keep_source_raw_sha256_hidden": True,
+        "future_preimage_capture_contract": future_capture_spec,
         "target_preparation_contract_version": 1,
         "held_project_mutation_candidate_count": sum(
             e["target_preparation_contract"]["phase"] == "HELD_CANDIDATE_CHANGE"
@@ -2319,6 +2405,9 @@ def draft_legacy_reversible_plan(
         current = _observe_current_selected_target(root, captured["path"])
         if current != (captured["state"], captured["sha256"]):
             raise AdoptionError("Selected current target changed during plan review")
+        if (_selected_target_entry_identity(root, captured["path"], current[0])
+                != captured["leaf_and_ancestor_identity"]):
+            raise AdoptionError("Selected current target identity changed during plan review")
     return output
 
 

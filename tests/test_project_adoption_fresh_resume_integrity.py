@@ -1149,3 +1149,94 @@ def test_target_preparation_refuses_unverified_original_keep_and_absent_remove()
         helper("REISOLATE_ORIGINAL_DROP_FOR_REVIEW", "ABSENT_LEAF_OBSERVED", False)
     with pytest.raises(AdoptionError, match="Unsupported proposed"):
         helper("ARBITRARY_WRITE", "PRESENT_BOUNDED_SHA_ATTESTED", False)
+
+
+def test_selected_entry_identity_rebind_same_bytes_does_not_reuse_inode(tmp_path):
+    """AUTHORED NOT_RUN; same SHA is not the same exact project directory entry."""
+    root = tmp_path / "synthetic-target-identity"
+    root.mkdir()
+    target = root / "AGENTS.md"
+    target.write_bytes(b"# Synthetic target with stable bytes\\n")
+    initial = project_adoption._selected_target_entry_identity(
+        root, "AGENTS.md", "PRESENT_BOUNDED_SHA_ATTESTED")
+    replacement = root / "replacement.tmp"
+    replacement.write_bytes(target.read_bytes())
+    replacement.replace(target)
+    changed = project_adoption._selected_target_entry_identity(
+        root, "AGENTS.md", "PRESENT_BOUNDED_SHA_ATTESTED")
+    assert initial != changed
+    assert initial["ancestor_chain"] == changed["ancestor_chain"]
+
+
+def test_selected_entry_identity_absent_leaf_binds_parent_replacement(tmp_path):
+    """AUTHORED NOT_RUN; missing file needs a later durable absence/parent proof."""
+    root = tmp_path / "synthetic-parent-identity"
+    parent = root / "nested"
+    parent.mkdir(parents=True)
+    before = project_adoption._selected_target_entry_identity(
+        root, "nested/AGENTS.md", "ABSENT_LEAF_OBSERVED")
+    parent.rename(root / "retired-nested")
+    parent.mkdir()
+    after = project_adoption._selected_target_entry_identity(
+        root, "nested/AGENTS.md", "ABSENT_LEAF_OBSERVED")
+    assert before != after
+    assert before["leaf_lstat"] is None and after["leaf_lstat"] is None
+
+
+def test_selected_entry_identity_rejects_inconsistent_target_state(tmp_path):
+    """AUTHORED NOT_RUN; read-only identity helper cannot invent file presence."""
+    root = tmp_path / "synthetic-state-refusal"
+    root.mkdir()
+    (root / "AGENTS.md").write_bytes(b"synthetic\\n")
+    with pytest.raises(AdoptionError, match="identity could not be safely attested"):
+        project_adoption._selected_target_entry_identity(
+            root, "AGENTS.md", "ABSENT_LEAF_OBSERVED")
+    with pytest.raises(AdoptionError, match="identity could not be safely attested"):
+        project_adoption._selected_target_entry_identity(
+            root, "not-there/AGENTS.md", "PRESENT_BOUNDED_SHA_ATTESTED")
+
+
+def test_target_plan_internal_identity_source_binding_and_future_capture_gate(tmp_path):
+    """AUTHORED NOT_RUN; preview binds source/identity but grants zero authority."""
+    project, data, sd, keep, copy, token = _selected_original_keep_plan_fixture(tmp_path)
+    preview = project_adoption.draft_legacy_reversible_plan(
+        project, snapshot_token=token,
+        targets={1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}, data_root=data)
+    assert preview["current_target_leaf_and_ancestor_identity_bound_to_plan_digest"] is True
+    assert preview["saved_original_keep_source_sha256_bound_to_plan_digest"] is True
+    assert preview["saved_original_keep_source_raw_sha256_hidden"] is True
+    assert hashlib.sha256(copy.read_bytes()).hexdigest() not in str(preview)
+    contract = preview["future_preimage_capture_contract"]
+    assert contract["version"] == 1
+    assert contract["state"] == "REQUIREMENTS_ONLY_NOT_CAPTURED"
+    assert "EXCLUSIVE_PREPARATION_JOURNAL_AND_RECOVERY_REPLAY" in contract[
+        "required_future_manifest_fields"]
+    assert contract["durable_capture_manifest_verified"] is False
+    assert contract["separate_attributable_owner_write_consent"] is False
+    assert contract["project_write_authorized"] is False
+    assert project_adoption._state(sd, project)["state"] == "active"
+
+
+def test_target_plan_refuses_same_byte_leaf_replacement_during_preview(tmp_path, monkeypatch):
+    """AUTHORED NOT_RUN; spoofed same SHA cannot hide an observed leaf rebind."""
+    project, data, sd, keep, copy, token = _selected_original_keep_plan_fixture(tmp_path)
+    real_identity = project_adoption._selected_target_entry_identity
+    replaced = []
+
+    def replace_after_identity(root, rel, expected_state):
+        value = real_identity(root, rel, expected_state)
+        if not replaced:
+            replacement = keep.parent / "synthetic-same-content.tmp"
+            replacement.write_bytes(keep.read_bytes())
+            replacement.replace(keep)
+            replaced.append(True)
+        return value
+
+    monkeypatch.setattr(project_adoption, "_selected_target_entry_identity",
+                        replace_after_identity)
+    with pytest.raises(AdoptionError, match="Selected current target identity changed"):
+        project_adoption.draft_legacy_reversible_plan(
+            project, snapshot_token=token,
+            targets={1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"}, data_root=data)
+    assert replaced == [True]
+    assert copy.is_file()
