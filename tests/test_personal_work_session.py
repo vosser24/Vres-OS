@@ -301,7 +301,7 @@ def test_catalog_review_requires_all_exact_selection_fields_and_canonical_key(tm
     # The original task review intentionally retains its older key semantics.
     selected, task, project, key, _ = ctx
     assert session.review_session(selected, task, project_root=project,
-                                  project_key=key)["active"] is True
+                                  project_key="project:ordinary")["active"] is True
 
 
 def test_catalog_without_snapshot_is_not_claimed_as_verified_structure(tmp_path):
