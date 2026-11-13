@@ -921,3 +921,124 @@ def test_personal_day_saved_167_snapshot_and_176_link_have_no_live_grant(tmp_pat
     assert "LIVE FRESHNESS NOT VERIFIED" in display
     assert str(root) not in display
     assert origin not in display
+
+
+def _personal_day_synthetic_global_fixture(ctx):
+    """Nonsensitive original #166 inventory kept ONLY in selected scratch desk."""
+    payload = {
+        "version": 1,
+        "scope": "current_windows_user_claude_config",
+        "enumeration_claim": "partial",
+        "entries": [
+            {"path": "settings.json", "kind": "file",
+             "is_reparse_point": False, "sha256_claim": None},
+        ],
+    }
+    document = json.dumps(payload, sort_keys=True).encode("utf-8")
+    filename = ctx[0] / "synthetic-global-inventory.json"
+    filename.write_bytes(document)
+    return document, hashlib.sha256(document).hexdigest(), filename
+
+
+def test_personal_day_integrates_held_166_168_synthetic_plan_and_176_result(tmp_path, capsys):
+    ctx, _, _ = _scratch(tmp_path)
+    document, digest, fixture = _personal_day_synthetic_global_fixture(ctx)
+    packet = session.review_personal_day(
+        ctx[0], ctx[1], project_root=ctx[2], project_key=ctx[3],
+        result_file=ctx[4], include_source_context=True,
+        include_adoption_preparation=True,
+        synthetic_global_inventory_document=document,
+        expected_synthetic_global_inventory_sha256=digest)
+    context = packet["selected_original_source_context"]
+    held = context["original_166_168_held_preparation"]
+    assert packet["adoption_preparation_selected_explicitly"] is True
+    assert held["status"] == "SELECTED_CHAIRMAN_GLOBAL_AND_PROJECT_ADOPTION_PREPARATION_HELD"
+    assert held["synthetic_inventory_document_sha256"] == digest
+    assert len(held["original_global_plan_sha256"]) == 64
+    assert len(held["preparation_sha256"]) == 64
+    assert len(context["integrated_source_context_sha256"]) == 64
+    assert context["original_176_result_source_link"]["checkpoint_sha256"] == (
+        packet["selected_original_journey"]["checkpoint_sha256"])
+    assert held["real_profile_inventory_or_hooks_read"] is False
+    assert held["global_snapshot_quarantine_and_rollback_proven"] is False
+    assert held["selected_project_plan_activated"] is False
+    assert held["keep_drop_recorded_or_applied"] is False
+    assert held["protected_f1_fable_authority_granted"] is False
+    assert packet["writes_performed"] is False
+    assert lifecycle.list_history(ctx[0])["count"] == 0
+    args = ["day", "--desk", str(ctx[0]), "--task-key", ctx[1],
+            "--project-root", str(ctx[2]), "--project-key", ctx[3],
+            "--result-file", str(ctx[4]), "--include-source-context",
+            "--include-adoption-preparation",
+            "--synthetic-global-inventory-file", str(fixture),
+            "--expected-synthetic-global-inventory-sha256", digest]
+    assert cli.main(args) == 0
+    displayed = capsys.readouterr().out
+    assert "HELD original #166/#168 preparation SHA-256" in displayed
+    assert "Integrated source-only context SHA-256" in displayed
+    assert str(ctx[2]) not in displayed
+    assert str(fixture) not in displayed
+    assert "activation_authorized" not in displayed
+
+
+def test_personal_day_166_requires_explicit_context_and_scratch_inventory(tmp_path, capsys):
+    ctx, _, _ = _scratch(tmp_path)
+    document, digest, fixture = _personal_day_synthetic_global_fixture(ctx)
+    opts = dict(
+        project_root=ctx[2], project_key=ctx[3],
+        include_adoption_preparation=True,
+        synthetic_global_inventory_document=document,
+        expected_synthetic_global_inventory_sha256=digest)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_personal_day(ctx[0], ctx[1], **opts)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_personal_day(
+            ctx[0], ctx[1], include_source_context=True,
+            **{**opts, "expected_synthetic_global_inventory_sha256": "0" * 64})
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_personal_day(
+            ctx[0], ctx[1], include_source_context=True,
+            project_root=ctx[2], project_key=ctx[3],
+            synthetic_global_inventory_document=document)
+    outside = tmp_path / "synthetic-global-inventory.json"
+    outside.write_bytes(document)
+    args = ["day", "--desk", str(ctx[0]), "--task-key", ctx[1],
+            "--project-root", str(ctx[2]), "--project-key", ctx[3],
+            "--include-source-context", "--include-adoption-preparation",
+            "--synthetic-global-inventory-file", str(outside),
+            "--expected-synthetic-global-inventory-sha256", digest]
+    assert cli.main(args) == 2
+    assert "VRES_WORK_SESSION_REFUSED" in capsys.readouterr().err
+    assert fixture.exists()
+    assert lifecycle.list_history(ctx[0])["count"] == 0
+
+
+def test_personal_day_166_late_drift_and_forged_authority_fail_closed(tmp_path, monkeypatch):
+    ctx, _, _ = _scratch(tmp_path)
+    document, digest, _ = _personal_day_synthetic_global_fixture(ctx)
+    original = session._selected_synthetic_global_adoption_plan
+    calls = {"n": 0}
+
+    def drifting_plan(data, selected_sha):
+        calls["n"] += 1
+        proposal = original(data, selected_sha)
+        if calls["n"] == 2:
+            return {**proposal, "original_global_plan_sha256": "0" * 64}
+        return proposal
+
+    monkeypatch.setattr(session, "_selected_synthetic_global_adoption_plan", drifting_plan)
+    kwargs = dict(
+        project_root=ctx[2], project_key=ctx[3],
+        include_source_context=True, include_adoption_preparation=True,
+        synthetic_global_inventory_document=document,
+        expected_synthetic_global_inventory_sha256=digest)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_personal_day(ctx[0], ctx[1], **kwargs)
+    assert calls["n"] == 2
+    monkeypatch.setattr(session, "_selected_synthetic_global_adoption_plan", original)
+    packet = session.review_personal_day(ctx[0], ctx[1], **kwargs)
+    packet["selected_original_source_context"]["original_166_168_held_preparation"][
+        "protected_f1_fable_authority_granted"] = True
+    with pytest.raises(session.WorkSessionRefused):
+        session.render_personal_day(packet)
+    assert lifecycle.list_history(ctx[0])["count"] == 0

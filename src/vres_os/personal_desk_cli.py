@@ -57,8 +57,12 @@ Usage: python -I -S -B personal_desk_cli.py COMMAND [command options]
             [--include-source-context with exact selected project]
             [--include-saved-catalog with original root, namespace, source,
              exact saved SHA-256 and revision]
-            Reuse original #168 project intake, optional #167 saved metadata,
-            and #176 NON-authoritative current result source provenance.
+            [--include-adoption-preparation --synthetic-global-inventory-file
+             EXACT-DESK/synthetic-global-inventory.json
+             --expected-synthetic-global-inventory-sha256 HEX]
+            Reuse original #168 intake, optional #167 saved catalog, #176
+            source-only result link and HELD #166 synthetic global preview.
+            One integrated read-only context SHA; no current host proof.
             NEVER live database freshness, memory eligibility or Fable.
             OR --task-key TASK-* --saved-snapshot-sha256 HEX
             [--check-saved-current --yes ONLY after separate reopen --yes]

@@ -2648,8 +2648,11 @@ def _review_personal_day_source_context(
     saved_catalog_source_id: str | None = None,
     expected_saved_catalog_sha256: str | None = None,
     expected_saved_catalog_revision: int | None = None,
+    include_adoption_preparation: bool = False,
+    synthetic_global_inventory_document: bytes | None = None,
+    expected_synthetic_global_inventory_sha256: str | None = None,
 ) -> dict[str, Any]:
-    """Explicit source context; not saved freshness or eligible experience."""
+    """Explicit original #165/#166/#167/#168/#176 source context; no authority."""
     if type(include_saved_catalog) is not bool:
         raise WorkSessionRefused("Exact saved catalog opt-in required")
     catalog_inputs = (saved_catalog_store, saved_catalog_source_id,
@@ -2664,6 +2667,14 @@ def _review_personal_day_source_context(
             raise WorkSessionRefused("Exact saved catalog SHA/revision required")
     elif any(value is not None for value in catalog_inputs):
         raise WorkSessionRefused("Unselected saved catalog forbidden")
+    if type(include_adoption_preparation) is not bool:
+        raise WorkSessionRefused("Exact #166 synthetic preparation opt-in required")
+    synthetic_fields = (synthetic_global_inventory_document,
+                        expected_synthetic_global_inventory_sha256)
+    if (include_adoption_preparation and any(v is None for v in synthetic_fields)
+            or not include_adoption_preparation
+            and any(v is not None for v in synthetic_fields)):
+        raise WorkSessionRefused("Synthetic global context requires exact explicit opt-in")
     if (type(journey) is not dict
             or journey.get("stage") not in (
                 "PROJECT_SELECTED_NO_RESULT", "RESULT_REVIEW_READY_SEPARATE_DECISION")
@@ -2763,9 +2774,69 @@ def _review_personal_day_source_context(
         }
     elif reviewed.get("selected_project_catalog") is not None:
         raise WorkSessionRefused("Unexpected catalog attached")
-    # Late original #168 read after the optional #167 and #176 inspections.
+    # Original #166 pure synthetic inventory planner; it never inspects the
+    # actual Windows user profile, Claude hooks, credentials or active state.
+    adoption = None
+    global_preview = None
+    if include_adoption_preparation:
+        global_preview = _selected_synthetic_global_adoption_plan(
+            synthetic_global_inventory_document,
+            expected_synthetic_global_inventory_sha256)
+        prepared = _selected_personal_adoption_preparation(
+            task, journey["selected_note_sha256"],
+            journey["selected_project_binding_sha256"],
+            global_preview, preview, None)
+        if (prepared.get("status") !=
+                "SELECTED_CHAIRMAN_GLOBAL_AND_PROJECT_ADOPTION_PREPARATION_HELD"
+                or prepared.get("global_snapshot_quarantine_and_rollback_proven")
+                   is not False
+                or prepared.get("selected_project_plan_activated") is not False
+                or prepared.get("global_or_project_keep_drop_applied") is not False
+                or prepared.get("independent_fable_authority_granted") is not False
+                or prepared.get("native_claude_or_hooks_executed") is not False
+                or prepared.get("database_or_credentials_accessed") is not False
+                or prepared.get("project_or_user_profile_modified") is not False
+                or type(prepared.get("preparation_sha256")) is not str
+                or not workbench._SHA.fullmatch(prepared["preparation_sha256"])):
+            raise WorkSessionRefused("Original global/project preparation is held")
+        adoption = {
+            "status": prepared["status"],
+            "synthetic_inventory_document_sha256":
+                global_preview["synthetic_inventory_document_sha256"],
+            "original_global_plan_sha256": global_preview["original_global_plan_sha256"],
+            "preparation_sha256": prepared["preparation_sha256"],
+            "global_snapshot_quarantine_and_rollback_proven": False,
+            "real_profile_inventory_or_hooks_read": False,
+            "selected_project_plan_activated": False,
+            "keep_drop_recorded_or_applied": False,
+            "protected_f1_fable_authority_granted": False,
+            "source_only_synthetic_claim_not_host_truth": True,
+        }
+    # Closing readbacks bind the selected project and optional synthetic
+    # #166 source to this packet; cooperative reads are NOT OS-atomic.
     if _selected_project_adoption_preview(project_root) != preview:
         raise WorkSessionRefused("Original project intake changed during day")
+    if include_adoption_preparation and _selected_synthetic_global_adoption_plan(
+            synthetic_global_inventory_document,
+            expected_synthetic_global_inventory_sha256) != global_preview:
+        raise WorkSessionRefused("Synthetic global plan changed during day")
+    context_identity = {
+        "schema": PERSONAL_DAY_CONTEXT_SCHEMA,
+        "task_key_claimed": task,
+        "selected_note_sha256": journey["selected_note_sha256"],
+        "selected_project_binding_sha256": journey["selected_project_binding_sha256"],
+        "checkpoint_sha256": journey["checkpoint_sha256"],
+        "original_168_intake_sha256": hashlib.sha256(
+            preview["report"].encode("utf-8")).hexdigest(),
+        "original_167_joint_saved_context_sha256": joint_sha,
+        "original_176_source_link_sha256": (
+            provenance["source_link_sha256"] if provenance is not None else None),
+        "original_166_168_held_preparation_sha256": (
+            adoption["preparation_sha256"] if adoption is not None else None),
+    }
+    source_context_sha = hashlib.sha256(json.dumps(
+        context_identity, sort_keys=True, separators=(",", ":"),
+        ensure_ascii=True, allow_nan=False).encode("ascii")).hexdigest()
     return {
         "schema": PERSONAL_DAY_CONTEXT_SCHEMA,
         "status": "READ_ONLY_SELECTED_ORIGINAL_PROJECT_SOURCE_CONTEXT",
@@ -2776,6 +2847,10 @@ def _review_personal_day_source_context(
         "original_167_saved_catalog": saved,
         "original_176_result_source_link": provenance,
         "joint_saved_context_sha256": joint_sha,
+        "original_166_168_held_preparation": adoption,
+        "original_166_adoption_preparation_selected_explicitly":
+            include_adoption_preparation,
+        "integrated_source_context_sha256": source_context_sha,
         "original_166_global_adoption_state_read": False,
         "original_168_project_activation_performed": False,
         "original_167_live_freshness_verified": False,
@@ -2807,6 +2882,9 @@ def review_personal_day(
     saved_catalog_source_id: str | None = None,
     expected_saved_catalog_sha256: str | None = None,
     expected_saved_catalog_revision: int | None = None,
+    include_adoption_preparation: bool = False,
+    synthetic_global_inventory_document: bytes | None = None,
+    expected_synthetic_global_inventory_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Show bounded original choices, or one explicitly selected task journey.
 
@@ -2820,10 +2898,18 @@ def review_personal_day(
             or type(saved_replay_approved) is not bool
             or type(include_result_acceptance_evidence) is not bool
             or type(include_source_context) is not bool
-            or type(include_saved_catalog) is not bool):
+            or type(include_saved_catalog) is not bool
+            or type(include_adoption_preparation) is not bool):
         raise WorkSessionRefused("Personal day choices require exact booleans")
     catalog_inputs = (saved_catalog_store, saved_catalog_source_id,
                       expected_saved_catalog_sha256, expected_saved_catalog_revision)
+    synthetic_inputs = (synthetic_global_inventory_document,
+                        expected_synthetic_global_inventory_sha256)
+    if (include_adoption_preparation and
+            (not include_source_context or any(v is None for v in synthetic_inputs))
+            or not include_adoption_preparation
+            and any(v is not None for v in synthetic_inputs)):
+        raise WorkSessionRefused("Exact opt-in synthetic #166 source requires selected project")
     if (include_saved_catalog and not include_source_context
             or not include_saved_catalog and any(v is not None for v in catalog_inputs)
             or include_source_context and (
@@ -2839,6 +2925,7 @@ def review_personal_day(
             acceptance_evidence_document is not None,
             expected_acceptance_evidence_sha256 is not None,
             include_source_context, include_saved_catalog,
+            include_adoption_preparation, any(v is not None for v in synthetic_inputs),
             any(v is not None for v in catalog_inputs))):
         raise WorkSessionRefused("Select one task before requesting a personal day focus")
     if task is not None and (
@@ -2928,7 +3015,11 @@ def review_personal_day(
                 saved_catalog_store=saved_catalog_store,
                 saved_catalog_source_id=saved_catalog_source_id,
                 expected_saved_catalog_sha256=expected_saved_catalog_sha256,
-                expected_saved_catalog_revision=expected_saved_catalog_revision)
+                expected_saved_catalog_revision=expected_saved_catalog_revision,
+                include_adoption_preparation=include_adoption_preparation,
+                synthetic_global_inventory_document=synthetic_global_inventory_document,
+                expected_synthetic_global_inventory_sha256=
+                    expected_synthetic_global_inventory_sha256)
             # A late original-owner result and task recheck remains non-atomic.
             fresh = review_workday_journey(
                 desk, task, project_root=project_root, project_key=project_key,
@@ -2977,6 +3068,7 @@ def review_personal_day(
         "selected_choice_kind": focus_kind,
         "selected_original_journey": selection,
         "source_context_selected_explicitly": include_source_context,
+        "adoption_preparation_selected_explicitly": include_adoption_preparation,
         "selected_original_source_context": source_context,
         "original_chairman_source_only": True,
         "historical_saved_result_current_by_default": False,
@@ -3008,7 +3100,10 @@ def render_personal_day(packet: dict[str, Any]) -> str:
             or packet.get("database_contacted") is not False
             or type(packet.get("original_offered_choices")) is not list
             or not 0 <= len(packet["original_offered_choices"]) <= 54
-            or type(packet.get("source_context_selected_explicitly")) is not bool):
+            or type(packet.get("source_context_selected_explicitly")) is not bool
+            or type(packet.get("adoption_preparation_selected_explicitly")) is not bool
+            or (packet["adoption_preparation_selected_explicitly"]
+                and not packet["source_context_selected_explicitly"])):
         raise WorkSessionRefused("Personal day text contract refused")
     lines = [
         "Vres-OS PERSONAL DAY -- ONE CHAIRMAN -- READ ONLY",
@@ -3056,6 +3151,11 @@ def render_personal_day(packet: dict[str, Any]) -> str:
                     or context.get("original_167_live_freshness_verified") is not False
                     or context.get("original_176_live_memory_eligibility_or_promotion") is not False
                     or context.get("original_174_protected_fable_granted") is not False
+                    or context.get("original_166_adoption_preparation_selected_explicitly")
+                       is not packet["adoption_preparation_selected_explicitly"]
+                    or type(context.get("integrated_source_context_sha256")) is not str
+                    or not workbench._SHA.fullmatch(
+                        context["integrated_source_context_sha256"])
                     or context.get("database_contacted") is not False
                     or context.get("native_claude_or_hooks_executed") is not False
                     or context.get("writes_performed") is not False
@@ -3066,6 +3166,8 @@ def render_personal_day(packet: dict[str, Any]) -> str:
                 raise WorkSessionRefused("Untrusted selected project source context")
             lines.append("Selected original project/source context (NOT authority):")
             lines.append(context["original_168_project_intake_report"])
+            lines.append("Integrated source-only context SHA-256: "
+                         + context["integrated_source_context_sha256"])
             catalog = context["original_167_saved_catalog"]
             if catalog is not None:
                 lines.append("Saved #167 source: " + catalog["source_id"]
@@ -3079,6 +3181,29 @@ def render_personal_day(packet: dict[str, Any]) -> str:
                 lines.append("#176 source-only result link SHA-256: "
                              + source["source_link_sha256"]
                              + " (NO eligible memory / trust or revocation check).")
+            adoption = context.get("original_166_168_held_preparation")
+            if packet["adoption_preparation_selected_explicitly"]:
+                if (type(adoption) is not dict
+                        or adoption.get("status") !=
+                           "SELECTED_CHAIRMAN_GLOBAL_AND_PROJECT_ADOPTION_PREPARATION_HELD"
+                        or any(adoption.get(key) is not False for key in (
+                            "global_snapshot_quarantine_and_rollback_proven",
+                            "real_profile_inventory_or_hooks_read",
+                            "selected_project_plan_activated",
+                            "keep_drop_recorded_or_applied",
+                            "protected_f1_fable_authority_granted"))
+                        or adoption.get("source_only_synthetic_claim_not_host_truth") is not True
+                        or any(type(adoption.get(key)) is not str or
+                               not workbench._SHA.fullmatch(adoption[key])
+                               for key in ("synthetic_inventory_document_sha256",
+                                           "original_global_plan_sha256",
+                                           "preparation_sha256"))):
+                    raise WorkSessionRefused("Forged original #166 held preparation")
+                lines.append("HELD original #166/#168 preparation SHA-256: "
+                             + adoption["preparation_sha256"]
+                             + " (SYNTHETIC, NOT Windows profile evidence).")
+            elif adoption is not None:
+                raise WorkSessionRefused("Unselected adoption preparation cannot be shown")
             lines.append("No adoption, credential, DB, native host or Fable authority.")
         elif context is not None:
             raise WorkSessionRefused("Unselected source context cannot be rendered")
@@ -3318,6 +3443,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             sub.add_argument("--include-legacy-rollback-evidence", action="store_true")
         if name == "day":
             sub.add_argument("--include-source-context", action="store_true")
+            sub.add_argument("--include-adoption-preparation", action="store_true")
+            sub.add_argument("--synthetic-global-inventory-file")
+            sub.add_argument("--expected-synthetic-global-inventory-sha256")
             sub.add_argument("--include-saved-catalog", action="store_true")
             sub.add_argument("--saved-catalog-root")
             sub.add_argument("--saved-catalog-namespace")
@@ -3440,6 +3568,26 @@ def main(argv: Sequence[str] | None = None) -> int:
                 day_source_options = _saved_catalog_cli_options(args)
                 day_source_options.pop("include_experience_provenance", None)
                 day_source_options["include_source_context"] = args.include_source_context
+                synthetic_fields = (args.synthetic_global_inventory_file,
+                                    args.expected_synthetic_global_inventory_sha256)
+                if args.include_adoption_preparation:
+                    if (not args.include_source_context
+                            or any(v is None for v in synthetic_fields)):
+                        raise WorkSessionRefused("Explicit #166 synthetic opt-in, project and SHA required")
+                    fixture_path = Path(args.synthetic_global_inventory_file)
+                    if (fixture_path.name != "synthetic-global-inventory.json"
+                            or fixture_path.parent != portable._desk(args.desk, must_exist=True)):
+                        raise WorkSessionRefused("Synthetic global inventory must be in selected scratch desk")
+                    day_source_options.update({
+                        "include_adoption_preparation": True,
+                        "synthetic_global_inventory_document":
+                            _read_selected_chairman_source(
+                                args.synthetic_global_inventory_file, maximum=64 * 1024),
+                        "expected_synthetic_global_inventory_sha256":
+                            args.expected_synthetic_global_inventory_sha256,
+                    })
+                elif any(v is not None for v in synthetic_fields):
+                    raise WorkSessionRefused("Unselected #166 synthetic source forbidden")
             view = (review_personal_day if args.command == "day"
                     else review_workday_journey)
             packet = view(
@@ -3457,6 +3605,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                         args.result_acceptance_evidence_file, maximum=32 * 1024)
                     != acceptance_options["acceptance_evidence_document"]):
                 raise WorkSessionRefused("Acceptance fixture changed before display")
+            if (args.command == "day" and args.include_adoption_preparation
+                    and _read_selected_chairman_source(
+                        args.synthetic_global_inventory_file, maximum=64 * 1024)
+                    != day_source_options["synthetic_global_inventory_document"]):
+                raise WorkSessionRefused("Synthetic global input changed before day display")
         elif args.command in ("decision", "decide", "briefing"):
             acceptance_options = _result_acceptance_cli_options(args)
             options = dict(
