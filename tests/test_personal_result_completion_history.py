@@ -740,3 +740,184 @@ def test_personal_day_saved_cli_does_not_replay_before_separate_reopen(tmp_path,
     assert fresh["writes_performed"] is False
     assert "SECRET-CHECK" not in json.dumps(fresh)
     assert str(ctx[2]) not in json.dumps(fresh)
+
+
+
+def test_personal_day_explicit_context_unifies_original_168_and_176(tmp_path, capsys):
+    ctx, opts, _ = _scratch(tmp_path)
+    packet = session.review_personal_day(
+        ctx[0], ctx[1], project_root=ctx[2], project_key=ctx[3],
+        result_file=ctx[4], include_source_context=True)
+    source = packet["selected_original_source_context"]
+    journey = packet["selected_original_journey"]
+    assert packet["source_context_selected_explicitly"] is True
+    assert source["status"] == "READ_ONLY_SELECTED_ORIGINAL_PROJECT_SOURCE_CONTEXT"
+    assert "READ-ONLY PROJECT INTAKE" in source["original_168_project_intake_report"]
+    assert source["original_167_saved_catalog"] is None
+    assert source["joint_saved_context_sha256"] is None
+    assert source["original_176_result_source_link"]["current_result_sha256"] == journey["current_result_sha256"]
+    assert source["original_176_result_source_link"]["checkpoint_sha256"] == opts["expected_checkpoint_sha256"]
+    assert source["original_176_result_source_link"]["live_episode_eligibility_verified"] is False
+    for name in ("original_166_global_adoption_state_read",
+                 "original_168_project_activation_performed",
+                 "original_167_live_freshness_verified",
+                 "original_174_protected_fable_granted",
+                 "original_176_live_memory_eligibility_or_promotion",
+                 "database_contacted", "native_claude_or_hooks_executed",
+                 "writes_performed"):
+        assert source[name] is False
+    assert str(ctx[2]) not in json.dumps(packet)
+    assert lifecycle.list_history(ctx[0])["count"] == 0
+    argv = ["day", "--desk", str(ctx[0]), "--task-key", ctx[1],
+            "--project-root", str(ctx[2]), "--project-key", ctx[3],
+            "--result-file", str(ctx[4]), "--include-source-context"]
+    assert cli.main(argv) == 0
+    text = capsys.readouterr().out
+    assert "Selected original project/source context" in text
+    assert "#176 source-only result link SHA-256" in text
+    assert "Write a local report" not in text
+    assert str(ctx[2]) not in text
+
+
+def test_personal_day_explicit_project_context_without_result(tmp_path):
+    ctx, _, _ = _scratch(tmp_path)
+    packet = session.review_personal_day(
+        ctx[0], ctx[1], project_root=ctx[2], project_key=ctx[3],
+        include_source_context=True)
+    source = packet["selected_original_source_context"]
+    assert packet["selected_original_journey"]["stage"] == "PROJECT_SELECTED_NO_RESULT"
+    assert source["original_176_result_source_link"] is None
+    assert source["original_167_saved_catalog"] is None
+    assert source["original_168_project_intake_report"].startswith("Vres-OS PERSONAL")
+    assert packet["writes_performed"] is False
+
+
+def test_personal_day_context_refuses_hidden_sources_and_historical_promotion(tmp_path, capsys):
+    ctx, opts, _ = _scratch(tmp_path)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_personal_day(ctx[0], ctx[1], include_source_context=True)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_personal_day(
+            ctx[0], ctx[1], project_root=ctx[2], project_key=ctx[3],
+            result_file=ctx[4], include_saved_catalog=True)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_personal_day(
+            ctx[0], ctx[1], project_root=ctx[2], project_key=ctx[3],
+            include_source_context=True, expected_saved_catalog_sha256="0" * 64)
+    assert cli.main(["day", "--desk", str(ctx[0]), "--include-source-context"]) == 2
+    assert "VRES_WORK_SESSION_REFUSED" in capsys.readouterr().err
+    finished = completion.finish_work(*ctx, **opts)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_personal_day(
+            ctx[0], ctx[1], saved_snapshot_sha256=finished["selected_note_sha256"],
+            project_root=ctx[2], project_key=ctx[3], include_source_context=True)
+    historical = session.review_personal_day(
+        ctx[0], ctx[1], saved_snapshot_sha256=finished["selected_note_sha256"])
+    assert historical["selected_original_source_context"] is None
+    assert historical["selected_original_journey"]["stage"] == "SAVED_HISTORICAL_ONLY"
+
+
+def test_personal_day_project_context_refuses_original_168_drift(tmp_path, monkeypatch):
+    ctx, _, _ = _scratch(tmp_path)
+    original = session._selected_project_adoption_preview
+    seen = {"count": 0}
+
+    def drifting(root):
+        seen["count"] += 1
+        report = original(root)
+        if seen["count"] == 2:
+            return {**report, "project_activation_authorized": True}
+        return report
+
+    monkeypatch.setattr(session, "_selected_project_adoption_preview", drifting)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_personal_day(
+            ctx[0], ctx[1], project_root=ctx[2], project_key=ctx[3],
+            include_source_context=True)
+    assert seen["count"] == 2
+    assert lifecycle.list_history(ctx[0])["count"] == 0
+
+
+def test_personal_day_source_render_refuses_forged_fable_authority(tmp_path):
+    ctx, _, _ = _scratch(tmp_path)
+    packet = session.review_personal_day(
+        ctx[0], ctx[1], project_root=ctx[2], project_key=ctx[3],
+        include_source_context=True)
+    packet["selected_original_source_context"]["original_174_protected_fable_granted"] = True
+    with pytest.raises(session.WorkSessionRefused):
+        session.render_personal_day(packet)
+
+
+
+def test_personal_day_saved_167_snapshot_and_176_link_have_no_live_grant(tmp_path, capsys):
+    from types import SimpleNamespace
+    from vres_os.personal_data_source_store import CurrentUserDataSourceStore
+
+    ctx, _, _ = _scratch(tmp_path)
+    root = tmp_path / "synthetic-data-catalog"
+    root.mkdir()
+    namespace = "a" * 64
+    origin = "example.invalid:5432/disposable"
+    credential_id = "credential-" + "b" * 32
+    metadata_calls = []
+
+    def metadata(resource_id):
+        metadata_calls.append(resource_id)
+        return SimpleNamespace(resource_id=credential_id,
+                               service_type="postgres", origin=origin)
+
+    def protect(path, *, directory):
+        path.chmod(0o700 if directory else 0o600)
+
+    store = CurrentUserDataSourceStore(root, namespace, metadata, owner_protector=protect)
+    sid, rev = store.update(
+        lambda catalog: catalog.register_postgres(origin, credential_id, authorized=True),
+        expected_revision=0, authorized=True)
+    linked, rev = store.update(
+        lambda catalog: catalog.bind(sid, ctx[3], authorized=True),
+        expected_revision=rev, authorized=True)
+    assert linked is True and rev == 2
+    metadata_calls.clear()
+    _, saved_revision, saved_sha = store.load_saved_snapshot()
+    assert saved_revision == 2
+    opts = dict(
+        project_root=ctx[2], project_key=ctx[3], result_file=ctx[4],
+        include_source_context=True, include_saved_catalog=True,
+        saved_catalog_store=store, saved_catalog_source_id=sid,
+        expected_saved_catalog_sha256=saved_sha,
+        expected_saved_catalog_revision=saved_revision)
+    packet = session.review_personal_day(ctx[0], ctx[1], **opts)
+    source = packet["selected_original_source_context"]
+    saved = source["original_167_saved_catalog"]
+    assert saved["source_id"] == sid
+    assert saved["revision"] == 2
+    assert saved["catalog_document_sha256"] == saved_sha
+    assert saved["live_freshness_verified"] is False
+    assert saved["credential_resource_disclosed"] is False
+    assert len(source["joint_saved_context_sha256"]) == 64
+    assert len(source["original_176_result_source_link"]["source_link_sha256"]) == 64
+    assert source["original_176_live_memory_eligibility_or_promotion"] is False
+    assert source["database_contacted"] is False
+    assert metadata_calls == []
+    redacted = json.dumps(packet)
+    assert str(root) not in redacted
+    assert origin not in redacted
+    assert credential_id not in redacted
+    assert session.render_personal_day(packet).find("LIVE FRESHNESS NOT VERIFIED") > 0
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_personal_day(
+            ctx[0], ctx[1], **{**opts, "expected_saved_catalog_revision": 1})
+    argv = ["day", "--desk", str(ctx[0]), "--task-key", ctx[1],
+            "--project-root", str(ctx[2]), "--project-key", ctx[3],
+            "--result-file", str(ctx[4]), "--include-source-context",
+            "--include-saved-catalog", "--saved-catalog-root", str(root),
+            "--saved-catalog-namespace", namespace,
+            "--saved-catalog-source-id", sid,
+            "--expected-saved-catalog-sha256", saved_sha,
+            "--expected-saved-catalog-revision", "2"]
+    assert cli.main(argv) == 0
+    display = capsys.readouterr().out
+    assert "Saved #167 source:" in display
+    assert "LIVE FRESHNESS NOT VERIFIED" in display
+    assert str(root) not in display
+    assert origin not in display

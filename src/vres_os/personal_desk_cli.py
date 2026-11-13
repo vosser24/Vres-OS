@@ -54,6 +54,12 @@ Usage: python -I -S -B personal_desk_cli.py COMMAND [command options]
             [--project-root ABS --project-key project:* [--result-file ABS]]
             [--expected-checkpoint-sha256 HEX] [--format text|json]
             [--show-selected-action] [same optional acceptance fixture/SHA]
+            [--include-source-context with exact selected project]
+            [--include-saved-catalog with original root, namespace, source,
+             exact saved SHA-256 and revision]
+            Reuse original #168 project intake, optional #167 saved metadata,
+            and #176 NON-authoritative current result source provenance.
+            NEVER live database freshness, memory eligibility or Fable.
             OR --task-key TASK-* --saved-snapshot-sha256 HEX
             [--check-saved-current --yes ONLY after separate reopen --yes]
             No auto-selection, project activation, completion or replay.

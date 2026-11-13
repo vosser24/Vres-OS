@@ -2634,6 +2634,160 @@ def render_workday_journey(packet: dict[str, Any]) -> str:
 PERSONAL_DAY_SCHEMA = "vres-personal-single-chairman-day/1"
 
 
+# A read-only #165 day view over existing #168 project, #167 saved catalog
+# and #176 source provenance owners. No new state or approval authority.
+PERSONAL_DAY_CONTEXT_SCHEMA = "vres-personal-day-governed-source-context/1"
+
+
+def _review_personal_day_source_context(
+    desk: str | Path, task: str, journey: dict[str, Any], *,
+    project_root: str | Path, project_key: str,
+    result_file: str | Path | None,
+    include_saved_catalog: bool = False,
+    saved_catalog_store: Any | None = None,
+    saved_catalog_source_id: str | None = None,
+    expected_saved_catalog_sha256: str | None = None,
+    expected_saved_catalog_revision: int | None = None,
+) -> dict[str, Any]:
+    """Explicit source context; not saved freshness or eligible experience."""
+    if type(include_saved_catalog) is not bool:
+        raise WorkSessionRefused("Exact saved catalog opt-in required")
+    catalog_inputs = (saved_catalog_store, saved_catalog_source_id,
+                      expected_saved_catalog_sha256, expected_saved_catalog_revision)
+    if include_saved_catalog:
+        if (saved_catalog_store is None
+                or type(saved_catalog_source_id) is not str
+                or type(expected_saved_catalog_sha256) is not str
+                or not workbench._SHA.fullmatch(expected_saved_catalog_sha256)
+                or type(expected_saved_catalog_revision) is not int
+                or not 0 <= expected_saved_catalog_revision <= 1000000):
+            raise WorkSessionRefused("Exact saved catalog SHA/revision required")
+    elif any(value is not None for value in catalog_inputs):
+        raise WorkSessionRefused("Unselected saved catalog forbidden")
+    if (type(journey) is not dict
+            or journey.get("stage") not in (
+                "PROJECT_SELECTED_NO_RESULT", "RESULT_REVIEW_READY_SEPARATE_DECISION")
+            or journey.get("task_key_claimed") != task
+            or type(journey.get("selected_note_sha256")) is not str
+            or not workbench._SHA.fullmatch(journey["selected_note_sha256"])
+            or type(journey.get("selected_project_binding_sha256")) is not str
+            or not workbench._SHA.fullmatch(journey["selected_project_binding_sha256"])
+            or (result_file is None) is not (journey.get("checkpoint_sha256") is None)):
+        raise WorkSessionRefused("Exact active project journey required")
+    reviewed = review_session(
+        desk, task, project_root=project_root, project_key=project_key,
+        result_file=result_file,
+        expected_checkpoint_sha256=journey["checkpoint_sha256"],
+        include_project_intake=True,
+        include_experience_provenance=result_file is not None,
+        include_saved_catalog=include_saved_catalog,
+        saved_catalog_store=saved_catalog_store,
+        saved_catalog_source_id=saved_catalog_source_id)
+    preview = reviewed.get("selected_project_intake")
+    if (reviewed.get("status") != "ACTIVE_WORK_SESSION_REVIEW"
+            or reviewed.get("active_note_sha256") != journey["selected_note_sha256"]
+            or reviewed.get("selected_project_binding_sha256")
+               != journey["selected_project_binding_sha256"]
+            or type(preview) is not dict
+            or preview.get("status") != "SELECTED_PROJECT_INTAKE_PREVIEW_ONLY"
+            or preview.get("project_activation_authorized") is not False
+            or preview.get("native_hooks_executed") is not False
+            or type(preview.get("report")) is not str
+            or len(preview["report"]) > 8192
+            or not preview["report"].startswith(
+                "Vres-OS PERSONAL \u2014 READ-ONLY PROJECT INTAKE\n")
+            or reviewed.get("writes_performed") is not False
+            or reviewed.get("native_chairman_authority_granted") is not False):
+        raise WorkSessionRefused("Original project source preview refused")
+    provenance = None
+    if result_file is not None:
+        observed = reviewed.get("observed_result")
+        source = reviewed.get("selected_experience_provenance")
+        if (type(observed) is not dict or type(source) is not dict
+                or observed.get("checkpoint_sha256") != journey["checkpoint_sha256"]
+                or observed.get("result_sha256") != journey["current_result_sha256"]
+                or observed.get("result_rechecked_after_experience_preview") is not True
+                or source.get("status") != "NONAUTHORITATIVE_EXPERIENCE_SOURCE_LINK_ONLY"
+                or source.get("selected_note_sha256") != journey["selected_note_sha256"]
+                or source.get("selected_project_binding_sha256")
+                   != journey["selected_project_binding_sha256"]
+                or source.get("checkpoint_sha256") != journey["checkpoint_sha256"]
+                or source.get("result_sha256") != journey["current_result_sha256"]
+                or source.get("revocation_state_checked") is not False
+                or source.get("experience_capture_or_memory_promotion") is not False
+                or source.get("database_contacted") is not False):
+            raise WorkSessionRefused("Original source result not revalidated")
+        provenance = {
+            "source_link_sha256": source["source_link_sha256"],
+            "current_result_sha256": source["result_sha256"],
+            "checkpoint_sha256": source["checkpoint_sha256"],
+            "live_episode_eligibility_verified": False,
+            "trust_scope_revocation_checked": False,
+        }
+    elif reviewed.get("selected_experience_provenance") is not None:
+        raise WorkSessionRefused("Unexpected experience source link")
+    saved = None
+    joint_sha = None
+    if include_saved_catalog:
+        cat = reviewed.get("selected_project_catalog")
+        if (type(cat) is not dict
+                or cat.get("status")
+                   != "READ_ONLY_EXPLICIT_SAVED_CURRENT_USER_CATALOG_SUMMARY"
+                or cat.get("catalog_document_sha256") != expected_saved_catalog_sha256
+                or cat.get("saved_catalog_revision") != expected_saved_catalog_revision
+                or cat.get("selected_source_id") != saved_catalog_source_id
+                or cat.get("credential_lookup_performed") is not False
+                or cat.get("database_contacted") is not False):
+            raise WorkSessionRefused("Original #167 snapshot identity changed")
+        joint = _selected_governed_workday_context(
+            task, journey["selected_note_sha256"],
+            journey["selected_project_binding_sha256"],
+            cat, reviewed["selected_experience_provenance"])
+        if (joint.get("catalog_freshness")
+                != "SAVED_SNAPSHOT_ONLY_LIVE_DRIFT_UNCHECKED"
+                or joint.get("experience_reuse_eligible") is not False
+                or joint.get("database_contacted") is not False
+                or joint.get("native_claude_or_hooks_executed") is not False):
+            raise WorkSessionRefused("#167/#176 source boundary refused")
+        joint_sha = joint["context_sha256"]
+        saved = {
+            "source_id": cat["selected_source_id"],
+            "revision": cat["saved_catalog_revision"],
+            "catalog_document_sha256": cat["catalog_document_sha256"],
+            "snapshot_status": cat["snapshot_status"],
+            "assurance": cat["assurance"],
+            "structural_object_count": cat["structural_object_count"],
+            "structural_column_count": cat["structural_column_count"],
+            "live_freshness_verified": False,
+            "credential_resource_disclosed": False,
+        }
+    elif reviewed.get("selected_project_catalog") is not None:
+        raise WorkSessionRefused("Unexpected catalog attached")
+    # Late original #168 read after the optional #167 and #176 inspections.
+    if _selected_project_adoption_preview(project_root) != preview:
+        raise WorkSessionRefused("Original project intake changed during day")
+    return {
+        "schema": PERSONAL_DAY_CONTEXT_SCHEMA,
+        "status": "READ_ONLY_SELECTED_ORIGINAL_PROJECT_SOURCE_CONTEXT",
+        "task_key_claimed": task,
+        "selected_note_sha256": journey["selected_note_sha256"],
+        "selected_project_binding_sha256": journey["selected_project_binding_sha256"],
+        "original_168_project_intake_report": preview["report"],
+        "original_167_saved_catalog": saved,
+        "original_176_result_source_link": provenance,
+        "joint_saved_context_sha256": joint_sha,
+        "original_166_global_adoption_state_read": False,
+        "original_168_project_activation_performed": False,
+        "original_167_live_freshness_verified": False,
+        "original_176_live_memory_eligibility_or_promotion": False,
+        "original_174_protected_fable_granted": False,
+        "database_contacted": False,
+        "native_claude_or_hooks_executed": False,
+        "writes_performed": False,
+        "cooperative_readback_is_atomic": False,
+    }
+
+
 def review_personal_day(
     desk: str | Path, task: str | None = None, *,
     project_root: str | Path | None = None,
@@ -2647,6 +2801,12 @@ def review_personal_day(
     include_result_acceptance_evidence: bool = False,
     acceptance_evidence_document: bytes | None = None,
     expected_acceptance_evidence_sha256: str | None = None,
+    include_source_context: bool = False,
+    include_saved_catalog: bool = False,
+    saved_catalog_store: Any | None = None,
+    saved_catalog_source_id: str | None = None,
+    expected_saved_catalog_sha256: str | None = None,
+    expected_saved_catalog_revision: int | None = None,
 ) -> dict[str, Any]:
     """Show bounded original choices, or one explicitly selected task journey.
 
@@ -2658,8 +2818,18 @@ def review_personal_day(
     if (type(show_selected_action) is not bool
             or type(check_saved_current) is not bool
             or type(saved_replay_approved) is not bool
-            or type(include_result_acceptance_evidence) is not bool):
+            or type(include_result_acceptance_evidence) is not bool
+            or type(include_source_context) is not bool
+            or type(include_saved_catalog) is not bool):
         raise WorkSessionRefused("Personal day choices require exact booleans")
+    catalog_inputs = (saved_catalog_store, saved_catalog_source_id,
+                      expected_saved_catalog_sha256, expected_saved_catalog_revision)
+    if (include_saved_catalog and not include_source_context
+            or not include_saved_catalog and any(v is not None for v in catalog_inputs)
+            or include_source_context and (
+                task is None or saved_snapshot_sha256 is not None
+                or project_root is None or project_key is None)):
+        raise WorkSessionRefused("Explicit active project context and catalog opt-in required")
     if task is None and any((
             project_root is not None, project_key is not None,
             result_file is not None, expected_checkpoint_sha256 is not None,
@@ -2667,7 +2837,9 @@ def review_personal_day(
             saved_replay_approved, show_selected_action,
             include_result_acceptance_evidence,
             acceptance_evidence_document is not None,
-            expected_acceptance_evidence_sha256 is not None)):
+            expected_acceptance_evidence_sha256 is not None,
+            include_source_context, include_saved_catalog,
+            any(v is not None for v in catalog_inputs))):
         raise WorkSessionRefused("Select one task before requesting a personal day focus")
     if task is not None and (
             type(task) is not str or not workbench._TASK_KEY.fullmatch(task)):
@@ -2710,6 +2882,7 @@ def review_personal_day(
                     "REVIEW_EXISTING_TASK_ONLY", "INSPECT_HISTORICAL_RESULT_ONLY"}):
             raise WorkSessionRefused("Malformed original task choice")
     selection = None
+    source_context = None
     focus_kind = None
     if task is not None:
         focus_kind = ("SAVED_COMPLETED_RESULT" if saved_snapshot_sha256 is not None
@@ -2747,6 +2920,39 @@ def review_personal_day(
                 or any(selection.get(k) is not v
                        for k, v in _journey_holds().items())):
             raise WorkSessionRefused("Original selected day journey changed")
+        if include_source_context:
+            source_context = _review_personal_day_source_context(
+                desk, task, selection,
+                project_root=project_root, project_key=project_key,
+                result_file=result_file, include_saved_catalog=include_saved_catalog,
+                saved_catalog_store=saved_catalog_store,
+                saved_catalog_source_id=saved_catalog_source_id,
+                expected_saved_catalog_sha256=expected_saved_catalog_sha256,
+                expected_saved_catalog_revision=expected_saved_catalog_revision)
+            # A late original-owner result and task recheck remains non-atomic.
+            fresh = review_workday_journey(
+                desk, task, project_root=project_root, project_key=project_key,
+                result_file=result_file,
+                expected_checkpoint_sha256=(selection["checkpoint_sha256"]
+                                            if result_file is not None
+                                            else expected_checkpoint_sha256),
+                show_selected_action=show_selected_action,
+                include_result_acceptance_evidence=include_result_acceptance_evidence,
+                acceptance_evidence_document=acceptance_evidence_document,
+                expected_acceptance_evidence_sha256=expected_acceptance_evidence_sha256)
+            if handoff._exact_json(fresh) != handoff._exact_json(selection):
+                raise WorkSessionRefused("Original day result changed during source review")
+            if include_saved_catalog:
+                recent = _selected_saved_catalog_summary(
+                    saved_catalog_store, saved_catalog_source_id, project_key)
+                selected_saved = source_context["original_167_saved_catalog"]
+                if (recent["catalog_document_sha256"]
+                        != selected_saved["catalog_document_sha256"]
+                        or recent["saved_catalog_revision"] != selected_saved["revision"]
+                        or recent["selected_source_id"] != selected_saved["source_id"]):
+                    raise WorkSessionRefused("Original saved catalog changed during day")
+                if _selected_project_adoption_preview(project_root).get("report") != source_context["original_168_project_intake_report"]:
+                    raise WorkSessionRefused("Project intake changed during catalog close")
     # Neither this nor the original owner's closing reads are OS-atomic;
     # any ordinary observable drift refuses rather than claiming a current view.
     if (handoff._exact_json(propose_chairman_turn(desk))
@@ -2770,6 +2976,8 @@ def review_personal_day(
         "selected_task_key_claimed": task,
         "selected_choice_kind": focus_kind,
         "selected_original_journey": selection,
+        "source_context_selected_explicitly": include_source_context,
+        "selected_original_source_context": source_context,
         "original_chairman_source_only": True,
         "historical_saved_result_current_by_default": False,
         "digest_authenticates_user_or_host": False,
@@ -2799,7 +3007,8 @@ def render_personal_day(packet: dict[str, Any]) -> str:
             or packet.get("native_claude_or_hooks_executed") is not False
             or packet.get("database_contacted") is not False
             or type(packet.get("original_offered_choices")) is not list
-            or not 0 <= len(packet["original_offered_choices"]) <= 54):
+            or not 0 <= len(packet["original_offered_choices"]) <= 54
+            or type(packet.get("source_context_selected_explicitly")) is not bool):
         raise WorkSessionRefused("Personal day text contract refused")
     lines = [
         "Vres-OS PERSONAL DAY -- ONE CHAIRMAN -- READ ONLY",
@@ -2831,8 +3040,52 @@ def render_personal_day(packet: dict[str, Any]) -> str:
                    != packet["selected_original_journey"].get("task_key_claimed")):
             raise WorkSessionRefused("Selected day journey not bound")
         lines.append(render_workday_journey(packet["selected_original_journey"]))
+        context = packet.get("selected_original_source_context")
+        if packet["source_context_selected_explicitly"]:
+            if (type(context) is not dict
+                    or context.get("schema") != PERSONAL_DAY_CONTEXT_SCHEMA
+                    or context.get("status")
+                       != "READ_ONLY_SELECTED_ORIGINAL_PROJECT_SOURCE_CONTEXT"
+                    or context.get("task_key_claimed")
+                       != packet["selected_task_key_claimed"]
+                    or context.get("selected_note_sha256")
+                       != packet["selected_original_journey"]["selected_note_sha256"]
+                    or context.get("selected_project_binding_sha256")
+                       != packet["selected_original_journey"]["selected_project_binding_sha256"]
+                    or context.get("original_168_project_activation_performed") is not False
+                    or context.get("original_167_live_freshness_verified") is not False
+                    or context.get("original_176_live_memory_eligibility_or_promotion") is not False
+                    or context.get("original_174_protected_fable_granted") is not False
+                    or context.get("database_contacted") is not False
+                    or context.get("native_claude_or_hooks_executed") is not False
+                    or context.get("writes_performed") is not False
+                    or type(context.get("original_168_project_intake_report")) is not str
+                    or len(context["original_168_project_intake_report"]) > 8192
+                    or not context["original_168_project_intake_report"].startswith(
+                        "Vres-OS PERSONAL — READ-ONLY PROJECT INTAKE\n")):
+                raise WorkSessionRefused("Untrusted selected project source context")
+            lines.append("Selected original project/source context (NOT authority):")
+            lines.append(context["original_168_project_intake_report"])
+            catalog = context["original_167_saved_catalog"]
+            if catalog is not None:
+                lines.append("Saved #167 source: " + catalog["source_id"]
+                             + "; revision: " + str(catalog["revision"])
+                             + "; status: " + catalog["snapshot_status"]
+                             + "; LIVE FRESHNESS NOT VERIFIED.")
+                lines.append("Joint source-context SHA-256: "
+                             + context["joint_saved_context_sha256"])
+            source = context["original_176_result_source_link"]
+            if source is not None:
+                lines.append("#176 source-only result link SHA-256: "
+                             + source["source_link_sha256"]
+                             + " (NO eligible memory / trust or revocation check).")
+            lines.append("No adoption, credential, DB, native host or Fable authority.")
+        elif context is not None:
+            raise WorkSessionRefused("Unselected source context cannot be rendered")
     else:
-        if packet.get("selected_original_journey") is not None:
+        if (packet.get("selected_original_journey") is not None
+                or packet.get("selected_original_source_context") is not None
+                or packet["source_context_selected_explicitly"]):
             raise WorkSessionRefused("Unselected day cannot contain a journey")
         lines.append("Choose one exact task; use its saved snapshot digest for history.")
     lines.append("No automatic task, project, approval, memory, DB, host or Windows action.")
@@ -2889,7 +3142,7 @@ def _saved_catalog_cli_options(args: argparse.Namespace) -> dict[str, Any]:
     if not args.include_saved_catalog:
         if any(value is not None for value in fields):
             raise WorkSessionRefused("Selected catalog requires explicit opt-in")
-        return {"include_experience_provenance": args.include_experience_provenance}
+        return {"include_experience_provenance": getattr(args, "include_experience_provenance", False)}
     if any(value is None for value in fields):
         raise WorkSessionRefused("Complete selected saved catalog identity required")
     # Import the original filesystem owner only after explicit opt-in; no
@@ -2903,7 +3156,7 @@ def _saved_catalog_cli_options(args: argparse.Namespace) -> dict[str, Any]:
         "saved_catalog_source_id": args.saved_catalog_source_id,
         "expected_saved_catalog_sha256": args.expected_saved_catalog_sha256,
         "expected_saved_catalog_revision": args.expected_saved_catalog_revision,
-        "include_experience_provenance": args.include_experience_provenance,
+        "include_experience_provenance": getattr(args, "include_experience_provenance", False),
     }
 
 
@@ -3063,6 +3316,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             sub.add_argument("--legacy-review-snapshot-token")
             sub.add_argument("--legacy-review-target", action="append", nargs=2)
             sub.add_argument("--include-legacy-rollback-evidence", action="store_true")
+        if name == "day":
+            sub.add_argument("--include-source-context", action="store_true")
+            sub.add_argument("--include-saved-catalog", action="store_true")
+            sub.add_argument("--saved-catalog-root")
+            sub.add_argument("--saved-catalog-namespace")
+            sub.add_argument("--saved-catalog-source-id")
+            sub.add_argument("--expected-saved-catalog-sha256")
+            sub.add_argument("--expected-saved-catalog-revision", type=int)
         if name in ("journey", "day"):
             sub.add_argument("--project-root")
             sub.add_argument("--project-key")
@@ -3174,6 +3435,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 raise WorkSessionRefused("Synthetic global input changed before display")
         elif args.command in ("journey", "day"):
             acceptance_options = _result_acceptance_cli_options(args)
+            day_source_options = {}
+            if args.command == "day":
+                day_source_options = _saved_catalog_cli_options(args)
+                day_source_options.pop("include_experience_provenance", None)
+                day_source_options["include_source_context"] = args.include_source_context
             view = (review_personal_day if args.command == "day"
                     else review_workday_journey)
             packet = view(
@@ -3185,7 +3451,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 check_saved_current=args.check_saved_current,
                 saved_replay_approved=args.yes,
                 show_selected_action=args.show_selected_action,
-                **acceptance_options)
+                **acceptance_options, **day_source_options)
             if args.include_result_acceptance_evidence and (
                     _read_selected_chairman_source(
                         args.result_acceptance_evidence_file, maximum=32 * 1024)
