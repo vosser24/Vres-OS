@@ -1,0 +1,59 @@
+# One-shot *source export only*. No product module imports or tests.
+# Never use ordinary CI: it enables PostgreSQL on PRs.
+name: Personal isolated exact-source export (no DB, no native)
+on:
+  push:
+    branches:
+      - feature/personal-offline-source-export-20261113
+permissions:
+  contents: read
+jobs:
+  source-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      VRES_ALLOW_TEST_DB: '0'
+      VRES_TEST_DATABASE_URL: ''
+      PYTHONNOUSERSITE: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+      GIT_CONFIG_NOSYSTEM: '1'
+    steps:
+      - name: Read disposable GitHub checkout without persisted credentials
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 3
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - name: Verify source parent/tree, exact one-file helper delta, and export pinned commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/feature/personal-offline-source-export-20261113"
+          test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD^)" = "d1ef9cae164081647ae051ae1ab7eda4c85a1478"
+          test "$(git rev-parse HEAD^^)" = "37e41e536c059836e8c9b74fdd9966c0edb6e9cc"
+          test "$(git rev-parse d1ef9cae164081647ae051ae1ab7eda4c85a1478^{tree})" = "1b965db8f2a30e49fb08fce46049919f9cb97d36"
+          test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/personal-pinned-source-export-20261113.yml"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git archive --format=zip --output="$RUNNER_TEMP/vres-source-d1ef9cae.zip" d1ef9cae164081647ae051ae1ab7eda4c85a1478
+          python3 -I -S -B - <<'PY'
+          import hashlib
+          from pathlib import Path
+          from zipfile import ZipFile
+          source = Path(__import__('os').environ['RUNNER_TEMP']) / 'vres-source-d1ef9cae.zip'
+          with ZipFile(source) as zipped:
+              names = zipped.namelist()
+              assert 'src/vres_os/personal_work_session.py' in names
+              assert 'tests/test_personal_work_session.py' in names
+              assert len(names) > 500
+          print('SOURCE_EXPORT=PASS; SHA256=' + hashlib.sha256(source.read_bytes()).hexdigest())
+          print('NO_PRODUCT_IMPORTS_NO_DATABASE_NO_NATIVE_CLAUDE')
+          PY
+      - name: Upload disposable one-day exact source ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: vres-pinned-full-source-d1ef9cae
+          path: ${{ runner.temp }}/vres-source-d1ef9cae.zip
+          retention-days: 1
+          if-no-files-found: error
