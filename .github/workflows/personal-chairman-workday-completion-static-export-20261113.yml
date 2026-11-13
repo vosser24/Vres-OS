@@ -27,13 +27,13 @@ jobs:
           set -euo pipefail
           test "$GITHUB_REF" = "refs/heads/feature/personal-chairman-workday-completion-static-export-20261113"
           test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
-          test "$(git rev-parse HEAD^)" = "60a07eb623c5b7626d7284f8e6e3aaa3e83fafb0"
-          test "$(git rev-parse HEAD^^)" = "510f2317ec96cd49302bcbf7f21f33983960eb38"
-          test "$(git rev-parse HEAD^^{tree})" = "c73ab70e3b5c53132dc3192a601ee3db4e31be63"
+          test "$(git rev-parse HEAD^)" = "a8a43ef47e4d54814b4ca11270fed3ca9b79d1c7"
+          test "$(git rev-parse HEAD^^)" = "60a07eb623c5b7626d7284f8e6e3aaa3e83fafb0"
+          test "$(git rev-parse HEAD^^^{tree})" = "356f0f4cf92b627ec3aebc8ee728a8afb7be0e6c"
           test "$(git rev-parse HEAD^{tree})" != "356f0f4cf92b627ec3aebc8ee728a8afb7be0e6c"
           test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/personal-chairman-workday-completion-static-export-20261113.yml"
           test -z "$(git status --porcelain --untracked-files=all)"
-          git archive --format=zip --output="$RUNNER_TEMP/vres-source-60a07eb.zip" HEAD^
+          git archive --format=zip --output="$RUNNER_TEMP/vres-source-60a07eb.zip" HEAD^^
           python3 -I -S -B - <<'PY'
           from pathlib import Path
           from zipfile import ZipFile
