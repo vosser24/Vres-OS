@@ -459,3 +459,131 @@ def test_one_task_briefing_original_cli_text_json_and_action_optin(tmp_path, cap
     assert "UNTRUSTED TASK ACTION" in shown
     assert "Write a local report" in shown
     assert lifecycle.list_history(ctx[0])["count"] == 0
+
+
+def test_one_chairman_daily_journey_starts_with_task_and_project_only(tmp_path):
+    ctx, opts, _ = _scratch(tmp_path)
+    initial = lifecycle.list_history(ctx[0])
+    task = session.review_workday_journey(ctx[0], ctx[1])
+    assert task["stage"] == "TASK_SELECTED_NO_PROJECT"
+    assert task["checkpoint_sha256"] is None
+    assert task["selected_next_action_untrusted"] is None
+    project = session.review_workday_journey(
+        ctx[0], ctx[1], project_root=ctx[2], project_key=ctx[3])
+    assert project["stage"] == "PROJECT_SELECTED_NO_RESULT"
+    assert len(project["selected_project_binding_sha256"]) == 64
+    assert project["task_completion_approved_or_performed"] is False
+    assert project["original_167_live_catalog_freshness_verified"] is False
+    assert lifecycle.list_history(ctx[0]) == initial
+    assert str(ctx[2]) not in json.dumps(project)
+
+
+def test_one_chairman_daily_journey_derives_result_checkpoint_and_decision(tmp_path):
+    ctx, opts, _ = _scratch(tmp_path)
+    journey = session.review_workday_journey(
+        *ctx[:2], project_root=ctx[2], project_key=ctx[3], result_file=ctx[4])
+    preview = session.prepare_completion_decision(
+        *ctx, expected_checkpoint_sha256=opts["expected_checkpoint_sha256"])
+    assert journey["stage"] == "RESULT_REVIEW_READY_SEPARATE_DECISION"
+    assert journey["checkpoint_sha256"] == opts["expected_checkpoint_sha256"]
+    assert journey["decision_sha256"] == preview["decision_sha256"]
+    assert journey["current_result_sha256"] == preview["result_sha256"]
+    assert journey["result_quality_validated"] is False
+    assert journey["original_174_protected_fable_granted"] is False
+    assert journey["original_176_live_memory_eligibility_or_promotion"] is False
+    assert lifecycle.list_history(ctx[0])["count"] == 0
+    assert "SEPARATE exact DECIDE --yes" in session.render_workday_journey(journey)
+
+
+def test_one_chairman_journey_checklist_gaps_redacted_and_stale_result_denied(tmp_path):
+    ctx, opts, _ = _scratch(tmp_path, statuses=("CLAIMED_GAP", "UNREVIEWED"))
+    kwargs = dict(project_root=ctx[2], project_key=ctx[3], result_file=ctx[4],
+                  include_result_acceptance_evidence=True,
+                  acceptance_evidence_document=opts["acceptance_evidence_document"],
+                  expected_acceptance_evidence_sha256=opts[
+                      "expected_acceptance_evidence_sha256"])
+    packet = session.review_workday_journey(*ctx[:2], **kwargs)
+    assert packet["unresolved_criterion_ids"] == ["C01", "C02"]
+    assert packet["extra_known_gap_acknowledgement_required"] is True
+    assert "SECRET-CHECK" not in json.dumps(packet)
+    assert str(ctx[2]) not in session.render_workday_journey(packet)
+    ctx[4].write_text("# stale result\n", encoding="utf-8")
+    with pytest.raises((session.WorkSessionRefused, ValueError)):
+        session.review_workday_journey(
+            *ctx[:2], expected_checkpoint_sha256=packet["checkpoint_sha256"],
+            **kwargs)
+    assert lifecycle.list_history(ctx[0])["count"] == 0
+
+
+def test_one_chairman_journey_saved_recheck_requires_separate_reopen(tmp_path):
+    ctx, opts, _ = _scratch(tmp_path)
+    done = completion.finish_work(*ctx, **opts)
+    note_sha = done["selected_note_sha256"]
+    historical = session.review_workday_journey(
+        *ctx[:2], saved_snapshot_sha256=note_sha)
+    assert historical["stage"] == "SAVED_HISTORICAL_ONLY"
+    assert historical["historical_result_current_bytes_verified_this_read"] is False
+    with pytest.raises((session.WorkSessionRefused, ValueError)):
+        session.review_workday_journey(
+            *ctx[:2], saved_snapshot_sha256=note_sha,
+            check_saved_current=True, saved_replay_approved=True)
+    assert session.reopen_saved(ctx[0], ctx[1], note_sha, approved=True)["status"] == (
+        "SAVED_WORK_SESSION_TASK_REOPENED")
+    matched = session.review_workday_journey(
+        *ctx[:2], saved_snapshot_sha256=note_sha,
+        check_saved_current=True, saved_replay_approved=True)
+    assert matched["stage"] == "SAVED_CURRENT_BYTES_MATCH_THIS_READ"
+    assert matched["historical_result_current_bytes_verified_this_read"] is True
+    assert matched["original_176_live_memory_eligibility_or_promotion"] is False
+    assert str(ctx[2]) not in json.dumps(matched)
+    assert "SECRET-CHECK" not in json.dumps(matched)
+    ctx[4].write_text("# changed after completion\n", encoding="utf-8")
+    with pytest.raises((session.WorkSessionRefused, ValueError)):
+        session.review_workday_journey(
+            *ctx[:2], saved_snapshot_sha256=note_sha,
+            check_saved_current=True, saved_replay_approved=True)
+    assert lifecycle.list_history(ctx[0])["count"] == 1
+
+
+def test_one_chairman_journey_refuses_mixed_authority_and_implicit_replay(tmp_path):
+    ctx, opts, _ = _scratch(tmp_path)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_workday_journey(
+            *ctx[:2], saved_snapshot_sha256="0" * 64, result_file=ctx[4])
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_workday_journey(
+            *ctx[:2], saved_snapshot_sha256="0" * 64,
+            check_saved_current=True)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_workday_journey(
+            *ctx[:2], saved_snapshot_sha256="0" * 64,
+            saved_replay_approved=True)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_workday_journey(
+            *ctx[:2], include_result_acceptance_evidence=True)
+    with pytest.raises((session.WorkSessionRefused, ValueError)):
+        session.review_workday_journey(
+            *ctx[:2], project_root=ctx[2], project_key=ctx[3],
+            result_file=ctx[4], expected_checkpoint_sha256="0" * 64)
+    assert lifecycle.list_history(ctx[0])["count"] == 0
+
+
+def test_one_chairman_journey_original_cli_text_and_json(tmp_path, capsys):
+    ctx, opts, _ = _scratch(tmp_path)
+    base = ["--desk", str(ctx[0]), "--task-key", ctx[1]]
+    assert cli.main(["work-session", "journey", *base]) == 0
+    hidden = capsys.readouterr().out
+    assert "WORKDAY JOURNEY" in hidden and "Task action hidden" in hidden
+    assert cli.main(["work-session", "journey", *base,
+                     "--project-root", str(ctx[2]), "--project-key", ctx[3],
+                     "--result-file", str(ctx[4]), "--format", "json"]) == 0
+    packet = json.loads(capsys.readouterr().out)
+    assert packet["stage"] == "RESULT_REVIEW_READY_SEPARATE_DECISION"
+    assert packet["decision_sha256"] and packet["writes_performed"] is False
+    assert packet["selected_next_action_untrusted"] is None
+    assert cli.main(["work-session", "journey", *base,
+                     "--show-selected-action"]) == 0
+    shown = capsys.readouterr().out
+    assert "UNTRUSTED TASK ACTION" in shown
+    assert str(ctx[2]) not in hidden + shown
+    assert lifecycle.list_history(ctx[0])["count"] == 0

@@ -85,6 +85,18 @@ Usage: python -I -S -B personal_desk_cli.py COMMAND [command options]
             Global/project adoption, KEEP/DROP and rollback are NOT applied.
             Saved #167 metadata is NOT live database freshness;
             #176 result-source preview is NOT eligible reusable memory
+            NEW: one READ-ONLY practical daily journey from active task
+            to explicit project/result review, exact completion decision,
+            and separately reopened saved-result current-byte verification.
+            journey --desk ABS --task-key TASK-*
+            [--project-root ABS --project-key project:* [--result-file ABS]]
+            [--expected-checkpoint-sha256 HEX] [--format text|json]
+            [--show-selected-action] [same optional acceptance fixture/SHA]
+            OR journey --desk ABS --task-key TASK-*
+            --saved-snapshot-sha256 HEX [--check-saved-current --yes]
+            No manual result checkpoint relay needed for a first read.
+            Saving requires DIFFERENT decide --yes. Saved replay first
+            requires DIFFERENT reopen --yes. NEVER auto-reopen/activate.
             NEW: one READ-ONLY completion briefing across original workday,
             current result, saved history and exact Chairman decision:
             briefing --desk ABS --task-key TASK-* --project-root ABS

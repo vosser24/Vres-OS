@@ -2340,6 +2340,293 @@ def render_completion_briefing(packet: dict[str, Any]) -> str:
     ])
     return "\n".join(lines)
 
+# One daily-use view over the ORIGINAL Chairman/workday/result/history owners.
+# This is a source-only read, not a second state machine or an approval surface.
+WORKDAY_JOURNEY_SCHEMA = "vres-personal-one-chairman-workday-journey/1"
+
+
+def review_workday_journey(
+    desk: str | Path, task: str, *,
+    project_root: str | Path | None = None,
+    project_key: str | None = None,
+    result_file: str | Path | None = None,
+    expected_checkpoint_sha256: str | None = None,
+    saved_snapshot_sha256: str | None = None,
+    check_saved_current: bool = False,
+    saved_replay_approved: bool = False,
+    show_selected_action: bool = False,
+    include_result_acceptance_evidence: bool = False,
+    acceptance_evidence_document: bytes | None = None,
+    expected_acceptance_evidence_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Read one explicit daily task at planning, result, or saved-replay stage.
+
+    A live result's checkpoint is calculated inside this one view, instead of
+    asking the operator to run a separate result command and relay its hash.
+    Completing, reopening and saved-path access still need their own explicit
+    original-owner actions. No background selection or project discovery.
+    """
+    if (type(task) is not str or not workbench._TASK_KEY.fullmatch(task)
+            or type(show_selected_action) is not bool
+            or type(check_saved_current) is not bool
+            or type(saved_replay_approved) is not bool
+            or type(include_result_acceptance_evidence) is not bool
+            or (project_root is None) != (project_key is None)):
+        raise WorkSessionRefused("One explicit task and valid journey choices required")
+    if saved_snapshot_sha256 is not None:
+        if (type(saved_snapshot_sha256) is not str
+                or not workbench._SHA.fullmatch(saved_snapshot_sha256)
+                or project_root is not None or result_file is not None
+                or expected_checkpoint_sha256 is not None
+                or show_selected_action or include_result_acceptance_evidence
+                or acceptance_evidence_document is not None
+                or expected_acceptance_evidence_sha256 is not None
+                or check_saved_current is not saved_replay_approved):
+            raise WorkSessionRefused("Saved history cannot be mixed with active result")
+        home = review_workday(desk, selected_task=task,
+                              snapshot_sha256=saved_snapshot_sha256)
+        saved = home["selected_review"]
+        if (home.get("writes_performed") is not False
+                or saved is None
+                or saved.get("kind") != "EXPLICIT_SAVED_COMPLETED_SNAPSHOT"
+                or saved.get("note_sha256") != saved_snapshot_sha256
+                or saved.get("saved_result_is_historical_not_current") is not True
+                or saved.get("current_document_bytes_verified") is not False):
+            raise WorkSessionRefused("Original saved result is not historical-only")
+        current = None
+        if check_saved_current:
+            # This opt-in reads the exact ORIGINAL saved path only AFTER a
+            # separately approved original `reopen --yes` has succeeded.
+            current = replay_saved(desk, task, saved_snapshot_sha256, approved=True)
+            if (current.get("status") != "SAVED_WORK_SESSION_EXACT_CONTEXT_REPLAY_MATCH"
+                    or current.get("writes_performed") is not False
+                    or current.get("current_result_bytes_matched_in_this_read") is not True
+                    or current.get("future_document_bytes_guaranteed_unchanged") is not False
+                    or current.get("checkpoint_sha256") != saved["saved_checkpoint_sha256"]
+                    or current.get("result_sha256") != saved["saved_result_sha256"]):
+                raise WorkSessionRefused("Original saved bytes did not revalidate")
+        # A cooperative closing snapshot is not same-user-race protection.
+        if handoff._exact_json(review_workday(
+                desk, selected_task=task, snapshot_sha256=saved_snapshot_sha256)) != handoff._exact_json(home):
+            raise WorkSessionRefused("Saved history changed during journey")
+        stage = ("SAVED_CURRENT_BYTES_MATCH_THIS_READ" if current is not None
+                 else "SAVED_HISTORICAL_ONLY")
+        return {
+            "schema": WORKDAY_JOURNEY_SCHEMA,
+            "status": "READ_ONLY_ORIGINAL_ONE_CHAIRMAN_WORKDAY_JOURNEY",
+            "stage": stage,
+            "task_key_claimed": task,
+            "active_task_count": home["active_count"],
+            "historical_completed_snapshots_for_selected_task": sum(
+                row["state"] == "completed" and row["task_key_claimed"] == task
+                for row in home["saved_history"]),
+            "selected_note_sha256": saved_snapshot_sha256,
+            "selected_project_binding_sha256": None,
+            "current_result_sha256": None,
+            "checkpoint_sha256": saved["saved_checkpoint_sha256"],
+            "decision_sha256": None,
+            "saved_result_sha256": saved["saved_result_sha256"],
+            "saved_snapshot_sha256": saved_snapshot_sha256,
+            "selected_next_action_disclosed": False,
+            "selected_next_action_untrusted": None,
+            "acceptance_claims_state": saved["saved_acceptance_claims_state"],
+            "unresolved_criterion_ids": [],
+            "extra_known_gap_acknowledgement_required": False,
+            "historical_result_current_bytes_verified_this_read": current is not None,
+            "next_safe_step": (
+                "Current saved result bytes matched this read only. Review manually; "
+                "do not treat historical claims as quality or reusable memory."
+                if current is not None else
+                "Historical record only. Separately approve original reopen --yes, "
+                "then request --check-saved-current --yes to recheck saved bytes."),
+            **_journey_holds(),
+        }
+    if (check_saved_current or saved_replay_approved or result_file is not None
+            and project_root is None or expected_checkpoint_sha256 is not None
+            and result_file is None or include_result_acceptance_evidence
+            and result_file is None or acceptance_evidence_document is not None
+            and result_file is None or expected_acceptance_evidence_sha256 is not None
+            and result_file is None):
+        raise WorkSessionRefused("Active journey requires an exact compatible selection")
+    if result_file is None:
+        home = review_workday(
+            desk, selected_task=task, show_selected_action=show_selected_action,
+            project_root=project_root, project_key=project_key)
+        selected = home["selected_review"]
+        if (home.get("writes_performed") is not False
+                or home.get("manual_revision_recovery_attention_required") is not False
+                or selected is None or selected.get("kind") != "EXPLICIT_ACTIVE_TASK"
+                or selected.get("task_key_claimed") != task):
+            raise WorkSessionRefused("Original active task unavailable")
+        return {
+            "schema": WORKDAY_JOURNEY_SCHEMA,
+            "status": "READ_ONLY_ORIGINAL_ONE_CHAIRMAN_WORKDAY_JOURNEY",
+            "stage": "PROJECT_SELECTED_NO_RESULT" if project_root is not None else "TASK_SELECTED_NO_PROJECT",
+            "task_key_claimed": task,
+            "active_task_count": home["active_count"],
+            "historical_completed_snapshots_for_selected_task": sum(
+                row["state"] == "completed" and row["task_key_claimed"] == task
+                for row in home["saved_history"]),
+            "selected_note_sha256": selected["note_sha256"],
+            "selected_project_binding_sha256": selected["selected_project_binding_sha256"],
+            "current_result_sha256": None,
+            "checkpoint_sha256": None,
+            "decision_sha256": None,
+            "saved_result_sha256": None,
+            "saved_snapshot_sha256": None,
+            "selected_next_action_disclosed": show_selected_action,
+            "selected_next_action_untrusted": (
+                selected["selected_next_action_untrusted"] if show_selected_action else None),
+            "acceptance_claims_state": "NO_RESULT_REVIEWED",
+            "unresolved_criterion_ids": [],
+            "extra_known_gap_acknowledgement_required": False,
+            "historical_result_current_bytes_verified_this_read": False,
+            "next_safe_step": (
+                "Select one explicit project and result document; no work is auto-started."
+                if project_root is None else
+                "Work on the selected project manually, then choose one result file "
+                "for digest-only review. No task is auto-completed."),
+            **_journey_holds(),
+        }
+    # Exact task/project/file bytes are observed but not considered validated.
+    first = result.inspect_work_result(
+        desk, task, project_root, project_key, result_file,
+        expected_checkpoint_sha256=expected_checkpoint_sha256,
+        show_selected_action=show_selected_action)
+    if (first.get("status") not in (
+            "RESULT_BYTES_OBSERVED_UNVALIDATED", "RESULT_EXACT_CONTEXT_CHECKPOINT_MATCH")
+            or first.get("files_written") is not False
+            or first.get("result_quality_validated") is not False):
+        raise WorkSessionRefused("Original result inspection denied")
+    checkpoint = first["checkpoint_sha256"]
+    briefing = prepare_completion_briefing(
+        desk, task, project_root, project_key, result_file,
+        expected_checkpoint_sha256=checkpoint,
+        show_selected_action=show_selected_action,
+        include_result_acceptance_evidence=include_result_acceptance_evidence,
+        acceptance_evidence_document=acceptance_evidence_document,
+        expected_acceptance_evidence_sha256=expected_acceptance_evidence_sha256)
+    closing = result.inspect_work_result(
+        desk, task, project_root, project_key, result_file,
+        expected_sha256=first["result_sha256"],
+        expected_checkpoint_sha256=checkpoint,
+        show_selected_action=show_selected_action)
+    if (closing.get("status") != "RESULT_EXACT_CONTEXT_CHECKPOINT_MATCH"
+            or closing["checkpoint_sha256"] != briefing["checkpoint_sha256"]
+            or closing["result_sha256"] != briefing["current_result_sha256"]
+            or closing["work_brief"]["project_binding_sha256"]
+               != briefing["selected_project_binding_sha256"]
+            or closing["work_brief"]["scratch_handoff"]["selected_note_sha256"]
+               != briefing["selected_note_sha256"]):
+        raise WorkSessionRefused("Workday/result changed during journey")
+    return {
+        "schema": WORKDAY_JOURNEY_SCHEMA,
+        "status": "READ_ONLY_ORIGINAL_ONE_CHAIRMAN_WORKDAY_JOURNEY",
+        "stage": "RESULT_REVIEW_READY_SEPARATE_DECISION",
+        "task_key_claimed": task,
+        "active_task_count": briefing["active_task_count"],
+        "historical_completed_snapshots_for_selected_task": briefing[
+            "historical_completed_snapshots_for_selected_task"],
+        "selected_note_sha256": briefing["selected_note_sha256"],
+        "selected_project_binding_sha256": briefing["selected_project_binding_sha256"],
+        "current_result_sha256": briefing["current_result_sha256"],
+        "checkpoint_sha256": checkpoint,
+        "decision_sha256": briefing["decision_sha256"],
+        "saved_result_sha256": None,
+        "saved_snapshot_sha256": None,
+        "selected_next_action_disclosed": show_selected_action,
+        "selected_next_action_untrusted": briefing["selected_next_action_untrusted"],
+        "acceptance_claims_state": briefing["acceptance_claims_state"],
+        "unresolved_criterion_ids": briefing["unresolved_criterion_ids"],
+        "extra_known_gap_acknowledgement_required": briefing[
+            "extra_known_gap_acknowledgement_required"],
+        "historical_result_current_bytes_verified_this_read": False,
+        "next_safe_step": (
+            "Manually review unresolved criterion IDs; finishing separately requires "
+            "exact DECIDE --yes AND additional --accept-with-known-gaps."
+            if briefing["extra_known_gap_acknowledgement_required"] else
+            "Manually verify the work result; a SEPARATE exact DECIDE --yes "
+            "is required to finish into original immutable history."),
+        **_journey_holds(),
+    }
+
+
+def _journey_holds() -> dict[str, bool]:
+    """The unified UX must never mint protected or mutation authority."""
+    return {
+        "one_existing_chairman_source_only": True,
+        "digest_authenticates_user_or_host": False,
+        "result_quality_validated": False,
+        "task_completion_approved_or_performed": False,
+        "task_reopened_or_result_replayed_automatically": False,
+        "saved_future_result_bytes_guaranteed": False,
+        "original_166_168_adoption_activation_or_rollback_performed": False,
+        "original_167_live_catalog_freshness_verified": False,
+        "original_174_protected_fable_granted": False,
+        "original_176_live_memory_eligibility_or_promotion": False,
+        "native_claude_or_hooks_executed": False,
+        "database_contacted": False,
+        "writes_performed": False,
+        "new_store_created": False,
+        "installed_vres_modified": False,
+    }
+
+
+def render_workday_journey(packet: dict[str, Any]) -> str:
+    """Minimal readable one-task journey; never render saved external paths."""
+    if (type(packet) is not dict
+            or packet.get("schema") != WORKDAY_JOURNEY_SCHEMA
+            or packet.get("status") != "READ_ONLY_ORIGINAL_ONE_CHAIRMAN_WORKDAY_JOURNEY"
+            or packet.get("stage") not in (
+                "TASK_SELECTED_NO_PROJECT", "PROJECT_SELECTED_NO_RESULT",
+                "RESULT_REVIEW_READY_SEPARATE_DECISION",
+                "SAVED_HISTORICAL_ONLY", "SAVED_CURRENT_BYTES_MATCH_THIS_READ")
+            or type(packet.get("task_key_claimed")) is not str
+            or not workbench._TASK_KEY.fullmatch(packet["task_key_claimed"])
+            or any(packet.get(key) is not value for key, value in _journey_holds().items())
+            or type(packet.get("next_safe_step")) is not str
+            or type(packet.get("selected_next_action_disclosed")) is not bool):
+        raise WorkSessionRefused("Daily journey text contract refused")
+    lines = [
+        "Vres-OS ONE CHAIRMAN WORKDAY JOURNEY -- READ ONLY",
+        "Selected task: " + packet["task_key_claimed"],
+        "Stage: " + packet["stage"],
+        "Active tasks: " + str(packet["active_task_count"])
+        + "; historical completed snapshots for task (undated): "
+        + str(packet["historical_completed_snapshots_for_selected_task"]),
+    ]
+    if packet["selected_next_action_disclosed"]:
+        lines.append("UNTRUSTED TASK ACTION (not executable): " + json.dumps(
+            packet["selected_next_action_untrusted"], ensure_ascii=True))
+    else:
+        lines.append("Task action hidden unless explicitly disclosed.")
+    if packet["selected_project_binding_sha256"] is not None:
+        lines.append("Selected project binding: " + packet["selected_project_binding_sha256"])
+    if packet["current_result_sha256"] is not None:
+        lines.append("Observed current result SHA-256: " + packet["current_result_sha256"])
+    if packet["checkpoint_sha256"] is not None:
+        lines.append("Exact task/result checkpoint SHA-256: " + packet["checkpoint_sha256"])
+    if packet["decision_sha256"] is not None:
+        lines.append("Read-only completion decision SHA-256: " + packet["decision_sha256"])
+        lines.append("Acceptance: " + packet["acceptance_claims_state"]
+                     + " (caller claims, never independently validated)")
+    if packet["unresolved_criterion_ids"]:
+        lines.append("Unresolved checklist IDs: " + json.dumps(
+            packet["unresolved_criterion_ids"], ensure_ascii=True))
+    if packet["saved_result_sha256"] is not None:
+        lines.append("Historical saved result SHA-256: " + packet["saved_result_sha256"])
+        lines.append("Saved external bytes current at this read: " + str(
+            packet["historical_result_current_bytes_verified_this_read"]))
+        if packet["acceptance_claims_state"] is not None:
+            lines.append("Historical self-claims: " + packet["acceptance_claims_state"]
+                         + " (NOT quality or memory eligibility)")
+    lines.extend([
+        "Next: " + packet["next_safe_step"],
+        "No automatic selection, completion, reopen, adoption, memory reuse, host, DB or writes.",
+        "Checks are cooperative, not atomic; digest is not identity/quality proof.",
+    ])
+    return "\n".join(lines)
+
 
 def _read_selected_chairman_source(path: str, *, maximum: int) -> bytes:
     # Read only a user-selected bounded regular file, never profile discovery.
@@ -2524,7 +2811,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = _SafeParser(
         description="Internal source-only personal workflow over original task owners")
     subs = parser.add_subparsers(dest="command", required=True)
-    for name in ("home", "start", "review", "finish", "reopen", "replay", "propose", "select", "decision", "decide", "briefing"):
+    for name in ("home", "start", "review", "finish", "reopen", "replay", "propose", "select", "decision", "decide", "briefing", "journey"):
         sub = subs.add_parser(name)
         sub.add_argument("--desk", required=True)
         sub.add_argument("--task-key", required=(name not in ("home", "propose")))
@@ -2565,6 +2852,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             sub.add_argument("--legacy-review-snapshot-token")
             sub.add_argument("--legacy-review-target", action="append", nargs=2)
             sub.add_argument("--include-legacy-rollback-evidence", action="store_true")
+        if name == "journey":
+            sub.add_argument("--project-root")
+            sub.add_argument("--project-key")
+            sub.add_argument("--result-file")
+            sub.add_argument("--expected-checkpoint-sha256")
+            sub.add_argument("--saved-snapshot-sha256")
+            sub.add_argument("--check-saved-current", action="store_true")
+            sub.add_argument("--yes", action="store_true")
+            sub.add_argument("--show-selected-action", action="store_true")
+            sub.add_argument("--format", choices=("text", "json"), default="text")
+            sub.add_argument("--include-result-acceptance-evidence", action="store_true")
+            sub.add_argument("--result-acceptance-evidence-file")
+            sub.add_argument("--expected-result-acceptance-evidence-sha256")
         if name in ("decision", "decide", "briefing"):
             sub.add_argument("--project-root", required=True)
             sub.add_argument("--project-key", required=True)
@@ -2661,6 +2961,23 @@ def main(argv: Sequence[str] | None = None) -> int:
                         args.synthetic_global_inventory_file, maximum=64 * 1024)
                     != adoption_options["synthetic_global_inventory_document"]):
                 raise WorkSessionRefused("Synthetic global input changed before display")
+        elif args.command == "journey":
+            acceptance_options = _result_acceptance_cli_options(args)
+            packet = review_workday_journey(
+                args.desk, args.task_key,
+                project_root=args.project_root, project_key=args.project_key,
+                result_file=args.result_file,
+                expected_checkpoint_sha256=args.expected_checkpoint_sha256,
+                saved_snapshot_sha256=args.saved_snapshot_sha256,
+                check_saved_current=args.check_saved_current,
+                saved_replay_approved=args.yes,
+                show_selected_action=args.show_selected_action,
+                **acceptance_options)
+            if args.include_result_acceptance_evidence and (
+                    _read_selected_chairman_source(
+                        args.result_acceptance_evidence_file, maximum=32 * 1024)
+                    != acceptance_options["acceptance_evidence_document"]):
+                raise WorkSessionRefused("Acceptance fixture changed before display")
         elif args.command in ("decision", "decide", "briefing"):
             acceptance_options = _result_acceptance_cli_options(args)
             options = dict(
@@ -2725,6 +3042,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(render_workday(packet))
         elif args.command == "briefing" and args.format == "text":
             print(render_completion_briefing(packet))
+        elif args.command == "journey" and args.format == "text":
+            print(render_workday_journey(packet))
         else:
             print(json.dumps(packet, sort_keys=True, ensure_ascii=True))
     except Exception:
