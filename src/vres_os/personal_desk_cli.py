@@ -60,6 +60,13 @@ Usage: python -I -S -B personal_desk_cli.py COMMAND [command options]
             [--kind ACTIVE_TASK|SAVED_COMPLETED_RESULT]
             [--project-root ABS --project-key project:* --result-file ABS
             --expected-checkpoint-sha256 HEX]
+            [--include-saved-catalog --saved-catalog-root ABS
+            --saved-catalog-namespace ID --saved-catalog-source-id ID
+            --expected-saved-catalog-sha256 HEX
+            --expected-saved-catalog-revision N]
+            [--include-experience-provenance with exact result]
+            Saved #167 metadata is NOT live database freshness;
+            #176 result-source preview is NOT eligible reusable memory
             Uses original tasks/results; NEVER host authority or auto-completion
             Internal one-task start/review/finish/reopen/replay
             start --desk ABS --task-key TASK-* --note-file ABS

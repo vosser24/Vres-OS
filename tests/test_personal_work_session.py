@@ -2000,3 +2000,197 @@ def test_chairman_conversation_existing_cli_rejects_invalid_and_stale_selection(
             kind='ACTIVE_TASK', approved=True)
     assert lifecycle.list_history(selected)['count'] == 0
     assert result.inspect_work_result(*ctx)['checkpoint_sha256'] == token
+
+
+# #165 selected single-Chairman journey carries original #167 saved catalog
+# and #176 result-source candidate. No DB, credential lookup, memory reuse,
+# host authority, background work or hidden user event.
+
+
+def _governed_choice_kwargs(tmp_path, ctx):
+    selected, task, project, key, document = ctx
+    store, sid, metadata_calls = _saved_catalog_for_session(tmp_path, key)
+    _, revision, digest = store.load_saved_snapshot()
+    offered = session.propose_chairman_turn(selected)
+    assert offered["choices"][0]["kind"] == "ACTIVE_TASK"
+    kwargs = {
+        "proposal_sha256": offered["proposal_sha256"],
+        "task": task,
+        "selected_note_sha256": offered["choices"][0]["selected_note_sha256"],
+        "project_root": project,
+        "project_key": key,
+        "approved": True,
+        "include_saved_catalog": True,
+        "saved_catalog_store": store,
+        "saved_catalog_source_id": sid,
+        "expected_saved_catalog_sha256": digest,
+        "expected_saved_catalog_revision": revision,
+    }
+    return kwargs, store, sid, metadata_calls
+
+
+def test_chairman_catalog_first_then_exact_result_source_one_owned_journey(tmp_path):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    kwargs, store, sid, calls = _governed_choice_kwargs(tmp_path, ctx)
+    planning = session.select_chairman_turn(selected, **kwargs)
+    planned = planning["selected_governed_workday_context"]
+    assert planned["status"] == "SOURCE_ONLY_SAVED_CATALOG_WORK_CONTEXT"
+    assert planned["catalog_snapshot_status"] == "NOT_CATALOGUED"
+    assert planned["catalog_freshness"] == "SAVED_SNAPSHOT_ONLY_LIVE_DRIFT_UNCHECKED"
+    assert planned["catalog_project_binding_rechecked"] is True
+    assert planned["experience_reuse_eligible"] is False
+    assert planned["result_source_link_sha256"] is None
+    assert planning["selected_original_owner_review"]["observed_result"] is None
+    asserted = session.select_chairman_turn(
+        selected, **kwargs, result_file=document,
+        expected_checkpoint_sha256=token, include_experience_provenance=True)
+    joint = asserted["selected_governed_workday_context"]
+    assert joint["status"] == "SOURCE_ONLY_SAVED_CATALOG_AND_EXACT_RESULT_CANDIDATE"
+    assert joint["catalog_document_sha256"] == planned["catalog_document_sha256"]
+    assert joint["result_source_bytes_observed_this_review"] is True
+    assert len(joint["result_source_link_sha256"]) == 64
+    assert joint["context_sha256"] != planned["context_sha256"]
+    assert joint["experience_reuse_eligible"] is False
+    assert joint["verified_experience_memory_retrieved"] is False
+    assert joint["database_contacted"] is False
+    assert asserted["trusted_user_event_verified"] is False
+    assert asserted["next_separate_step"] == "SEPARATE_EXPLICIT_FINISH_APPROVAL_STILL_REQUIRED"
+    assert lifecycle.list_history(selected)["count"] == 0
+    assert calls == []
+    serialized = json.dumps(asserted)
+    assert str(store.root) not in serialized
+    assert "example.gr:5432" not in serialized
+    assert "credential-" not in serialized
+    assert str(document) not in serialized
+
+
+def test_chairman_catalog_choice_refuses_implicit_stale_and_cross_project(tmp_path):
+    ctx, _ = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    kwargs, store, sid, calls = _governed_choice_kwargs(tmp_path, ctx)
+    for altered in (
+        {"include_saved_catalog": False},
+        {"expected_saved_catalog_sha256": "0" * 64},
+        {"expected_saved_catalog_revision": 1},
+        {"saved_catalog_source_id": "source-" + "f" * 64},
+        {"project_key": "project:" + "f" * 24},
+    ):
+        case = dict(kwargs)
+        case.update(altered)
+        with pytest.raises(session.WorkSessionRefused):
+            session.select_chairman_turn(selected, **case)
+    with pytest.raises(session.WorkSessionRefused):
+        session.select_chairman_turn(selected, **kwargs,
+                                     include_experience_provenance=True)
+    with pytest.raises(session.WorkSessionRefused):
+        session.select_chairman_turn(selected, **kwargs,
+                                     include_experience_provenance="yes")
+    assert calls == []
+
+
+def test_chairman_catalog_choice_refuses_late_rebind_and_changed_result(tmp_path, monkeypatch):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    kwargs, store, sid, calls = _governed_choice_kwargs(tmp_path, ctx)
+    original = session._selected_saved_catalog_summary
+    count = [0]
+
+    def late_unlink(*args, **options):
+        packet = original(*args, **options)
+        count[0] += 1
+        if count[0] == 3:
+            _, revision = store.load()
+            store.update(lambda catalog: catalog.unlink(sid, key, authorized=True),
+                         expected_revision=revision, authorized=True)
+        return packet
+
+    monkeypatch.setattr(session, "_selected_saved_catalog_summary", late_unlink)
+    with pytest.raises(session.WorkSessionRefused):
+        session.select_chairman_turn(
+            selected, **kwargs, result_file=document,
+            expected_checkpoint_sha256=token, include_experience_provenance=True)
+    assert count[0] >= 3
+    assert lifecycle.list_history(selected)["count"] == 0
+    assert calls == []
+
+
+def test_chairman_catalog_choice_refuses_result_drift_during_closing_saved_read(
+        tmp_path, monkeypatch):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    kwargs, store, sid, calls = _governed_choice_kwargs(tmp_path, ctx)
+    original = session._selected_saved_catalog_summary
+    count = [0]
+
+    def late_result_change(*args, **options):
+        packet = original(*args, **options)
+        count[0] += 1
+        if count[0] == 3:
+            document.write_text("# Changed during last saved catalog read\n", encoding="utf-8")
+        return packet
+
+    monkeypatch.setattr(session, "_selected_saved_catalog_summary",
+                        late_result_change)
+    with pytest.raises((session.WorkSessionRefused, result.WorkResultRefused)):
+        session.select_chairman_turn(
+            selected, **kwargs, result_file=document,
+            expected_checkpoint_sha256=token, include_experience_provenance=True)
+    assert count[0] >= 3
+    assert lifecycle.list_history(selected)["count"] == 0
+    assert calls == []
+
+
+def test_chairman_saved_result_choice_refuses_catalog_or_experience_promotion(tmp_path):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    _finish(ctx, token)
+    offered = session.propose_chairman_turn(selected)
+    choice = offered["choices"][0]
+    kwargs = {
+        "proposal_sha256": offered["proposal_sha256"],
+        "task": task,
+        "selected_note_sha256": choice["selected_note_sha256"],
+        "kind": "SAVED_COMPLETED_RESULT",
+        "approved": True,
+    }
+    with pytest.raises(session.WorkSessionRefused):
+        session.select_chairman_turn(selected, **kwargs, include_saved_catalog=True)
+    with pytest.raises(session.WorkSessionRefused):
+        session.select_chairman_turn(selected, **kwargs,
+                                     include_experience_provenance=True)
+    historical = session.select_chairman_turn(selected, **kwargs)
+    assert historical["selected_governed_workday_context"] is None
+    assert historical["automatic_task_reopen_or_completion"] is False
+
+
+def test_chairman_catalog_source_available_in_existing_desk_cli_without_broker(
+        tmp_path, capsys):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    kwargs, store, sid, calls = _governed_choice_kwargs(tmp_path, ctx)
+    base = ["work-session", "select", "--desk", str(selected),
+            "--task-key", task, "--proposal-sha256", kwargs["proposal_sha256"],
+            "--selected-note-sha256", kwargs["selected_note_sha256"],
+            "--project-root", str(project), "--project-key", key, "--yes"]
+    catalog = ["--include-saved-catalog", "--saved-catalog-root", str(store.root),
+               "--saved-catalog-namespace", store.user_namespace,
+               "--saved-catalog-source-id", sid,
+               "--expected-saved-catalog-sha256", kwargs["expected_saved_catalog_sha256"],
+               "--expected-saved-catalog-revision",
+               str(kwargs["expected_saved_catalog_revision"])]
+    assert cli.main([*base, *catalog,
+                     "--include-experience-provenance"]) == 2
+    capsys.readouterr()
+    assert cli.main([*base, *catalog, "--result-file", str(document),
+                     "--expected-checkpoint-sha256", token,
+                     "--include-experience-provenance"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["selected_governed_workday_context"][
+        "status"] == "SOURCE_ONLY_SAVED_CATALOG_AND_EXACT_RESULT_CANDIDATE"
+    assert payload["selected_governed_workday_context"]["experience_reuse_eligible"] is False
+    assert payload["database_contacted"] is False
+    assert calls == []
+    assert str(store.root) not in json.dumps(payload)
+    assert "credential-" not in json.dumps(payload)
+    assert lifecycle.list_history(selected)["count"] == 0

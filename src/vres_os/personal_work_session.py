@@ -1306,6 +1306,83 @@ def propose_chairman_turn(desk: str | Path) -> dict[str, Any]:
     }
 
 
+def _selected_governed_workday_context(
+    task: str, note_sha256: str, project_binding: str,
+    catalog: dict[str, Any], experience: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Source-only joint #165/#167/#176 preview under ORIGINAL owners.
+
+    A saved snapshot is NOT a live freshness check. Verified current result
+    bytes are NOT a validated experience episode or permission for reuse.
+    Only the original #176 authority/revocation/scope owner may establish that.
+    """
+    if (type(catalog) is not dict
+            or catalog.get("status")
+               != "READ_ONLY_EXPLICIT_SAVED_CURRENT_USER_CATALOG_SUMMARY"
+            or catalog.get("snapshot_status")
+               not in {"NOT_CATALOGUED", "AVAILABLE_UNVERIFIED"}
+            or catalog.get("assurance")
+               not in {"none", "caller_supplied_unverified"}
+            or catalog.get("catalog_storage_provenance_verified") is not False
+            or catalog.get("current_user_identity_verified") is not False
+            or catalog.get("credential_lookup_performed") is not False
+            or catalog.get("database_contacted") is not False
+            or type(catalog.get("saved_catalog_revision")) is not int
+            or type(catalog.get("catalog_document_sha256")) is not str
+            or not workbench._SHA.fullmatch(catalog["catalog_document_sha256"])):
+        raise WorkSessionRefused("Original saved data-source catalog context refused")
+    if experience is not None and (
+            type(experience) is not dict
+            or experience.get("status")
+               != "NONAUTHORITATIVE_EXPERIENCE_SOURCE_LINK_ONLY"
+            or experience.get("selected_note_sha256") != note_sha256
+            or experience.get("selected_project_binding_sha256") != project_binding
+            or experience.get("task_key_claimed") != task
+            or experience.get("original_experience_truth_owner_remains_required") is not True
+            or experience.get("revocation_state_checked") is not False
+            or experience.get("experience_capture_or_memory_promotion") is not False
+            or type(experience.get("source_link_sha256")) is not str
+            or not workbench._SHA.fullmatch(experience["source_link_sha256"])):
+        raise WorkSessionRefused("Original experience source context refused")
+    identity = {
+        "schema": "vres-personal-selected-governed-workday-context/1",
+        "task_key_claimed": task,
+        "selected_note_sha256": note_sha256,
+        "selected_project_binding_sha256": project_binding,
+        "catalog_document_sha256": catalog["catalog_document_sha256"],
+        "catalog_revision": catalog["saved_catalog_revision"],
+        "catalog_source_id": catalog["selected_source_id"],
+        "catalog_snapshot_fingerprint": catalog["snapshot_fingerprint"],
+        "result_source_link_sha256": (
+            experience["source_link_sha256"] if experience is not None else None),
+    }
+    token = hashlib.sha256(json.dumps(
+        identity, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+        allow_nan=False).encode("ascii")).hexdigest()
+    return {
+        **identity,
+        "status": ("SOURCE_ONLY_SAVED_CATALOG_AND_EXACT_RESULT_CANDIDATE"
+                   if experience is not None else
+                   "SOURCE_ONLY_SAVED_CATALOG_WORK_CONTEXT"),
+        "context_sha256": token,
+        "catalog_snapshot_status": catalog["snapshot_status"],
+        "catalog_assurance": catalog["assurance"],
+        "catalog_project_binding_rechecked": True,
+        "catalog_freshness": "SAVED_SNAPSHOT_ONLY_LIVE_DRIFT_UNCHECKED",
+        "result_source_bytes_observed_this_review": experience is not None,
+        "verified_experience_memory_retrieved": False,
+        "experience_reuse_eligible": False,
+        "experience_reuse_gate": "ORIGINAL_176_SCOPE_TRUST_REVOCATION_AND_APPROVAL_REQUIRED",
+        "trusted_user_event_verified": False,
+        "current_user_identity_verified": False,
+        "credential_lookup_performed": False,
+        "database_contacted": False,
+        "native_claude_or_hooks_executed": False,
+        "files_written": False,
+        "cooperative_readback_not_atomic": True,
+    }
+
+
 def select_chairman_turn(
     desk: str | Path, *, proposal_sha256: str, task: str,
     selected_note_sha256: str, kind: str = "ACTIVE_TASK",
@@ -1320,6 +1397,12 @@ def select_chairman_turn(
     expected_chairman_history_sha256: str | None = None,
     expected_chairman_proposal_sha256: str | None = None,
     expected_chairman_template_sha256: str | None = None,
+    include_saved_catalog: bool = False,
+    saved_catalog_store: Any | None = None,
+    saved_catalog_source_id: str | None = None,
+    expected_saved_catalog_sha256: str | None = None,
+    expected_saved_catalog_revision: int | None = None,
+    include_experience_provenance: bool = False,
 ) -> dict[str, Any]:
     """Re-attest ONE caller-confirmed choice against original owners, no writes.
 
@@ -1329,6 +1412,24 @@ def select_chairman_turn(
     """
     if approved is not True:
         raise WorkSessionRefused("Explicit caller-selected conversation choice required")
+    if type(include_saved_catalog) is not bool or type(include_experience_provenance) is not bool:
+        raise WorkSessionRefused("Governed catalog/experience options require exact booleans")
+    catalog_inputs = (saved_catalog_store, saved_catalog_source_id,
+                      expected_saved_catalog_sha256, expected_saved_catalog_revision)
+    if include_saved_catalog:
+        if (project_root is None or project_key is None
+                or saved_catalog_store is None or saved_catalog_source_id is None
+                or type(expected_saved_catalog_sha256) is not str
+                or not workbench._SHA.fullmatch(expected_saved_catalog_sha256)
+                or type(expected_saved_catalog_revision) is not int
+                or not 0 <= expected_saved_catalog_revision <= 1000000):
+            raise WorkSessionRefused("Explicit original saved catalog SHA/revision and project required")
+    elif any(item is not None for item in catalog_inputs):
+        raise WorkSessionRefused("Saved catalog source requires explicit opt-in")
+    if include_experience_provenance and (
+            not include_saved_catalog or result_file is None
+            or expected_checkpoint_sha256 is None):
+        raise WorkSessionRefused("Exact result and selected saved catalog required for #176 source preview")
     if (type(proposal_sha256) is not str
             or not workbench._SHA.fullmatch(proposal_sha256)
             or type(task) is not str or not workbench._TASK_KEY.fullmatch(task)
@@ -1352,6 +1453,7 @@ def select_chairman_turn(
         if (project_root is not None or project_key is not None
                 or result_file is not None or expected_checkpoint_sha256 is not None
                 or include_chairman_candidate is not False
+                or include_saved_catalog or include_experience_provenance
                 or any(value is not None for value in chairman_inputs)):
             raise WorkSessionRefused("Saved conversation choice is historical only")
         inspected = review_workday(
@@ -1375,7 +1477,11 @@ def select_chairman_turn(
             chairman_template=chairman_template,
             expected_chairman_history_sha256=expected_chairman_history_sha256,
             expected_chairman_proposal_sha256=expected_chairman_proposal_sha256,
-            expected_chairman_template_sha256=expected_chairman_template_sha256)
+            expected_chairman_template_sha256=expected_chairman_template_sha256,
+            include_saved_catalog=include_saved_catalog,
+            saved_catalog_store=saved_catalog_store,
+            saved_catalog_source_id=saved_catalog_source_id,
+            include_experience_provenance=include_experience_provenance)
         if (inspected["status"] != "ACTIVE_WORK_SESSION_REVIEW"
                 or inspected["active_note_sha256"] != selected_note_sha256
                 or inspected["task_key_claimed"] != task
@@ -1393,6 +1499,15 @@ def select_chairman_turn(
         next_step = ("SEPARATE_EXPLICIT_FINISH_APPROVAL_STILL_REQUIRED"
                      if result_file is not None
                      else "REVIEW_EXPLICIT_PROJECT_AND_RESULT_BEFORE_FINISH")
+    selected_governed = None
+    if include_saved_catalog:
+        saved = inspected["selected_project_catalog"]
+        if (saved["catalog_document_sha256"] != expected_saved_catalog_sha256
+                or saved["saved_catalog_revision"] != expected_saved_catalog_revision):
+            raise WorkSessionRefused("Catalog digest/revision changed since explicit caller selection")
+        selected_governed = _selected_governed_workday_context(
+            task, selected_note_sha256, inspected["selected_project_binding_sha256"],
+            saved, inspected["selected_experience_provenance"])
     # A long optional Chairman source render or result scan cannot authorize
     # a selection from a stale original Workday inventory.
     if propose_chairman_turn(desk)["proposal_sha256"] != proposal_sha256:
@@ -1413,6 +1528,34 @@ def select_chairman_turn(
                 or fresh["work_brief"]["project_binding_sha256"]
                    != inspected["selected_project_binding_sha256"]):
             raise WorkSessionRefused("Result changed during selected Chairman conversation")
+    if include_saved_catalog:
+        # The original file owner, task owner and result owner may drift while
+        # another source is inspected. Do bounded cooperative closing readbacks;
+        # this never asserts filesystem atomicity or live database freshness.
+        recent = _selected_saved_catalog_summary(
+            saved_catalog_store, saved_catalog_source_id, project_key)
+        if recent != inspected["selected_project_catalog"]:
+            raise WorkSessionRefused("Saved catalog revised during Chairman task selection")
+        if propose_chairman_turn(desk)["proposal_sha256"] != proposal_sha256:
+            raise WorkSessionRefused("Workday changed during final saved catalog check")
+        if result_file is not None:
+            final_result = result.inspect_work_result(
+                desk, task, project_root, project_key, result_file,
+                expected_checkpoint_sha256=expected_checkpoint_sha256)
+            before_result = inspected["observed_result"]
+            if (before_result is None
+                    or final_result["status"] != before_result["status"]
+                    or final_result["checkpoint_sha256"] != before_result["checkpoint_sha256"]
+                    or final_result["result_sha256"] != before_result["result_sha256"]
+                    or final_result["result_bytes"] != before_result["result_bytes"]
+                    or final_result["work_brief"]["scratch_handoff"]["selected_note_sha256"]
+                       != selected_note_sha256
+                    or final_result["work_brief"]["project_binding_sha256"]
+                       != inspected["selected_project_binding_sha256"]):
+                raise WorkSessionRefused("Result changed during catalog closing recheck")
+        if _selected_saved_catalog_summary(
+                saved_catalog_store, saved_catalog_source_id, project_key) != recent:
+            raise WorkSessionRefused("Saved catalog changed during closing result inspection")
     return {
         "schema": CHAIRMAN_TURN_SCHEMA,
         "status": "CHAIRMAN_SOURCE_ONLY_CONVERSATION_CHOICE_REATTESTED",
@@ -1421,6 +1564,7 @@ def select_chairman_turn(
         "task_key_claimed": task,
         "selected_note_sha256": selected_note_sha256,
         "selected_original_owner_review": focus,
+        "selected_governed_workday_context": selected_governed,
         "next_separate_step": next_step,
         "suggested_chairman_message": (
             "The saved result is historical. Explicitly reopen its exact snapshot "
@@ -1484,6 +1628,32 @@ def _chairman_cli_options(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def _saved_catalog_cli_options(args: argparse.Namespace) -> dict[str, Any]:
+    """Existing #167 store, explicit root and SHA; never discover a profile."""
+    fields = (args.saved_catalog_root, args.saved_catalog_namespace,
+              args.saved_catalog_source_id, args.expected_saved_catalog_sha256,
+              args.expected_saved_catalog_revision)
+    if not args.include_saved_catalog:
+        if any(value is not None for value in fields):
+            raise WorkSessionRefused("Selected catalog requires explicit opt-in")
+        return {"include_experience_provenance": args.include_experience_provenance}
+    if any(value is None for value in fields):
+        raise WorkSessionRefused("Complete selected saved catalog identity required")
+    # Import the original filesystem owner only after explicit opt-in; no
+    # broker values or even broker metadata are read in this review.
+    from vres_os.personal_data_source_store import CurrentUserDataSourceStore
+    return {
+        "include_saved_catalog": True,
+        "saved_catalog_store": CurrentUserDataSourceStore(
+            Path(args.saved_catalog_root), args.saved_catalog_namespace,
+            _reject_catalog_credential_lookup),
+        "saved_catalog_source_id": args.saved_catalog_source_id,
+        "expected_saved_catalog_sha256": args.expected_saved_catalog_sha256,
+        "expected_saved_catalog_revision": args.expected_saved_catalog_revision,
+        "include_experience_provenance": args.include_experience_provenance,
+    }
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _SafeParser(
         description="Internal source-only personal workflow over original task owners")
@@ -1507,6 +1677,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             sub.add_argument("--project-key")
             sub.add_argument("--result-file")
             sub.add_argument("--expected-checkpoint-sha256")
+            sub.add_argument("--include-saved-catalog", action="store_true")
+            sub.add_argument("--saved-catalog-root")
+            sub.add_argument("--saved-catalog-namespace")
+            sub.add_argument("--saved-catalog-source-id")
+            sub.add_argument("--expected-saved-catalog-sha256")
+            sub.add_argument("--expected-saved-catalog-revision", type=int)
+            sub.add_argument("--include-experience-provenance", action="store_true")
         if name == "start":
             sub.add_argument("--note-file", required=True)
             sub.add_argument("--project-root", required=True)
@@ -1554,7 +1731,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 project_root=args.project_root, project_key=args.project_key,
                 result_file=args.result_file,
                 expected_checkpoint_sha256=args.expected_checkpoint_sha256,
-                **_chairman_cli_options(args))
+                **_chairman_cli_options(args),
+                **_saved_catalog_cli_options(args))
         elif args.command == "start":
             packet = start_session(
                 args.desk, args.task_key, args.note_file,
