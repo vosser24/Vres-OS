@@ -24,11 +24,13 @@ if not __package__:
     from vres_os import personal_portable_desk as desk
     from vres_os import personal_project_task_draft as draft
     from vres_os import personal_task_continuity as continuity
+    from vres_os import personal_result_acceptance as acceptance
 else:
     from . import personal_offline_workbench as workbench
     from . import personal_portable_desk as desk
     from . import personal_project_task_draft as draft
     from . import personal_task_continuity as continuity
+    from . import personal_result_acceptance as acceptance
 
 SCHEMA = 'vres-personal-task-lifecycle/1'
 _HISTORY = 'Vres-Lifecycle-History'
@@ -37,6 +39,7 @@ _STATES = ('completed', 'archived')
 _MAX_HISTORY_ENTRIES = 48
 _RESULT_LINK_SCHEMA = 'vres-personal-result-history-link/1'
 _RESULT_LINK_CHAIRMAN_SCHEMA = 'vres-personal-result-history-link/2'
+_RESULT_LINK_ACCEPTANCE_SCHEMA = 'vres-personal-result-history-link/3'
 _CHAIRMAN_SOURCE_KEYS = frozenset({
     'source_link_sha256', 'history_sha256', 'latest_proposal_sha256',
     'template_sha256', 'rendered_candidate_sha256', 'requested_family',
@@ -46,7 +49,7 @@ _RESULT_NAME = re.compile(r'Vres-Result-H[a-f0-9]{64}\.json\Z', re.ASCII)
 _PROJECT_KEY = re.compile(r'project:[A-Za-z0-9][A-Za-z0-9_.:-]{0,95}\Z', re.ASCII)
 _RESULT_TYPES = frozenset(('.md', '.txt', '.py', '.json', '.csv',
                            '.pdf', '.docx', '.xlsx', '.pptx'))
-_MAX_RESULT_LINK_BYTES = 4096
+_MAX_RESULT_LINK_BYTES = 6144  # Version 3 stores only redacted acceptance claims; legacy bound unchanged
 
 
 class LifecycleRefused(ValueError):
@@ -109,10 +112,15 @@ def _result_bytes(record: dict[str, Any]) -> bytes:
             'checkpoint_sha256', 'result_contents_disclosed',
             'result_quality_validated', 'native_chairman_task_bound'}
     if type(record) is not dict or record.get('schema') not in (
-            _RESULT_LINK_SCHEMA, _RESULT_LINK_CHAIRMAN_SCHEMA):
+            _RESULT_LINK_SCHEMA, _RESULT_LINK_CHAIRMAN_SCHEMA,
+            _RESULT_LINK_ACCEPTANCE_SCHEMA):
         raise LifecycleRefused('Malformed history result record')
-    with_chairman = record['schema'] == _RESULT_LINK_CHAIRMAN_SCHEMA
-    if set(record) != (keys | {'chairman_candidate'} if with_chairman else keys):
+    with_acceptance = record['schema'] == _RESULT_LINK_ACCEPTANCE_SCHEMA
+    with_chairman = (record['schema'] == _RESULT_LINK_CHAIRMAN_SCHEMA
+                     or with_acceptance and 'chairman_candidate' in record)
+    expected_keys = (keys | ({'chairman_candidate'} if with_chairman else set())
+                     | ({'acceptance_claims'} if with_acceptance else set()))
+    if set(record) != expected_keys:
         raise LifecycleRefused('Malformed history result record')
     key, note, project_key, root, rel = (
         record['task_key_claimed'], record['selected_note_sha256'],
@@ -171,8 +179,18 @@ def _result_bytes(record: dict[str, Any]) -> bytes:
         ])).hexdigest()
         if candidate['source_link_sha256'] != linked:
             raise LifecycleRefused('Chairman source lineage differs from completed task')
+    if with_acceptance:
+        try:
+            acceptance.validate_saved_acceptance_claims(
+                record['acceptance_claims'], task=key, note_sha256=note,
+                project_binding_sha256=binding,
+                result_sha256=record['result_sha256'],
+                checkpoint_sha256=checkpoint)
+        except acceptance.ResultAcceptanceRefused:
+            raise LifecycleRefused('Original saved acceptance claim validation refused') from None
     encoded = canonical(record) + b'\n'
-    if len(encoded) > _MAX_RESULT_LINK_BYTES:
+    limit = _MAX_RESULT_LINK_BYTES if with_acceptance else 4096
+    if len(encoded) > limit:
         raise LifecycleRefused('History result record exceeds byte bound')
     return encoded
 
@@ -181,7 +199,8 @@ def prepare_result_link(*, task: str, note_sha256: str, project_root: str | Path
                         project_key: str, relative_result_path: str,
                         project_binding_sha256: str, result_sha256: str,
                         result_bytes: int, checkpoint_sha256: str,
-                        chairman_candidate: dict[str, Any] | None = None) -> dict[str, Any]:
+                        chairman_candidate: dict[str, Any] | None = None,
+                        acceptance_claims: dict[str, Any] | None = None) -> dict[str, Any]:
     """Validate record before any completion mutation; no disk write."""
     record = {
         'schema': _RESULT_LINK_SCHEMA, 'task_key_claimed': task,
@@ -216,6 +235,9 @@ def prepare_result_link(*, task: str, note_sha256: str, project_root: str | Path
             }
         except KeyError:
             raise LifecycleRefused('Missing Chairman candidate provenance') from None
+    if acceptance_claims is not None:
+        record['schema'] = _RESULT_LINK_ACCEPTANCE_SCHEMA
+        record['acceptance_claims'] = acceptance_claims
     _result_bytes(record)
     return record
 
@@ -247,13 +269,23 @@ def _public_result(record: dict[str, Any], *, show_result_paths: bool) -> dict[s
         'document_quality_validated': False,
         'native_chairman_task_bound': False,
     }
-    if record['schema'] == _RESULT_LINK_CHAIRMAN_SCHEMA:
+    if 'chairman_candidate' in record:
         public['chairman_candidate'] = {
             **record['chairman_candidate'],
             'caller_supplied_source_not_authenticated': True,
             'source_material_reverified_this_read': False,
             'host_observed_chairman_verified': False,
             'protected_f1_fable_authority_granted': False,
+        }
+    if record['schema'] == _RESULT_LINK_ACCEPTANCE_SCHEMA:
+        public['saved_acceptance_claims'] = {
+            **record['acceptance_claims'],
+            'historical_caller_self_claims_only': True,
+            'acceptance_document_or_evidence_reverified_this_read': False,
+            'original_176_episode_captured': False,
+            'original_176_current_trust_scope_revocation_checked': False,
+            'original_176_experience_eligible_or_reused': False,
+            'independent_quality_or_owner_authentication_proven': False,
         }
     if show_result_paths:
         public.update({

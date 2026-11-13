@@ -893,6 +893,11 @@ def replay_saved(desk: str | Path, task: str, snapshot_sha256: str, *,
             "saved_history_is_memory_authority": False,
             "experience_eligible_for_live_retrieval": False,
             "experience_episode_created": False,
+            "saved_acceptance_claims_receipt_sha256": (
+                link['saved_acceptance_claims']['saved_claims_receipt_sha256']
+                if 'saved_acceptance_claims' in link else None),
+            "saved_acceptance_claims_do_not_prove_source_trust": True,
+            "original_176_live_trust_scope_revocation_checked": False,
         }
     return {
         "schema": SCHEMA,
@@ -906,6 +911,9 @@ def replay_saved(desk: str | Path, task: str, snapshot_sha256: str, *,
         "selected_project_intake": selected_intake,
         "selected_saved_chairman_candidate": (
             link['chairman_candidate'] if include_saved_chairman_candidate else None),
+        "selected_saved_acceptance_claims": link.get('saved_acceptance_claims'),
+        "saved_claims_do_not_validate_quality_or_consent": True,
+        "saved_claims_not_original_176_episode_or_memory_authority": True,
         "saved_chairman_context_is_host_authority": False,
         "result_rechecked_after_selected_intake": include_project_intake,
         "project_activation_authorized": False,
@@ -980,7 +988,8 @@ def _workday_owner_snapshot(desk: str | Path) -> tuple[dict[str, Any], dict[str,
             if (row["state"] != "completed" or type(linked) is not dict
                     or linked.get("schema") not in (
                         lifecycle._RESULT_LINK_SCHEMA,
-                        lifecycle._RESULT_LINK_CHAIRMAN_SCHEMA)
+                        lifecycle._RESULT_LINK_CHAIRMAN_SCHEMA,
+                        lifecycle._RESULT_LINK_ACCEPTANCE_SCHEMA)
                     or linked.get("document_path_hidden") is not True
                     or linked.get("document_current_bytes_verified") is not False
                     or linked.get("document_quality_validated") is not False
@@ -991,7 +1000,9 @@ def _workday_owner_snapshot(desk: str | Path) -> tuple[dict[str, Any], dict[str,
                     or not workbench._SHA.fullmatch(linked["checkpoint_sha256"])):
                 raise WorkSessionRefused("Original linked result is not historical-only")
             candidate = linked.get('chairman_candidate')
-            if linked['schema'] == lifecycle._RESULT_LINK_CHAIRMAN_SCHEMA:
+            if (linked['schema'] == lifecycle._RESULT_LINK_CHAIRMAN_SCHEMA
+                    or linked['schema'] == lifecycle._RESULT_LINK_ACCEPTANCE_SCHEMA
+                    and candidate is not None):
                 if (type(candidate) is not dict
                         or candidate.get('host_evidence_status')
                            != 'NO_HOST_MODEL_EVIDENCE_STOP'
@@ -1004,6 +1015,18 @@ def _workday_owner_snapshot(desk: str | Path) -> tuple[dict[str, Any], dict[str,
                     raise WorkSessionRefused('Saved Chairman source cannot become host authority')
             elif candidate is not None:
                 raise WorkSessionRefused('Legacy result must not claim a Chairman source link')
+            saved = linked.get('saved_acceptance_claims')
+            if linked['schema'] == lifecycle._RESULT_LINK_ACCEPTANCE_SCHEMA:
+                if (type(saved) is not dict
+                        or saved.get('historical_caller_self_claims_only') is not True
+                        or saved.get('acceptance_document_or_evidence_reverified_this_read') is not False
+                        or saved.get('original_176_episode_captured') is not False
+                        or saved.get('original_176_current_trust_scope_revocation_checked') is not False
+                        or saved.get('original_176_experience_eligible_or_reused') is not False
+                        or saved.get('independent_quality_or_owner_authentication_proven') is not False):
+                    raise WorkSessionRefused('Saved acceptance cannot become quality or memory authority')
+            elif saved is not None:
+                raise WorkSessionRefused('Legacy history cannot acquire a saved acceptance claim')
     return daily, history, attention
 
 
@@ -1056,6 +1079,11 @@ def review_workday(
                 evidence["result_sha256"] if evidence is not None else None),
             "saved_chairman_candidate_linked": (
                 evidence is not None and 'chairman_candidate' in evidence),
+            "saved_acceptance_self_claims_linked": (
+                evidence is not None and 'saved_acceptance_claims' in evidence),
+            "saved_acceptance_claims_state": (
+                evidence['saved_acceptance_claims']['acceptance_claims_state']
+                if evidence is not None and 'saved_acceptance_claims' in evidence else None),
             "saved_checkpoint_sha256": (
                 evidence["checkpoint_sha256"] if evidence is not None else None),
             "current_result_bytes_verified": False,
@@ -1075,6 +1103,10 @@ def review_workday(
                 "saved_result_bytes": evidence["result_bytes"],
                 "saved_result_is_historical_not_current": True,
                 "saved_chairman_candidate_linked": 'chairman_candidate' in evidence,
+                "saved_acceptance_self_claims_linked": 'saved_acceptance_claims' in evidence,
+                "saved_acceptance_claims_state": (
+                    evidence['saved_acceptance_claims']['acceptance_claims_state']
+                    if 'saved_acceptance_claims' in evidence else None),
                 "task_reopened": False,
                 "result_replayed": False,
                 "current_document_bytes_verified": False,
@@ -2181,9 +2213,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             sub.add_argument("--synthetic-experience-pack-file")
             sub.add_argument("--expected-experience-pack-sha256")
             sub.add_argument("--declared-experience-project-id", type=int)
-            sub.add_argument("--include-result-acceptance-evidence", action="store_true")
-            sub.add_argument("--result-acceptance-evidence-file")
-            sub.add_argument("--expected-result-acceptance-evidence-sha256")
             sub.add_argument("--include-adoption-preparation", action="store_true")
             sub.add_argument("--synthetic-global-inventory-file")
             sub.add_argument("--expected-synthetic-global-inventory-sha256")
@@ -2196,6 +2225,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             sub.add_argument("--note-file", required=True)
             sub.add_argument("--project-root", required=True)
             sub.add_argument("--project-key", required=True)
+        if name in ("select", "finish"):
+            sub.add_argument("--include-result-acceptance-evidence", action="store_true")
+            sub.add_argument("--result-acceptance-evidence-file")
+            sub.add_argument("--expected-result-acceptance-evidence-sha256")
+        if name == "finish":
+            sub.add_argument("--expected-chairman-turn-proposal-sha256")
+            sub.add_argument("--expected-selected-note-sha256")
+            sub.add_argument("--accept-with-known-gaps", action="store_true")
         if name in ("review", "finish"):
             sub.add_argument("--project-root", required=(name == "finish"))
             sub.add_argument("--project-key", required=(name == "finish"))
@@ -2280,11 +2317,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                 include_experience_provenance=args.include_experience_provenance,
                 **_chairman_cli_options(args))
         elif args.command == "finish":
+            acceptance_options = _result_acceptance_cli_options(args)
+            if (not args.include_result_acceptance_evidence and
+                    (args.expected_chairman_turn_proposal_sha256 is not None
+                     or args.expected_selected_note_sha256 is not None
+                     or args.accept_with_known_gaps)):
+                raise WorkSessionRefused("Extra acceptance selection requires opt-in")
             packet = completion.finish_work(
                 args.desk, args.task_key, args.project_root, args.project_key,
                 args.result_file,
                 expected_checkpoint_sha256=args.expected_checkpoint_sha256,
-                approved=args.yes, **_chairman_cli_options(args))
+                approved=args.yes,
+                expected_chairman_turn_proposal_sha256=(
+                    args.expected_chairman_turn_proposal_sha256),
+                expected_selected_note_sha256=args.expected_selected_note_sha256,
+                accept_unresolved_claims=args.accept_with_known_gaps,
+                **_chairman_cli_options(args), **acceptance_options)
         elif args.command == "reopen":
             packet = reopen_saved(
                 args.desk, args.task_key, args.snapshot_sha256, approved=args.yes)

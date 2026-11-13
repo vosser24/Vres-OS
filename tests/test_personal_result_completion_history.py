@@ -1,0 +1,241 @@
+"""Original #165 acceptance -> separately approved completion -> saved #176 source-prep.
+
+Only disposable nonsensitive scratch fixtures. Historical caller claims are never
+quality proof, host user authentication, Fable approval or eligible memory.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+
+import pytest
+
+from vres_os import personal_portable_desk as desk_owner
+from vres_os import personal_task_lifecycle as lifecycle
+from vres_os import personal_work_result as result_owner
+from vres_os import personal_work_completion as completion
+from vres_os import personal_work_session as session
+from vres_os import personal_result_acceptance as acceptance
+from vres_os import personal_desk_cli as cli
+
+
+def _scratch(tmp_path, statuses=("CLAIMED_MET", "CLAIMED_MET")):
+    d = tmp_path / "Vres-Desk-Completion-Review"
+    d.mkdir()
+    project = tmp_path / "OrdinaryProject"
+    project.mkdir()
+    note = tmp_path / "note.md"
+    note.write_text("# Task\n\n## Next action\n- Write a local report.\n", encoding="utf-8")
+    task = "TASK-REPORT-COMPLETION"
+    desk_owner.add_task(d, task, note, approved=True)
+    report = project / "report.md"
+    report.write_text("# Nonsensitive synthetic report\nDone.\n", encoding="utf-8")
+    ctx = (d, task, project, "project:" + "a" * 24, report)
+    checkpoint = result_owner.inspect_work_result(*ctx)["checkpoint_sha256"]
+    proposed = session.propose_chairman_turn(d)
+    active = next(x for x in proposed["choices"] if x["kind"] == "ACTIVE_TASK")
+    choice = session.select_chairman_turn(
+        d, task=task, proposal_sha256=proposed["proposal_sha256"],
+        selected_note_sha256=active["selected_note_sha256"], approved=True,
+        project_root=project, project_key=ctx[3], result_file=report,
+        expected_checkpoint_sha256=checkpoint)
+    continuity = choice["selected_task_result_continuity"]
+    data = {
+        "schema": acceptance.SCHEMA,
+        "selected_task_key": task,
+        "selected_note_sha256": continuity["selected_note_sha256"],
+        "selected_project_binding_sha256": continuity["selected_project_binding_sha256"],
+        "selected_result_sha256": continuity["selected_result_sha256"],
+        "selected_result_checkpoint_sha256": continuity["selected_result_checkpoint_sha256"],
+        "selected_continuity_receipt_sha256": continuity["continuity_receipt_sha256"],
+        "criteria": [{
+            "id": f"C{i:02d}",
+            "criterion": f"SECRET-CHECK-{i} operator-only detail should never be echoed",
+            "status": state,
+            "evidence_sha256": "1" * 64 if state == "CLAIMED_MET" else None,
+        } for i, state in enumerate(statuses, 1)],
+    }
+    raw = json.dumps(data, sort_keys=True).encode("utf-8")
+    opts = {
+        "expected_checkpoint_sha256": checkpoint,
+        "approved": True,
+        "include_result_acceptance_evidence": True,
+        "acceptance_evidence_document": raw,
+        "expected_acceptance_evidence_sha256": hashlib.sha256(raw).hexdigest(),
+        "expected_chairman_turn_proposal_sha256": proposed["proposal_sha256"],
+        "expected_selected_note_sha256": active["selected_note_sha256"],
+    }
+    return ctx, opts, data
+
+
+def _saved(ctx):
+    rows = lifecycle.list_history(ctx[0])["snapshots"]
+    assert len(rows) == 1
+    return rows[0]["result_evidence"]
+
+
+def test_explicit_separate_approval_required_even_when_all_claimed_met(tmp_path):
+    ctx, opts, _ = _scratch(tmp_path)
+    with pytest.raises(completion.WorkCompletionRefused):
+        completion.finish_work(*ctx, **{**opts, "approved": False})
+    assert lifecycle.list_history(ctx[0])["count"] == 0
+    done = completion.finish_work(*ctx, **opts)
+    assert done["status"] == "USER_CONFIRMED_SCRATCH_WORK_RESULT_COMPLETED"
+    assert done["saved_acceptance_self_claims_linked"] is True
+    assert done["acceptance_claims_independently_validated"] is False
+    assert done["original_176_live_experience_eligible_or_promoted"] is False
+    assert done["result_quality_validated"] is False
+    saved = _saved(ctx)
+    claims = saved["saved_acceptance_claims"]
+    assert saved["schema"] == lifecycle._RESULT_LINK_ACCEPTANCE_SCHEMA
+    assert claims["acceptance_claims_state"] == "ALL_SELF_CLAIMED_MET_NOT_VALIDATED"
+    assert claims["claimed_met_count"] == 2
+    assert claims["original_176_experience_eligible_or_reused"] is False
+    assert claims["independent_quality_or_owner_authentication_proven"] is False
+    assert "SECRET-CHECK" not in json.dumps(saved)
+    assert str(ctx[2]) not in json.dumps(lifecycle.list_history(ctx[0]))
+
+
+def test_unresolved_claims_hold_completion_until_extra_acknowledgement(tmp_path):
+    ctx, opts, _ = _scratch(tmp_path, ("CLAIMED_MET", "CLAIMED_GAP", "UNREVIEWED"))
+    with pytest.raises(completion.WorkCompletionRefused):
+        completion.finish_work(*ctx, **opts)
+    assert lifecycle.list_history(ctx[0])["count"] == 0
+    done = completion.finish_work(*ctx, **{**opts, "accept_unresolved_claims": True})
+    assert done["caller_explicitly_acknowledged_unresolved_claims"] is True
+    claims = _saved(ctx)["saved_acceptance_claims"]
+    assert claims["unresolved_criterion_ids"] == ["C02", "C03"]
+    assert claims["acceptance_claims_state"] == "CLAIMED_GAPS_OR_UNREVIEWED_CRITERIA"
+    assert claims["original_176_episode_captured"] is False
+
+
+def test_saved_replay_shows_redacted_claims_but_not_memory_eligibility(tmp_path):
+    ctx, opts, _ = _scratch(tmp_path)
+    done = completion.finish_work(*ctx, **opts)
+    home = session.review_workday(ctx[0])
+    saved = next(i for i in home["saved_history"] if i["state"] == "completed")
+    assert saved["saved_acceptance_self_claims_linked"] is True
+    assert saved["saved_acceptance_claims_state"] == "ALL_SELF_CLAIMED_MET_NOT_VALIDATED"
+    note_sha = done["selected_note_sha256"]
+    assert session.reopen_saved(ctx[0], ctx[1], note_sha, approved=True)["status"] == (
+        "SAVED_WORK_SESSION_TASK_REOPENED")
+    replay = session.replay_saved(ctx[0], ctx[1], note_sha, approved=True,
+                                  include_experience_provenance=True)
+    assert replay["status"] == "SAVED_WORK_SESSION_EXACT_CONTEXT_REPLAY_MATCH"
+    claims = replay["selected_saved_acceptance_claims"]
+    assert claims["saved_claims_receipt_sha256"] == done[
+        "saved_acceptance_claims_receipt_sha256"]
+    assert replay["selected_experience_provenance"]["experience_episode_created"] is False
+    assert replay["selected_experience_provenance"][
+        "original_176_live_trust_scope_revocation_checked"] is False
+    assert replay["saved_claims_do_not_validate_quality_or_consent"] is True
+    assert "SECRET-CHECK" not in json.dumps(replay)
+    assert str(ctx[2]) not in json.dumps(replay)
+
+
+def test_stale_result_or_stale_chairman_proposal_refuses_before_move(tmp_path):
+    ctx, opts, _ = _scratch(tmp_path)
+    with pytest.raises(completion.WorkCompletionRefused):
+        completion.finish_work(*ctx, **{**opts, "expected_chairman_turn_proposal_sha256": "0" * 64})
+    assert lifecycle.list_history(ctx[0])["count"] == 0
+    ctx[4].write_text("# Changed while selected\n", encoding="utf-8")
+    with pytest.raises(completion.WorkCompletionRefused):
+        completion.finish_work(*ctx, **opts)
+    assert lifecycle.list_history(ctx[0])["count"] == 0
+
+
+def test_extra_authority_in_fixture_is_not_promoted(tmp_path):
+    ctx, opts, data = _scratch(tmp_path)
+    data["independent_approval"] = True
+    raw = json.dumps(data).encode("utf-8")
+    with pytest.raises(completion.WorkCompletionRefused):
+        completion.finish_work(*ctx, **{
+            **opts, "acceptance_evidence_document": raw,
+            "expected_acceptance_evidence_sha256": hashlib.sha256(raw).hexdigest(),
+        })
+    assert lifecycle.list_history(ctx[0])["count"] == 0
+
+
+def test_partial_opt_in_and_gap_override_without_review_refused(tmp_path):
+    ctx, opts, _ = _scratch(tmp_path)
+    with pytest.raises(completion.WorkCompletionRefused):
+        completion.finish_work(*ctx, expected_checkpoint_sha256=opts["expected_checkpoint_sha256"],
+                               approved=True, accept_unresolved_claims=True)
+    with pytest.raises(completion.WorkCompletionRefused):
+        completion.finish_work(*ctx, **{**opts,
+            "include_result_acceptance_evidence": False})
+    with pytest.raises(completion.WorkCompletionRefused):
+        completion.finish_work(*ctx, **{**opts,
+            "expected_selected_note_sha256": "0" * 64})
+    assert lifecycle.list_history(ctx[0])["count"] == 0
+
+
+def test_saved_sidecar_count_and_receipt_tampering_fail_closed(tmp_path):
+    ctx, opts, _ = _scratch(tmp_path)
+    completion.finish_work(*ctx, **opts)
+    links = list((ctx[0] / lifecycle._HISTORY / "completed").glob("Vres-Result-H*.json"))
+    assert len(links) == 1
+    obj = json.loads(links[0].read_text())
+    obj["acceptance_claims"]["claimed_met_count"] = 1
+    links[0].write_text(json.dumps(obj, separators=(",", ":"), sort_keys=True) + "\n")
+    with pytest.raises(lifecycle.LifecycleRefused):
+        lifecycle.list_history(ctx[0])
+    with pytest.raises((session.WorkSessionRefused, lifecycle.LifecycleRefused)):
+        session.review_workday(ctx[0])
+
+
+def test_historical_helper_refuses_fake_memory_authority(tmp_path):
+    ctx, opts, _ = _scratch(tmp_path)
+    continuity = session.select_chairman_turn(
+        ctx[0], proposal_sha256=opts["expected_chairman_turn_proposal_sha256"],
+        task=ctx[1], selected_note_sha256=opts["expected_selected_note_sha256"],
+        approved=True, project_root=ctx[2], project_key=ctx[3],
+        result_file=ctx[4], expected_checkpoint_sha256=opts["expected_checkpoint_sha256"],
+        include_result_acceptance_evidence=True,
+        acceptance_evidence_document=opts["acceptance_evidence_document"],
+        expected_acceptance_evidence_sha256=opts["expected_acceptance_evidence_sha256"])
+    frozen = acceptance.freeze_saved_acceptance_claims(
+        continuity=continuity["selected_task_result_continuity"],
+        review=continuity["selected_result_acceptance_evidence"])
+    base = dict(task=ctx[1], note_sha256=frozen["selected_note_sha256"],
+                project_binding_sha256=frozen["selected_project_binding_sha256"],
+                result_sha256=frozen["selected_result_sha256"],
+                checkpoint_sha256=frozen["selected_result_checkpoint_sha256"])
+    acceptance.validate_saved_acceptance_claims(frozen, **base)
+    for field, value in (("experience_reuse_eligible", True),
+                         ("criteria_count", 200),
+                         ("saved_claims_receipt_sha256", "0" * 64)):
+        bad = {**frozen, field: value}
+        with pytest.raises(acceptance.ResultAcceptanceRefused):
+            acceptance.validate_saved_acceptance_claims(bad, **base)
+
+
+def test_legacy_completion_contract_unchanged(tmp_path):
+    ctx, opts, _ = _scratch(tmp_path)
+    done = completion.finish_work(*ctx,
+          expected_checkpoint_sha256=opts["expected_checkpoint_sha256"], approved=True)
+    assert done["saved_acceptance_self_claims_linked"] is False
+    assert _saved(ctx)["schema"] == lifecycle._RESULT_LINK_SCHEMA
+    assert _saved(ctx).get("saved_acceptance_claims") is None
+
+
+def test_existing_cli_finish_requires_exact_desk_fixture_and_owner_flags(tmp_path, capsys):
+    ctx, opts, _ = _scratch(tmp_path)
+    fixture = ctx[0] / "result-acceptance-evidence.json"
+    fixture.write_bytes(opts["acceptance_evidence_document"])
+    cmd = ["work-session", "finish", "--desk", str(ctx[0]), "--task-key", ctx[1],
+           "--project-root", str(ctx[2]), "--project-key", ctx[3],
+           "--result-file", str(ctx[4]), "--expected-checkpoint-sha256",
+           opts["expected_checkpoint_sha256"], "--yes",
+           "--include-result-acceptance-evidence",
+           "--result-acceptance-evidence-file", str(fixture),
+           "--expected-result-acceptance-evidence-sha256",
+           opts["expected_acceptance_evidence_sha256"],
+           "--expected-chairman-turn-proposal-sha256",
+           opts["expected_chairman_turn_proposal_sha256"],
+           "--expected-selected-note-sha256", opts["expected_selected_note_sha256"]]
+    assert cli.main(cmd) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["saved_acceptance_self_claims_linked"] is True
+    assert str(ctx[2]) not in json.dumps(output)
+    assert "SECRET-CHECK" not in json.dumps(output)

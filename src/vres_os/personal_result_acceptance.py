@@ -166,3 +166,142 @@ def review_selected_result_acceptance(
         "files_written_or_new_store_created": False,
         "cooperative_readback_not_atomic": True,
     }
+
+
+# Historical acceptance claims live only in the ORIGINAL completed-result
+# lifecycle sidecar. They are not a second store or an eligible #176 episode.
+SAVED_CLAIMS_SCHEMA = "vres-personal-saved-result-acceptance-claims/1"
+_SAVED_FIELDS = frozenset({
+    "schema", "selected_task_key", "selected_note_sha256",
+    "selected_project_binding_sha256", "selected_result_sha256",
+    "selected_result_checkpoint_sha256", "original_continuity_receipt_sha256",
+    "acceptance_document_sha256", "review_receipt_sha256",
+    "criteria_count", "claimed_met_count", "claimed_gap_count",
+    "unreviewed_count", "unresolved_criterion_ids", "acceptance_claims_state",
+    "saved_claims_receipt_sha256",
+})
+
+
+def _canonical(value: Any) -> bytes:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=True, allow_nan=False).encode("ascii")
+
+
+def validate_saved_acceptance_claims(
+    claims: dict[str, Any], *, task: str, note_sha256: str,
+    project_binding_sha256: str, result_sha256: str, checkpoint_sha256: str,
+) -> None:
+    """Fail closed on modified or forged historical *self-claims*.
+
+    Rehashing a local sidecar does NOT authenticate its writer or establish
+    factual acceptance, trust, user consent, live revocation or memory reuse.
+    """
+    if (type(claims) is not dict or frozenset(claims) != _SAVED_FIELDS
+            or claims.get("schema") != SAVED_CLAIMS_SCHEMA
+            or type(task) is not str or not task.startswith("TASK-")
+            or not 1 <= len(task) <= 120
+            or any(not _is_sha(v) for v in (
+                note_sha256, project_binding_sha256, result_sha256,
+                checkpoint_sha256))):
+        raise ResultAcceptanceRefused("Invalid saved result acceptance claim contract")
+    bound = {
+        "selected_task_key": task,
+        "selected_note_sha256": note_sha256,
+        "selected_project_binding_sha256": project_binding_sha256,
+        "selected_result_sha256": result_sha256,
+        "selected_result_checkpoint_sha256": checkpoint_sha256,
+    }
+    if any(type(claims.get(k)) is not str or claims[k] != v for k, v in bound.items()):
+        raise ResultAcceptanceRefused("Saved acceptance no longer binds original result")
+    for key in ("original_continuity_receipt_sha256", "acceptance_document_sha256",
+                "review_receipt_sha256", "saved_claims_receipt_sha256"):
+        if not _is_sha(claims.get(key)):
+            raise ResultAcceptanceRefused("Saved acceptance receipt missing or malformed")
+    counts = tuple(claims.get(k) for k in (
+        "criteria_count", "claimed_met_count", "claimed_gap_count", "unreviewed_count"))
+    n, met, gap, unreviewed = counts
+    if (any(type(v) is not int for v in counts)
+            or not 1 <= n <= _MAX_CRITERIA
+            or min(met, gap, unreviewed) < 0
+            or met + gap + unreviewed != n):
+        raise ResultAcceptanceRefused("Saved acceptance counts are inconsistent")
+    missing = claims.get("unresolved_criterion_ids")
+    if (type(missing) is not list or len(missing) != gap + unreviewed
+            or any(type(v) is not str for v in missing)
+            or missing != sorted(set(missing))
+            or any(v not in [f"C{i:02d}" for i in range(1, n + 1)] for v in missing)):
+        raise ResultAcceptanceRefused("Saved unresolved criterion IDs invalid")
+    expected_state = ("ALL_SELF_CLAIMED_MET_NOT_VALIDATED" if not missing else
+                      "CLAIMED_GAPS_OR_UNREVIEWED_CRITERIA")
+    if claims.get("acceptance_claims_state") != expected_state:
+        raise ResultAcceptanceRefused("Saved self-claims state mismatch")
+    review_id = {
+        "schema": SCHEMA,
+        "original_continuity_receipt_sha256": claims["original_continuity_receipt_sha256"],
+        "acceptance_document_sha256": claims["acceptance_document_sha256"],
+        "selected_result_checkpoint_sha256": checkpoint_sha256,
+    }
+    if hashlib.sha256(_canonical(review_id)).hexdigest() != claims["review_receipt_sha256"]:
+        raise ResultAcceptanceRefused("Saved result review receipt mismatch")
+    saved = {k: v for k, v in claims.items() if k != "saved_claims_receipt_sha256"}
+    if hashlib.sha256(_canonical(saved)).hexdigest() != claims["saved_claims_receipt_sha256"]:
+        raise ResultAcceptanceRefused("Saved result self-claim sidecar was altered")
+
+
+def freeze_saved_acceptance_claims(
+    *, continuity: dict[str, Any], review: dict[str, Any],
+) -> dict[str, Any]:
+    """Freeze the redacted ORIGINAL result self-review for historical replay.
+
+    This is invoked before a separate explicit original work completion, never
+    as approval, quality proof, host-authenticated consent or #176 capture.
+    """
+    if (type(continuity) is not dict or type(review) is not dict
+            or continuity.get("status") != "SOURCE_ONLY_ACTIVE_TASK_RESULT_CONTINUITY_HELD"
+            or continuity.get("work_status") != "EXACT_RESULT_BYTES_REVIEWED_NOT_VALIDATED"
+            or continuity.get("result_quality_validated") is not False
+            or continuity.get("task_completion_approved_or_performed") is not False
+            or review.get("status") != "CALLER_SUPPLIED_RESULT_ACCEPTANCE_REVIEW_HELD"
+            or review.get("claims_independently_validated") is not False
+            or review.get("result_quality_validated") is not False
+            or review.get("owner_identity_or_consent_authenticated") is not False
+            or review.get("task_completion_approved_or_performed") is not False
+            or review.get("original_176_experience_eligible_or_promoted") is not False
+            or review.get("original_174_fable_high_authority_granted") is not False
+            or review.get("database_or_credentials_accessed") is not False
+            or review.get("native_claude_or_hooks_executed") is not False
+            or review.get("files_written_or_new_store_created") is not False
+            or review.get("original_continuity_receipt_sha256") !=
+               continuity.get("continuity_receipt_sha256")
+            or review.get("selected_result_checkpoint_sha256") !=
+               continuity.get("selected_result_checkpoint_sha256")):
+        raise ResultAcceptanceRefused("Untrusted acceptance review cannot be saved")
+    claims = {
+        "schema": SAVED_CLAIMS_SCHEMA,
+        "selected_task_key": continuity.get("task_key_claimed"),
+        "selected_note_sha256": continuity.get("selected_note_sha256"),
+        "selected_project_binding_sha256": continuity.get("selected_project_binding_sha256"),
+        "selected_result_sha256": continuity.get("selected_result_sha256"),
+        "selected_result_checkpoint_sha256": continuity.get("selected_result_checkpoint_sha256"),
+        "original_continuity_receipt_sha256": continuity.get("continuity_receipt_sha256"),
+        "acceptance_document_sha256": review.get("acceptance_document_sha256"),
+        "review_receipt_sha256": review.get("review_receipt_sha256"),
+        "criteria_count": review.get("criteria_count"),
+        "claimed_met_count": review.get("claimed_met_count"),
+        "claimed_gap_count": review.get("claimed_gap_count"),
+        "unreviewed_count": review.get("unreviewed_count"),
+        "unresolved_criterion_ids": review.get("unresolved_criterion_ids"),
+        "acceptance_claims_state": review.get("acceptance_claims_state"),
+    }
+    try:
+        digest = hashlib.sha256(_canonical(claims)).hexdigest()
+    except (ValueError, TypeError, OverflowError):
+        raise ResultAcceptanceRefused("Acceptance claim cannot be canonically saved") from None
+    claims["saved_claims_receipt_sha256"] = digest
+    validate_saved_acceptance_claims(
+        claims, task=claims["selected_task_key"],
+        note_sha256=claims["selected_note_sha256"],
+        project_binding_sha256=claims["selected_project_binding_sha256"],
+        result_sha256=claims["selected_result_sha256"],
+        checkpoint_sha256=claims["selected_result_checkpoint_sha256"])
+    return claims

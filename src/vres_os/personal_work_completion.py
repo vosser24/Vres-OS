@@ -41,6 +41,12 @@ def finish_work(
     expected_chairman_history_sha256: str | None = None,
     expected_chairman_proposal_sha256: str | None = None,
     expected_chairman_template_sha256: str | None = None,
+    include_result_acceptance_evidence: bool = False,
+    acceptance_evidence_document: bytes | None = None,
+    expected_acceptance_evidence_sha256: str | None = None,
+    expected_chairman_turn_proposal_sha256: str | None = None,
+    expected_selected_note_sha256: str | None = None,
+    accept_unresolved_claims: bool = False,
 ) -> dict[str, Any]:
     """Verify exact result replay, then move one matching scratch task to history.
 
@@ -59,8 +65,22 @@ def finish_work(
     if ((not include_chairman_candidate and any(x is not None for x in chairman_fields))
             or (include_chairman_candidate and not all(x is not None for x in chairman_fields))):
         raise WorkCompletionRefused("Exact Chairman source selection or explicit opt-in missing")
+    acceptance_fields = (acceptance_evidence_document,
+                         expected_acceptance_evidence_sha256,
+                         expected_chairman_turn_proposal_sha256,
+                         expected_selected_note_sha256)
+    if (type(accept_unresolved_claims) is not bool
+            or accept_unresolved_claims and not include_result_acceptance_evidence):
+        raise WorkCompletionRefused("Unresolved acceptance claims need a selected review")
+    if (type(include_result_acceptance_evidence) is not bool
+            or not include_result_acceptance_evidence and any(x is not None for x in acceptance_fields)
+            or include_result_acceptance_evidence and (
+                type(acceptance_evidence_document) is not bytes
+                or not all(type(x) is str for x in acceptance_fields[1:]))):
+        raise WorkCompletionRefused("Acceptance evidence requires exact separate selection")
     try:
         chairman_candidate = None
+        saved_acceptance_claims = None
         if include_chairman_candidate:
             # Reuse the ORIGINAL work-session Chairman review, not a new model,
             # policy, validator, task store, or a caller-provided approval claim.
@@ -84,6 +104,37 @@ def finish_work(
                     or chairman_candidate.get('host_evidence_status')
                        != 'NO_HOST_MODEL_EVIDENCE_STOP'):
                 raise WorkCompletionRefused('Unverified Chairman-to-result source lineage')
+        if include_result_acceptance_evidence:
+            # Reattest through the SAME original #165 choice and exact-result
+            # self-review before ANY completion mutation. No synthetic claims
+            # are treated as proof, approval, Fable or #176 memory eligibility.
+            from . import personal_work_session as session
+            from . import personal_result_acceptance as acceptance
+            proposed = session.propose_chairman_turn(desk)
+            if proposed.get("proposal_sha256") != expected_chairman_turn_proposal_sha256:
+                raise WorkCompletionRefused("Chairman task proposal changed before completion")
+            matching = [c for c in proposed["choices"]
+                        if c["kind"] == "ACTIVE_TASK"
+                        and c["task_key_claimed"] == task
+                        and c["selected_note_sha256"] == expected_selected_note_sha256]
+            if len(matching) != 1:
+                raise WorkCompletionRefused("Exact active task receipt unavailable")
+            selected_review = session.select_chairman_turn(
+                desk, proposal_sha256=expected_chairman_turn_proposal_sha256,
+                task=task, selected_note_sha256=expected_selected_note_sha256,
+                kind="ACTIVE_TASK", approved=True, project_root=project_root,
+                project_key=project_key, result_file=result_file,
+                expected_checkpoint_sha256=expected_checkpoint_sha256,
+                include_result_acceptance_evidence=True,
+                acceptance_evidence_document=acceptance_evidence_document,
+                expected_acceptance_evidence_sha256=expected_acceptance_evidence_sha256)
+            saved_acceptance_claims = acceptance.freeze_saved_acceptance_claims(
+                continuity=selected_review["selected_task_result_continuity"],
+                review=selected_review["selected_result_acceptance_evidence"])
+            if (saved_acceptance_claims['unresolved_criterion_ids']
+                    and not accept_unresolved_claims):
+                raise WorkCompletionRefused(
+                    "Unresolved criteria require a separate explicit known-gap acknowledgement")
         inspected = result.inspect_work_result(
             desk, task, project_root, project_key, result_file,
             expected_checkpoint_sha256=expected_checkpoint_sha256,
@@ -99,6 +150,14 @@ def finish_work(
         if selected["selected_task"] != task:
             raise WorkCompletionRefused("Selected scratch task mismatch")
         note_sha = selected["selected_note_sha256"]
+        if saved_acceptance_claims is not None and (
+                saved_acceptance_claims["selected_note_sha256"] != note_sha
+                or saved_acceptance_claims["selected_project_binding_sha256"] !=
+                   inspected["work_brief"]["project_binding_sha256"]
+                or saved_acceptance_claims["selected_result_sha256"] != inspected["result_sha256"]
+                or saved_acceptance_claims["selected_result_checkpoint_sha256"] !=
+                   inspected["checkpoint_sha256"]):
+            raise WorkCompletionRefused("Acceptance evidence changed before completion move")
         file_path, relative = result._selected_file(project_root, result_file)
         # Validate the bounded record completely BEFORE moving the task.
         prepared = lifecycle.prepare_result_link(
@@ -109,6 +168,7 @@ def finish_work(
             result_bytes=inspected["result_bytes"],
             checkpoint_sha256=inspected["checkpoint_sha256"],
             chairman_candidate=chairman_candidate,
+            acceptance_claims=saved_acceptance_claims,
         )
         move = lifecycle.move_out(
             desk, task, state="completed", approved=True,
@@ -154,6 +214,11 @@ def finish_work(
                 matches[0]['result_evidence'].get('chairman_candidate', {}).get(
                     'source_link_sha256') != chairman_candidate['source_link_sha256']):
             raise WorkCompletionRefused('Saved Chairman source lineage differs from selection')
+        if saved_acceptance_claims is not None and (
+                matches[0]['result_evidence'].get('saved_acceptance_claims', {}).get(
+                    'saved_claims_receipt_sha256') !=
+                    saved_acceptance_claims['saved_claims_receipt_sha256']):
+            raise WorkCompletionRefused('Saved acceptance self-claim lineage differs')
     except Exception:
         raise WorkCompletionRefused(
             "Task may be completed; inspect existing history before any retry"
@@ -173,6 +238,14 @@ def finish_work(
         "user_confirmed_scratch_completion": True,
         "document_to_history_link_persisted": True,
         "chairman_source_candidate_history_linked": include_chairman_candidate,
+        "saved_acceptance_self_claims_linked": saved_acceptance_claims is not None,
+        "saved_acceptance_claims_receipt_sha256": (
+            saved_acceptance_claims['saved_claims_receipt_sha256']
+            if saved_acceptance_claims is not None else None),
+        "caller_explicitly_acknowledged_unresolved_claims": (
+            saved_acceptance_claims is not None and accept_unresolved_claims),
+        "acceptance_claims_independently_validated": False,
+        "original_176_live_experience_eligible_or_promoted": False,
         "chairman_host_evidence_status": "NO_HOST_MODEL_EVIDENCE_STOP",
         "checkpoint_persisted": True,
         "history_result_current_bytes_verified": False,
