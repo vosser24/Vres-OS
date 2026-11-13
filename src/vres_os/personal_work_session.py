@@ -23,6 +23,7 @@ if not __package__:
     from vres_os import personal_work_completion as completion
     from vres_os import personal_project_intake as intake
     from vres_os import personal_data_sources as data_sources
+    from vres_os import personal_chairman_result_handoff as outcome
 else:
     from . import personal_desk_chairman_handoff as handoff
     from . import personal_portable_desk as portable
@@ -32,6 +33,7 @@ else:
     from . import personal_work_completion as completion
     from . import personal_project_intake as intake
     from . import personal_data_sources as data_sources
+    from . import personal_chairman_result_handoff as outcome
 
 SCHEMA = "vres-personal-integrated-work-session/1"
 
@@ -1854,6 +1856,20 @@ def select_chairman_turn(
                     or latest["work_brief"]["project_binding_sha256"]
                        != inspected["selected_project_binding_sha256"]):
                 raise WorkSessionRefused("Exact result changed during architecture decision review")
+    # Compose the final, source-only task-to-result handoff ONLY after all
+    # original-owner closing rechecks; never activate, save or finish here.
+    selected_outcome = None
+    if kind == "ACTIVE_TASK":
+        try:
+            selected_outcome = outcome.compose_selected_result_handoff(
+                task=task, note_sha256=selected_note_sha256,
+                proposal_sha256=proposal_sha256, selected_review=focus,
+                governed_context=selected_governed,
+                adoption_preparation=selected_adoption,
+                architecture_decision=selected_decision_support)
+        except outcome.ResultHandoffRefused:
+            raise WorkSessionRefused(
+                "Selected original-owner result continuity evidence refused") from None
     return {
         "schema": CHAIRMAN_TURN_SCHEMA,
         "status": "CHAIRMAN_SOURCE_ONLY_CONVERSATION_CHOICE_REATTESTED",
@@ -1865,6 +1881,7 @@ def select_chairman_turn(
         "selected_governed_workday_context": selected_governed,
         "selected_global_project_adoption_preparation": selected_adoption,
         "selected_architecture_experience_decision_support": selected_decision_support,
+        "selected_task_result_continuity": selected_outcome,
         "next_separate_step": next_step,
         "suggested_chairman_message": (
             "The saved result is historical. Explicitly reopen its exact snapshot "
@@ -1880,7 +1897,8 @@ def select_chairman_turn(
                 if selected_decision_support is not None else
                 "I can review this selected work. Completing it remains a separate decision."
             )
-        ),
+        ) + (" " + selected_outcome["next_safe_step"]
+             if selected_outcome is not None else ""),
         "source_only_caller_asserted_choice": True,
         "trusted_user_event_verified": False,
         "chairman_message_emitted_to_host": False,

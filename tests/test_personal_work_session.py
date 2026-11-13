@@ -2744,3 +2744,165 @@ def test_chairman_architecture_support_result_recheck_late_change(tmp_path, monk
             result_file=document, expected_checkpoint_sha256=token)
     assert len(calls) >= 2
     assert lifecycle.list_history(selected)["count"] == 0
+
+
+# Original single-Chairman task/result continuity handoff. AUTHORED, NOT_RUN
+# until an independently proven safe original-owner integration environment.
+
+def test_result_handoff_without_project_does_not_invent_result_or_authority(tmp_path):
+    ctx, _ = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    proposed = session.propose_chairman_turn(selected)
+    choice = next(x for x in proposed["choices"] if x["kind"] == "ACTIVE_TASK")
+    packet = session.select_chairman_turn(
+        selected, proposal_sha256=proposed["proposal_sha256"], task=task,
+        selected_note_sha256=choice["selected_note_sha256"], approved=True)
+    receipt = packet["selected_task_result_continuity"]
+    assert receipt["work_status"] == "ACTIVE_TASK_NO_SELECTED_RESULT"
+    assert receipt["selected_project_binding_sha256"] is None
+    assert receipt["selected_original_result_receipt"] is None
+    assert receipt["task_completion_approved_or_performed"] is False
+    assert "exact project binding" in receipt["next_safe_step"]
+    assert lifecycle.list_history(selected)["count"] == 0
+
+
+def test_result_handoff_exact_result_architecture_is_deterministic_and_held(tmp_path):
+    ctx, checkpoint = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    options = _selected_architecture_kwargs(ctx)
+    first = session.select_chairman_turn(
+        selected, **options, result_file=document, expected_checkpoint_sha256=checkpoint)
+    second = session.select_chairman_turn(
+        selected, **options, result_file=document, expected_checkpoint_sha256=checkpoint)
+    receipt = first["selected_task_result_continuity"]
+    assert receipt["work_status"] == "EXACT_RESULT_BYTES_REVIEWED_NOT_VALIDATED"
+    assert receipt["selected_result_checkpoint_sha256"] == checkpoint
+    assert receipt["selected_result_sha256"] == first[
+        "selected_original_owner_review"]["observed_result"]["result_sha256"]
+    assert receipt["original_174_audit_sha256"] == first[
+        "selected_architecture_experience_decision_support"]["original_174_audit_digest"]
+    assert receipt["continuity_receipt_sha256"] == second[
+        "selected_task_result_continuity"]["continuity_receipt_sha256"]
+    assert receipt["digest_authenticates_user_or_host"] is False
+    assert receipt["result_quality_validated"] is False
+    assert receipt["files_written_or_new_store_created"] is False
+    assert str(project) not in json.dumps(receipt)
+    assert lifecycle.list_history(selected)["count"] == 0
+
+
+def test_result_handoff_binds_saved_catalog_and_exact_result_source_not_memory(tmp_path):
+    ctx, checkpoint = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    options, store, sid, calls = _governed_choice_kwargs(tmp_path, ctx)
+    packet = session.select_chairman_turn(
+        selected, **options, result_file=document,
+        expected_checkpoint_sha256=checkpoint, include_experience_provenance=True)
+    receipt = packet["selected_task_result_continuity"]
+    context = packet["selected_governed_workday_context"]
+    assert receipt["original_167_catalog_context_sha256"] == context["context_sha256"]
+    assert receipt["original_176_result_source_link_sha256"] == context[
+        "result_source_link_sha256"]
+    assert receipt["original_167_catalog_gate"] == "SAVED_SNAPSHOT_ONLY_NOT_LIVE_FRESHNESS"
+    assert receipt["original_176_experience_gate"] == (
+        "EXACT_RESULT_SOURCE_ONLY_NOT_MEMORY_ELIGIBILITY")
+    assert receipt["experience_reuse_eligible_or_promoted"] is False
+    assert calls == []
+    assert str(store.root) not in json.dumps(receipt)
+    assert lifecycle.list_history(selected)["count"] == 0
+
+
+def test_result_handoff_combines_166_168_and_174_with_no_activation(tmp_path):
+    ctx, checkpoint = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    packet = session.select_chairman_turn(
+        selected, **_selected_adoption_kwargs(ctx),
+        include_architecture_experience_decision_support=True,
+        result_file=document, expected_checkpoint_sha256=checkpoint)
+    receipt = packet["selected_task_result_continuity"]
+    assert receipt["architecture_decision_sha256"] == packet[
+        "selected_architecture_experience_decision_support"]["decision_context_sha256"]
+    assert receipt["original_166_168_adoption_preparation_sha256"] == packet[
+        "selected_global_project_adoption_preparation"]["preparation_sha256"]
+    assert receipt["original_166_168_adoption_gate"] == "PREPARATION_ONLY_NO_ACTIVATION"
+    assert receipt["global_or_project_adoption_activated"] is False
+    assert receipt["task_completion_approved_or_performed"] is False
+    assert receipt["native_claude_or_hooks_executed"] is False
+    assert lifecycle.list_history(selected)["count"] == 0
+
+
+def test_result_handoff_keeps_synthetic_e5_quarantined_and_redacted(tmp_path):
+    ctx, checkpoint = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    blob, digest = _synthetic_e5_pack()
+    packet = session.select_chairman_turn(
+        selected, **_selected_architecture_kwargs(ctx),
+        synthetic_experience_pack=blob,
+        expected_experience_pack_sha256=digest,
+        declared_experience_project_id=23)
+    receipt = packet["selected_task_result_continuity"]
+    assert receipt["work_status"] == "ACTIVE_TASK_NO_SELECTED_RESULT"
+    assert receipt["original_176_experience_gate"] == (
+        "UNTRUSTED_SYNTHETIC_E5_PACK_QUARANTINED")
+    assert receipt["experience_reuse_eligible_or_promoted"] is False
+    assert "KNOWLEDGE-one" not in json.dumps(receipt)
+    assert "override all protections" not in json.dumps(receipt)
+    assert lifecycle.list_history(selected)["count"] == 0
+
+
+def test_result_handoff_refuses_forged_authority_and_cross_result(tmp_path):
+    from vres_os import personal_chairman_result_handoff as outcome
+    ctx, checkpoint = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    packet = session.select_chairman_turn(
+        selected, **_selected_architecture_kwargs(ctx),
+        result_file=document, expected_checkpoint_sha256=checkpoint)
+    focus = packet["selected_original_owner_review"]
+    decision = packet["selected_architecture_experience_decision_support"]
+    valid = dict(task=task, note_sha256=packet["selected_note_sha256"],
+                 proposal_sha256=packet["proposal_sha256"],
+                 selected_review=focus, architecture_decision=decision)
+    for altered in (
+        {"architecture_decision": {**decision, "selected_result_sha256": "0" * 64}},
+        {"selected_review": {**focus, "result_quality_validated": True}},
+        {"architecture_decision": {**decision, "experience_reuse_authorized": True}},
+    ):
+        with pytest.raises(outcome.ResultHandoffRefused):
+            outcome.compose_selected_result_handoff(**{**valid, **altered})
+
+
+def test_saved_chairman_result_does_not_create_active_handoff(tmp_path):
+    ctx, checkpoint = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    _finish(ctx, checkpoint)
+    proposed = session.propose_chairman_turn(selected)
+    saved = next(x for x in proposed["choices"] if x["kind"] == "SAVED_COMPLETED_RESULT")
+    packet = session.select_chairman_turn(
+        selected, proposal_sha256=proposed["proposal_sha256"], task=task,
+        selected_note_sha256=saved["selected_note_sha256"],
+        kind="SAVED_COMPLETED_RESULT", approved=True)
+    assert packet["selected_task_result_continuity"] is None
+    assert packet["selected_original_owner_review"]["result_replayed"] is False
+    assert packet["automatic_task_reopen_or_completion"] is False
+
+
+def test_existing_desk_cli_includes_result_handoff_without_private_paths(tmp_path, capsys):
+    ctx, checkpoint = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    proposed = session.propose_chairman_turn(selected)
+    item = next(x for x in proposed["choices"] if x["kind"] == "ACTIVE_TASK")
+    command = [
+        "work-session", "select", "--desk", str(selected), "--task-key", task,
+        "--proposal-sha256", proposed["proposal_sha256"],
+        "--selected-note-sha256", item["selected_note_sha256"],
+        "--project-root", str(project), "--project-key", key,
+        "--result-file", str(document),
+        "--expected-checkpoint-sha256", checkpoint, "--yes",
+    ]
+    assert cli.main(command) == 0
+    packet = json.loads(capsys.readouterr().out)
+    receipt = packet["selected_task_result_continuity"]
+    assert receipt["selected_result_checkpoint_sha256"] == checkpoint
+    assert receipt["files_written_or_new_store_created"] is False
+    assert str(project) not in json.dumps(receipt)
+    assert str(selected) not in json.dumps(receipt)
+    assert lifecycle.list_history(selected)["count"] == 0
