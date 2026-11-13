@@ -1237,6 +1237,9 @@ def render_workday(packet: dict[str, Any]) -> str:
             linked = "linked historical result" if row["saved_result_linked"] else "no result link"
             lines.append("  " + row["task_key_claimed"] + " | note="
                          + row["note_sha256"] + " | " + linked)
+            if row["saved_acceptance_self_claims_linked"]:
+                lines.append("    Historical acceptance self-claims (NOT quality validation): "
+                             + row["saved_acceptance_claims_state"])
     lines.append("Archived: " + str(packet["archived_snapshot_count"])
                  + "; revisions: " + str(packet["revision_snapshot_count"]))
     selected = packet["selected_review"]
@@ -1259,6 +1262,12 @@ def render_workday(packet: dict[str, Any]) -> str:
                      + selected["note_sha256"])
         lines.append("Saved checkpoint (historical only): "
                      + selected["saved_checkpoint_sha256"])
+        if selected["saved_acceptance_self_claims_linked"]:
+            lines.append("Historical self-review: "
+                         + selected["saved_acceptance_claims_state"]
+                         + " (NOT quality validation)")
+        lines.append("Next: separately reopen the exact saved snapshot, "
+                     "then explicitly replay/recheck CURRENT result bytes.")
     lines.append("History has no timestamps. Saved result bytes are NOT verified current.")
     lines.append("No task resumed/finished, no project writes, no native Claude/DB.")
     return "\n".join(lines)
@@ -1997,6 +2006,205 @@ def select_chairman_turn(
     }
 
 
+COMPLETION_DECISION_SCHEMA = "vres-personal-chairman-completion-decision/1"
+
+
+def prepare_completion_decision(
+    desk: str | Path, task: str, project_root: str | Path,
+    project_key: str, result_file: str | Path, *,
+    expected_checkpoint_sha256: str,
+    include_result_acceptance_evidence: bool = False,
+    acceptance_evidence_document: bytes | None = None,
+    expected_acceptance_evidence_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Read-only selected personal completion decision; never grants approval.
+
+    One named task is explicitly selected by the caller. The original Chairman,
+    result, checklist and historical owners remain authoritative for their own
+    source-only validations. This digest detects drift, NOT caller identity.
+    """
+    if (type(task) is not str or not workbench._TASK_KEY.fullmatch(task)
+            or type(expected_checkpoint_sha256) is not str
+            or not workbench._SHA.fullmatch(expected_checkpoint_sha256)
+            or type(include_result_acceptance_evidence) is not bool):
+        raise WorkSessionRefused("Exact task, result checkpoint and review selection required")
+    if include_result_acceptance_evidence:
+        if (type(acceptance_evidence_document) is not bytes
+                or type(expected_acceptance_evidence_sha256) is not str
+                or not workbench._SHA.fullmatch(expected_acceptance_evidence_sha256)):
+            raise WorkSessionRefused("Exact caller-supplied acceptance review required")
+    elif (acceptance_evidence_document is not None
+          or expected_acceptance_evidence_sha256 is not None):
+        raise WorkSessionRefused("Unselected acceptance evidence refused")
+    proposed = propose_chairman_turn(desk)
+    if proposed["manual_revision_recovery_attention_required"] is not False:
+        raise WorkSessionRefused("Interrupted revision requires manual review before finishing")
+    chosen = [row for row in proposed["choices"]
+              if row["kind"] == "ACTIVE_TASK" and row["task_key_claimed"] == task]
+    if len(chosen) != 1:
+        raise WorkSessionRefused("Exactly one active original Chairman choice required")
+    note_sha = chosen[0]["selected_note_sha256"]
+    selected = select_chairman_turn(
+        desk, proposal_sha256=proposed["proposal_sha256"], task=task,
+        selected_note_sha256=note_sha, kind="ACTIVE_TASK", approved=True,
+        project_root=project_root, project_key=project_key,
+        result_file=result_file,
+        expected_checkpoint_sha256=expected_checkpoint_sha256,
+        include_result_acceptance_evidence=include_result_acceptance_evidence,
+        acceptance_evidence_document=acceptance_evidence_document,
+        expected_acceptance_evidence_sha256=expected_acceptance_evidence_sha256)
+    evidence = selected["selected_task_result_continuity"]
+    review = selected["selected_result_acceptance_evidence"]
+    if (selected.get("status") != "CHAIRMAN_SOURCE_ONLY_CONVERSATION_CHOICE_REATTESTED"
+            or selected.get("selected_kind") != "ACTIVE_TASK"
+            or selected.get("writes_performed") is not False
+            or evidence is None
+            or evidence.get("status") != "SOURCE_ONLY_ACTIVE_TASK_RESULT_CONTINUITY_HELD"
+            or evidence.get("selected_note_sha256") != note_sha
+            or evidence.get("selected_result_checkpoint_sha256") != expected_checkpoint_sha256
+            or evidence.get("result_quality_validated") is not False
+            or evidence.get("experience_reuse_eligible_or_promoted") is not False
+            or (review is not None) != include_result_acceptance_evidence):
+        raise WorkSessionRefused("Original Chairman/result review was not held")
+    if review is not None and (
+            review.get("status") != "CALLER_SUPPLIED_RESULT_ACCEPTANCE_REVIEW_HELD"
+            or review.get("claims_independently_validated") is not False
+            or review.get("task_completion_approved_or_performed") is not False
+            or review.get("original_176_experience_eligible_or_promoted") is not False):
+        raise WorkSessionRefused("Self-claims cannot grant completion or memory eligibility")
+    state = {
+        "schema": COMPLETION_DECISION_SCHEMA,
+        "task_key_claimed": task,
+        "selected_note_sha256": note_sha,
+        "proposal_sha256": proposed["proposal_sha256"],
+        "project_binding_sha256": evidence["selected_project_binding_sha256"],
+        "result_sha256": evidence["selected_result_sha256"],
+        "checkpoint_sha256": expected_checkpoint_sha256,
+        "continuity_receipt_sha256": evidence["continuity_receipt_sha256"],
+        "acceptance_review_receipt_sha256": (
+            review["review_receipt_sha256"] if review is not None else None),
+        "unresolved_criterion_ids": (
+            review["unresolved_criterion_ids"] if review is not None else []),
+    }
+    decision_sha = hashlib.sha256(json.dumps(
+        state, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+        allow_nan=False).encode("ascii")).hexdigest()
+    # The pure acceptance parsing can be lengthy. Re-attest exact owners at
+    # the closing boundary; these are cooperative, not atomic OS guarantees.
+    if propose_chairman_turn(desk)["proposal_sha256"] != proposed["proposal_sha256"]:
+        raise WorkSessionRefused("Workday changed during decision preview")
+    closing = result.inspect_work_result(
+        desk, task, project_root, project_key, result_file,
+        expected_checkpoint_sha256=expected_checkpoint_sha256)
+    if (closing.get("status") != "RESULT_EXACT_CONTEXT_CHECKPOINT_MATCH"
+            or closing.get("checkpoint_sha256") != expected_checkpoint_sha256
+            or closing.get("result_sha256") != state["result_sha256"]
+            or closing.get("work_brief", {}).get("project_binding_sha256")
+               != state["project_binding_sha256"]
+            or closing["work_brief"]["scratch_handoff"]["selected_note_sha256"]
+               != note_sha):
+        raise WorkSessionRefused("Exact result changed during completion preview")
+    return {
+        **state,
+        "status": "READ_ONLY_EXACT_PERSONAL_COMPLETION_DECISION",
+        "decision_sha256": decision_sha,
+        "acceptance_claims_state": (
+            review["acceptance_claims_state"] if review is not None else "NO_CHECKLIST_REVIEWED"),
+        "claimed_met_count": review["claimed_met_count"] if review is not None else None,
+        "claimed_gap_count": review["claimed_gap_count"] if review is not None else None,
+        "unreviewed_count": review["unreviewed_count"] if review is not None else None,
+        "extra_known_gap_acknowledgement_required": bool(state["unresolved_criterion_ids"]),
+        "next_safe_step": (
+            "Review or remedy C-IDs, then independently decide with a separate "
+            "completion approval and explicit known-gap acknowledgement."
+            if state["unresolved_criterion_ids"] else
+            "Manually verify the exact result before a separate explicit completion decision."),
+        "task_completion_approved_or_performed": False,
+        "caller_identity_authenticated": False,
+        "result_quality_validated": False,
+        "original_174_protected_fable_granted": False,
+        "original_176_live_trust_scope_revocation_checked": False,
+        "original_176_episode_or_reuse_eligible": False,
+        "history_will_remain_original_lifecycle_owner": True,
+        "digest_authenticates_user_or_host": False,
+        "external_result_future_bytes_guaranteed": False,
+        "cooperative_readback_not_atomic": True,
+        "native_claude_or_hooks_executed": False,
+        "database_contacted": False,
+        "writes_performed": False,
+        "new_store_created": False,
+    }
+
+
+def finish_reviewed_decision(
+    desk: str | Path, task: str, project_root: str | Path,
+    project_key: str, result_file: str | Path, *,
+    expected_checkpoint_sha256: str, expected_decision_sha256: str,
+    approved: bool = False, accept_unresolved_claims: bool = False,
+    include_result_acceptance_evidence: bool = False,
+    acceptance_evidence_document: bytes | None = None,
+    expected_acceptance_evidence_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Recompute the exact preview, then delegate a separate original finish."""
+    if (approved is not True or type(accept_unresolved_claims) is not bool
+            or type(expected_decision_sha256) is not str
+            or not workbench._SHA.fullmatch(expected_decision_sha256)):
+        raise WorkSessionRefused("Explicit separately approved exact decision SHA required")
+    preview = prepare_completion_decision(
+        desk, task, project_root, project_key, result_file,
+        expected_checkpoint_sha256=expected_checkpoint_sha256,
+        include_result_acceptance_evidence=include_result_acceptance_evidence,
+        acceptance_evidence_document=acceptance_evidence_document,
+        expected_acceptance_evidence_sha256=expected_acceptance_evidence_sha256)
+    if preview["decision_sha256"] != expected_decision_sha256:
+        raise WorkSessionRefused("Completion preview expired; review again")
+    if ((preview["extra_known_gap_acknowledgement_required"]
+         and not accept_unresolved_claims)
+            or (accept_unresolved_claims
+                and not preview["extra_known_gap_acknowledgement_required"])):
+        raise WorkSessionRefused("Separate explicit unresolved-claim decision disagrees")
+    completed = completion.finish_work(
+        desk, task, project_root, project_key, result_file,
+        expected_checkpoint_sha256=expected_checkpoint_sha256, approved=True,
+        include_result_acceptance_evidence=include_result_acceptance_evidence,
+        acceptance_evidence_document=acceptance_evidence_document,
+        expected_acceptance_evidence_sha256=expected_acceptance_evidence_sha256,
+        expected_chairman_turn_proposal_sha256=(
+            preview["proposal_sha256"] if include_result_acceptance_evidence else None),
+        expected_selected_note_sha256=(
+            preview["selected_note_sha256"] if include_result_acceptance_evidence else None),
+        accept_unresolved_claims=accept_unresolved_claims)
+    if (completed.get("status") != "USER_CONFIRMED_SCRATCH_WORK_RESULT_COMPLETED"
+            or completed.get("selected_note_sha256") != preview["selected_note_sha256"]
+            or completed.get("checkpoint_sha256") != preview["checkpoint_sha256"]
+            or completed.get("result_sha256") != preview["result_sha256"]
+            or completed.get("saved_acceptance_self_claims_linked")
+               is not include_result_acceptance_evidence
+            or completed.get("original_176_live_experience_eligible_or_promoted") is not False):
+        raise WorkSessionRefused("Task may be completed; inspect original history before retry")
+    return {
+        "schema": COMPLETION_DECISION_SCHEMA,
+        "status": "SEPARATELY_APPROVED_PERSONAL_RESULT_SAVED_IN_ORIGINAL_HISTORY",
+        "task_key_claimed": task,
+        "saved_snapshot_sha256": preview["selected_note_sha256"],
+        "approved_decision_sha256": expected_decision_sha256,
+        "checkpoint_sha256": preview["checkpoint_sha256"],
+        "result_sha256_at_completion": preview["result_sha256"],
+        "saved_acceptance_self_claims_linked": include_result_acceptance_evidence,
+        "acceptance_claims_state": preview["acceptance_claims_state"],
+        "caller_acknowledged_known_gaps": accept_unresolved_claims,
+        "historical_result_current_bytes_verified": False,
+        "explicit_reopen_then_replay_required": True,
+        "original_176_live_episode_or_reuse_eligible": False,
+        "result_quality_validated": False,
+        "caller_identity_authenticated": False,
+        "original_lifecycle_history_reused": True,
+        "external_result_file_modified": False,
+        "new_task_or_memory_store_created": False,
+        "installed_vres_modified": False,
+    }
+
+
 def _read_selected_chairman_source(path: str, *, maximum: int) -> bytes:
     # Read only a user-selected bounded regular file, never profile discovery.
     selected = Path(path)
@@ -2180,7 +2388,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = _SafeParser(
         description="Internal source-only personal workflow over original task owners")
     subs = parser.add_subparsers(dest="command", required=True)
-    for name in ("home", "start", "review", "finish", "reopen", "replay", "propose", "select"):
+    for name in ("home", "start", "review", "finish", "reopen", "replay", "propose", "select", "decision", "decide"):
         sub = subs.add_parser(name)
         sub.add_argument("--desk", required=True)
         sub.add_argument("--task-key", required=(name not in ("home", "propose")))
@@ -2221,6 +2429,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             sub.add_argument("--legacy-review-snapshot-token")
             sub.add_argument("--legacy-review-target", action="append", nargs=2)
             sub.add_argument("--include-legacy-rollback-evidence", action="store_true")
+        if name in ("decision", "decide"):
+            sub.add_argument("--project-root", required=True)
+            sub.add_argument("--project-key", required=True)
+            sub.add_argument("--result-file", required=True)
+            sub.add_argument("--expected-checkpoint-sha256", required=True)
+            sub.add_argument("--include-result-acceptance-evidence", action="store_true")
+            sub.add_argument("--result-acceptance-evidence-file")
+            sub.add_argument("--expected-result-acceptance-evidence-sha256")
+            if name == "decide":
+                sub.add_argument("--expected-decision-sha256", required=True)
+                sub.add_argument("--accept-with-known-gaps", action="store_true")
+                sub.add_argument("--yes", action="store_true")
         if name == "start":
             sub.add_argument("--note-file", required=True)
             sub.add_argument("--project-root", required=True)
@@ -2302,6 +2522,21 @@ def main(argv: Sequence[str] | None = None) -> int:
                         args.synthetic_global_inventory_file, maximum=64 * 1024)
                     != adoption_options["synthetic_global_inventory_document"]):
                 raise WorkSessionRefused("Synthetic global input changed before display")
+        elif args.command in ("decision", "decide"):
+            acceptance_options = _result_acceptance_cli_options(args)
+            options = dict(
+                expected_checkpoint_sha256=args.expected_checkpoint_sha256,
+                **acceptance_options)
+            if args.command == "decision":
+                packet = prepare_completion_decision(
+                    args.desk, args.task_key, args.project_root, args.project_key,
+                    args.result_file, **options)
+            else:
+                packet = finish_reviewed_decision(
+                    args.desk, args.task_key, args.project_root, args.project_key,
+                    args.result_file, expected_decision_sha256=args.expected_decision_sha256,
+                    approved=args.yes, accept_unresolved_claims=args.accept_with_known_gaps,
+                    **options)
         elif args.command == "start":
             packet = start_session(
                 args.desk, args.task_key, args.note_file,

@@ -85,6 +85,24 @@ Usage: python -I -S -B personal_desk_cli.py COMMAND [command options]
             Global/project adoption, KEEP/DROP and rollback are NOT applied.
             Saved #167 metadata is NOT live database freshness;
             #176 result-source preview is NOT eligible reusable memory
+            NEW: guided exact task/result decision without manually relaying
+            proposal/note SHAs. Both commands remain ORIGINAL owner delegates.
+            decision --desk ABS --task-key TASK-* --project-root ABS
+            --project-key project:* --result-file ABS
+            --expected-checkpoint-sha256 HEX
+            [--include-result-acceptance-evidence
+            --result-acceptance-evidence-file SCRATCH/result-acceptance-evidence.json
+            --expected-result-acceptance-evidence-sha256 HEX]
+            Returns READ-ONLY short decision SHA, redacted claimed gaps and
+            explicit next step; neither verifies quality nor completes a task.
+            decide --desk ABS --task-key TASK-* --project-root ABS
+            --project-key project:* --result-file ABS
+            --expected-checkpoint-sha256 HEX --expected-decision-sha256 HEX
+            --yes [same optional acceptance fixture and hash]
+            [--accept-with-known-gaps ONLY for reviewed unresolved C-IDs]
+            Rechecks exact original owners before a SEPARATE approved finish.
+            Completion remains non-atomic; on refusal inspect history, never
+            blindly retry. History and replay remain original lifecycle owners.
             Uses original tasks/results; NEVER host authority or auto-completion
             Internal one-task start/review/finish/reopen/replay
             start --desk ABS --task-key TASK-* --note-file ABS
