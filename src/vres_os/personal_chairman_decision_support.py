@@ -214,6 +214,8 @@ def prepare_selected_decision(
         "status": "SELECTED_CHAIRMAN_ARCHITECTURE_EXPERIENCE_DECISION_HELD",
         "decision_context_sha256": _digest(identity),
         "original_174_maturity": audit.get("maturity"),
+        "original_174_requires_alignment_plan": audit.get("requires_alignment_plan") is True,
+        "original_174_requires_protected_plan_validation": audit.get("requires_protected_plan_validation") is True,
         "original_174_profiles": audit.get("profiles"),
         "original_174_rule_counts": dict(sorted(findings.items())),
         "original_174_material_findings": material,

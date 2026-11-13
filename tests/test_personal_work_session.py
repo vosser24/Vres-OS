@@ -2547,7 +2547,10 @@ def test_chairman_architecture_established_project_rule_summary_is_redacted(tmp_
     report = packet["selected_architecture_experience_decision_support"]
     assert report["original_174_maturity"] == "established"
     assert report["original_174_rule_counts"].get("ARCH-010", 0) >= 1
-    assert report["original_174_material_findings"] >= 1
+    # Original ARCH-010 is an established-project gate, not a material finding.
+    assert report["original_174_requires_alignment_plan"] is True
+    assert report["original_174_requires_protected_plan_validation"] is True
+    assert report["original_174_material_findings"] == 0
     assert report["independently_trusted_fable_positive_verdict"] is False
     assert "module_0.py" not in json.dumps(report)
     assert str(project) not in json.dumps(report)
