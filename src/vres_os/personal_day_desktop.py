@@ -73,9 +73,13 @@ class PersonalDayDesktop(ttk.Frame):
         self.rowconfigure(5, weight=2)
         self.values = {name: tk.StringVar() for name in (
             "desk", "new_task", "note", "project", "key", "result",
-            "acceptance_path", "acceptance_sha")}
+            "acceptance_path", "acceptance_sha",
+            "catalog_root", "catalog_namespace", "catalog_source",
+            "catalog_sha", "catalog_revision", "synthetic_file", "synthetic_sha")}
         self.with_intake = tk.BooleanVar(value=False)
         self.with_acceptance = tk.BooleanVar(value=False)
+        self.with_catalog = tk.BooleanVar(value=False)
+        self.with_synthetic = tk.BooleanVar(value=False)
         self.status = tk.StringVar(value="Choose an explicit scratch desk and select Load.")
         self.choices: dict[str, tuple[str, str, str]] = {}
         self.focused: tuple | None = None
@@ -117,20 +121,57 @@ class PersonalDayDesktop(ttk.Frame):
         self.listing.configure(yscrollcommand=scrollbar.set)
         self.listing.bind("<<TreeviewSelect>>", lambda _event: self._invalidate())
 
-        context = ttk.LabelFrame(self, text="Explicit project / result (never auto-discovered)")
-        context.grid(row=3, column=0, sticky="ew", pady=6)
-        context.columnconfigure(1, weight=1)
-        self._field(context, 0, "Project root", "project")
-        self._field(context, 1, "Original project key", "key")
-        self._field(context, 2, "Result file", "result")
+        workspace = ttk.Notebook(self)
+        workspace.grid(row=3, column=0, sticky="ew", pady=6)
+
+        active = ttk.Frame(workspace, padding=5)
+        active.columnconfigure(1, weight=1)
+        workspace.add(active, text="Project / result")
+        self._field(active, 0, "Project root (explicit)", "project")
+        self._field(active, 1, "Original project key", "key")
+        self._field(active, 2, "Result file (explicit)", "result")
         ttk.Checkbutton(
-            context, text="Read-only original #168 project/source intake",
+            active, text="Opt in: original #168 read-only project/source preview",
             variable=self.with_intake).grid(row=3, column=1, sticky="w")
-        self._field(context, 4, "Optional acceptance file in scratch desk", "acceptance_path")
-        self._field(context, 5, "Expected acceptance SHA-256", "acceptance_sha")
+
+        claims = ttk.Frame(workspace, padding=5)
+        claims.columnconfigure(1, weight=1)
+        workspace.add(claims, text="Acceptance self-claims")
+        self._field(claims, 0, "Scratch acceptance file", "acceptance_path")
+        self._field(claims, 1, "Exact acceptance SHA-256", "acceptance_sha")
         ttk.Checkbutton(
-            context, text="Explicitly include caller-supplied acceptance self-claims",
-            variable=self.with_acceptance).grid(row=6, column=1, sticky="w")
+            claims, text="Opt in: caller self-claims, NOT result-quality proof",
+            variable=self.with_acceptance).grid(row=2, column=1, sticky="w")
+
+        sources = ttk.Frame(workspace, padding=5)
+        sources.columnconfigure(0, weight=1)
+        sources.columnconfigure(1, weight=1)
+        workspace.add(sources, text="Optional source context (held)")
+        catalog = ttk.LabelFrame(sources, text="Original #167 saved catalog · NOT live freshness")
+        catalog.grid(row=0, column=0, sticky="nsew", padx=4)
+        catalog.columnconfigure(1, weight=1)
+        self._field(catalog, 0, "Explicit saved root", "catalog_root")
+        self._field(catalog, 1, "Namespace", "catalog_namespace")
+        self._field(catalog, 2, "Source ID", "catalog_source")
+        self._field(catalog, 3, "Saved document SHA-256", "catalog_sha")
+        self._field(catalog, 4, "Saved revision", "catalog_revision")
+        ttk.Checkbutton(
+            catalog, text="Opt in: read one existing offline #167 snapshot",
+            variable=self.with_catalog).grid(row=5, column=0, columnspan=2, sticky="w")
+
+        synthetic = ttk.LabelFrame(
+            sources, text="Original #166/#168 · SYNTHETIC preparation ONLY")
+        synthetic.grid(row=0, column=1, sticky="nsew", padx=4)
+        synthetic.columnconfigure(1, weight=1)
+        self._field(synthetic, 0, "Scratch-only inventory file", "synthetic_file")
+        self._field(synthetic, 1, "Synthetic file SHA-256", "synthetic_sha")
+        ttk.Checkbutton(
+            synthetic, text="Opt in: HELD synthetic preview; no adoption",
+            variable=self.with_synthetic).grid(row=2, column=0, columnspan=2, sticky="w")
+        ttk.Label(
+            synthetic, text="Both previews require Project / result tab #168 opt-in.\n"
+            "No real profile scan, DB, credentials, native hooks, or F1/Fable.",
+            justify="left").grid(row=3, column=0, columnspan=2, sticky="w", pady=8)
 
         buttons = ttk.Frame(self)
         buttons.grid(row=4, column=0, sticky="ew", pady=5)
@@ -149,8 +190,9 @@ class PersonalDayDesktop(ttk.Frame):
         report.rowconfigure(0, weight=1)
         self.detail = tk.Text(report, wrap="word", height=11, state="disabled")
         self.detail.grid(row=0, column=0, sticky="nsew")
-        ttk.Scrollbar(report, orient="vertical", command=self.detail.yview).grid(
-            row=0, column=1, sticky="ns")
+        report_scroll = ttk.Scrollbar(report, orient="vertical", command=self.detail.yview)
+        report_scroll.grid(row=0, column=1, sticky="ns")
+        self.detail.configure(yscrollcommand=report_scroll.set)
 
         create = ttk.LabelFrame(self, text="Optional NEW scratch start (absent desk + empty project only)")
         create.grid(row=6, column=0, sticky="ew")
@@ -188,8 +230,11 @@ class PersonalDayDesktop(ttk.Frame):
         selected = self._selected()
         return (self.values["desk"].get().strip(), *selected,
                 *(self.values[name].get().strip() for name in (
-                    "project", "key", "result", "acceptance_path", "acceptance_sha")),
-                bool(self.with_acceptance.get()), bool(self.with_intake.get()))
+                    "project", "key", "result", "acceptance_path", "acceptance_sha",
+                    "catalog_root", "catalog_namespace", "catalog_source",
+                    "catalog_sha", "catalog_revision", "synthetic_file", "synthetic_sha")),
+                bool(self.with_acceptance.get()), bool(self.with_intake.get()),
+                bool(self.with_catalog.get()), bool(self.with_synthetic.get()))
 
     def _acceptance(self, desk_path: str) -> dict:
         file = self.values["acceptance_path"].get().strip()
@@ -213,13 +258,74 @@ class PersonalDayDesktop(ttk.Frame):
             "expected_acceptance_evidence_sha256": sha,
         }
 
+    def _sources(self, desk_path: str) -> dict:
+        """Opt-in ORIGINAL offline #167 snapshot and HELD scratch-only #166 plan.
+
+        Never opens the broker, a live database, a native host or a profile scan.
+        The existing owner rechecks all original digest/identity boundaries.
+        """
+        keys = ("catalog_root", "catalog_namespace", "catalog_source",
+                "catalog_sha", "catalog_revision")
+        catalog = {name: self.values[name].get().strip() for name in keys}
+        file = self.values["synthetic_file"].get().strip()
+        sha = self.values["synthetic_sha"].get().strip()
+        if not self.with_catalog.get() and any(catalog.values()):
+            raise DesktopRefused("Clear saved catalog fields or explicitly opt in.")
+        if not self.with_synthetic.get() and (file or sha):
+            raise DesktopRefused("Clear synthetic inputs or explicitly opt in.")
+        if (self.with_catalog.get() or self.with_synthetic.get()) and not self.with_intake.get():
+            raise DesktopRefused("Saved/synthetic previews require selected #168 intake.")
+        result = {}
+        if self.with_catalog.get():
+            if not all(catalog.values()):
+                raise DesktopRefused("All five original saved catalog fields are required.")
+            revision_text = catalog["catalog_revision"]
+            if (not revision_text.isascii() or not revision_text.isdecimal()
+                    or (len(revision_text) > 1 and revision_text.startswith("0"))
+                    or len(revision_text) > 7 or int(revision_text) > 1000000):
+                raise DesktopRefused("Exact nonnegative saved catalog revision required.")
+            digest = catalog["catalog_sha"]
+            if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+                raise DesktopRefused("Expected saved catalog SHA-256 must be lowercase hex.")
+            # ORIGINAL #167 store, loaded ONLY on explicit user-selected focus.
+            # No broker is ever constructed; the original callback refuses lookup.
+            from vres_os.personal_data_source_store import CurrentUserDataSourceStore
+            result.update({
+                "include_saved_catalog": True,
+                "saved_catalog_store": CurrentUserDataSourceStore(
+                    Path(catalog["catalog_root"]), catalog["catalog_namespace"],
+                    owner._reject_catalog_credential_lookup),
+                "saved_catalog_source_id": catalog["catalog_source"],
+                "expected_saved_catalog_sha256": digest,
+                "expected_saved_catalog_revision": int(revision_text),
+            })
+        if self.with_synthetic.get():
+            if not file or not sha:
+                raise DesktopRefused("One exact scratch synthetic file and SHA are required.")
+            root = portable._desk(desk_path, must_exist=True)
+            selected = Path(file)
+            if selected.name != "synthetic-global-inventory.json" or selected.parent != root:
+                raise DesktopRefused("Synthetic inventory must stay in selected scratch desk.")
+            raw = owner._read_selected_chairman_source(file, maximum=64 * 1024)
+            if hashlib.sha256(raw).hexdigest() != sha:
+                raise DesktopRefused("Synthetic inventory SHA-256 mismatch.")
+            result.update({
+                "include_adoption_preparation": True,
+                "synthetic_global_inventory_document": raw,
+                "expected_synthetic_global_inventory_sha256": sha,
+            })
+        return result
+
     def _history_only(self) -> tuple[str, str, str]:
         kind, task, digest = self._selected()
         if kind != "SAVED_COMPLETED_RESULT":
             raise DesktopRefused("Select a saved completed result for this operation.")
         if (any(self.values[n].get().strip() for n in (
-                "project", "key", "result", "acceptance_path", "acceptance_sha"))
-                or self.with_intake.get() or self.with_acceptance.get()):
+                "project", "key", "result", "acceptance_path", "acceptance_sha",
+                "catalog_root", "catalog_namespace", "catalog_source",
+                "catalog_sha", "catalog_revision", "synthetic_file", "synthetic_sha"))
+                or self.with_intake.get() or self.with_acceptance.get()
+                or self.with_catalog.get() or self.with_synthetic.get()):
             raise DesktopRefused("Clear active context and opt-ins before saved history.")
         return kind, task, digest
 
@@ -261,18 +367,31 @@ class PersonalDayDesktop(ttk.Frame):
                 context = checked_context(*(self.values[k].get() for k in (
                     "project", "key", "result")))
                 opts = self._acceptance(desk)
+                sources = self._sources(desk)
                 if opts and not context["result_file"]:
                     raise DesktopRefused("Acceptance review requires an explicit result.")
                 packet = owner.review_personal_day(
                     desk, task, include_source_context=bool(self.with_intake.get()),
-                    **context, **opts)
+                    **context, **opts, **sources)
             checked_day(packet, selected=True)
             journey = packet["selected_original_journey"]
             if journey["selected_note_sha256"] != digest:
                 raise DesktopRefused("Selected original note changed.")
             self.focused = (self._binding(), journey)
             self._display(owner.render_personal_day(packet))
-            self.status.set("READ ONLY. Focus did not approve or complete anything.")
+            stage = journey["stage"]
+            guidance = {
+                "TASK_SELECTED_NO_PROJECT": "Choose a project root and original key, then focus again.",
+                "PROJECT_SELECTED_NO_RESULT": "Select an exact result file when ready; no result assumed.",
+                "RESULT_REVIEW_READY_SEPARATE_DECISION":
+                    "Result is observed. Use a separate read-only Decision before Complete.",
+                "SAVED_HISTORICAL_ONLY":
+                    "Historical ONLY. Clear active context, then separately approve Reopen and Replay.",
+                "SAVED_CURRENT_BYTES_MATCH_THIS_READ":
+                    "Historical bytes matched this read only; not future or quality proof.",
+            }
+            self.status.set("READ ONLY. " + guidance.get(
+                stage, "No action, quality validation or authority was granted."))
         except Exception:
             self._refuse()
 
@@ -403,6 +522,13 @@ class PersonalDayDesktop(ttk.Frame):
         try:
             context = checked_context(*(self.values[k].get() for k in (
                 "project", "key", "result")))
+            if (self.with_acceptance.get() or self.with_intake.get()
+                    or self.with_catalog.get() or self.with_synthetic.get()
+                    or any(self.values[k].get().strip() for k in (
+                        "acceptance_path", "acceptance_sha", "catalog_root",
+                        "catalog_namespace", "catalog_source", "catalog_sha",
+                        "catalog_revision", "synthetic_file", "synthetic_sha"))):
+                raise DesktopRefused("Clear read-only source and review inputs before NEW scratch.")
             if not context["project_root"] or context["result_file"]:
                 raise DesktopRefused("New scratch requires explicit empty project; no result yet.")
             task = self.values["new_task"].get().strip()

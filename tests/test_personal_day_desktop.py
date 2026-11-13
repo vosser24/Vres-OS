@@ -156,3 +156,124 @@ def test_desktop_replay_never_implicitly_reopens_or_promotes_history(monkeypatch
     assert refused == []
     assert "THIS READ ONLY" in shown[0]
     assert "memory" in shown[0]
+
+
+
+def _source_view(*, catalog=False, synthetic=False, intake=True):
+    view = _View()
+    names = ("catalog_root", "catalog_namespace", "catalog_source",
+             "catalog_sha", "catalog_revision", "synthetic_file", "synthetic_sha")
+    view.values = {name: _Var("") for name in names}
+    view.with_catalog = _Var(catalog)
+    view.with_synthetic = _Var(synthetic)
+    view.with_intake = _Var(intake)
+    return view
+
+
+def test_desktop_unselected_sources_and_missing_original_intake_refuse():
+    view = _source_view(intake=False)
+    view.values["catalog_root"].set("/scratch/saved")
+    with pytest.raises(desktop.DesktopRefused):
+        desktop.PersonalDayDesktop._sources(view, "/scratch/Vres-Desk-TEST")
+    view.values["catalog_root"].set("")
+    view.with_catalog.set(True)
+    with pytest.raises(desktop.DesktopRefused):
+        desktop.PersonalDayDesktop._sources(view, "/scratch/Vres-Desk-TEST")
+    view.with_catalog.set(False)
+    view.with_synthetic.set(True)
+    with pytest.raises(desktop.DesktopRefused):
+        desktop.PersonalDayDesktop._sources(view, "/scratch/Vres-Desk-TEST")
+
+
+def test_desktop_selected_catalog_delegates_original_167_no_credential_broker(monkeypatch):
+    from pathlib import Path
+    from vres_os import personal_data_source_store
+    view = _source_view(catalog=True)
+    for name, value in {
+        "catalog_root": "/scratch/current-user-data",
+        "catalog_namespace": "test-user-namespace",
+        "catalog_source": "source:test",
+        "catalog_sha": "a" * 64,
+        "catalog_revision": "3",
+    }.items():
+        view.values[name].set(value)
+    calls = []
+    class FakeOriginalStore:
+        def __init__(self, root, namespace, callback):
+            calls.append((root, namespace, callback))
+    monkeypatch.setattr(personal_data_source_store,
+                        "CurrentUserDataSourceStore", FakeOriginalStore)
+    opts = desktop.PersonalDayDesktop._sources(view, "/scratch/Vres-Desk-TEST")
+    assert opts["include_saved_catalog"] is True
+    assert opts["expected_saved_catalog_sha256"] == "a" * 64
+    assert opts["expected_saved_catalog_revision"] == 3
+    assert len(calls) == 1 and calls[0][0] == Path("/scratch/current-user-data")
+    assert calls[0][2] is desktop.owner._reject_catalog_credential_lookup
+
+
+def test_desktop_catalog_rejects_ambiguous_revision_and_digest():
+    view = _source_view(catalog=True)
+    for name, value in {
+        "catalog_root": "/scratch/data", "catalog_namespace": "synthetic",
+        "catalog_source": "source:synthetic", "catalog_sha": "b" * 64,
+        "catalog_revision": "01",
+    }.items():
+        view.values[name].set(value)
+    with pytest.raises(desktop.DesktopRefused):
+        desktop.PersonalDayDesktop._sources(view, "/scratch/Vres-Desk-TEST")
+    view.values["catalog_revision"].set("0")
+    view.values["catalog_sha"].set("B" * 64)
+    with pytest.raises(desktop.DesktopRefused):
+        desktop.PersonalDayDesktop._sources(view, "/scratch/Vres-Desk-TEST")
+
+
+def test_desktop_synthetic_166_fixture_is_scratch_only_and_sha_bound(monkeypatch):
+    import hashlib
+    from pathlib import Path
+    view = _source_view(synthetic=True)
+    root = Path("/scratch/Vres-Desk-TEST")
+    document = b'{"synthetic":true}'
+    sha = hashlib.sha256(document).hexdigest()
+    view.values["synthetic_file"].set(str(root / "synthetic-global-inventory.json"))
+    view.values["synthetic_sha"].set(sha)
+    monkeypatch.setattr(desktop.portable, "_desk", lambda *a, **k: root)
+    reads = []
+    def read(file, *, maximum):
+        reads.append((file, maximum))
+        return document
+    monkeypatch.setattr(desktop.owner, "_read_selected_chairman_source", read)
+    opts = desktop.PersonalDayDesktop._sources(view, str(root))
+    assert opts == {
+        "include_adoption_preparation": True,
+        "synthetic_global_inventory_document": document,
+        "expected_synthetic_global_inventory_sha256": sha,
+    }
+    assert reads == [(str(root / "synthetic-global-inventory.json"), 65536)]
+    view.values["synthetic_sha"].set("a" * 64)
+    with pytest.raises(desktop.DesktopRefused):
+        desktop.PersonalDayDesktop._sources(view, str(root))
+    view.values["synthetic_sha"].set(sha)
+    view.values["synthetic_file"].set("/outside/synthetic-global-inventory.json")
+    with pytest.raises(desktop.DesktopRefused):
+        desktop.PersonalDayDesktop._sources(view, str(root))
+
+
+def test_desktop_history_refuses_any_source_context_even_when_opted_in():
+    view = _source_view(catalog=True)
+    for name in ("project", "key", "result", "acceptance_path", "acceptance_sha"):
+        view.values[name] = _Var("")
+    view.with_acceptance = _Var(False)
+    view._selected = lambda: ("SAVED_COMPLETED_RESULT", "TASK-SYNTHETIC", "e" * 64)
+    with pytest.raises(desktop.DesktopRefused):
+        desktop.PersonalDayDesktop._history_only(view)
+
+
+def test_desktop_source_edit_invalidates_exact_prior_preview_binding():
+    view = _source_view(catalog=True)
+    for name in ("desk", "project", "key", "result", "acceptance_path", "acceptance_sha"):
+        view.values[name] = _Var("")
+    view.with_acceptance = _Var(False)
+    view._selected = lambda: ("ACTIVE_TASK", "TASK-SYNTHETIC", "c" * 64)
+    first = desktop.PersonalDayDesktop._binding(view)
+    view.values["catalog_revision"].set("4")
+    assert desktop.PersonalDayDesktop._binding(view) != first
