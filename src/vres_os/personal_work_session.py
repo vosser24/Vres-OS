@@ -2205,6 +2205,142 @@ def finish_reviewed_decision(
     }
 
 
+
+# A source-only personal Workday + original Chairman + completion briefing.
+# Neither state, approval nor result quality is established by this view.
+COMPLETION_BRIEFING_SCHEMA = "vres-personal-one-task-completion-briefing/1"
+
+
+def prepare_completion_briefing(
+    desk: str | Path, task: str, project_root: str | Path,
+    project_key: str, result_file: str | Path, *,
+    expected_checkpoint_sha256: str, show_selected_action: bool = False,
+    include_result_acceptance_evidence: bool = False,
+    acceptance_evidence_document: bytes | None = None,
+    expected_acceptance_evidence_sha256: str | None = None,
+) -> dict[str, Any]:
+    """One explicit task, existing history and exact read-only decision."""
+    if type(show_selected_action) is not bool:
+        raise WorkSessionRefused("Explicit boolean action disclosure required")
+    home = review_workday(
+        desk, selected_task=task, show_selected_action=show_selected_action,
+        project_root=project_root, project_key=project_key)
+    selected = home["selected_review"]
+    if (home.get("writes_performed") is not False
+            or home.get("manual_revision_recovery_attention_required") is not False
+            or selected is None
+            or selected.get("kind") != "EXPLICIT_ACTIVE_TASK"
+            or selected.get("task_key_claimed") != task
+            or selected.get("next_action_disclosed") is not show_selected_action):
+        raise WorkSessionRefused("Exact active task/revision state unavailable")
+    decision = prepare_completion_decision(
+        desk, task, project_root, project_key, result_file,
+        expected_checkpoint_sha256=expected_checkpoint_sha256,
+        include_result_acceptance_evidence=include_result_acceptance_evidence,
+        acceptance_evidence_document=acceptance_evidence_document,
+        expected_acceptance_evidence_sha256=expected_acceptance_evidence_sha256)
+    if (decision.get("status") != "READ_ONLY_EXACT_PERSONAL_COMPLETION_DECISION"
+            or decision.get("writes_performed") is not False
+            or decision.get("task_completion_approved_or_performed") is not False
+            or decision.get("original_176_episode_or_reuse_eligible") is not False
+            or decision["selected_note_sha256"] != selected["note_sha256"]
+            or decision["project_binding_sha256"]
+               != selected["selected_project_binding_sha256"]):
+        raise WorkSessionRefused("Workday / result decision context mismatch")
+    # Second original Workday readback is cooperative, never OS atomic.
+    closing = review_workday(
+        desk, selected_task=task, show_selected_action=show_selected_action,
+        project_root=project_root, project_key=project_key)
+    if handoff._exact_json(home) != handoff._exact_json(closing):
+        raise WorkSessionRefused("Workday changed during briefing")
+    prior = sum(
+        row["state"] == "completed" and row["task_key_claimed"] == task
+        for row in home["saved_history"])
+    return {
+        "schema": COMPLETION_BRIEFING_SCHEMA,
+        "status": "READ_ONLY_ONE_TASK_COMPLETION_BRIEFING",
+        "task_key_claimed": task,
+        "selected_note_sha256": selected["note_sha256"],
+        "selected_project_binding_sha256": selected["selected_project_binding_sha256"],
+        "active_task_count": home["active_count"],
+        "historical_completed_snapshots_for_selected_task": prior,
+        "historical_result_current_bytes_verified": False,
+        "selected_next_action_disclosed": show_selected_action,
+        "selected_next_action_untrusted": (
+            selected["selected_next_action_untrusted"] if show_selected_action else None),
+        "checkpoint_sha256": decision["checkpoint_sha256"],
+        "current_result_sha256": decision["result_sha256"],
+        "decision_sha256": decision["decision_sha256"],
+        "acceptance_claims_state": decision["acceptance_claims_state"],
+        "claimed_met_count": decision["claimed_met_count"],
+        "claimed_gap_count": decision["claimed_gap_count"],
+        "unreviewed_count": decision["unreviewed_count"],
+        "unresolved_criterion_ids": decision["unresolved_criterion_ids"],
+        "extra_known_gap_acknowledgement_required":
+            decision["extra_known_gap_acknowledgement_required"],
+        "next_safe_step": decision["next_safe_step"],
+        "separate_exact_decide_with_yes_required": True,
+        "digest_authenticates_user_or_host": False,
+        "result_quality_validated": False,
+        "original_174_protected_fable_granted": False,
+        "original_176_live_episode_or_reuse_eligible": False,
+        "task_completion_approved_or_performed": False,
+        "native_claude_or_hooks_executed": False,
+        "database_contacted": False,
+        "writes_performed": False,
+        "new_store_created": False,
+    }
+
+
+def render_completion_briefing(packet: dict[str, Any]) -> str:
+    """Human-readable no-path briefing; action text remains explicit opt-in."""
+    if (type(packet) is not dict
+            or packet.get("schema") != COMPLETION_BRIEFING_SCHEMA
+            or packet.get("status") != "READ_ONLY_ONE_TASK_COMPLETION_BRIEFING"
+            or packet.get("writes_performed") is not False
+            or packet.get("task_completion_approved_or_performed") is not False
+            or packet.get("original_176_live_episode_or_reuse_eligible") is not False
+            or packet.get("result_quality_validated") is not False
+            or packet.get("native_claude_or_hooks_executed") is not False
+            or packet.get("database_contacted") is not False
+            or packet.get("separate_exact_decide_with_yes_required") is not True
+            or type(packet.get("task_key_claimed")) is not str
+            or not workbench._TASK_KEY.fullmatch(packet["task_key_claimed"])
+            or type(packet.get("decision_sha256")) is not str
+            or not workbench._SHA.fullmatch(packet["decision_sha256"])):
+        raise WorkSessionRefused("Completion briefing text contract refused")
+    lines = [
+        "Vres-OS PERSONAL COMPLETION BRIEFING -- READ ONLY",
+        "Selected task: " + packet["task_key_claimed"],
+        "Active tasks: " + str(packet["active_task_count"])
+        + "; undated completed snapshots for selected task: "
+        + str(packet["historical_completed_snapshots_for_selected_task"]),
+        "Current result SHA-256: " + packet["current_result_sha256"],
+        "Exact checkpoint SHA-256: " + packet["checkpoint_sha256"],
+        "Acceptance: " + packet["acceptance_claims_state"]
+        + " (self-claims only, NOT quality validation)",
+    ]
+    if packet["selected_next_action_disclosed"]:
+        lines.append("UNTRUSTED TASK ACTION (not executable): "
+                     + json.dumps(packet["selected_next_action_untrusted"],
+                                  ensure_ascii=True))
+    else:
+        lines.append("Task action hidden; explicit disclosure required.")
+    if packet["unresolved_criterion_ids"]:
+        lines.append("Unresolved checklist IDs: "
+                     + json.dumps(packet["unresolved_criterion_ids"],
+                                  ensure_ascii=True)
+                     + " -- separate known-gap acknowledgement required.")
+    lines.extend([
+        "Read-only decision SHA-256: " + packet["decision_sha256"],
+        "Next: " + packet["next_safe_step"],
+        "Finishing is a DIFFERENT explicit work-session decide --yes action.",
+        "No completion, host/Fable/#176 authority, native hook, DB or project write.",
+        "Historical bytes and self-claims are NOT independently verified.",
+    ])
+    return "\n".join(lines)
+
+
 def _read_selected_chairman_source(path: str, *, maximum: int) -> bytes:
     # Read only a user-selected bounded regular file, never profile discovery.
     selected = Path(path)
@@ -2388,7 +2524,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = _SafeParser(
         description="Internal source-only personal workflow over original task owners")
     subs = parser.add_subparsers(dest="command", required=True)
-    for name in ("home", "start", "review", "finish", "reopen", "replay", "propose", "select", "decision", "decide"):
+    for name in ("home", "start", "review", "finish", "reopen", "replay", "propose", "select", "decision", "decide", "briefing"):
         sub = subs.add_parser(name)
         sub.add_argument("--desk", required=True)
         sub.add_argument("--task-key", required=(name not in ("home", "propose")))
@@ -2429,7 +2565,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             sub.add_argument("--legacy-review-snapshot-token")
             sub.add_argument("--legacy-review-target", action="append", nargs=2)
             sub.add_argument("--include-legacy-rollback-evidence", action="store_true")
-        if name in ("decision", "decide"):
+        if name in ("decision", "decide", "briefing"):
             sub.add_argument("--project-root", required=True)
             sub.add_argument("--project-key", required=True)
             sub.add_argument("--result-file", required=True)
@@ -2437,6 +2573,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             sub.add_argument("--include-result-acceptance-evidence", action="store_true")
             sub.add_argument("--result-acceptance-evidence-file")
             sub.add_argument("--expected-result-acceptance-evidence-sha256")
+            if name == "briefing":
+                sub.add_argument("--format", choices=("text", "json"), default="text")
+                sub.add_argument("--show-selected-action", action="store_true")
             if name == "decide":
                 sub.add_argument("--expected-decision-sha256", required=True)
                 sub.add_argument("--accept-with-known-gaps", action="store_true")
@@ -2522,12 +2661,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                         args.synthetic_global_inventory_file, maximum=64 * 1024)
                     != adoption_options["synthetic_global_inventory_document"]):
                 raise WorkSessionRefused("Synthetic global input changed before display")
-        elif args.command in ("decision", "decide"):
+        elif args.command in ("decision", "decide", "briefing"):
             acceptance_options = _result_acceptance_cli_options(args)
             options = dict(
                 expected_checkpoint_sha256=args.expected_checkpoint_sha256,
                 **acceptance_options)
-            if args.command == "decision":
+            if args.command == "briefing":
+                packet = prepare_completion_briefing(
+                    args.desk, args.task_key, args.project_root, args.project_key,
+                    args.result_file, show_selected_action=args.show_selected_action,
+                    **options)
+            elif args.command == "decision":
                 packet = prepare_completion_decision(
                     args.desk, args.task_key, args.project_root, args.project_key,
                     args.result_file, **options)
@@ -2579,6 +2723,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 include_saved_chairman_candidate=args.include_saved_chairman_candidate)
         if args.command == "home" and args.format == "text":
             print(render_workday(packet))
+        elif args.command == "briefing" and args.format == "text":
+            print(render_completion_briefing(packet))
         else:
             print(json.dumps(packet, sort_keys=True, ensure_ascii=True))
     except Exception:

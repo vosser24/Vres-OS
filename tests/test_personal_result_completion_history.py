@@ -388,3 +388,74 @@ def test_original_desk_cli_two_explicit_completion_commands(tmp_path, capsys):
     done = json.loads(capsys.readouterr().out)
     assert done["saved_snapshot_sha256"] == preview["selected_note_sha256"]
     assert done["original_176_live_episode_or_reuse_eligible"] is False
+
+
+
+def test_one_task_briefing_uses_original_workday_decision_no_mutation(tmp_path):
+    ctx, opts, _ = _scratch(tmp_path)
+    before = lifecycle.list_history(ctx[0])
+    brief = session.prepare_completion_briefing(
+        *ctx, expected_checkpoint_sha256=opts["expected_checkpoint_sha256"])
+    preview = session.prepare_completion_decision(
+        *ctx, expected_checkpoint_sha256=opts["expected_checkpoint_sha256"])
+    assert brief["status"] == "READ_ONLY_ONE_TASK_COMPLETION_BRIEFING"
+    assert brief["decision_sha256"] == preview["decision_sha256"]
+    assert brief["current_result_sha256"] == preview["result_sha256"]
+    assert brief["selected_project_binding_sha256"] == preview["project_binding_sha256"]
+    assert brief["historical_completed_snapshots_for_selected_task"] == 0
+    assert brief["selected_next_action_untrusted"] is None
+    assert brief["task_completion_approved_or_performed"] is False
+    assert brief["original_176_live_episode_or_reuse_eligible"] is False
+    assert brief["writes_performed"] is False
+    assert lifecycle.list_history(ctx[0]) == before
+    rendered = session.render_completion_briefing(brief)
+    assert "READ ONLY" in rendered and "DIFFERENT explicit" in rendered
+    assert str(ctx[2]) not in rendered
+
+
+def test_one_task_briefing_redacts_gaps_and_requires_separate_ack(tmp_path):
+    ctx, opts, _ = _scratch(tmp_path, statuses=("CLAIMED_GAP", "UNREVIEWED"))
+    brief = session.prepare_completion_briefing(
+        *ctx, expected_checkpoint_sha256=opts["expected_checkpoint_sha256"],
+        include_result_acceptance_evidence=True,
+        acceptance_evidence_document=opts["acceptance_evidence_document"],
+        expected_acceptance_evidence_sha256=opts["expected_acceptance_evidence_sha256"])
+    rendered = session.render_completion_briefing(brief)
+    assert brief["extra_known_gap_acknowledgement_required"] is True
+    assert brief["unresolved_criterion_ids"] == ["C01", "C02"]
+    assert "known-gap acknowledgement required" in rendered
+    assert "SECRET-CHECK" not in rendered
+    assert "SECRET-CHECK" not in json.dumps(brief)
+    assert str(ctx[2]) not in json.dumps(brief)
+    assert lifecycle.list_history(ctx[0])["count"] == 0
+
+
+def test_one_task_briefing_stale_result_refuses_before_history_move(tmp_path):
+    ctx, opts, _ = _scratch(tmp_path)
+    ctx[4].write_text("Changed result since the checkpoint", encoding="utf-8")
+    with pytest.raises((session.WorkSessionRefused, ValueError)):
+        session.prepare_completion_briefing(
+            *ctx, expected_checkpoint_sha256=opts["expected_checkpoint_sha256"])
+    assert lifecycle.list_history(ctx[0])["count"] == 0
+
+
+def test_one_task_briefing_original_cli_text_json_and_action_optin(tmp_path, capsys):
+    ctx, opts, _ = _scratch(tmp_path)
+    args = ["--desk", str(ctx[0]), "--task-key", ctx[1],
+            "--project-root", str(ctx[2]), "--project-key", ctx[3],
+            "--result-file", str(ctx[4]), "--expected-checkpoint-sha256",
+            opts["expected_checkpoint_sha256"]]
+    assert cli.main(["work-session", "briefing", *args]) == 0
+    hidden = capsys.readouterr().out
+    assert "PERSONAL COMPLETION BRIEFING" in hidden
+    assert "Task action hidden" in hidden
+    assert str(ctx[2]) not in hidden
+    assert cli.main(["work-session", "briefing", *args, "--format", "json"]) == 0
+    packet = json.loads(capsys.readouterr().out)
+    assert packet["decision_sha256"] and packet["writes_performed"] is False
+    assert packet["selected_next_action_untrusted"] is None
+    assert cli.main(["work-session", "briefing", *args, "--show-selected-action"]) == 0
+    shown = capsys.readouterr().out
+    assert "UNTRUSTED TASK ACTION" in shown
+    assert "Write a local report" in shown
+    assert lifecycle.list_history(ctx[0])["count"] == 0

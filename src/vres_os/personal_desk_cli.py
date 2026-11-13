@@ -85,6 +85,13 @@ Usage: python -I -S -B personal_desk_cli.py COMMAND [command options]
             Global/project adoption, KEEP/DROP and rollback are NOT applied.
             Saved #167 metadata is NOT live database freshness;
             #176 result-source preview is NOT eligible reusable memory
+            NEW: one READ-ONLY completion briefing across original workday,
+            current result, saved history and exact Chairman decision:
+            briefing --desk ABS --task-key TASK-* --project-root ABS
+            --project-key project:* --result-file ABS
+            --expected-checkpoint-sha256 HEX [--format text|json]
+            [--show-selected-action] [same optional acceptance fixture/SHA]
+            Neither approval nor quality validation; no automatic selection.
             NEW: guided exact task/result decision without manually relaying
             proposal/note SHAs. Both commands remain ORIGINAL owner delegates.
             decision --desk ABS --task-key TASK-* --project-root ABS
