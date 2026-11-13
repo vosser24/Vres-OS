@@ -65,6 +65,16 @@ Usage: python -I -S -B personal_desk_cli.py COMMAND [command options]
             --expected-saved-catalog-sha256 HEX
             --expected-saved-catalog-revision N]
             [--include-experience-provenance with exact result]
+            [--include-adoption-preparation
+            --synthetic-global-inventory-file ABS
+            --expected-synthetic-global-inventory-sha256 HEX]
+            [--include-legacy-owner-review --legacy-review-data-root ABS
+            [--legacy-review-snapshot-token TOKEN
+            --legacy-review-target NUMBER TARGET ...]
+            [--include-legacy-rollback-evidence]]
+            #166 inventory is caller-supplied SYNTHETIC only; no profile scan.
+            #168 project intake and optional original held recovery are read-only.
+            Global/project adoption, KEEP/DROP and rollback are NOT applied.
             Saved #167 metadata is NOT live database freshness;
             #176 result-source preview is NOT eligible reusable memory
             Uses original tasks/results; NEVER host authority or auto-completion

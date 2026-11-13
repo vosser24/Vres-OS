@@ -1383,6 +1383,144 @@ def _selected_governed_workday_context(
     }
 
 
+
+def _selected_synthetic_global_adoption_plan(
+    document: bytes, expected_sha256: str,
+) -> dict[str, Any]:
+    """#166 pure inventory planner, never a current-user profile inspection.
+
+    Only an explicitly provided synthetic JSON document is accepted. Byte
+    fingerprints prove equality with that caller input, NOT its provenance,
+    completeness, an immutable snapshot, quarantine or rollback readiness.
+    """
+    from . import global_claude_adoption_plan as global_owner
+
+    if (type(document) is not bytes or not 0 < len(document) <= 64 * 1024
+            or type(expected_sha256) is not str
+            or not workbench._SHA.fullmatch(expected_sha256)
+            or hashlib.sha256(document).hexdigest() != expected_sha256):
+        raise WorkSessionRefused("Exact bounded synthetic #166 inventory bytes required")
+
+    def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in out:
+                raise ValueError("Duplicate synthetic inventory key")
+            out[key] = value
+        return out
+
+    try:
+        inventory = json.loads(
+            document.decode("utf-8"), object_pairs_hook=unique_object,
+            parse_constant=lambda _value: (_ for _ in ()).throw(ValueError("Nonfinite JSON")),
+        )
+        plan = global_owner.plan_global_claude_adoption(inventory)
+    except (UnicodeError, ValueError, TypeError, RecursionError):
+        raise WorkSessionRefused("Original #166 synthetic inventory planning refused") from None
+    plan_sha = hashlib.sha256(json.dumps(
+        plan, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+        allow_nan=False).encode("ascii")).hexdigest()
+    return {
+        "status": "ORIGINAL_166_SYNTHETIC_GLOBAL_PREVIEW_NOT_HOST_INVENTORY",
+        "synthetic_inventory_document_sha256": expected_sha256,
+        "original_global_plan_sha256": plan_sha,
+        "scope": plan["scope"],
+        "inventory_claim": plan["inventory_claim"],
+        "governance_counts": plan["counts"],
+        "numbered_untrusted_governance_review": [
+            {"number": number, "relative_name": row["relative_name"],
+             "category": row["category"], "decision": "NOT_MADE"}
+            for number, row in enumerate(plan["items"], 1)
+            if row["category"] == "legacy_governance_quarantine_required"
+        ],
+        "original_owner_required_steps": plan["required_steps"],
+        "source_verified": False,
+        "real_profile_enumeration_verified": False,
+        "real_snapshot_or_quarantine_verified": False,
+        "real_global_rollback_proven": False,
+        "keep_drop_decisions_recorded": False,
+        "native_vendor_state_read": False,
+        "activation_authorized": False,
+    }
+
+
+def _selected_personal_adoption_preparation(
+    task: str, selected_note_sha256: str, project_binding: str,
+    global_preview: dict[str, Any], project_intake: dict[str, Any],
+    original_legacy_owner: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """One selected #165 task -> original #166 global / #168 project PREPARE.
+
+    The sequence identifies the owners of later reversible choices; it does not
+    enact them or turn an untrusted synthetic inventory into global authority.
+    """
+    if (global_preview.get("status") !=
+            "ORIGINAL_166_SYNTHETIC_GLOBAL_PREVIEW_NOT_HOST_INVENTORY"
+            or project_intake.get("status") != "SELECTED_PROJECT_INTAKE_PREVIEW_ONLY"
+            or type(project_intake.get("report")) is not str
+            or project_intake.get("project_activation_authorized") is not False
+            or project_intake.get("database_or_credentials_accessed") is not False
+            or type(project_binding) is not str
+            or not workbench._SHA.fullmatch(project_binding)):
+        raise WorkSessionRefused("Original #166/#168 selected preparation was refused")
+    if original_legacy_owner is not None and (
+            original_legacy_owner.get("status") !=
+            "ORIGINAL_LEGACY_OWNER_REVIEW_SELECTED_READ_ONLY"
+            or original_legacy_owner.get("activation_allowed") is not False
+            or original_legacy_owner.get("independent_fable_authority") != "NOT_GRANTED"):
+        raise WorkSessionRefused("Original #168 held evidence cannot grant authority")
+    selected_plan = (original_legacy_owner.get("selected_reversible_plan")
+                     if original_legacy_owner is not None else None)
+    capture = (original_legacy_owner.get("selected_plan_held_capture_status")
+               if original_legacy_owner is not None else None)
+    triage = (original_legacy_owner.get("selected_plan_held_recovery_triage")
+              if original_legacy_owner is not None else None)
+    identity = {
+        "schema": "vres-personal-chairman-selected-adoption-preparation/1",
+        "task_key_claimed": task,
+        "selected_note_sha256": selected_note_sha256,
+        "selected_project_binding_sha256": project_binding,
+        "synthetic_global_inventory_sha256": global_preview["synthetic_inventory_document_sha256"],
+        "original_global_plan_sha256": global_preview["original_global_plan_sha256"],
+        "original_project_intake_sha256": hashlib.sha256(
+            project_intake["report"].encode("utf-8")).hexdigest(),
+        "original_legacy_plan_digest": (
+            selected_plan.get("plan_digest") if selected_plan is not None else None),
+        "original_legacy_snapshot_token": (
+            original_legacy_owner.get("snapshot_token")
+            if original_legacy_owner is not None else None),
+    }
+    return {
+        **identity,
+        "status": "SELECTED_CHAIRMAN_GLOBAL_AND_PROJECT_ADOPTION_PREPARATION_HELD",
+        "preparation_sha256": hashlib.sha256(json.dumps(
+            identity, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+            allow_nan=False).encode("ascii")).hexdigest(),
+        "global_original_owner_preview": global_preview,
+        "project_original_owner_preview": project_intake,
+        "project_original_legacy_review": original_legacy_owner,
+        "project_original_held_capture": capture,
+        "project_original_recovery_triage": triage,
+        "review_sequence": [
+            "GLOBAL: verify independent current-user snapshot and reversible quarantine before any native Claude launch",
+            "GLOBAL: review synthetic suggestions as untrusted; record actual numbered KEEP/DROP only under #166 authority",
+            "PROJECT: verify #168 intake, architecture, existing legacy review, exact plans and rollback provenance",
+            "SEPARATE: obtain owner authorization and independent incident/F1/Fable clearance before activation",
+        ],
+        "global_snapshot_quarantine_and_rollback_proven": False,
+        "selected_project_plan_activated": False,
+        "global_or_project_keep_drop_applied": False,
+        "current_user_identity_verified": False,
+        "host_authenticated_owner_consent": False,
+        "independent_fable_authority_granted": False,
+        "native_claude_or_hooks_executed": False,
+        "database_or_credentials_accessed": False,
+        "project_or_user_profile_modified": False,
+        "new_task_or_policy_store_created": False,
+        "cooperative_readback_not_atomic": True,
+    }
+
+
 def select_chairman_turn(
     desk: str | Path, *, proposal_sha256: str, task: str,
     selected_note_sha256: str, kind: str = "ACTIVE_TASK",
@@ -1403,6 +1541,14 @@ def select_chairman_turn(
     expected_saved_catalog_sha256: str | None = None,
     expected_saved_catalog_revision: int | None = None,
     include_experience_provenance: bool = False,
+    include_adoption_preparation: bool = False,
+    synthetic_global_inventory_document: bytes | None = None,
+    expected_synthetic_global_inventory_sha256: str | None = None,
+    include_legacy_owner_review: bool = False,
+    legacy_review_data_root: str | Path | None = None,
+    legacy_review_snapshot_token: str | None = None,
+    legacy_review_targets: dict[int, str] | None = None,
+    include_legacy_rollback_evidence: bool = False,
 ) -> dict[str, Any]:
     """Re-attest ONE caller-confirmed choice against original owners, no writes.
 
@@ -1426,6 +1572,26 @@ def select_chairman_turn(
             raise WorkSessionRefused("Explicit original saved catalog SHA/revision and project required")
     elif any(item is not None for item in catalog_inputs):
         raise WorkSessionRefused("Saved catalog source requires explicit opt-in")
+    if (type(include_adoption_preparation) is not bool
+            or type(include_legacy_owner_review) is not bool
+            or type(include_legacy_rollback_evidence) is not bool):
+        raise WorkSessionRefused("Adoption preparation choices require exact booleans")
+    adoption_inputs = (synthetic_global_inventory_document,
+                       expected_synthetic_global_inventory_sha256)
+    legacy_inputs = (legacy_review_data_root, legacy_review_snapshot_token,
+                     legacy_review_targets)
+    if include_adoption_preparation:
+        if (project_root is None or project_key is None
+                or not all(value is not None for value in adoption_inputs)
+                or (include_legacy_owner_review and legacy_review_data_root is None)
+                or (not include_legacy_owner_review
+                    and (include_legacy_rollback_evidence
+                         or any(value is not None for value in legacy_inputs)))):
+            raise WorkSessionRefused("Explicit project, synthetic global inventory and held owner review required")
+    elif (any(value is not None for value in adoption_inputs)
+          or include_legacy_owner_review or include_legacy_rollback_evidence
+          or any(value is not None for value in legacy_inputs)):
+        raise WorkSessionRefused("Unselected global/project adoption evidence is forbidden")
     if include_experience_provenance and (
             not include_saved_catalog or result_file is None
             or expected_checkpoint_sha256 is None):
@@ -1454,6 +1620,7 @@ def select_chairman_turn(
                 or result_file is not None or expected_checkpoint_sha256 is not None
                 or include_chairman_candidate is not False
                 or include_saved_catalog or include_experience_provenance
+                or include_adoption_preparation
                 or any(value is not None for value in chairman_inputs)):
             raise WorkSessionRefused("Saved conversation choice is historical only")
         inspected = review_workday(
@@ -1481,7 +1648,13 @@ def select_chairman_turn(
             include_saved_catalog=include_saved_catalog,
             saved_catalog_store=saved_catalog_store,
             saved_catalog_source_id=saved_catalog_source_id,
-            include_experience_provenance=include_experience_provenance)
+            include_experience_provenance=include_experience_provenance,
+            include_project_intake=include_adoption_preparation,
+            include_legacy_owner_review=include_legacy_owner_review,
+            legacy_review_data_root=legacy_review_data_root,
+            legacy_review_snapshot_token=legacy_review_snapshot_token,
+            legacy_review_targets=legacy_review_targets,
+            include_legacy_rollback_evidence=include_legacy_rollback_evidence)
         if (inspected["status"] != "ACTIVE_WORK_SESSION_REVIEW"
                 or inspected["active_note_sha256"] != selected_note_sha256
                 or inspected["task_key_claimed"] != task
@@ -1508,6 +1681,15 @@ def select_chairman_turn(
         selected_governed = _selected_governed_workday_context(
             task, selected_note_sha256, inspected["selected_project_binding_sha256"],
             saved, inspected["selected_experience_provenance"])
+    selected_adoption = None
+    if include_adoption_preparation:
+        global_preview = _selected_synthetic_global_adoption_plan(
+            synthetic_global_inventory_document,
+            expected_synthetic_global_inventory_sha256)
+        selected_adoption = _selected_personal_adoption_preparation(
+            task, selected_note_sha256, inspected["selected_project_binding_sha256"],
+            global_preview, inspected["selected_project_intake"],
+            inspected["selected_legacy_owner_review"])
     # A long optional Chairman source render or result scan cannot authorize
     # a selection from a stale original Workday inventory.
     if propose_chairman_turn(desk)["proposal_sha256"] != proposal_sha256:
@@ -1556,6 +1738,42 @@ def select_chairman_turn(
         if _selected_saved_catalog_summary(
                 saved_catalog_store, saved_catalog_source_id, project_key) != recent:
             raise WorkSessionRefused("Saved catalog changed during closing result inspection")
+    if include_adoption_preparation:
+        # Late checks after the global synthetic plan and any saved catalog or
+        # result review. These are ordinary cooperative readbacks, not an OS
+        # transaction or a verified real global-profile snapshot.
+        if _selected_project_adoption_preview(project_root) != inspected["selected_project_intake"]:
+            raise WorkSessionRefused("#168 project intake changed during global preparation")
+        if include_legacy_owner_review:
+            if _selected_legacy_owner_review(
+                    project_root, project_key, legacy_review_data_root,
+                    snapshot_token=legacy_review_snapshot_token,
+                    targets=legacy_review_targets,
+                    include_rollback_evidence=include_legacy_rollback_evidence,
+                    ) != inspected["selected_legacy_owner_review"]:
+                raise WorkSessionRefused("#168 legacy recovery evidence changed during global preparation")
+        if include_saved_catalog and _selected_saved_catalog_summary(
+                saved_catalog_store, saved_catalog_source_id, project_key
+                ) != inspected["selected_project_catalog"]:
+            raise WorkSessionRefused("#167 saved catalog changed during adoption preparation")
+        if result_file is not None:
+            latest_result = result.inspect_work_result(
+                desk, task, project_root, project_key, result_file,
+                expected_checkpoint_sha256=expected_checkpoint_sha256)
+            observed = inspected["observed_result"]
+            if (observed is None
+                    or latest_result["checkpoint_sha256"] != observed["checkpoint_sha256"]
+                    or latest_result["result_sha256"] != observed["result_sha256"]
+                    or latest_result["result_bytes"] != observed["result_bytes"]
+                    or latest_result["work_brief"]["scratch_handoff"]["selected_note_sha256"]
+                       != selected_note_sha256
+                    or latest_result["work_brief"]["project_binding_sha256"]
+                       != inspected["selected_project_binding_sha256"]):
+                raise WorkSessionRefused("Exact work result changed during adoption preparation")
+        if propose_chairman_turn(desk)["proposal_sha256"] != proposal_sha256:
+            raise WorkSessionRefused("Chairman task changed during adoption closing review")
+        if _selected_project_adoption_preview(project_root) != inspected["selected_project_intake"]:
+            raise WorkSessionRefused("Project changed during adoption closing review")
     return {
         "schema": CHAIRMAN_TURN_SCHEMA,
         "status": "CHAIRMAN_SOURCE_ONLY_CONVERSATION_CHOICE_REATTESTED",
@@ -1565,6 +1783,7 @@ def select_chairman_turn(
         "selected_note_sha256": selected_note_sha256,
         "selected_original_owner_review": focus,
         "selected_governed_workday_context": selected_governed,
+        "selected_global_project_adoption_preparation": selected_adoption,
         "next_separate_step": next_step,
         "suggested_chairman_message": (
             "The saved result is historical. Explicitly reopen its exact snapshot "
@@ -1654,6 +1873,53 @@ def _saved_catalog_cli_options(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+
+def _adoption_cli_options(args: argparse.Namespace) -> dict[str, Any]:
+    """Exact caller-supplied synthetic #166 bytes; #168 owner-only READs."""
+    fields = (args.synthetic_global_inventory_file,
+              args.expected_synthetic_global_inventory_sha256,
+              args.legacy_review_data_root, args.legacy_review_snapshot_token,
+              args.legacy_review_target)
+    if not args.include_adoption_preparation:
+        if any(x is not None for x in fields) or (args.include_legacy_owner_review
+              or args.include_legacy_rollback_evidence):
+            raise WorkSessionRefused("Adoption evidence requires selected preparation")
+        return {}
+    if (args.synthetic_global_inventory_file is None
+            or args.expected_synthetic_global_inventory_sha256 is None):
+        raise WorkSessionRefused("Exact source-only global inventory file and digest required")
+    # This option is a dedicated scratch fixture, NOT permission to open any
+    # absolute profile path, vendor configuration, source project or credential.
+    fixture_path = Path(args.synthetic_global_inventory_file)
+    desk_root = portable._desk(args.desk, must_exist=True)
+    if (fixture_path.name != "synthetic-global-inventory.json"
+            or fixture_path.parent != desk_root):
+        raise WorkSessionRefused("Synthetic global inventory must be in selected scratch desk")
+    targets: dict[int, str] | None = None
+    if args.legacy_review_target is not None:
+        targets = {}
+        for number_str, target in args.legacy_review_target:
+            if (not number_str.isascii() or not number_str.isdecimal()
+                    or number_str.startswith("0") or len(number_str) > 2):
+                raise WorkSessionRefused("Explicit original #168 displayed number required")
+            number = int(number_str)
+            if not 1 <= number <= 60 or number in targets:
+                raise WorkSessionRefused("Duplicate or out-of-range legacy review number")
+            targets[number] = target
+    return {
+        "include_adoption_preparation": True,
+        "synthetic_global_inventory_document": _read_selected_chairman_source(
+            args.synthetic_global_inventory_file, maximum=64 * 1024),
+        "expected_synthetic_global_inventory_sha256":
+            args.expected_synthetic_global_inventory_sha256,
+        "include_legacy_owner_review": args.include_legacy_owner_review,
+        "legacy_review_data_root": args.legacy_review_data_root,
+        "legacy_review_snapshot_token": args.legacy_review_snapshot_token,
+        "legacy_review_targets": targets,
+        "include_legacy_rollback_evidence": args.include_legacy_rollback_evidence,
+    }
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _SafeParser(
         description="Internal source-only personal workflow over original task owners")
@@ -1684,6 +1950,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             sub.add_argument("--expected-saved-catalog-sha256")
             sub.add_argument("--expected-saved-catalog-revision", type=int)
             sub.add_argument("--include-experience-provenance", action="store_true")
+            sub.add_argument("--include-adoption-preparation", action="store_true")
+            sub.add_argument("--synthetic-global-inventory-file")
+            sub.add_argument("--expected-synthetic-global-inventory-sha256")
+            sub.add_argument("--include-legacy-owner-review", action="store_true")
+            sub.add_argument("--legacy-review-data-root")
+            sub.add_argument("--legacy-review-snapshot-token")
+            sub.add_argument("--legacy-review-target", action="append", nargs=2)
+            sub.add_argument("--include-legacy-rollback-evidence", action="store_true")
         if name == "start":
             sub.add_argument("--note-file", required=True)
             sub.add_argument("--project-root", required=True)
@@ -1724,6 +1998,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif args.command == "propose":
             packet = propose_chairman_turn(args.desk)
         elif args.command == "select":
+            adoption_options = _adoption_cli_options(args)
             packet = select_chairman_turn(
                 args.desk, proposal_sha256=args.proposal_sha256,
                 task=args.task_key, selected_note_sha256=args.selected_note_sha256,
@@ -1732,7 +2007,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 result_file=args.result_file,
                 expected_checkpoint_sha256=args.expected_checkpoint_sha256,
                 **_chairman_cli_options(args),
-                **_saved_catalog_cli_options(args))
+                **_saved_catalog_cli_options(args),
+                **adoption_options)
+            if args.include_adoption_preparation and (
+                    _read_selected_chairman_source(
+                        args.synthetic_global_inventory_file, maximum=64 * 1024)
+                    != adoption_options["synthetic_global_inventory_document"]):
+                raise WorkSessionRefused("Synthetic global input changed before display")
         elif args.command == "start":
             packet = start_session(
                 args.desk, args.task_key, args.note_file,

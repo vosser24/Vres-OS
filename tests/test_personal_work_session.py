@@ -2194,3 +2194,279 @@ def test_chairman_catalog_source_available_in_existing_desk_cli_without_broker(
     assert str(store.root) not in json.dumps(payload)
     assert "credential-" not in json.dumps(payload)
     assert lifecycle.list_history(selected)["count"] == 0
+
+
+# #165 single selected source-only Chairman -> original #166 synthetic global
+# preview + original #168 project intake/held recovery + optional #167 catalog.
+# All claims are caller-supplied; no host, Windows profile, native Claude or DB.
+
+
+def _synthetic_global_inventory_bytes():
+    import hashlib
+    document = json.dumps({
+        "version": 1,
+        "scope": "current_windows_user_claude_config",
+        "enumeration_claim": "partial",
+        "entries": [
+            {"path": "CLAUDE.md", "kind": "file", "is_reparse_point": False,
+             "sha256_claim": None},
+            {"path": "hooks/demo-hook.ps1", "kind": "file", "is_reparse_point": False,
+             "sha256_claim": "1" * 64},
+            {"path": "credentials.json", "kind": "file", "is_reparse_point": False,
+             "sha256_claim": None},
+        ],
+    }, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return document, hashlib.sha256(document).hexdigest()
+
+
+def _selected_adoption_kwargs(ctx):
+    selected, task, project, key, document = ctx
+    offered = session.propose_chairman_turn(selected)
+    option = next(row for row in offered["choices"] if row["kind"] == "ACTIVE_TASK")
+    blob, digest = _synthetic_global_inventory_bytes()
+    return {
+        "proposal_sha256": offered["proposal_sha256"],
+        "selected_note_sha256": option["selected_note_sha256"],
+        "task": task,
+        "approved": True,
+        "project_root": project,
+        "project_key": key,
+        "include_adoption_preparation": True,
+        "synthetic_global_inventory_document": blob,
+        "expected_synthetic_global_inventory_sha256": digest,
+    }
+
+
+def test_selected_chairman_global_and_project_intake_are_one_held_journey(tmp_path):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    kwargs = _selected_adoption_kwargs(ctx)
+    before = document.read_bytes()
+    packet = session.select_chairman_turn(selected, **kwargs)
+    journey = packet["selected_global_project_adoption_preparation"]
+    assert journey["status"] == "SELECTED_CHAIRMAN_GLOBAL_AND_PROJECT_ADOPTION_PREPARATION_HELD"
+    assert journey["task_key_claimed"] == task
+    assert journey["selected_note_sha256"] == kwargs["selected_note_sha256"]
+    assert journey["global_original_owner_preview"]["governance_counts"][
+        "legacy_governance_quarantine_required"] == 2
+    assert journey["global_original_owner_preview"]["governance_counts"][
+        "vendor_native_state_preserve_no_read"] == 1
+    assert len(journey["global_original_owner_preview"][
+        "numbered_untrusted_governance_review"]) == 2
+    assert journey["project_original_owner_preview"]["status"] == (
+        "SELECTED_PROJECT_INTAKE_PREVIEW_ONLY")
+    assert journey["project_original_legacy_review"] is None
+    assert journey["global_snapshot_quarantine_and_rollback_proven"] is False
+    assert journey["selected_project_plan_activated"] is False
+    assert journey["host_authenticated_owner_consent"] is False
+    assert journey["independent_fable_authority_granted"] is False
+    assert journey["database_or_credentials_accessed"] is False
+    assert journey["project_or_user_profile_modified"] is False
+    assert packet["trusted_user_event_verified"] is False
+    assert packet["selected_governed_workday_context"] is None
+    assert document.read_bytes() == before
+    assert lifecycle.list_history(selected)["count"] == 0
+    assert str(project) not in json.dumps(packet)
+    assert "credentials.json" not in json.dumps(packet)
+
+
+def test_selected_adoption_coexists_with_catalog_and_exact_result_no_promotion(tmp_path):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    base, store, sid, calls = _governed_choice_kwargs(tmp_path, ctx)
+    inventory, digest = _synthetic_global_inventory_bytes()
+    packet = session.select_chairman_turn(
+        selected, **base, result_file=document, expected_checkpoint_sha256=token,
+        include_experience_provenance=True, include_adoption_preparation=True,
+        synthetic_global_inventory_document=inventory,
+        expected_synthetic_global_inventory_sha256=digest)
+    assert packet["selected_global_project_adoption_preparation"]["status"] == (
+        "SELECTED_CHAIRMAN_GLOBAL_AND_PROJECT_ADOPTION_PREPARATION_HELD")
+    assert packet["selected_governed_workday_context"]["experience_reuse_eligible"] is False
+    assert packet["selected_original_owner_review"]["observed_result"]["result_sha256"]
+    assert packet["native_claude_or_hooks_executed"] is False
+    assert calls == []
+    assert lifecycle.list_history(selected)["count"] == 0
+    assert str(store.root) not in json.dumps(packet)
+
+
+def test_selected_adoption_includes_original_168_legacy_plan_and_rollback_triage(tmp_path):
+    from vres_os import project_adoption
+    from types import SimpleNamespace
+    desk_root, project, data, keep, token = _synthetic_legacy_work_review(tmp_path)
+    project_adoption.record_legacy_review_intent(
+        project, 1, "REQUEST_REVERSIBLE_PLAN", snapshot_token=token,
+        authority=lambda s: {"confirmed": True, "kind": "synthetic_fixture"},
+        data_root=data)
+    ctx = (desk_root, "TASK-LEGACY-REVIEW", project.root, project.key, keep)
+    kwargs = _selected_adoption_kwargs(ctx)
+    result_packet = session.select_chairman_turn(
+        desk_root, **kwargs, include_legacy_owner_review=True,
+        legacy_review_data_root=data, legacy_review_snapshot_token=token,
+        legacy_review_targets={1: "RESTORE_ORIGINAL_KEEP_FOR_REVIEW"},
+        include_legacy_rollback_evidence=True)
+    selected = result_packet["selected_global_project_adoption_preparation"]
+    assert selected["original_legacy_snapshot_token"] == token
+    assert len(selected["original_legacy_plan_digest"]) == 64
+    assert selected["project_original_legacy_review"]["selected_reversible_plan"][
+        "project_write_authorized"] is False if (
+        "project_write_authorized" in selected["project_original_legacy_review"][
+            "selected_reversible_plan"]) else True
+    assert selected["project_original_legacy_review"]["activation_allowed"] is False
+    assert selected["project_original_held_capture"] is not None
+    assert selected["project_original_recovery_triage"] is not None
+    assert selected["global_or_project_keep_drop_applied"] is False
+    assert keep.read_bytes() == b"# Synthetic owner edit\n"
+    assert str(data) not in json.dumps(result_packet)
+
+
+def test_selected_adoption_refuses_implicit_sources_invalid_json_and_authority(tmp_path):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    kwargs = _selected_adoption_kwargs(ctx)
+    inventory = kwargs["synthetic_global_inventory_document"]
+    for changes in (
+        {"include_adoption_preparation": False},
+        {"include_adoption_preparation": "yes"},
+        {"expected_synthetic_global_inventory_sha256": "0" * 64},
+        {"synthetic_global_inventory_document": inventory + b"\n"},
+        {"project_key": None},
+        {"include_legacy_owner_review": True},
+        {"legacy_review_data_root": tmp_path},
+        {"include_legacy_rollback_evidence": True},
+    ):
+        attempt = dict(kwargs)
+        attempt.update(changes)
+        with pytest.raises(session.WorkSessionRefused):
+            session.select_chairman_turn(selected, **attempt)
+    bad = b'{"version":1,"version":1,"scope":"current_windows_user_claude_config"}'
+    import hashlib
+    with pytest.raises(session.WorkSessionRefused):
+        session.select_chairman_turn(
+            selected, **{**kwargs, "synthetic_global_inventory_document": bad,
+                         "expected_synthetic_global_inventory_sha256":
+                             hashlib.sha256(bad).hexdigest()})
+    _finish(ctx, token)
+    finished = session.propose_chairman_turn(selected)
+    saved = finished["choices"][0]
+    with pytest.raises(session.WorkSessionRefused):
+        session.select_chairman_turn(
+            selected, proposal_sha256=finished["proposal_sha256"], task=task,
+            selected_note_sha256=saved["selected_note_sha256"],
+            kind="SAVED_COMPLETED_RESULT", approved=True,
+            include_adoption_preparation=True,
+            synthetic_global_inventory_document=inventory,
+            expected_synthetic_global_inventory_sha256=kwargs[
+                "expected_synthetic_global_inventory_sha256"],
+            project_root=project, project_key=key)
+
+
+def test_selected_adoption_refuses_late_project_scan_drift(tmp_path, monkeypatch):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    kwargs = _selected_adoption_kwargs(ctx)
+    orig = session._selected_project_adoption_preview
+    calls = []
+    def different_report(*args, **options):
+        packet = orig(*args, **options)
+        calls.append(1)
+        if len(calls) >= 2:
+            return {**packet, "report": packet["report"] + " changed"}
+        return packet
+    monkeypatch.setattr(session, "_selected_project_adoption_preview", different_report)
+    with pytest.raises(session.WorkSessionRefused):
+        session.select_chairman_turn(selected, **kwargs)
+    assert len(calls) >= 2
+    assert lifecycle.list_history(selected)["count"] == 0
+
+
+def test_selected_adoption_refuses_late_original_168_legacy_change(tmp_path, monkeypatch):
+    desk_root, project, data, keep, token = _synthetic_legacy_work_review(tmp_path)
+    ctx = (desk_root, "TASK-LEGACY-REVIEW", project.root, project.key, keep)
+    kwargs = _selected_adoption_kwargs(ctx)
+    orig = session._selected_legacy_owner_review
+    calls = []
+    def late_change(*args, **options):
+        packet = orig(*args, **options)
+        calls.append(1)
+        if len(calls) >= 4:
+            return {**packet, "configuration_state": "changed_during_review"}
+        return packet
+    monkeypatch.setattr(session, "_selected_legacy_owner_review", late_change)
+    with pytest.raises(session.WorkSessionRefused):
+        session.select_chairman_turn(
+            desk_root, **kwargs, include_legacy_owner_review=True,
+            legacy_review_data_root=data)
+    assert len(calls) >= 4
+
+
+def test_selected_adoption_refuses_result_changed_during_global_planning(tmp_path, monkeypatch):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    kwargs = _selected_adoption_kwargs(ctx)
+    orig = session._selected_synthetic_global_adoption_plan
+    def modify_result(*args, **options):
+        packet = orig(*args, **options)
+        document.write_text("# Synthetic changed result\n", encoding="utf-8")
+        return packet
+    monkeypatch.setattr(session, "_selected_synthetic_global_adoption_plan", modify_result)
+    with pytest.raises((session.WorkSessionRefused, result.WorkResultRefused)):
+        session.select_chairman_turn(
+            selected, **kwargs, result_file=document,
+            expected_checkpoint_sha256=token)
+    assert lifecycle.list_history(selected)["count"] == 0
+
+
+def test_selected_global_project_adoption_original_cli_fixture_is_scratch_only(
+        tmp_path, capsys):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    kwargs = _selected_adoption_kwargs(ctx)
+    blob, digest = _synthetic_global_inventory_bytes()
+    source = selected / "synthetic-global-inventory.json"
+    source.write_bytes(blob)
+    base = ["work-session", "select", "--desk", str(selected),
+            "--task-key", task, "--proposal-sha256", kwargs["proposal_sha256"],
+            "--selected-note-sha256", kwargs["selected_note_sha256"],
+            "--project-root", str(project), "--project-key", key, "--yes"]
+    adoption = ["--include-adoption-preparation",
+                "--synthetic-global-inventory-file", str(source),
+                "--expected-synthetic-global-inventory-sha256", digest]
+    assert cli.main([*base, *adoption]) == 0
+    packet = json.loads(capsys.readouterr().out)
+    assert packet["selected_global_project_adoption_preparation"]["status"] == (
+        "SELECTED_CHAIRMAN_GLOBAL_AND_PROJECT_ADOPTION_PREPARATION_HELD")
+    assert packet["native_claude_or_hooks_executed"] is False
+    assert str(source) not in json.dumps(packet)
+    assert cli.main([*base, "--synthetic-global-inventory-file", str(source)]) == 2
+    capsys.readouterr()
+    unselected = tmp_path / "synthetic-global-inventory.json"
+    unselected.write_bytes(blob)
+    assert cli.main([*base, "--include-adoption-preparation",
+                     "--synthetic-global-inventory-file", str(unselected),
+                     "--expected-synthetic-global-inventory-sha256", digest]) == 2
+    capsys.readouterr()
+    assert cli.main([*base, *adoption[:-1], "0" * 64]) == 2
+
+
+def test_selected_global_project_adoption_cli_rechecks_synthetic_file(tmp_path, monkeypatch):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    kwargs = _selected_adoption_kwargs(ctx)
+    source = selected / "synthetic-global-inventory.json"
+    source.write_bytes(kwargs["synthetic_global_inventory_document"])
+    base = ["select", "--desk", str(selected),
+            "--task-key", task, "--proposal-sha256", kwargs["proposal_sha256"],
+            "--selected-note-sha256", kwargs["selected_note_sha256"],
+            "--project-root", str(project), "--project-key", key, "--yes",
+            "--include-adoption-preparation",
+            "--synthetic-global-inventory-file", str(source),
+            "--expected-synthetic-global-inventory-sha256",
+            kwargs["expected_synthetic_global_inventory_sha256"]]
+    orig = session._selected_synthetic_global_adoption_plan
+    def change_fixture(*args, **options):
+        report = orig(*args, **options)
+        source.write_bytes(kwargs["synthetic_global_inventory_document"] + b"\n")
+        return report
+    monkeypatch.setattr(session, "_selected_synthetic_global_adoption_plan", change_fixture)
+    assert session.main(base) == 2
