@@ -24,6 +24,7 @@ if not __package__:
     from vres_os import personal_project_intake as intake
     from vres_os import personal_data_sources as data_sources
     from vres_os import personal_chairman_result_handoff as outcome
+    from vres_os import personal_result_acceptance as acceptance
 else:
     from . import personal_desk_chairman_handoff as handoff
     from . import personal_portable_desk as portable
@@ -34,6 +35,7 @@ else:
     from . import personal_project_intake as intake
     from . import personal_data_sources as data_sources
     from . import personal_chairman_result_handoff as outcome
+    from . import personal_result_acceptance as acceptance
 
 SCHEMA = "vres-personal-integrated-work-session/1"
 
@@ -1557,6 +1559,9 @@ def select_chairman_turn(
     synthetic_experience_pack: bytes | None = None,
     expected_experience_pack_sha256: str | None = None,
     declared_experience_project_id: int | None = None,
+    include_result_acceptance_evidence: bool = False,
+    acceptance_evidence_document: bytes | None = None,
+    expected_acceptance_evidence_sha256: str | None = None,
 ) -> dict[str, Any]:
     """Re-attest ONE caller-confirmed choice against original owners, no writes.
 
@@ -1566,6 +1571,17 @@ def select_chairman_turn(
     """
     if approved is not True:
         raise WorkSessionRefused("Explicit caller-selected conversation choice required")
+    if type(include_result_acceptance_evidence) is not bool:
+        raise WorkSessionRefused("Exact acceptance evidence selection required")
+    if include_result_acceptance_evidence:
+        if (result_file is None or expected_checkpoint_sha256 is None
+                or project_root is None or project_key is None
+                or type(acceptance_evidence_document) is not bytes
+                or type(expected_acceptance_evidence_sha256) is not str):
+            raise WorkSessionRefused("Explicit exact result and acceptance evidence required")
+    elif (acceptance_evidence_document is not None
+          or expected_acceptance_evidence_sha256 is not None):
+        raise WorkSessionRefused("Acceptance evidence requires explicit opt-in")
     if type(include_saved_catalog) is not bool or type(include_experience_provenance) is not bool:
         raise WorkSessionRefused("Governed catalog/experience options require exact booleans")
     catalog_inputs = (saved_catalog_store, saved_catalog_source_id,
@@ -1647,6 +1663,7 @@ def select_chairman_turn(
                 or include_saved_catalog or include_experience_provenance
                 or include_adoption_preparation
                 or include_architecture_experience_decision_support
+                or include_result_acceptance_evidence
                 or any(value is not None for value in chairman_inputs)):
             raise WorkSessionRefused("Saved conversation choice is historical only")
         inspected = review_workday(
@@ -1870,6 +1887,38 @@ def select_chairman_turn(
         except outcome.ResultHandoffRefused:
             raise WorkSessionRefused(
                 "Selected original-owner result continuity evidence refused") from None
+    # Acceptance evidence is caller-supplied and may be forged. It is
+    # bound ONLY to the exact current original work-result receipt.
+    selected_acceptance = None
+    if include_result_acceptance_evidence:
+        try:
+            selected_acceptance = acceptance.review_selected_result_acceptance(
+                continuity=selected_outcome,
+                document=acceptance_evidence_document,
+                expected_document_sha256=expected_acceptance_evidence_sha256)
+        except acceptance.ResultAcceptanceRefused:
+            raise WorkSessionRefused("Exact result acceptance self-review refused") from None
+        # Even after a bounded pure JSON review, original task/result
+        # identity must still be current; this is not OS-atomic.
+        if propose_chairman_turn(desk)["proposal_sha256"] != proposal_sha256:
+            raise WorkSessionRefused("Task changed during acceptance evidence review")
+        latest_result = result.inspect_work_result(
+            desk, task, project_root, project_key, result_file,
+            expected_checkpoint_sha256=expected_checkpoint_sha256)
+        reviewed_result = inspected["observed_result"]
+        if (reviewed_result is None
+                or latest_result["checkpoint_sha256"] != reviewed_result["checkpoint_sha256"]
+                or latest_result["result_sha256"] != reviewed_result["result_sha256"]
+                or latest_result["result_bytes"] != reviewed_result["result_bytes"]
+                or latest_result["work_brief"]["project_binding_sha256"]
+                   != inspected["selected_project_binding_sha256"]
+                or latest_result["work_brief"]["scratch_handoff"]["selected_note_sha256"]
+                   != selected_note_sha256):
+            raise WorkSessionRefused("Result changed during acceptance closing review")
+        if include_saved_catalog and _selected_saved_catalog_summary(
+                saved_catalog_store, saved_catalog_source_id, project_key
+                ) != inspected["selected_project_catalog"]:
+            raise WorkSessionRefused("Saved catalog changed during acceptance closing review")
     return {
         "schema": CHAIRMAN_TURN_SCHEMA,
         "status": "CHAIRMAN_SOURCE_ONLY_CONVERSATION_CHOICE_REATTESTED",
@@ -1882,6 +1931,7 @@ def select_chairman_turn(
         "selected_global_project_adoption_preparation": selected_adoption,
         "selected_architecture_experience_decision_support": selected_decision_support,
         "selected_task_result_continuity": selected_outcome,
+        "selected_result_acceptance_evidence": selected_acceptance,
         "next_separate_step": next_step,
         "suggested_chairman_message": (
             "The saved result is historical. Explicitly reopen its exact snapshot "
@@ -1898,7 +1948,9 @@ def select_chairman_turn(
                 "I can review this selected work. Completing it remains a separate decision."
             )
         ) + (" " + selected_outcome["next_safe_step"]
-             if selected_outcome is not None else ""),
+             if selected_outcome is not None else "") + (
+            " " + selected_acceptance["next_safe_step"]
+            if selected_acceptance is not None else ""),
         "source_only_caller_asserted_choice": True,
         "trusted_user_event_verified": False,
         "chairman_message_emitted_to_host": False,
@@ -2068,6 +2120,30 @@ def _architecture_experience_cli_options(args: argparse.Namespace) -> dict[str, 
     }
 
 
+def _result_acceptance_cli_options(args: argparse.Namespace) -> dict[str, Any]:
+    """Read one explicit scratch-desk fixture, never profile/DB/project sources."""
+    fields = (args.result_acceptance_evidence_file,
+              args.expected_result_acceptance_evidence_sha256)
+    if not args.include_result_acceptance_evidence:
+        if any(value is not None for value in fields):
+            raise WorkSessionRefused("Result acceptance fixture needs explicit opt-in")
+        return {}
+    if any(value is None for value in fields):
+        raise WorkSessionRefused("Exact acceptance fixture file/SHA required")
+    desk_root = portable._desk(args.desk, must_exist=True)
+    candidate = Path(args.result_acceptance_evidence_file)
+    if (candidate.name != "result-acceptance-evidence.json"
+            or candidate.parent != desk_root):
+        raise WorkSessionRefused("Acceptance fixture must be in selected scratch desk")
+    return {
+        "include_result_acceptance_evidence": True,
+        "acceptance_evidence_document": _read_selected_chairman_source(
+            args.result_acceptance_evidence_file, maximum=32 * 1024),
+        "expected_acceptance_evidence_sha256":
+            args.expected_result_acceptance_evidence_sha256,
+    }
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _SafeParser(
         description="Internal source-only personal workflow over original task owners")
@@ -2105,6 +2181,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             sub.add_argument("--synthetic-experience-pack-file")
             sub.add_argument("--expected-experience-pack-sha256")
             sub.add_argument("--declared-experience-project-id", type=int)
+            sub.add_argument("--include-result-acceptance-evidence", action="store_true")
+            sub.add_argument("--result-acceptance-evidence-file")
+            sub.add_argument("--expected-result-acceptance-evidence-sha256")
             sub.add_argument("--include-adoption-preparation", action="store_true")
             sub.add_argument("--synthetic-global-inventory-file")
             sub.add_argument("--expected-synthetic-global-inventory-sha256")
@@ -2155,6 +2234,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif args.command == "select":
             adoption_options = _adoption_cli_options(args)
             decision_options = _architecture_experience_cli_options(args)
+            acceptance_options = _result_acceptance_cli_options(args)
             packet = select_chairman_turn(
                 args.desk, proposal_sha256=args.proposal_sha256,
                 task=args.task_key, selected_note_sha256=args.selected_note_sha256,
@@ -2165,7 +2245,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 **_chairman_cli_options(args),
                 **_saved_catalog_cli_options(args),
                 **adoption_options,
-                **decision_options)
+                **decision_options,
+                **acceptance_options)
             for name, key, maximum in (
                     ("synthetic_alignment_plan_file", "synthetic_alignment_plan", 64 * 1024),
                     ("synthetic_experience_pack_file", "synthetic_experience_pack", 16 * 1024)):
@@ -2174,6 +2255,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                         _read_selected_chairman_source(selected_file, maximum=maximum)
                         != decision_options[key]):
                     raise WorkSessionRefused("Synthetic decision fixture changed before display")
+            if args.include_result_acceptance_evidence and (
+                    _read_selected_chairman_source(
+                        args.result_acceptance_evidence_file, maximum=32 * 1024)
+                    != acceptance_options["acceptance_evidence_document"]):
+                raise WorkSessionRefused("Acceptance fixture changed before display")
             if args.include_adoption_preparation and (
                     _read_selected_chairman_source(
                         args.synthetic_global_inventory_file, maximum=64 * 1024)
