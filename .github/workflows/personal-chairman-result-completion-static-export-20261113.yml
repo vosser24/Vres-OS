@@ -1,0 +1,54 @@
+# Static source export; NO imports, execution, tests, DB or native host.
+name: Personal Chairman pinned source static-only export
+on:
+  push:
+    branches: [feature/personal-chairman-result-completion-static-export-20261113]
+permissions:
+  contents: read
+jobs:
+  static-source-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      VRES_ALLOW_TEST_DB: '0'
+      VRES_TEST_DATABASE_URL: ''
+      PYTHONNOUSERSITE: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 3
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - name: Verify exact source and produce static git archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/feature/personal-chairman-result-completion-static-export-20261113"
+          test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD^)" = "77fe2376c5432ab0716eeb64a58e77e24762b1c4"
+          test "$(git rev-parse HEAD^^)" = "a7e1dc021c75104825b143212ec06e568f517bb7"
+          test "$(git rev-parse HEAD^^{tree})" = "172c06ca86f57c51f07c9e8fa80275afb5c0e6fb"
+          test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/personal-chairman-result-completion-static-export-20261113.yml"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git archive --format=zip --output="$RUNNER_TEMP/vres-source-77fe2376.zip" HEAD^
+          python3 -I -S -B - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+          import os, hashlib
+          p = Path(os.environ['RUNNER_TEMP']) / 'vres-source-77fe2376.zip'
+          with ZipFile(p) as z:
+              files = set(z.namelist())
+              assert len(files) >= 550
+              assert 'src/vres_os/personal_work_session.py' in files
+              assert 'src/vres_os/personal_result_acceptance.py' in files
+          print('STATIC_ONLY_SOURCE_PASS', hashlib.sha256(p.read_bytes()).hexdigest())
+          print('NO_PRODUCT_IMPORT_NO_DB_NO_NATIVE')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vres-pinned-chairman-result-77fe2376
+          path: ${{ runner.temp }}/vres-source-77fe2376.zip
+          retention-days: 1
+          if-no-files-found: error
