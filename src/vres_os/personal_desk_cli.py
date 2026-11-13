@@ -65,6 +65,12 @@ Usage: python -I -S -B personal_desk_cli.py COMMAND [command options]
             --expected-saved-catalog-sha256 HEX
             --expected-saved-catalog-revision N]
             [--include-experience-provenance with exact result]
+            [--include-architecture-experience-decision-support
+            [--synthetic-alignment-plan-file SCRATCH/ synthetic-architecture-plan.json
+            --expected-alignment-plan-sha256 HEX]
+            [--synthetic-experience-pack-file SCRATCH/ synthetic-experience-pack.json
+            --expected-experience-pack-sha256 HEX
+            --declared-experience-project-id N]]
             [--include-adoption-preparation
             --synthetic-global-inventory-file ABS
             --expected-synthetic-global-inventory-sha256 HEX]
@@ -74,6 +80,8 @@ Usage: python -I -S -B personal_desk_cli.py COMMAND [command options]
             [--include-legacy-rollback-evidence]]
             #166 inventory is caller-supplied SYNTHETIC only; no profile scan.
             #168 project intake and optional original held recovery are read-only.
+            #174 audit/plan contract is NOT Fable approval or activation.
+            #176 synthetic E5 pack is NOT live-revocation-checked eligible memory.
             Global/project adoption, KEEP/DROP and rollback are NOT applied.
             Saved #167 metadata is NOT live database freshness;
             #176 result-source preview is NOT eligible reusable memory

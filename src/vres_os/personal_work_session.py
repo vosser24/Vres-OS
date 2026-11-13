@@ -1549,6 +1549,12 @@ def select_chairman_turn(
     legacy_review_snapshot_token: str | None = None,
     legacy_review_targets: dict[int, str] | None = None,
     include_legacy_rollback_evidence: bool = False,
+    include_architecture_experience_decision_support: bool = False,
+    synthetic_alignment_plan: bytes | None = None,
+    expected_alignment_plan_sha256: str | None = None,
+    synthetic_experience_pack: bytes | None = None,
+    expected_experience_pack_sha256: str | None = None,
+    declared_experience_project_id: int | None = None,
 ) -> dict[str, Any]:
     """Re-attest ONE caller-confirmed choice against original owners, no writes.
 
@@ -1592,6 +1598,23 @@ def select_chairman_turn(
           or include_legacy_owner_review or include_legacy_rollback_evidence
           or any(value is not None for value in legacy_inputs)):
         raise WorkSessionRefused("Unselected global/project adoption evidence is forbidden")
+    if type(include_architecture_experience_decision_support) is not bool:
+        raise WorkSessionRefused("Architecture/experience decision support requires an exact boolean")
+    decision_inputs = (synthetic_alignment_plan, expected_alignment_plan_sha256,
+                       synthetic_experience_pack, expected_experience_pack_sha256,
+                       declared_experience_project_id)
+    if include_architecture_experience_decision_support:
+        if project_root is None or project_key is None:
+            raise WorkSessionRefused("Exact selected project required for #174/#176 decision support")
+        if (synthetic_alignment_plan is None) != (expected_alignment_plan_sha256 is None):
+            raise WorkSessionRefused("Synthetic #174 plan selection must include exact SHA")
+        if ((synthetic_experience_pack is None) !=
+                (expected_experience_pack_sha256 is None) or
+                (synthetic_experience_pack is None) !=
+                (declared_experience_project_id is None)):
+            raise WorkSessionRefused("Synthetic #176 pack requires exact SHA and claimed project ID")
+    elif any(value is not None for value in decision_inputs):
+        raise WorkSessionRefused("Unselected architecture/experience inputs forbidden")
     if include_experience_provenance and (
             not include_saved_catalog or result_file is None
             or expected_checkpoint_sha256 is None):
@@ -1621,6 +1644,7 @@ def select_chairman_turn(
                 or include_chairman_candidate is not False
                 or include_saved_catalog or include_experience_provenance
                 or include_adoption_preparation
+                or include_architecture_experience_decision_support
                 or any(value is not None for value in chairman_inputs)):
             raise WorkSessionRefused("Saved conversation choice is historical only")
         inspected = review_workday(
@@ -1649,7 +1673,8 @@ def select_chairman_turn(
             saved_catalog_store=saved_catalog_store,
             saved_catalog_source_id=saved_catalog_source_id,
             include_experience_provenance=include_experience_provenance,
-            include_project_intake=include_adoption_preparation,
+            include_project_intake=(include_adoption_preparation
+                                    or include_architecture_experience_decision_support),
             include_legacy_owner_review=include_legacy_owner_review,
             legacy_review_data_root=legacy_review_data_root,
             legacy_review_snapshot_token=legacy_review_snapshot_token,
@@ -1690,6 +1715,25 @@ def select_chairman_turn(
             task, selected_note_sha256, inspected["selected_project_binding_sha256"],
             global_preview, inspected["selected_project_intake"],
             inspected["selected_legacy_owner_review"])
+    selected_decision_support = None
+    if include_architecture_experience_decision_support:
+        # Original #174 audit/plan owners; structurally inspect caller-provided
+        # synthetic #176 E5 pack only. No DB owner is imported/contacted.
+        from . import personal_chairman_decision_support as decision_owner
+        try:
+            selected_decision_support = decision_owner.prepare_selected_decision(
+                task=task, note_sha256=selected_note_sha256,
+                project_binding_sha256=inspected["selected_project_binding_sha256"],
+                project_root=project_root,
+                result_sha256=(inspected["observed_result"]["result_sha256"]
+                               if inspected["observed_result"] is not None else None),
+                synthetic_alignment_plan=synthetic_alignment_plan,
+                expected_alignment_plan_sha256=expected_alignment_plan_sha256,
+                synthetic_experience_pack=synthetic_experience_pack,
+                expected_experience_pack_sha256=expected_experience_pack_sha256,
+                declared_experience_project_id=declared_experience_project_id)
+        except Exception:
+            raise WorkSessionRefused("Original #174/#176 selected decision preview refused") from None
     # A long optional Chairman source render or result scan cannot authorize
     # a selection from a stale original Workday inventory.
     if propose_chairman_turn(desk)["proposal_sha256"] != proposal_sha256:
@@ -1774,6 +1818,42 @@ def select_chairman_turn(
             raise WorkSessionRefused("Chairman task changed during adoption closing review")
         if _selected_project_adoption_preview(project_root) != inspected["selected_project_intake"]:
             raise WorkSessionRefused("Project changed during adoption closing review")
+    if include_architecture_experience_decision_support:
+        # Cooperative closing re-audit catches ordinary project/source drift.
+        # Neither #174 structure nor a synthetic #176 pack is an authority grant.
+        try:
+            fresh_decision = decision_owner.prepare_selected_decision(
+                task=task, note_sha256=selected_note_sha256,
+                project_binding_sha256=inspected["selected_project_binding_sha256"],
+                project_root=project_root,
+                result_sha256=(inspected["observed_result"]["result_sha256"]
+                               if inspected["observed_result"] is not None else None),
+                synthetic_alignment_plan=synthetic_alignment_plan,
+                expected_alignment_plan_sha256=expected_alignment_plan_sha256,
+                synthetic_experience_pack=synthetic_experience_pack,
+                expected_experience_pack_sha256=expected_experience_pack_sha256,
+                declared_experience_project_id=declared_experience_project_id)
+        except Exception:
+            raise WorkSessionRefused("Architecture/experience decision closing review refused") from None
+        if fresh_decision != selected_decision_support:
+            raise WorkSessionRefused("Selected architecture evidence changed during Chairman review")
+        if propose_chairman_turn(desk)["proposal_sha256"] != proposal_sha256:
+            raise WorkSessionRefused("Selected task changed during architecture closing review")
+        if _selected_project_adoption_preview(project_root) != inspected["selected_project_intake"]:
+            raise WorkSessionRefused("Project intake changed during architecture decision review")
+        if result_file is not None:
+            latest = result.inspect_work_result(
+                desk, task, project_root, project_key, result_file,
+                expected_checkpoint_sha256=expected_checkpoint_sha256)
+            prior = inspected["observed_result"]
+            if (prior is None or latest["checkpoint_sha256"] != prior["checkpoint_sha256"]
+                    or latest["result_sha256"] != prior["result_sha256"]
+                    or latest["result_bytes"] != prior["result_bytes"]
+                    or latest["work_brief"]["scratch_handoff"]["selected_note_sha256"]
+                       != selected_note_sha256
+                    or latest["work_brief"]["project_binding_sha256"]
+                       != inspected["selected_project_binding_sha256"]):
+                raise WorkSessionRefused("Exact result changed during architecture decision review")
     return {
         "schema": CHAIRMAN_TURN_SCHEMA,
         "status": "CHAIRMAN_SOURCE_ONLY_CONVERSATION_CHOICE_REATTESTED",
@@ -1784,12 +1864,22 @@ def select_chairman_turn(
         "selected_original_owner_review": focus,
         "selected_governed_workday_context": selected_governed,
         "selected_global_project_adoption_preparation": selected_adoption,
+        "selected_architecture_experience_decision_support": selected_decision_support,
         "next_separate_step": next_step,
         "suggested_chairman_message": (
             "The saved result is historical. Explicitly reopen its exact snapshot "
             "before a separate read-only replay."
             if kind == "SAVED_COMPLETED_RESULT" else
-            "I can review this selected work. Completing it remains a separate decision."
+            (
+                f"Selected project: {selected_decision_support['original_174_material_findings']} "
+                f"material architecture findings, "
+                f"{selected_decision_support['original_174_limitations_count']} audit limitations; "
+                f"alignment plan: {selected_decision_support['original_174_alignment_plan_contract_status']}. "
+                "Any #176 pack is only a synthetic candidate preview; verify live scope, "
+                "trust and revocation before reuse. No activation or task completion."
+                if selected_decision_support is not None else
+                "I can review this selected work. Completing it remains a separate decision."
+            )
         ),
         "source_only_caller_asserted_choice": True,
         "trusted_user_event_verified": False,
@@ -1920,6 +2010,46 @@ def _adoption_cli_options(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def _architecture_experience_cli_options(args: argparse.Namespace) -> dict[str, Any]:
+    """Only bounded synthetic documents in the explicitly selected scratch desk."""
+    fields = (args.synthetic_alignment_plan_file, args.expected_alignment_plan_sha256,
+              args.synthetic_experience_pack_file, args.expected_experience_pack_sha256,
+              args.declared_experience_project_id)
+    if not args.include_architecture_experience_decision_support:
+        if any(value is not None for value in fields):
+            raise WorkSessionRefused("Unselected architecture/experience fixture forbidden")
+        return {}
+    plan = (args.synthetic_alignment_plan_file, args.expected_alignment_plan_sha256)
+    pack = (args.synthetic_experience_pack_file,
+            args.expected_experience_pack_sha256, args.declared_experience_project_id)
+    if (any(value is not None for value in plan)
+            and not all(value is not None for value in plan)):
+        raise WorkSessionRefused("Complete synthetic architecture plan file/SHA required")
+    if (any(value is not None for value in pack)
+            and not all(value is not None for value in pack)):
+        raise WorkSessionRefused("Complete synthetic #176 pack file/SHA/project ID required")
+    desk_root = portable._desk(args.desk, must_exist=True)
+
+    def fixture(path: str, basename: str, maximum: int) -> bytes:
+        candidate = Path(path)
+        if candidate.name != basename or candidate.parent != desk_root:
+            raise WorkSessionRefused("Synthetic decision fixture must be inside selected scratch desk")
+        return _read_selected_chairman_source(path, maximum=maximum)
+
+    return {
+        "include_architecture_experience_decision_support": True,
+        "synthetic_alignment_plan": (
+            fixture(plan[0], "synthetic-architecture-plan.json", 64 * 1024)
+            if plan[0] is not None else None),
+        "expected_alignment_plan_sha256": plan[1],
+        "synthetic_experience_pack": (
+            fixture(pack[0], "synthetic-experience-pack.json", 16 * 1024)
+            if pack[0] is not None else None),
+        "expected_experience_pack_sha256": pack[1],
+        "declared_experience_project_id": pack[2],
+    }
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _SafeParser(
         description="Internal source-only personal workflow over original task owners")
@@ -1950,6 +2080,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             sub.add_argument("--expected-saved-catalog-sha256")
             sub.add_argument("--expected-saved-catalog-revision", type=int)
             sub.add_argument("--include-experience-provenance", action="store_true")
+            sub.add_argument("--include-architecture-experience-decision-support",
+                             action="store_true")
+            sub.add_argument("--synthetic-alignment-plan-file")
+            sub.add_argument("--expected-alignment-plan-sha256")
+            sub.add_argument("--synthetic-experience-pack-file")
+            sub.add_argument("--expected-experience-pack-sha256")
+            sub.add_argument("--declared-experience-project-id", type=int)
             sub.add_argument("--include-adoption-preparation", action="store_true")
             sub.add_argument("--synthetic-global-inventory-file")
             sub.add_argument("--expected-synthetic-global-inventory-sha256")
@@ -1999,6 +2136,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             packet = propose_chairman_turn(args.desk)
         elif args.command == "select":
             adoption_options = _adoption_cli_options(args)
+            decision_options = _architecture_experience_cli_options(args)
             packet = select_chairman_turn(
                 args.desk, proposal_sha256=args.proposal_sha256,
                 task=args.task_key, selected_note_sha256=args.selected_note_sha256,
@@ -2008,7 +2146,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                 expected_checkpoint_sha256=args.expected_checkpoint_sha256,
                 **_chairman_cli_options(args),
                 **_saved_catalog_cli_options(args),
-                **adoption_options)
+                **adoption_options,
+                **decision_options)
+            for name, key, maximum in (
+                    ("synthetic_alignment_plan_file", "synthetic_alignment_plan", 64 * 1024),
+                    ("synthetic_experience_pack_file", "synthetic_experience_pack", 16 * 1024)):
+                selected_file = getattr(args, name)
+                if selected_file is not None and (
+                        _read_selected_chairman_source(selected_file, maximum=maximum)
+                        != decision_options[key]):
+                    raise WorkSessionRefused("Synthetic decision fixture changed before display")
             if args.include_adoption_preparation and (
                     _read_selected_chairman_source(
                         args.synthetic_global_inventory_file, maximum=64 * 1024)
