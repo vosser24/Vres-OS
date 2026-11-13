@@ -53,7 +53,15 @@ Usage: python -I -S -B personal_desk_cli.py COMMAND [command options]
             [--show-selected-action] [--project-root ABS --project-key project:*]
             [--snapshot-sha256 HEX with --task-key] [--format text|json]
             Never auto-focus, reopen/replay or access installed Vres
-  work-session  Internal one-task start/review/finish/reopen/replay
+  work-session  Original single-Chairman source-only proposal/selection
+            propose --desk ABS-Vres-Desk-* (returns exact choice SHA)
+            select --desk ABS-Vres-Desk-* --task-key TASK-*
+            --proposal-sha256 HEX --selected-note-sha256 HEX --yes
+            [--kind ACTIVE_TASK|SAVED_COMPLETED_RESULT]
+            [--project-root ABS --project-key project:* --result-file ABS
+            --expected-checkpoint-sha256 HEX]
+            Uses original tasks/results; NEVER host authority or auto-completion
+            Internal one-task start/review/finish/reopen/replay
             start --desk ABS --task-key TASK-* --note-file ABS
             --project-root ABS --project-key project:* --yes (empty project)
             review --desk ABS --task-key TASK-* [--project-root ABS

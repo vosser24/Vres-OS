@@ -27,7 +27,7 @@ def _new(tmp_path):
     desk.add_task(selected, "TASK-ONE-REPORT", note, approved=True)
     document = project / "report.md"
     document.write_text("# Ordinary report\n\nNon-sensitive sample.\n", encoding="utf-8")
-    context = (selected, "TASK-ONE-REPORT", project, "project:ordinary", document)
+    context = (selected, "TASK-ONE-REPORT", project, "project:" + "a" * 24, document)
     checkpoint = result.inspect_work_result(*context)["checkpoint_sha256"]
     return context, checkpoint
 
@@ -1128,7 +1128,7 @@ def _synthetic_legacy_work_review(tmp_path):
     keep.write_bytes(b"# Synthetic owner edit\n")
     review = project_adoption.status(project, data_root=data)[
         "legacy_configuration_readiness"]["owner_review"]
-    desk_root = tmp_path / "SyntheticDesk"
+    desk_root = tmp_path / "Vres-Desk-Synthetic-Legacy"
     desk_root.mkdir()
     note = tmp_path / "SyntheticWork.md"
     note.write_text("# Work\n\n## Next action\n- Review legacy changes.\n",
@@ -1752,3 +1752,251 @@ def test_saved_chairman_link_refuses_host_promotion_in_existing_history(tmp_path
                                       ensure_ascii=True) + '\n', encoding='ascii')
     with pytest.raises(lifecycle.LifecycleRefused):
         lifecycle.list_history(selected)
+
+
+# #165 single-Chairman conversational CHOICE over the ORIGINAL workday/task,
+# existing completion and saved replay; source-only, never a live host claim.
+
+
+def test_chairman_conversation_preview_is_grounded_and_never_auto_selects(tmp_path):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    offered = session.propose_chairman_turn(selected)
+    assert offered['status'] == 'CHAIRMAN_SOURCE_ONLY_CONVERSATION_CHOICES'
+    assert len(offered['choices']) == 1
+    assert offered['choices'][0]['kind'] == 'ACTIVE_TASK'
+    assert offered['choices'][0]['task_key_claimed'] == task
+    assert offered['choices'][0]['available_action'] == 'REVIEW_EXISTING_TASK_ONLY'
+    assert offered['automatic_task_or_result_selection'] is False
+    assert offered['chairman_message_emitted_to_host'] is False
+    assert offered['writes_performed'] is False
+    assert 'Prepare an ordinary report' not in json.dumps(offered)
+    assert str(project) not in json.dumps(offered)
+    _finish(ctx, token)
+    saved = session.propose_chairman_turn(selected)
+    assert [choice['kind'] for choice in saved['choices']] == ['SAVED_COMPLETED_RESULT']
+    assert saved['proposal_sha256'] != offered['proposal_sha256']
+    assert saved['current_historical_document_bytes_verified'] is False
+    assert saved['protected_f1_fable_authority_granted'] is False
+    assert str(document) not in json.dumps(saved)
+
+
+def test_chairman_conversation_selection_to_existing_v2_completion_replay(tmp_path):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    source = _synthetic_chairman_history_selection()
+    preview = session.propose_chairman_turn(selected)
+    choice = preview['choices'][0]
+    selected_turn = session.select_chairman_turn(
+        selected, proposal_sha256=preview['proposal_sha256'],
+        task=task, selected_note_sha256=choice['selected_note_sha256'],
+        project_root=project, project_key=key, result_file=document,
+        expected_checkpoint_sha256=token, approved=True,
+        include_chairman_candidate=True, **source)
+    assert selected_turn['status'] == 'CHAIRMAN_SOURCE_ONLY_CONVERSATION_CHOICE_REATTESTED'
+    focus = selected_turn['selected_original_owner_review']
+    assert focus['observed_result']['checkpoint_sha256'] == token
+    assert focus['selected_chairman_candidate']['host_evidence_status'] == 'NO_HOST_MODEL_EVIDENCE_STOP'
+    assert selected_turn['next_separate_step'] == 'SEPARATE_EXPLICIT_FINISH_APPROVAL_STILL_REQUIRED'
+    assert selected_turn['host_observed_chairman_verified'] is False
+    assert selected_turn['trusted_user_event_verified'] is False
+    assert lifecycle.list_history(selected)['count'] == 0
+    completed = completion.finish_work(
+        *ctx, expected_checkpoint_sha256=token, approved=True,
+        include_chairman_candidate=True, **source)
+    assert completed['chairman_source_candidate_history_linked'] is True
+    saved = session.propose_chairman_turn(selected)
+    historical = session.select_chairman_turn(
+        selected, proposal_sha256=saved['proposal_sha256'],
+        task=task, selected_note_sha256=saved['choices'][0]['selected_note_sha256'],
+        kind='SAVED_COMPLETED_RESULT', approved=True)
+    assert historical['next_separate_step'] == 'REOPEN_EXACT_SNAPSHOT_SEPARATELY_BEFORE_REPLAY'
+    assert historical['selected_original_owner_review']['result_replayed'] is False
+    assert str(project) not in json.dumps(historical)
+    session.reopen_saved(selected, task, saved['choices'][0]['selected_note_sha256'], approved=True)
+    replay = session.replay_saved(
+        selected, task, saved['choices'][0]['selected_note_sha256'],
+        approved=True, include_saved_chairman_candidate=True)
+    assert replay['checkpoint_sha256'] == token
+    assert (replay['selected_saved_chairman_candidate']['source_link_sha256']
+            == focus['selected_chairman_candidate']['source_link_sha256'])
+    assert replay['saved_chairman_context_is_host_authority'] is False
+    assert replay['native_chairman_authority_granted'] is False
+
+
+def test_chairman_conversation_stale_or_unapproved_selection_refused(tmp_path):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    offered = session.propose_chairman_turn(selected)
+    choice = offered['choices'][0]
+    kwargs = dict(proposal_sha256=offered['proposal_sha256'], task=task,
+                  selected_note_sha256=choice['selected_note_sha256'])
+    with pytest.raises(session.WorkSessionRefused):
+        session.select_chairman_turn(selected, **kwargs)
+    with pytest.raises(session.WorkSessionRefused):
+        session.select_chairman_turn(selected, **{**kwargs, 'proposal_sha256': '0' * 64},
+                                     approved=True)
+    with pytest.raises(session.WorkSessionRefused):
+        session.select_chairman_turn(selected, **{**kwargs, 'selected_note_sha256': '1' * 64},
+                                     approved=True)
+    with pytest.raises(session.WorkSessionRefused):
+        session.select_chairman_turn(selected, **kwargs, approved=True,
+                                     result_file=document, project_root=project,
+                                     project_key=key)
+    second = tmp_path / 'second-note.md'
+    second.write_text('# Second task\n\n## Next action\n- Read.\n', encoding='utf-8')
+    desk.add_task(selected, 'TASK-SECOND', second, approved=True)
+    with pytest.raises(session.WorkSessionRefused, match='changed'):
+        session.select_chairman_turn(selected, **kwargs, approved=True)
+    assert lifecycle.list_history(selected)['count'] == 0
+    assert result.inspect_work_result(*ctx)['checkpoint_sha256'] == token
+
+
+def test_chairman_conversation_refuses_late_result_drift_without_completion(
+        tmp_path, monkeypatch):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    offered = session.propose_chairman_turn(selected)
+    original = session.review_session
+
+    def changed_after_review(*args, **kwargs):
+        reviewed = original(*args, **kwargs)
+        document.write_text('# Changed before closing recheck\n', encoding='utf-8')
+        return reviewed
+
+    monkeypatch.setattr(session, 'review_session', changed_after_review)
+    with pytest.raises((session.WorkSessionRefused, result.WorkResultRefused)):
+        session.select_chairman_turn(
+            selected, proposal_sha256=offered['proposal_sha256'], task=task,
+            selected_note_sha256=offered['choices'][0]['selected_note_sha256'],
+            project_root=project, project_key=key,
+            result_file=document, expected_checkpoint_sha256=token, approved=True)
+    assert lifecycle.list_history(selected)['count'] == 0
+    assert session.review_workday(selected)['active_count'] == 1
+
+
+def test_chairman_saved_conversation_choice_never_replays_or_activates(tmp_path):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    _finish(ctx, token)
+    offered = session.propose_chairman_turn(selected)
+    choice = offered['choices'][0]
+    kwargs = dict(proposal_sha256=offered['proposal_sha256'], task=task,
+                  selected_note_sha256=choice['selected_note_sha256'],
+                  kind='SAVED_COMPLETED_RESULT', approved=True)
+    with pytest.raises(session.WorkSessionRefused):
+        session.select_chairman_turn(selected, **kwargs, project_root=project,
+                                     project_key=key)
+    with pytest.raises(session.WorkSessionRefused):
+        session.select_chairman_turn(selected, **kwargs,
+                                     include_chairman_candidate=True)
+    packet = session.select_chairman_turn(selected, **kwargs)
+    assert packet['selected_original_owner_review']['current_document_bytes_verified'] is False
+    assert packet['automatic_task_reopen_or_completion'] is False
+    assert packet['writes_performed'] is False
+    assert str(document) not in json.dumps(packet)
+    assert lifecycle.list_history(selected)['count'] == 1
+    assert session.review_session(selected, task)['active'] is False
+
+
+def test_chairman_conversation_pending_revision_is_attention_only(tmp_path):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    root = lifecycle._root(selected)
+    hist = lifecycle._history(root, create=True)
+    pending = hist / 'pending' / ('Vres-Workbench-P' + 'a' * 32)
+    pending.mkdir()
+    packet = session.propose_chairman_turn(selected)
+    assert packet['manual_revision_recovery_attention_required'] is True
+    assert 'manual recovery review' in packet['suggested_chairman_message']
+    assert packet['writes_performed'] is False
+    assert pending.is_dir()
+    assert result.inspect_work_result(*ctx)['checkpoint_sha256'] == token
+
+
+def test_chairman_conversation_existing_cli_proposal_select_and_exact_finish(tmp_path, capsys):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    assert cli.main(['work-session', 'propose', '--desk', str(selected)]) == 0
+    proposal = json.loads(capsys.readouterr().out)
+    assert proposal['status'] == 'CHAIRMAN_SOURCE_ONLY_CONVERSATION_CHOICES'
+    choice = proposal['choices'][0]
+    required = [
+        'work-session', 'select', '--desk', str(selected), '--task-key', task,
+        '--proposal-sha256', proposal['proposal_sha256'],
+        '--selected-note-sha256', choice['selected_note_sha256'],
+        '--project-root', str(project), '--project-key', key,
+        '--result-file', str(document), '--expected-checkpoint-sha256', token,
+    ]
+    assert cli.main(required) == 2
+    assert 'VRES_WORK_SESSION_REFUSED' in capsys.readouterr().err
+    source = _synthetic_chairman_history_selection()
+    history_file = tmp_path / 'selected-history.json'
+    template_file = tmp_path / 'selected-template.md'
+    history_file.write_bytes(source['chairman_history_document'])
+    template_file.write_bytes(source['chairman_template'])
+    opt = [
+        '--include-chairman-candidate',
+        '--chairman-history-file', str(history_file),
+        '--chairman-template-file', str(template_file),
+        '--expected-chairman-history-sha256', source['expected_chairman_history_sha256'],
+        '--expected-chairman-proposal-sha256', source['expected_chairman_proposal_sha256'],
+        '--expected-chairman-template-sha256', source['expected_chairman_template_sha256'],
+    ]
+    assert cli.main([*required, *opt, '--yes']) == 0
+    selected_turn = json.loads(capsys.readouterr().out)
+    assert selected_turn['status'] == 'CHAIRMAN_SOURCE_ONLY_CONVERSATION_CHOICE_REATTESTED'
+    assert selected_turn['selected_original_owner_review']['observed_result'][
+        'checkpoint_sha256'] == token
+    assert selected_turn['selected_original_owner_review']['selected_chairman_candidate'][
+        'host_evidence_status'] == 'NO_HOST_MODEL_EVIDENCE_STOP'
+    assert selected_turn['trusted_user_event_verified'] is False
+    assert lifecycle.list_history(selected)['count'] == 0
+    assert cli.main([
+        'work-session', 'finish', '--desk', str(selected), '--task-key', task,
+        '--project-root', str(project), '--project-key', key,
+        '--result-file', str(document), '--expected-checkpoint-sha256', token,
+        *opt, '--yes',
+    ]) == 0
+    done = json.loads(capsys.readouterr().out)
+    assert done['chairman_source_candidate_history_linked'] is True
+    assert cli.main(['work-session', 'propose', '--desk', str(selected)]) == 0
+    saved = json.loads(capsys.readouterr().out)
+    saved_choice = saved['choices'][0]
+    assert saved_choice['kind'] == 'SAVED_COMPLETED_RESULT'
+    assert cli.main([
+        'work-session', 'select', '--desk', str(selected), '--task-key', task,
+        '--proposal-sha256', saved['proposal_sha256'],
+        '--selected-note-sha256', saved_choice['selected_note_sha256'],
+        '--kind', 'SAVED_COMPLETED_RESULT', '--yes',
+    ]) == 0
+    historical = json.loads(capsys.readouterr().out)
+    assert historical['next_separate_step'] == 'REOPEN_EXACT_SNAPSHOT_SEPARATELY_BEFORE_REPLAY'
+    assert historical['automatic_task_reopen_or_completion'] is False
+    assert 'password' not in json.dumps(historical)
+    assert lifecycle.list_history(selected)['count'] == 1
+
+
+def test_chairman_conversation_existing_cli_rejects_invalid_and_stale_selection(tmp_path, capsys):
+    ctx, token = _new(tmp_path)
+    selected, task, project, key, document = ctx
+    assert cli.main(['work-session', 'propose', '--desk', str(selected)]) == 0
+    offered = json.loads(capsys.readouterr().out)
+    bad = [
+        'work-session', 'select', '--desk', str(selected), '--task-key', task,
+        '--proposal-sha256', '0' * 64, '--selected-note-sha256',
+        offered['choices'][0]['selected_note_sha256'], '--yes',
+    ]
+    assert cli.main(bad) == 2
+    capsys.readouterr()
+    assert cli.main([
+        *bad[:6], offered['proposal_sha256'], *bad[7:]
+    ]) == 2  # malformed CLI sequence must never downgrade a refusal
+    capsys.readouterr()
+    with pytest.raises(session.WorkSessionRefused):
+        session.select_chairman_turn(
+            selected, task=task, proposal_sha256='0' * 64,
+            selected_note_sha256=offered['choices'][0]['selected_note_sha256'],
+            kind='ACTIVE_TASK', approved=True)
+    assert lifecycle.list_history(selected)['count'] == 0
+    assert result.inspect_work_result(*ctx)['checkpoint_sha256'] == token

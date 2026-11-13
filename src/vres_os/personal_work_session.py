@@ -1228,6 +1228,220 @@ def render_workday(packet: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+
+# #165 — SOURCE-ONLY single-Chairman conversation handoff; existing workday,
+# task, work-result and history owners remain the only owners of their state.
+# The strings below are deterministic SUGGESTIONS for a future Chairman host,
+# not a host-authenticated conversation, model invocation or command language.
+CHAIRMAN_TURN_SCHEMA = "vres-personal-chairman-work-conversation/1"
+
+
+def propose_chairman_turn(desk: str | Path) -> dict[str, Any]:
+    """Offer grounded task/saved-result choices without choosing or opening one.
+
+    This is a bounded conversational preview of the existing Workday Home;
+    it neither reads task instructions nor treats historical results as current.
+    The digest detects ordinary state drift, NOT actor/user authentication.
+    """
+    home = review_workday(desk)
+    if (home.get("schema") != WORKDAY_SCHEMA
+            or home.get("status") != "READ_ONLY_INTEGRATED_PERSONAL_WORKDAY_HOME"
+            or home.get("writes_performed") is not False
+            or home.get("native_chairman_task_bound") is not False
+            or home.get("selected_review") is not None):
+        raise WorkSessionRefused("Original Workday Home contract required")
+    choices = [
+        {"kind": "ACTIVE_TASK", "task_key_claimed": row["task_key_claimed"],
+         "selected_note_sha256": row["note_sha256"],
+         "available_action": "REVIEW_EXISTING_TASK_ONLY"}
+        for row in home["active_tasks"]
+    ]
+    choices.extend(
+        {"kind": "SAVED_COMPLETED_RESULT",
+         "task_key_claimed": row["task_key_claimed"],
+         "selected_note_sha256": row["note_sha256"],
+         "available_action": "INSPECT_HISTORICAL_RESULT_ONLY"}
+        for row in home["saved_history"]
+        if row["state"] == "completed" and row["saved_result_linked"] is True
+    )
+    if len(choices) > 54 or len({(c["kind"], c["task_key_claimed"],
+                                   c["selected_note_sha256"]) for c in choices}) != len(choices):
+        raise WorkSessionRefused("Ambiguous or unbounded Chairman work choices")
+    state = {
+        "schema": CHAIRMAN_TURN_SCHEMA,
+        "choices": choices,
+        "manual_revision_recovery_attention_required":
+            home["manual_revision_recovery_attention_required"],
+    }
+    digest = hashlib.sha256(json.dumps(
+        state, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+        allow_nan=False).encode("ascii")).hexdigest()
+    if state["manual_revision_recovery_attention_required"]:
+        suggested = (
+            "An interrupted task revision needs manual recovery review. "
+            "I can inspect an existing task or saved result, but I cannot repair it automatically."
+        )
+    elif choices:
+        suggested = (
+            "I can help review one of your existing tasks or saved completed results. "
+            "Which exact item should we inspect? Nothing will be started or finished automatically."
+        )
+    else:
+        suggested = "I found no active task or linked completed result to select."
+    return {
+        **state,
+        "status": "CHAIRMAN_SOURCE_ONLY_CONVERSATION_CHOICES",
+        "proposal_sha256": digest,
+        "suggested_chairman_message": suggested,
+        "original_task_history_owner_reused": True,
+        "chairman_message_emitted_to_host": False,
+        "caller_selection_verified_by_host": False,
+        "note_text_or_external_paths_disclosed": False,
+        "current_historical_document_bytes_verified": False,
+        "automatic_task_or_result_selection": False,
+        "native_claude_or_hooks_executed": False,
+        "database_contacted": False,
+        "writes_performed": False,
+        "protected_f1_fable_authority_granted": False,
+    }
+
+
+def select_chairman_turn(
+    desk: str | Path, *, proposal_sha256: str, task: str,
+    selected_note_sha256: str, kind: str = "ACTIVE_TASK",
+    approved: bool = False,
+    project_root: str | Path | None = None,
+    project_key: str | None = None,
+    result_file: str | Path | None = None,
+    expected_checkpoint_sha256: str | None = None,
+    include_chairman_candidate: bool = False,
+    chairman_history_document: bytes | None = None,
+    chairman_template: bytes | None = None,
+    expected_chairman_history_sha256: str | None = None,
+    expected_chairman_proposal_sha256: str | None = None,
+    expected_chairman_template_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Re-attest ONE caller-confirmed choice against original owners, no writes.
+
+    Only a source-only conversation response is prepared. A live user event,
+    model observation, protected validation and final completion approval
+    must be established by their separately held authoritative owners.
+    """
+    if approved is not True:
+        raise WorkSessionRefused("Explicit caller-selected conversation choice required")
+    if (type(proposal_sha256) is not str
+            or not workbench._SHA.fullmatch(proposal_sha256)
+            or type(task) is not str or not workbench._TASK_KEY.fullmatch(task)
+            or type(selected_note_sha256) is not str
+            or not workbench._SHA.fullmatch(selected_note_sha256)
+            or type(kind) is not str
+            or kind not in {"ACTIVE_TASK", "SAVED_COMPLETED_RESULT"}):
+        raise WorkSessionRefused("Exact original Chairman work-choice identity required")
+    offered = propose_chairman_turn(desk)
+    matching = [choice for choice in offered["choices"]
+                if choice["kind"] == kind
+                and choice["task_key_claimed"] == task
+                and choice["selected_note_sha256"] == selected_note_sha256]
+    if offered["proposal_sha256"] != proposal_sha256 or len(matching) != 1:
+        raise WorkSessionRefused("Chairman work choices changed; propose again")
+    chairman_inputs = (chairman_history_document, chairman_template,
+                       expected_chairman_history_sha256,
+                       expected_chairman_proposal_sha256,
+                       expected_chairman_template_sha256)
+    if kind == "SAVED_COMPLETED_RESULT":
+        if (project_root is not None or project_key is not None
+                or result_file is not None or expected_checkpoint_sha256 is not None
+                or include_chairman_candidate is not False
+                or any(value is not None for value in chairman_inputs)):
+            raise WorkSessionRefused("Saved conversation choice is historical only")
+        inspected = review_workday(
+            desk, selected_task=task, snapshot_sha256=selected_note_sha256)
+        focus = inspected["selected_review"]
+        if (focus is None or focus["kind"] != "EXPLICIT_SAVED_COMPLETED_SNAPSHOT"
+                or focus["note_sha256"] != selected_note_sha256
+                or focus["saved_result_is_historical_not_current"] is not True
+                or focus["result_replayed"] is not False):
+            raise WorkSessionRefused("Original completed snapshot review refused")
+        next_step = "REOPEN_EXACT_SNAPSHOT_SEPARATELY_BEFORE_REPLAY"
+    else:
+        if (result_file is not None and expected_checkpoint_sha256 is None):
+            raise WorkSessionRefused("Select an exact result checkpoint for conversation review")
+        inspected = review_session(
+            desk, task, project_root=project_root, project_key=project_key,
+            result_file=result_file,
+            expected_checkpoint_sha256=expected_checkpoint_sha256,
+            include_chairman_candidate=include_chairman_candidate,
+            chairman_history_document=chairman_history_document,
+            chairman_template=chairman_template,
+            expected_chairman_history_sha256=expected_chairman_history_sha256,
+            expected_chairman_proposal_sha256=expected_chairman_proposal_sha256,
+            expected_chairman_template_sha256=expected_chairman_template_sha256)
+        if (inspected["status"] != "ACTIVE_WORK_SESSION_REVIEW"
+                or inspected["active_note_sha256"] != selected_note_sha256
+                or inspected["task_key_claimed"] != task
+                or inspected["native_chairman_authority_granted"] is not False):
+            raise WorkSessionRefused("Original task changed during conversation choice")
+        focus = {
+            "kind": "EXPLICIT_ACTIVE_TASK",
+            "task_key_claimed": task,
+            "selected_note_sha256": selected_note_sha256,
+            "selected_project_binding_sha256": inspected["selected_project_binding_sha256"],
+            "observed_result": inspected["observed_result"],
+            "selected_chairman_candidate": inspected["selected_chairman_candidate"],
+            "result_quality_validated": False,
+        }
+        next_step = ("SEPARATE_EXPLICIT_FINISH_APPROVAL_STILL_REQUIRED"
+                     if result_file is not None
+                     else "REVIEW_EXPLICIT_PROJECT_AND_RESULT_BEFORE_FINISH")
+    # A long optional Chairman source render or result scan cannot authorize
+    # a selection from a stale original Workday inventory.
+    if propose_chairman_turn(desk)["proposal_sha256"] != proposal_sha256:
+        raise WorkSessionRefused("Chairman workday changed during selected review")
+    if kind == "ACTIVE_TASK" and result_file is not None:
+        # Reuse the ORIGINAL work-result owner after the final workday read.
+        # This is cooperative readback, never an atomic filesystem guarantee.
+        fresh = result.inspect_work_result(
+            desk, task, project_root, project_key, result_file,
+            expected_checkpoint_sha256=expected_checkpoint_sha256)
+        observed = inspected["observed_result"]
+        if (observed is None or fresh["status"] != observed["status"]
+                or fresh["checkpoint_sha256"] != observed["checkpoint_sha256"]
+                or fresh["result_sha256"] != observed["result_sha256"]
+                or fresh["result_bytes"] != observed["result_bytes"]
+                or fresh["work_brief"]["scratch_handoff"]["selected_note_sha256"]
+                   != selected_note_sha256
+                or fresh["work_brief"]["project_binding_sha256"]
+                   != inspected["selected_project_binding_sha256"]):
+            raise WorkSessionRefused("Result changed during selected Chairman conversation")
+    return {
+        "schema": CHAIRMAN_TURN_SCHEMA,
+        "status": "CHAIRMAN_SOURCE_ONLY_CONVERSATION_CHOICE_REATTESTED",
+        "proposal_sha256": proposal_sha256,
+        "selected_kind": kind,
+        "task_key_claimed": task,
+        "selected_note_sha256": selected_note_sha256,
+        "selected_original_owner_review": focus,
+        "next_separate_step": next_step,
+        "suggested_chairman_message": (
+            "The saved result is historical. Explicitly reopen its exact snapshot "
+            "before a separate read-only replay."
+            if kind == "SAVED_COMPLETED_RESULT" else
+            "I can review this selected work. Completing it remains a separate decision."
+        ),
+        "source_only_caller_asserted_choice": True,
+        "trusted_user_event_verified": False,
+        "chairman_message_emitted_to_host": False,
+        "result_quality_validated": False,
+        "automatic_task_reopen_or_completion": False,
+        "host_observed_chairman_verified": False,
+        "protected_f1_fable_authority_granted": False,
+        "native_claude_or_hooks_executed": False,
+        "database_contacted": False,
+        "writes_performed": False,
+        "new_task_or_memory_store_created": False,
+    }
+
+
 def _read_selected_chairman_source(path: str, *, maximum: int) -> bytes:
     # Read only a user-selected bounded regular file, never profile discovery.
     selected = Path(path)
@@ -1274,16 +1488,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = _SafeParser(
         description="Internal source-only personal workflow over original task owners")
     subs = parser.add_subparsers(dest="command", required=True)
-    for name in ("home", "start", "review", "finish", "reopen", "replay"):
+    for name in ("home", "start", "review", "finish", "reopen", "replay", "propose", "select"):
         sub = subs.add_parser(name)
         sub.add_argument("--desk", required=True)
-        sub.add_argument("--task-key", required=(name != "home"))
+        sub.add_argument("--task-key", required=(name not in ("home", "propose")))
         if name == "home":
             sub.add_argument("--snapshot-sha256")
             sub.add_argument("--show-selected-action", action="store_true")
             sub.add_argument("--project-root")
             sub.add_argument("--project-key")
             sub.add_argument("--format", choices=("text", "json"), default="text")
+        if name == "select":
+            sub.add_argument("--proposal-sha256", required=True)
+            sub.add_argument("--selected-note-sha256", required=True)
+            sub.add_argument("--kind", choices=("ACTIVE_TASK", "SAVED_COMPLETED_RESULT"),
+                             default="ACTIVE_TASK")
+            sub.add_argument("--project-root")
+            sub.add_argument("--project-key")
+            sub.add_argument("--result-file")
+            sub.add_argument("--expected-checkpoint-sha256")
         if name == "start":
             sub.add_argument("--note-file", required=True)
             sub.add_argument("--project-root", required=True)
@@ -1294,7 +1517,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             sub.add_argument("--result-file", required=(name == "finish"))
             sub.add_argument("--expected-checkpoint-sha256",
                              required=(name == "finish"))
-        if name in ('review', 'finish'):
+        if name in ('review', 'finish', 'select'):
             sub.add_argument('--include-chairman-candidate', action='store_true')
             sub.add_argument('--chairman-history-file')
             sub.add_argument('--chairman-template-file')
@@ -1305,7 +1528,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             sub.add_argument("--show-result-paths", action="store_true")
             sub.add_argument("--include-project-intake", action="store_true")
             sub.add_argument("--include-experience-provenance", action="store_true")
-        if name in ("start", "finish", "reopen", "replay"):
+        if name in ("start", "finish", "reopen", "replay", "select"):
             sub.add_argument("--yes", action="store_true")
         if name == "replay":
             sub.add_argument('--include-saved-chairman-candidate', action='store_true')
@@ -1321,6 +1544,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 snapshot_sha256=args.snapshot_sha256,
                 show_selected_action=args.show_selected_action,
                 project_root=args.project_root, project_key=args.project_key)
+        elif args.command == "propose":
+            packet = propose_chairman_turn(args.desk)
+        elif args.command == "select":
+            packet = select_chairman_turn(
+                args.desk, proposal_sha256=args.proposal_sha256,
+                task=args.task_key, selected_note_sha256=args.selected_note_sha256,
+                kind=args.kind, approved=args.yes,
+                project_root=args.project_root, project_key=args.project_key,
+                result_file=args.result_file,
+                expected_checkpoint_sha256=args.expected_checkpoint_sha256,
+                **_chairman_cli_options(args))
         elif args.command == "start":
             packet = start_session(
                 args.desk, args.task_key, args.note_file,
