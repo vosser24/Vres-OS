@@ -2628,6 +2628,217 @@ def render_workday_journey(packet: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+# Original #165 Personal Day: one bounded entry to existing workday and journey.
+# This is a read-only presentation over ORIGINAL task/history/result owners.
+# It does not own choices, trust, approval, completion or any new persistence.
+PERSONAL_DAY_SCHEMA = "vres-personal-single-chairman-day/1"
+
+
+def review_personal_day(
+    desk: str | Path, task: str | None = None, *,
+    project_root: str | Path | None = None,
+    project_key: str | None = None,
+    result_file: str | Path | None = None,
+    expected_checkpoint_sha256: str | None = None,
+    saved_snapshot_sha256: str | None = None,
+    check_saved_current: bool = False,
+    saved_replay_approved: bool = False,
+    show_selected_action: bool = False,
+    include_result_acceptance_evidence: bool = False,
+    acceptance_evidence_document: bytes | None = None,
+    expected_acceptance_evidence_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Show bounded original choices, or one explicitly selected task journey.
+
+    No default focus and no implicit saved-current read. Exact original result
+    and completion digests are calculated only for a caller-selected result.
+    Old saved results remain historical until independently reopened and
+    expressly rechecked through the original replay owner.
+    """
+    if (type(show_selected_action) is not bool
+            or type(check_saved_current) is not bool
+            or type(saved_replay_approved) is not bool
+            or type(include_result_acceptance_evidence) is not bool):
+        raise WorkSessionRefused("Personal day choices require exact booleans")
+    if task is None and any((
+            project_root is not None, project_key is not None,
+            result_file is not None, expected_checkpoint_sha256 is not None,
+            saved_snapshot_sha256 is not None, check_saved_current,
+            saved_replay_approved, show_selected_action,
+            include_result_acceptance_evidence,
+            acceptance_evidence_document is not None,
+            expected_acceptance_evidence_sha256 is not None)):
+        raise WorkSessionRefused("Select one task before requesting a personal day focus")
+    if task is not None and (
+            type(task) is not str or not workbench._TASK_KEY.fullmatch(task)):
+        raise WorkSessionRefused("Explicit original task key required")
+    offered = propose_chairman_turn(desk)
+    home = review_workday(desk)
+    if (offered.get("status") != "CHAIRMAN_SOURCE_ONLY_CONVERSATION_CHOICES"
+            or offered.get("writes_performed") is not False
+            or offered.get("caller_selection_verified_by_host") is not False
+            or offered.get("chairman_message_emitted_to_host") is not False
+            or offered.get("note_text_or_external_paths_disclosed") is not False
+            or offered.get("automatic_task_or_result_selection") is not False
+            or offered.get("database_contacted") is not False
+            or offered.get("native_claude_or_hooks_executed") is not False
+            or offered.get("protected_f1_fable_authority_granted") is not False
+            or type(offered.get("choices")) is not list
+            or not 0 <= len(offered["choices"]) <= 54
+            or type(offered.get("proposal_sha256")) is not str
+            or not workbench._SHA.fullmatch(offered["proposal_sha256"])
+            or home.get("status") != "READ_ONLY_INTEGRATED_PERSONAL_WORKDAY_HOME"
+            or home.get("writes_performed") is not False
+            or home.get("selected_review") is not None
+            or home.get("manual_revision_recovery_attention_required")
+               is not offered["manual_revision_recovery_attention_required"]):
+        raise WorkSessionRefused("Original Chairman day choices cannot be trusted")
+    active = [c for c in offered["choices"] if c.get("kind") == "ACTIVE_TASK"]
+    saved = [c for c in offered["choices"]
+             if c.get("kind") == "SAVED_COMPLETED_RESULT"]
+    if (len(active) != home["active_count"]
+            or len(active) + len(saved) != len(offered["choices"])):
+        raise WorkSessionRefused("Original day inventory mismatched")
+    for c in offered["choices"]:
+        if (type(c) is not dict
+                or c.get("kind") not in {"ACTIVE_TASK", "SAVED_COMPLETED_RESULT"}
+                or type(c.get("task_key_claimed")) is not str
+                or not workbench._TASK_KEY.fullmatch(c["task_key_claimed"])
+                or type(c.get("selected_note_sha256")) is not str
+                or not workbench._SHA.fullmatch(c["selected_note_sha256"])
+                or c.get("available_action") not in {
+                    "REVIEW_EXISTING_TASK_ONLY", "INSPECT_HISTORICAL_RESULT_ONLY"}):
+            raise WorkSessionRefused("Malformed original task choice")
+    selection = None
+    focus_kind = None
+    if task is not None:
+        focus_kind = ("SAVED_COMPLETED_RESULT" if saved_snapshot_sha256 is not None
+                      else "ACTIVE_TASK")
+        exact = [
+            c for c in offered["choices"]
+            if c["task_key_claimed"] == task and c["kind"] == focus_kind
+            and (saved_snapshot_sha256 is None
+                 or c["selected_note_sha256"] == saved_snapshot_sha256)
+        ]
+        if len(exact) != 1:
+            raise WorkSessionRefused("Selected task/saved snapshot is not an offered choice")
+        selection = review_workday_journey(
+            desk, task, project_root=project_root, project_key=project_key,
+            result_file=result_file,
+            expected_checkpoint_sha256=expected_checkpoint_sha256,
+            saved_snapshot_sha256=saved_snapshot_sha256,
+            check_saved_current=check_saved_current,
+            saved_replay_approved=saved_replay_approved,
+            show_selected_action=show_selected_action,
+            include_result_acceptance_evidence=include_result_acceptance_evidence,
+            acceptance_evidence_document=acceptance_evidence_document,
+            expected_acceptance_evidence_sha256=expected_acceptance_evidence_sha256)
+        if (selection.get("schema") != WORKDAY_JOURNEY_SCHEMA
+                or selection.get("status")
+                   != "READ_ONLY_ORIGINAL_ONE_CHAIRMAN_WORKDAY_JOURNEY"
+                or selection.get("task_key_claimed") != task
+                or selection.get("selected_note_sha256")
+                   != exact[0]["selected_note_sha256"]
+                or (focus_kind == "SAVED_COMPLETED_RESULT")
+                   is not selection["stage"].startswith("SAVED_")
+                or selection.get("selected_next_action_disclosed")
+                   is not (show_selected_action
+                           if focus_kind == "ACTIVE_TASK" else False)
+                or any(selection.get(k) is not v
+                       for k, v in _journey_holds().items())):
+            raise WorkSessionRefused("Original selected day journey changed")
+    # Neither this nor the original owner's closing reads are OS-atomic;
+    # any ordinary observable drift refuses rather than claiming a current view.
+    if (handoff._exact_json(propose_chairman_turn(desk))
+            != handoff._exact_json(offered)
+            or handoff._exact_json(review_workday(desk))
+               != handoff._exact_json(home)):
+        raise WorkSessionRefused("Original daily inventory changed during review")
+    return {
+        "schema": PERSONAL_DAY_SCHEMA,
+        "status": "READ_ONLY_ONE_ORIGINAL_CHAIRMAN_PERSONAL_DAY",
+        "proposal_sha256": offered["proposal_sha256"],
+        "original_offered_choices": offered["choices"],
+        "active_task_count": home["active_count"],
+        "linked_historical_result_choice_count": len(saved),
+        "saved_completed_snapshot_count": home["completed_snapshot_count"],
+        "archived_snapshot_count": home["archived_snapshot_count"],
+        "revision_snapshot_count": home["revision_snapshot_count"],
+        "manual_revision_recovery_attention_required":
+            home["manual_revision_recovery_attention_required"],
+        "task_selected_explicitly": task is not None,
+        "selected_task_key_claimed": task,
+        "selected_choice_kind": focus_kind,
+        "selected_original_journey": selection,
+        "original_chairman_source_only": True,
+        "historical_saved_result_current_by_default": False,
+        "digest_authenticates_user_or_host": False,
+        "task_selection_or_completion_performed": False,
+        "original_166_168_activation_or_rollback_performed": False,
+        "original_167_live_catalog_freshness_verified": False,
+        "original_174_protected_fable_granted": False,
+        "original_176_live_memory_eligibility_or_promotion": False,
+        "native_claude_or_hooks_executed": False,
+        "database_contacted": False,
+        "writes_performed": False,
+        "new_store_created": False,
+        "installed_vres_modified": False,
+    }
+
+
+def render_personal_day(packet: dict[str, Any]) -> str:
+    """Concise safe day + selected original journey; no paths or note content."""
+    if (type(packet) is not dict
+            or packet.get("schema") != PERSONAL_DAY_SCHEMA
+            or packet.get("status") != "READ_ONLY_ONE_ORIGINAL_CHAIRMAN_PERSONAL_DAY"
+            or packet.get("writes_performed") is not False
+            or packet.get("task_selection_or_completion_performed") is not False
+            or packet.get("original_167_live_catalog_freshness_verified") is not False
+            or packet.get("original_174_protected_fable_granted") is not False
+            or packet.get("original_176_live_memory_eligibility_or_promotion") is not False
+            or packet.get("native_claude_or_hooks_executed") is not False
+            or packet.get("database_contacted") is not False
+            or type(packet.get("original_offered_choices")) is not list
+            or not 0 <= len(packet["original_offered_choices"]) <= 54):
+        raise WorkSessionRefused("Personal day text contract refused")
+    lines = [
+        "Vres-OS PERSONAL DAY -- ONE CHAIRMAN -- READ ONLY",
+        "Active tasks: " + str(packet["active_task_count"])
+        + "; saved completed snapshots (UNDATED): "
+        + str(packet["saved_completed_snapshot_count"]),
+        "Linked historical result choices: "
+        + str(packet["linked_historical_result_choice_count"]),
+        "Archived: " + str(packet["archived_snapshot_count"])
+        + "; revisions: " + str(packet["revision_snapshot_count"]),
+    ]
+    if packet["manual_revision_recovery_attention_required"]:
+        lines.append("ATTENTION: original task revision needs manual recovery; none attempted.")
+    for c in packet["original_offered_choices"]:
+        if (type(c) is not dict or
+                c.get("kind") not in {"ACTIVE_TASK", "SAVED_COMPLETED_RESULT"}
+                or type(c.get("task_key_claimed")) is not str
+                or not workbench._TASK_KEY.fullmatch(c["task_key_claimed"])
+                or type(c.get("selected_note_sha256")) is not str
+                or not workbench._SHA.fullmatch(c["selected_note_sha256"])):
+            raise WorkSessionRefused("Personal day contains untrusted choice")
+        lines.append("  " + c["kind"] + " | " + c["task_key_claimed"]
+                     + " | note=" + c["selected_note_sha256"]
+                     + (" (historical, NOT current)" if c["kind"]
+                        == "SAVED_COMPLETED_RESULT" else ""))
+    if packet["task_selected_explicitly"]:
+        if (packet.get("selected_original_journey") is None
+                or packet.get("selected_task_key_claimed")
+                   != packet["selected_original_journey"].get("task_key_claimed")):
+            raise WorkSessionRefused("Selected day journey not bound")
+        lines.append(render_workday_journey(packet["selected_original_journey"]))
+    else:
+        if packet.get("selected_original_journey") is not None:
+            raise WorkSessionRefused("Unselected day cannot contain a journey")
+        lines.append("Choose one exact task; use its saved snapshot digest for history.")
+    lines.append("No automatic task, project, approval, memory, DB, host or Windows action.")
+    return "\n".join(lines)
+
+
 def _read_selected_chairman_source(path: str, *, maximum: int) -> bytes:
     # Read only a user-selected bounded regular file, never profile discovery.
     selected = Path(path)
@@ -2811,10 +3022,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = _SafeParser(
         description="Internal source-only personal workflow over original task owners")
     subs = parser.add_subparsers(dest="command", required=True)
-    for name in ("home", "start", "review", "finish", "reopen", "replay", "propose", "select", "decision", "decide", "briefing", "journey"):
+    for name in ("home", "day", "start", "review", "finish", "reopen", "replay", "propose", "select", "decision", "decide", "briefing", "journey"):
         sub = subs.add_parser(name)
         sub.add_argument("--desk", required=True)
-        sub.add_argument("--task-key", required=(name not in ("home", "propose")))
+        sub.add_argument("--task-key", required=(name not in ("home", "propose", "day")))
         if name == "home":
             sub.add_argument("--snapshot-sha256")
             sub.add_argument("--show-selected-action", action="store_true")
@@ -2852,7 +3063,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             sub.add_argument("--legacy-review-snapshot-token")
             sub.add_argument("--legacy-review-target", action="append", nargs=2)
             sub.add_argument("--include-legacy-rollback-evidence", action="store_true")
-        if name == "journey":
+        if name in ("journey", "day"):
             sub.add_argument("--project-root")
             sub.add_argument("--project-key")
             sub.add_argument("--result-file")
@@ -2961,9 +3172,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                         args.synthetic_global_inventory_file, maximum=64 * 1024)
                     != adoption_options["synthetic_global_inventory_document"]):
                 raise WorkSessionRefused("Synthetic global input changed before display")
-        elif args.command == "journey":
+        elif args.command in ("journey", "day"):
             acceptance_options = _result_acceptance_cli_options(args)
-            packet = review_workday_journey(
+            view = (review_personal_day if args.command == "day"
+                    else review_workday_journey)
+            packet = view(
                 args.desk, args.task_key,
                 project_root=args.project_root, project_key=args.project_key,
                 result_file=args.result_file,
@@ -3044,6 +3257,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(render_completion_briefing(packet))
         elif args.command == "journey" and args.format == "text":
             print(render_workday_journey(packet))
+        elif args.command == "day" and args.format == "text":
+            print(render_personal_day(packet))
         else:
             print(json.dumps(packet, sort_keys=True, ensure_ascii=True))
     except Exception:

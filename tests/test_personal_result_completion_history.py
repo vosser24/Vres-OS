@@ -587,3 +587,156 @@ def test_one_chairman_journey_original_cli_text_and_json(tmp_path, capsys):
     assert "UNTRUSTED TASK ACTION" in shown
     assert str(ctx[2]) not in hidden + shown
     assert lifecycle.list_history(ctx[0])["count"] == 0
+
+
+def test_personal_day_one_entry_lists_original_choices_without_auto_focus(tmp_path, capsys):
+    ctx, _, _ = _scratch(tmp_path)
+    before = lifecycle.list_history(ctx[0])
+    day = session.review_personal_day(ctx[0])
+    assert day["status"] == "READ_ONLY_ONE_ORIGINAL_CHAIRMAN_PERSONAL_DAY"
+    assert day["task_selected_explicitly"] is False
+    assert day["selected_original_journey"] is None
+    assert day["active_task_count"] == 1
+    assert day["linked_historical_result_choice_count"] == 0
+    assert len(day["original_offered_choices"]) == 1
+    assert day["original_offered_choices"][0]["task_key_claimed"] == ctx[1]
+    assert day["task_selection_or_completion_performed"] is False
+    assert day["original_167_live_catalog_freshness_verified"] is False
+    assert day["original_174_protected_fable_granted"] is False
+    assert day["original_176_live_memory_eligibility_or_promotion"] is False
+    assert cli.main(["day", "--desk", str(ctx[0])]) == 0
+    output = capsys.readouterr().out
+    assert "PERSONAL DAY -- ONE CHAIRMAN" in output
+    assert "Choose one exact task" in output
+    assert "Write a local report" not in output
+    assert str(ctx[2]) not in output
+    assert lifecycle.list_history(ctx[0]) == before
+
+
+def test_personal_day_selected_task_result_is_read_only_exact_decision(tmp_path, capsys):
+    ctx, opts, _ = _scratch(tmp_path)
+    day = session.review_personal_day(
+        ctx[0], ctx[1], project_root=ctx[2], project_key=ctx[3],
+        result_file=ctx[4])
+    journey = day["selected_original_journey"]
+    assert day["task_selected_explicitly"] is True
+    assert day["selected_choice_kind"] == "ACTIVE_TASK"
+    assert journey["stage"] == "RESULT_REVIEW_READY_SEPARATE_DECISION"
+    assert journey["checkpoint_sha256"] == opts["expected_checkpoint_sha256"]
+    assert journey["decision_sha256"]
+    assert day["writes_performed"] is False
+    assert lifecycle.list_history(ctx[0])["count"] == 0
+    args = ["--desk", str(ctx[0]), "--task-key", ctx[1],
+            "--project-root", str(ctx[2]), "--project-key", ctx[3],
+            "--result-file", str(ctx[4])]
+    assert cli.main(["day", *args]) == 0
+    hidden = capsys.readouterr().out
+    assert "Read-only completion decision SHA-256" in hidden
+    assert "Task action hidden" in hidden
+    assert "Write a local report" not in hidden
+    assert str(ctx[2]) not in hidden
+    assert cli.main(["day", *args, "--format", "json"]) == 0
+    packet = json.loads(capsys.readouterr().out)
+    assert packet["selected_original_journey"]["decision_sha256"] == journey["decision_sha256"]
+    assert packet["task_selection_or_completion_performed"] is False
+    assert cli.main(["day", *args, "--show-selected-action"]) == 0
+    opt_in = capsys.readouterr().out
+    assert "UNTRUSTED TASK ACTION" in opt_in
+    assert "Write a local report" in opt_in
+    assert str(ctx[2]) not in opt_in
+    assert lifecycle.list_history(ctx[0])["count"] == 0
+
+
+def test_personal_day_saved_history_only_and_separately_reopened_current_bytes(tmp_path):
+    ctx, opts, _ = _scratch(tmp_path)
+    finished = completion.finish_work(*ctx, **opts)
+    note_sha = finished["selected_note_sha256"]
+    menu = session.review_personal_day(ctx[0])
+    assert menu["saved_completed_snapshot_count"] == 1
+    assert menu["linked_historical_result_choice_count"] == 1
+    assert menu["original_offered_choices"][0]["kind"] == "SAVED_COMPLETED_RESULT"
+    historical = session.review_personal_day(
+        ctx[0], ctx[1], saved_snapshot_sha256=note_sha)
+    assert historical["selected_original_journey"]["stage"] == "SAVED_HISTORICAL_ONLY"
+    assert historical["selected_original_journey"][
+        "historical_result_current_bytes_verified_this_read"] is False
+    with pytest.raises((session.WorkSessionRefused, ValueError)):
+        session.review_personal_day(
+            ctx[0], ctx[1], saved_snapshot_sha256=note_sha,
+            check_saved_current=True, saved_replay_approved=True)
+    session.reopen_saved(ctx[0], ctx[1], note_sha, approved=True)
+    matched = session.review_personal_day(
+        ctx[0], ctx[1], saved_snapshot_sha256=note_sha,
+        check_saved_current=True, saved_replay_approved=True)
+    assert matched["selected_original_journey"]["stage"] == "SAVED_CURRENT_BYTES_MATCH_THIS_READ"
+    assert matched["selected_original_journey"][
+        "historical_result_current_bytes_verified_this_read"] is True
+    assert matched["original_176_live_memory_eligibility_or_promotion"] is False
+    assert str(ctx[2]) not in json.dumps(matched)
+    ctx[4].write_text("Synthetic file changed after accepted completion.", encoding="utf-8")
+    with pytest.raises((session.WorkSessionRefused, ValueError)):
+        session.review_personal_day(
+            ctx[0], ctx[1], saved_snapshot_sha256=note_sha,
+            check_saved_current=True, saved_replay_approved=True)
+    assert lifecycle.list_history(ctx[0])["count"] == 1
+
+
+def test_personal_day_rejects_implicit_choice_and_mixed_authority(tmp_path, capsys):
+    ctx, opts, _ = _scratch(tmp_path)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_personal_day(ctx[0], result_file=ctx[4])
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_personal_day(ctx[0], check_saved_current=True)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_personal_day(ctx[0], show_selected_action=True)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_personal_day(ctx[0], "TASK-NONEXISTENT")
+    with pytest.raises((session.WorkSessionRefused, ValueError)):
+        session.review_personal_day(
+            ctx[0], ctx[1], project_root=ctx[2], project_key=ctx[3],
+            result_file=ctx[4], expected_checkpoint_sha256="0" * 64)
+    assert cli.main(["day", "--desk", str(ctx[0]), "--yes"]) == 2
+    error = capsys.readouterr().err
+    assert "VRES_WORK_SESSION_REFUSED" in error
+    assert str(ctx[2]) not in error
+    assert lifecycle.list_history(ctx[0])["count"] == 0
+
+
+def test_personal_day_detects_changed_offered_choices(tmp_path, monkeypatch):
+    ctx, _, _ = _scratch(tmp_path)
+    original = session.propose_chairman_turn
+    seen = {"calls": 0}
+
+    def drifting_proposal(desk):
+        seen["calls"] += 1
+        result = original(desk)
+        if seen["calls"] == 2:
+            return {**result, "proposal_sha256": "0" * 64}
+        return result
+
+    monkeypatch.setattr(session, "propose_chairman_turn", drifting_proposal)
+    with pytest.raises(session.WorkSessionRefused):
+        session.review_personal_day(ctx[0])
+    assert seen["calls"] == 2
+    assert lifecycle.list_history(ctx[0])["count"] == 0
+
+
+def test_personal_day_saved_cli_does_not_replay_before_separate_reopen(tmp_path, capsys):
+    ctx, opts, _ = _scratch(tmp_path)
+    finished = completion.finish_work(*ctx, **opts)
+    base_args = ["--desk", str(ctx[0]), "--task-key", ctx[1],
+                 "--saved-snapshot-sha256", finished["selected_note_sha256"]]
+    assert cli.main(["day", *base_args]) == 0
+    historical = capsys.readouterr().out
+    assert "SAVED_HISTORICAL_ONLY" in historical
+    assert "historical, NOT current" in historical
+    assert cli.main(["day", *base_args, "--check-saved-current", "--yes"]) == 2
+    assert "VRES_WORK_SESSION_REFUSED" in capsys.readouterr().err
+    session.reopen_saved(ctx[0], ctx[1], finished["selected_note_sha256"], approved=True)
+    assert cli.main(["day", *base_args, "--check-saved-current", "--yes",
+                     "--format", "json"]) == 0
+    fresh = json.loads(capsys.readouterr().out)
+    assert fresh["selected_original_journey"]["stage"] == "SAVED_CURRENT_BYTES_MATCH_THIS_READ"
+    assert fresh["writes_performed"] is False
+    assert "SECRET-CHECK" not in json.dumps(fresh)
+    assert str(ctx[2]) not in json.dumps(fresh)
