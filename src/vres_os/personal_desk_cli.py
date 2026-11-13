@@ -67,6 +67,24 @@ Usage: python -I -S -B personal_desk_cli.py COMMAND [command options]
             OR --task-key TASK-* --saved-snapshot-sha256 HEX
             [--check-saved-current --yes ONLY after separate reopen --yes]
             No auto-selection, project activation, completion or replay.
+            GUIDED original stages (no new store or hidden approval):
+            day list --desk ABS
+            day start --desk ABS --task-key TASK-* --note-file ABS
+              --project-root ABS --project-key project:* --yes
+            day focus --desk ABS --task-key TASK-* [project/result context]
+            day decision --desk ABS --task-key TASK-* --project-root ABS
+              --project-key project:* --result-file ABS
+              --expected-checkpoint-sha256 HEX (READ ONLY)
+            day complete [same exact result inputs]
+              --expected-decision-sha256 HEX --yes
+              [--accept-with-known-gaps only if required by original claims]
+            day history --desk ABS --task-key TASK-*
+              --saved-snapshot-sha256 HEX (HISTORICAL ONLY)
+            day reopen --desk ABS --task-key TASK-*
+              --snapshot-sha256 HEX --yes (SEPARATE approval)
+            day replay --desk ABS --task-key TASK-*
+              --snapshot-sha256 HEX --yes (explicit current-byte check)
+            Legacy day --desk ... remains unchanged and read-only.
   home      One READ-ONLY workday view across existing task/history owners
             --desk ABS-Vres-Desk-* [--task-key TASK-*]
             [--show-selected-action] [--project-root ABS --project-key project:*]
@@ -179,6 +197,47 @@ class PersonalDeskRefused(ValueError):
     """Reject unknown entrypoint routes before loading any owner module."""
 
 
+# One existing #165 Chairman. These are stage aliases to the ORIGINAL
+# source-only session/lifecycle owners; there is no new task or memory store.
+_DAY_STAGE_COMMANDS = {
+    "start": "start",
+    "list": "day",
+    "focus": "day",
+    "decision": "decision",
+    "complete": "decide",
+    "history": "day",
+    "reopen": "reopen",
+    "replay": "replay",
+}
+
+
+def _day_owner_route(rest: list[str]) -> list[str]:
+    """Route a declared day stage; retain original approval and digest gates."""
+    if not rest or rest[0].startswith("-"):
+        return ["day", *rest]
+    stage, *options = rest
+    owner = _DAY_STAGE_COMMANDS.get(stage)
+    if owner is None:
+        raise PersonalDeskRefused("Unknown Personal Day stage")
+    flags = {item.partition("=")[0] for item in options if item.startswith("--")}
+    if stage in {"list", "focus", "history"} and "--yes" in flags:
+        raise PersonalDeskRefused("Read-only day stage cannot approve a transition")
+    if stage == "list" and flags.intersection({
+            "--task-key", "--project-root", "--project-key", "--result-file",
+            "--saved-snapshot-sha256", "--check-saved-current",
+            "--include-source-context", "--include-adoption-preparation",
+            "--show-selected-action"}):
+        raise PersonalDeskRefused("Day list cannot select a task or result")
+    if stage == "focus" and flags.intersection({
+            "--saved-snapshot-sha256", "--check-saved-current"}):
+        raise PersonalDeskRefused("Day focus reviews only an active task")
+    if stage == "history" and (
+            "--saved-snapshot-sha256" not in flags
+            or "--check-saved-current" in flags):
+        raise PersonalDeskRefused("Day history is historical only")
+    return [owner, *options]
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if not args or args[0] in {"help", "--help", "-h"}:
@@ -218,7 +277,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             from vres_os import personal_work_session as owner
             outcome = owner.main(
                 ["home", *rest] if action == "home" else
-                ["day", *rest] if action == "day" else rest)
+                _day_owner_route(rest) if action == "day" else rest)
         else:  # today
             from vres_os import personal_daily_focus as owner
             outcome = owner.main(rest)

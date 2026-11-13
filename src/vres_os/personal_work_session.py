@@ -3213,6 +3213,38 @@ def render_personal_day(packet: dict[str, Any]) -> str:
                 or packet["source_context_selected_explicitly"]):
             raise WorkSessionRefused("Unselected day cannot contain a journey")
         lines.append("Choose one exact task; use its saved snapshot digest for history.")
+    # Human guidance only; the original owners must revalidate all source
+    # digests, caller choice and separate approvals at the actual operation.
+    if packet["task_selected_explicitly"]:
+        stage = packet["selected_original_journey"]["stage"]
+        if stage == "RESULT_REVIEW_READY_SEPARATE_DECISION":
+            lines.append(
+                "DAY FLOW: day decision is READ ONLY; day complete requires "
+                "the exact checkpoint + decision SHA and separate --yes.")
+            if packet["selected_original_journey"]["extra_known_gap_acknowledgement_required"]:
+                lines.append(
+                    "Unresolved claims need explicit --accept-with-known-gaps "
+                    "at day complete; claims are NOT verified quality.")
+            lines.append(
+                "AFTER completion: day history is historical only; use separate "
+                "day reopen --yes, then day replay --yes to check current saved bytes.")
+        elif stage in {"TASK_SELECTED_NO_PROJECT", "PROJECT_SELECTED_NO_RESULT"}:
+            lines.append(
+                "DAY FLOW: day focus requires one explicit project/result when "
+                "ready; day decision and day complete remain separate.")
+        elif stage == "SAVED_HISTORICAL_ONLY":
+            lines.append(
+                "DAY FLOW: day history is NOT current; first separately approve "
+                "day reopen --yes, then request day replay --yes.")
+        elif stage == "SAVED_CURRENT_BYTES_MATCH_THIS_READ":
+            lines.append(
+                "DAY FLOW: original saved bytes matched THIS READ only; "
+                "no future-byte, quality or memory-reuse guarantee.")
+    else:
+        lines.append(
+            "DAY FLOW: day focus -> day decision (read only) -> day complete "
+            "(separate --yes) -> day history -> day reopen (--yes) -> "
+            "day replay (--yes); no phase is automatic.")
     lines.append("No automatic task, project, approval, memory, DB, host or Windows action.")
     return "\n".join(lines)
 

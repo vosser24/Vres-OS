@@ -1042,3 +1042,153 @@ def test_personal_day_166_late_drift_and_forged_authority_fail_closed(tmp_path, 
     with pytest.raises(session.WorkSessionRefused):
         session.render_personal_day(packet)
     assert lifecycle.list_history(ctx[0])["count"] == 0
+
+
+def test_personal_day_guided_root_start_uses_exact_original_owner_and_approval(tmp_path, capsys):
+    desk = tmp_path / "Vres-Desk-Guided-Start"
+    project = tmp_path / "EmptyOrdinaryProject"
+    project.mkdir()
+    note = tmp_path / "nonsensitive-new-task.md"
+    note.write_text("# Task\n\n## Next action\n- Write a synthetic summary.\n",
+                    encoding="utf-8")
+    task = "TASK-GUIDED-START"
+    args = ["--desk", str(desk), "--task-key", task,
+            "--note-file", str(note), "--project-root", str(project),
+            "--project-key", "project:" + "b" * 24]
+    assert cli.main(["day", "start", *args]) == 2
+    capsys.readouterr()
+    assert not desk.exists()
+    assert cli.main(["day", "start", *args, "--yes"]) == 0
+    started = json.loads(capsys.readouterr().out)
+    assert started["status"] == "NEW_ORIGINAL_OWNER_WORK_SESSION_STARTED"
+    assert started["ordinary_project_modified"] is False
+    assert started["native_chairman_authority_granted"] is False
+    assert list(project.iterdir()) == []
+    assert cli.main(["day", "list", "--desk", str(desk), "--format", "json"]) == 0
+    listed = json.loads(capsys.readouterr().out)
+    assert listed["active_task_count"] == 1
+    assert listed["original_offered_choices"][0]["task_key_claimed"] == task
+    assert listed["task_selected_explicitly"] is False
+
+
+def test_personal_day_guided_full_original_result_history_and_verified_replay(tmp_path, capsys):
+    ctx, opts, _ = _scratch(tmp_path)
+    explicit = ["--desk", str(ctx[0]), "--task-key", ctx[1],
+                "--project-root", str(ctx[2]), "--project-key", ctx[3],
+                "--result-file", str(ctx[4])]
+    assert cli.main(["day", "focus", *explicit, "--format", "json"]) == 0
+    focused = json.loads(capsys.readouterr().out)
+    selected = focused["selected_original_journey"]
+    assert selected["stage"] == "RESULT_REVIEW_READY_SEPARATE_DECISION"
+    assert selected["checkpoint_sha256"] == opts["expected_checkpoint_sha256"]
+    assert focused["writes_performed"] is False
+    reviewed = [*explicit, "--expected-checkpoint-sha256",
+                selected["checkpoint_sha256"]]
+    assert cli.main(["day", "decision", *reviewed]) == 0
+    decision = json.loads(capsys.readouterr().out)
+    assert decision["status"] == "READ_ONLY_EXACT_PERSONAL_COMPLETION_DECISION"
+    assert decision["decision_sha256"] == selected["decision_sha256"]
+    assert lifecycle.list_history(ctx[0])["count"] == 0
+    completed_args = [*reviewed, "--expected-decision-sha256",
+                      decision["decision_sha256"]]
+    assert cli.main(["day", "complete", *completed_args]) == 2
+    capsys.readouterr()
+    assert lifecycle.list_history(ctx[0])["count"] == 0
+    assert cli.main(["day", "complete", *completed_args, "--yes"]) == 0
+    completed = json.loads(capsys.readouterr().out)
+    assert completed["status"] == "SEPARATELY_APPROVED_PERSONAL_RESULT_SAVED_IN_ORIGINAL_HISTORY"
+    assert completed["original_lifecycle_history_reused"] is True
+    assert completed["original_176_live_episode_or_reuse_eligible"] is False
+    assert lifecycle.list_history(ctx[0])["count"] == 1
+    sha = completed["saved_snapshot_sha256"]
+    selected_history = ["--desk", str(ctx[0]), "--task-key", ctx[1],
+                        "--saved-snapshot-sha256", sha]
+    assert cli.main(["day", "history", *selected_history, "--format", "json"]) == 0
+    history = json.loads(capsys.readouterr().out)
+    assert history["selected_original_journey"]["stage"] == "SAVED_HISTORICAL_ONLY"
+    assert history["selected_original_journey"][
+        "historical_result_current_bytes_verified_this_read"] is False
+    selected_saved = ["--desk", str(ctx[0]), "--task-key", ctx[1],
+                      "--snapshot-sha256", sha]
+    assert cli.main(["day", "replay", *selected_saved, "--yes"]) == 2
+    capsys.readouterr()
+    assert cli.main(["day", "reopen", *selected_saved]) == 2
+    capsys.readouterr()
+    assert cli.main(["day", "reopen", *selected_saved, "--yes"]) == 0
+    reopened = json.loads(capsys.readouterr().out)
+    assert reopened["status"] == "SAVED_WORK_SESSION_TASK_REOPENED"
+    assert reopened["result_replayed"] is False
+    assert cli.main(["day", "replay", *selected_saved, "--yes"]) == 0
+    replayed = json.loads(capsys.readouterr().out)
+    assert replayed["status"] == "SAVED_WORK_SESSION_EXACT_CONTEXT_REPLAY_MATCH"
+    assert replayed["current_result_bytes_matched_in_this_read"] is True
+    assert replayed["future_document_bytes_guaranteed_unchanged"] is False
+    assert replayed["result_quality_validated"] is False
+    assert str(ctx[2]) not in json.dumps(replayed)
+    assert lifecycle.list_history(ctx[0])["count"] == 1
+    ctx[4].write_text("The external synthetic result has changed.\n", encoding="utf-8")
+    assert cli.main(["day", "replay", *selected_saved, "--yes"]) == 2
+    capsys.readouterr()
+    assert lifecycle.list_history(ctx[0])["count"] == 1
+
+
+def test_personal_day_guided_stage_refusals_and_safe_human_flow(tmp_path, capsys):
+    ctx, _, _ = _scratch(tmp_path)
+    base = ["--desk", str(ctx[0])]
+    for args in (
+            ["day", "unknown-stage", *base],
+            ["day", "list", *base, "--task-key=" + ctx[1]],
+            ["day", "focus", *base, "--task-key", ctx[1], "--yes"],
+            ["day", "focus", *base, "--task-key", ctx[1],
+             "--saved-snapshot-sha256", "a" * 64],
+            ["day", "history", *base, "--task-key", ctx[1]],
+            ["day", "history", *base, "--task-key", ctx[1],
+             "--saved-snapshot-sha256", "a" * 64, "--yes"],
+            ["day", "history", *base, "--task-key", ctx[1],
+             "--saved-snapshot-sha256", "a" * 64, "--check-saved-current"],
+    ):
+        assert cli.main(args) == 2
+        refusal = capsys.readouterr()
+        assert "VRES_DESK_REFUSED" in refusal.err
+        assert str(ctx[2]) not in refusal.err
+    assert cli.main(["day", *base]) == 0
+    listed = capsys.readouterr().out
+    assert "DAY FLOW: day focus -> day decision" in listed
+    assert "separate --yes" in listed
+    assert "Write a local report" not in listed
+    assert str(ctx[2]) not in listed
+    assert cli.main(["day", "focus", *base, "--task-key", ctx[1]]) == 0
+    selected = capsys.readouterr().out
+    assert "day decision and day complete remain separate" in selected
+    assert lifecycle.list_history(ctx[0])["count"] == 0
+
+
+def test_personal_day_guided_known_gap_requires_extra_explicit_ack(tmp_path, capsys):
+    ctx, opts, _ = _scratch(tmp_path, ("CLAIMED_MET", "CLAIMED_GAP", "UNREVIEWED"))
+    fixture = ctx[0] / "result-acceptance-evidence.json"
+    fixture.write_bytes(opts["acceptance_evidence_document"])
+    args = ["--desk", str(ctx[0]), "--task-key", ctx[1],
+            "--project-root", str(ctx[2]), "--project-key", ctx[3],
+            "--result-file", str(ctx[4]), "--expected-checkpoint-sha256",
+            opts["expected_checkpoint_sha256"],
+            "--include-result-acceptance-evidence",
+            "--result-acceptance-evidence-file", str(fixture),
+            "--expected-result-acceptance-evidence-sha256",
+            opts["expected_acceptance_evidence_sha256"]]
+    assert cli.main(["day", "decision", *args]) == 0
+    decision = json.loads(capsys.readouterr().out)
+    assert decision["unresolved_criterion_ids"] == ["C02", "C03"]
+    assert decision["extra_known_gap_acknowledgement_required"] is True
+    assert "SECRET-CHECK" not in json.dumps(decision)
+    chosen = ["day", "complete", *args,
+              "--expected-decision-sha256", decision["decision_sha256"], "--yes"]
+    assert cli.main(chosen) == 2
+    capsys.readouterr()
+    assert lifecycle.list_history(ctx[0])["count"] == 0
+    assert cli.main([*chosen, "--accept-with-known-gaps"]) == 0
+    done = json.loads(capsys.readouterr().out)
+    assert done["caller_acknowledged_known_gaps"] is True
+    assert done["original_176_live_episode_or_reuse_eligible"] is False
+    assert "SECRET-CHECK" not in json.dumps(done)
+    assert _saved(ctx)["saved_acceptance_claims"][
+        "unresolved_criterion_ids"] == ["C02", "C03"]
