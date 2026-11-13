@@ -1,0 +1,62 @@
+# One-shot STATIC source export only. NO product imports/tests/DB/native Claude.
+# On a separate helper branch; it NEVER changes the feature source itself.
+name: Personal pinned architecture-experience source export (no DB/no native)
+on:
+  push:
+    branches:
+      - feature/personal-chairman-architecture-experience-export-20261113
+permissions:
+  contents: read
+jobs:
+  source-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      VRES_ALLOW_TEST_DB: '0'
+      VRES_TEST_DATABASE_URL: ''
+      PYTHONNOUSERSITE: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+      GIT_CONFIG_NOSYSTEM: '1'
+    steps:
+      - name: Checkout without persisted GitHub credentials
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 3
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - name: Exact-parent static-only source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/feature/personal-chairman-architecture-experience-export-20261113"
+          test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD^)" = "759930a83a05aef5d06b5d35704ab6d3785f9232"
+          test "$(git rev-parse HEAD^^)" = "11a18615118350a0b37dd6b1311806e0aaa2bcb7"
+          test "$(git rev-parse HEAD^^^{tree})" = "d61e0b6ed0dc3b448cdf6f2c4262feefd243075e"
+          test "$(git rev-parse HEAD^^{tree})" = "a8abf190661f84ed6af8f90c7b08e465df12400e"
+          test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/personal-chairman-architecture-experience-export-20261113.yml"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git archive --format=zip --output="$RUNNER_TEMP/vres-source-759930.zip" HEAD^
+          python3 -I -S -B - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+          from zipfile import ZipFile
+          archive = Path(os.environ["RUNNER_TEMP"]) / "vres-source-759930.zip"
+          with ZipFile(archive) as zipped:
+              paths = zipped.namelist()
+              assert "src/vres_os/personal_chairman_decision_support.py" in paths
+              assert "src/vres_os/personal_work_session.py" in paths
+              assert "tests/test_personal_work_session.py" in paths
+              assert len(paths) >= 550
+          print("SOURCE_EXPORT=PASS; ZIP_SHA256=" + hashlib.sha256(archive.read_bytes()).hexdigest())
+          print("NO_PRODUCT_IMPORTS_NO_DATABASE_NO_NATIVE_CLAUDE")
+          PY
+      - name: One-day disposable source ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vres-pinned-architecture-experience-759930
+          path: ${{ runner.temp }}/vres-source-759930.zip
+          retention-days: 1
+          if-no-files-found: error
