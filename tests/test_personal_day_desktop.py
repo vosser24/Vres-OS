@@ -886,3 +886,147 @@ def test_next_action_button_only_for_selected_active_loaded_original_owner():
     view.loaded_desk = "/test/Vres-Desk-Other"
     desktop.PersonalDayDesktop._sync_guidance(view)
     assert view.action_preview_button.state == "disabled"
+
+
+def _completion_briefing_view():
+    view, refused = _completion_view()
+    view.loaded_desk = "/bounded/Vres-Desk-Synthetic"
+    view._sync_guidance = lambda: None
+    shown = []
+    view._display = shown.append
+    view.focused = (("stable",), {
+        "stage": "RESULT_REVIEW_READY_SEPARATE_DECISION",
+        "task_key_claimed": "TASK-SYNTHETIC",
+        "selected_note_sha256": "c" * 64,
+        "selected_project_binding_sha256": "d" * 64,
+        "checkpoint_sha256": "a" * 64,
+        "current_result_sha256": "e" * 64,
+        "decision_sha256": "b" * 64,
+        "acceptance_claims_state": "NO_CHECKLIST_REVIEWED",
+        "unresolved_criterion_ids": [],
+        "extra_known_gap_acknowledgement_required": False,
+    }, None)
+    return view, shown, refused
+
+
+def _completion_briefing_packet():
+    return {
+        "schema": desktop.owner.COMPLETION_BRIEFING_SCHEMA,
+        "status": "READ_ONLY_ONE_TASK_COMPLETION_BRIEFING",
+        "task_key_claimed": "TASK-SYNTHETIC",
+        "selected_note_sha256": "c" * 64,
+        "selected_project_binding_sha256": "d" * 64,
+        "checkpoint_sha256": "a" * 64,
+        "current_result_sha256": "e" * 64,
+        "decision_sha256": "b" * 64,
+        "acceptance_claims_state": "NO_CHECKLIST_REVIEWED",
+        "unresolved_criterion_ids": [],
+        "extra_known_gap_acknowledgement_required": False,
+        "selected_next_action_disclosed": False,
+        "selected_next_action_untrusted": None,
+        "historical_result_current_bytes_verified": False,
+        "separate_exact_decide_with_yes_required": True,
+        "digest_authenticates_user_or_host": False,
+        "result_quality_validated": False,
+        "original_174_protected_fable_granted": False,
+        "original_176_live_episode_or_reuse_eligible": False,
+        "task_completion_approved_or_performed": False,
+        "native_claude_or_hooks_executed": False,
+        "database_contacted": False,
+        "writes_performed": False,
+        "new_store_created": False,
+    }
+
+
+def test_briefing_guidance_requires_explicit_focused_result_not_history():
+    for kind, stage, focused in (
+            ("ACTIVE_TASK", None, False),
+            ("ACTIVE_TASK", "PROJECT_SELECTED_NO_RESULT", True),
+            ("SAVED_COMPLETED_RESULT", "RESULT_REVIEW_READY_SEPARATE_DECISION", True)):
+        assert not desktop.guided_action_plan(
+            kind, stage, focused=focused, history_clear=True)["enabled"]["briefing"]
+    ready = desktop.guided_action_plan(
+        "ACTIVE_TASK", "RESULT_REVIEW_READY_SEPARATE_DECISION", focused=True)
+    assert ready["enabled"]["briefing"]
+    assert not ready["enabled"]["complete"]
+
+
+def test_briefing_reuses_original_owner_and_clears_previous_decision(monkeypatch):
+    view, shown, refused = _completion_briefing_view()
+    checks, calls = [], []
+    view._recheck_original_source = lambda task: checks.append(task)
+    def original_brief(*args, **kwargs):
+        calls.append((args, kwargs))
+        return _completion_briefing_packet()
+    monkeypatch.setattr(desktop.owner, "prepare_completion_briefing", original_brief)
+    monkeypatch.setattr(desktop.owner, "render_completion_briefing",
+                        lambda packet: "Vres-OS PERSONAL COMPLETION BRIEFING -- READ ONLY\nTask")
+    monkeypatch.setattr(desktop.owner, "finish_reviewed_decision",
+                        lambda *a, **kw: pytest.fail("Briefing cannot finish"))
+    desktop.PersonalDayDesktop.preview_briefing(view)
+    assert refused == []
+    assert shown == ["", "Vres-OS PERSONAL COMPLETION BRIEFING -- READ ONLY\nTask"]
+    assert calls[0][0] == ("/bounded/Vres-Desk-Synthetic", "TASK-SYNTHETIC",
+                            "/bounded/Project", "project:" + "d" * 24,
+                            "/bounded/Project/report.md")
+    assert calls[0][1]["show_selected_action"] is False
+    assert calls[0][1]["expected_checkpoint_sha256"] == "a" * 64
+    assert checks == ["TASK-SYNTHETIC"] * 2
+    assert view.decision is None and view.focused is not None
+    assert "Review decision separately" in view.status.get()
+
+
+def test_briefing_refuses_saved_unloaded_unfocused_and_nonresult_before_read(monkeypatch):
+    monkeypatch.setattr(desktop.owner, "prepare_completion_briefing",
+                        lambda *a, **k: pytest.fail("Unfocused briefing cannot read"))
+    for case in ("saved", "unloaded", "unfocused", "planning"):
+        view, shown, refused = _completion_briefing_view()
+        if case == "saved":
+            view._selected = lambda: ("SAVED_COMPLETED_RESULT", "TASK-SYNTHETIC", "c" * 64)
+        elif case == "unloaded":
+            view.loaded_desk = None
+        elif case == "unfocused":
+            view.focused = None
+        else:
+            view.focused[1]["stage"] = "PROJECT_SELECTED_NO_RESULT"
+        desktop.PersonalDayDesktop.preview_briefing(view)
+        assert refused == ["REFUSED"] and shown == [""]
+        assert view.decision is None
+
+
+def test_briefing_refuses_tampered_receipts_without_render(monkeypatch):
+    monkeypatch.setattr(desktop.owner, "render_completion_briefing",
+                        lambda *_: pytest.fail("Invalid receipt cannot render"))
+    for field, value in (
+            ("selected_note_sha256", "f" * 64),
+            ("checkpoint_sha256", "f" * 64),
+            ("selected_next_action_disclosed", True),
+            ("selected_next_action_untrusted", "execute-this"),
+            ("task_completion_approved_or_performed", True),
+            ("database_contacted", True),
+            ("original_176_live_episode_or_reuse_eligible", True)):
+        view, shown, refused = _completion_briefing_view()
+        packet = {**_completion_briefing_packet(), field: value}
+        monkeypatch.setattr(desktop.owner, "prepare_completion_briefing",
+                            lambda *a, packet=packet, **k: packet)
+        desktop.PersonalDayDesktop.preview_briefing(view)
+        assert refused == ["REFUSED"] and shown == [""]
+        assert view.decision is None
+
+
+def test_briefing_refuses_late_source_drift_without_render(monkeypatch):
+    view, shown, refused = _completion_briefing_view()
+    checks = []
+    def recheck(_task):
+        checks.append("CHECK")
+        if len(checks) == 2:
+            raise desktop.DesktopRefused("late source drift")
+    view._recheck_original_source = recheck
+    monkeypatch.setattr(desktop.owner, "prepare_completion_briefing",
+                        lambda *a, **k: _completion_briefing_packet())
+    monkeypatch.setattr(desktop.owner, "render_completion_briefing",
+                        lambda *_: pytest.fail("Late drift cannot render"))
+    desktop.PersonalDayDesktop.preview_briefing(view)
+    assert checks == ["CHECK", "CHECK"]
+    assert refused == ["REFUSED"] and shown == [""]
+    assert view.decision is None

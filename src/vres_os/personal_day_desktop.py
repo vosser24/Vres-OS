@@ -47,7 +47,7 @@ def guided_action_plan(
     never becomes evidence, consent or write authority.
     """
     enabled = {name: False for name in (
-        "focus", "decision", "complete", "reopen", "replay", "clear_history")}
+        "focus", "briefing", "decision", "complete", "reopen", "replay", "clear_history")}
     if kind == "ACTIVE_TASK":
         enabled["focus"] = True
         if not focused:
@@ -57,6 +57,7 @@ def guided_action_plan(
         elif stage == "PROJECT_SELECTED_NO_RESULT":
             next_step = "Step 2/4: Enter the exact result file when ready; focus again."
         elif stage == "RESULT_REVIEW_READY_SEPARATE_DECISION":
+            enabled["briefing"] = True
             enabled["decision"] = True
             enabled["complete"] = bool(decision_ready)
             if decision_ready:
@@ -355,18 +356,23 @@ class PersonalDayDesktop(ttk.Frame):
 
         buttons = ttk.Frame(self)
         buttons.grid(row=4, column=0, sticky="ew", pady=5)
-        for column, (name, label, method) in enumerate((
-                ("focus", "Focus / inspect", self.focus),
-                ("decision", "Review decision", self.preview_decision),
-                ("complete", "Complete (approve)", self.complete),
-                ("reopen", "Reopen (approve)", self.reopen),
-                ("replay", "Verify saved bytes", self.replay),
-                ("clear_history", "Clear history inputs", self.clear_history_context))):
-            button = ttk.Button(buttons, text=label, command=method)
-            button.grid(row=0, column=column, padx=3)
-            self.action_buttons[name] = button
+        # Short task/history rows reduce button overflow at minimum desktop size.
+        for line, controls in enumerate((
+                (("focus", "Focus / inspect", self.focus),
+                 ("briefing", "Evidence & gaps (read only)", self.preview_briefing),
+                 ("decision", "Review decision", self.preview_decision),
+                 ("complete", "Complete (approve)", self.complete)),
+                (("clear_history", "Clear history inputs", self.clear_history_context),
+                 ("reopen", "Reopen (approve)", self.reopen),
+                 ("replay", "Verify saved bytes", self.replay)))):
+            for column, (name, label, method) in enumerate(controls):
+                button = ttk.Button(buttons, text=label, command=method)
+                button.grid(row=line, column=column, sticky="ew", padx=3, pady=2)
+                self.action_buttons[name] = button
+        for column in range(4):
+            buttons.columnconfigure(column, weight=1)
         ttk.Label(buttons, textvariable=self.guide, wraplength=900).grid(
-            row=1, column=0, columnspan=6, sticky="w", pady=(7, 0))
+            row=2, column=0, columnspan=4, sticky="w", pady=(7, 0))
 
         report = ttk.LabelFrame(self, text="Original owner view · historical is NOT current")
         report.grid(row=5, column=0, sticky="nsew", pady=6)
@@ -798,6 +804,87 @@ class PersonalDayDesktop(ttk.Frame):
             }
             self.status.set("READ ONLY. " + guidance.get(
                 stage, "No action, quality validation or authority was granted."))
+            self._sync_guidance()
+        except Exception:
+            self._refuse()
+
+    def preview_briefing(self) -> None:
+        """Show ORIGINAL #165 task/result/history evidence without approval.
+
+        The selected action is ALWAYS hidden. A briefing never retains a
+        completion decision, creates a store or upgrades a historical result.
+        """
+        self.decision = None
+        self._sync_guidance()
+        self._display("")
+        try:
+            kind, task, digest = self._selected()
+            desk = self.values["desk"].get().strip()
+            if (kind != "ACTIVE_TASK" or not desk or self.loaded_desk != desk
+                    or self.focused is None or self.focused[0] != self._binding()):
+                raise DesktopRefused("Focus one unchanged ACTIVE task in the loaded desk.")
+            journey = self.focused[1]
+            if (type(journey) is not dict
+                    or journey.get("stage") != "RESULT_REVIEW_READY_SEPARATE_DECISION"
+                    or journey.get("task_key_claimed") != task
+                    or journey.get("selected_note_sha256") != digest):
+                raise DesktopRefused("Exact original result focus is required for briefing.")
+            context = checked_context(*(self.values[k].get() for k in (
+                "project", "key", "result")))
+            if not all(context.values()):
+                raise DesktopRefused("Explicit original project and result are required.")
+            self._recheck_original_source(task)
+            opts = self._acceptance(desk)
+            packet = owner.prepare_completion_briefing(
+                desk, task, context["project_root"], context["project_key"],
+                context["result_file"],
+                expected_checkpoint_sha256=journey["checkpoint_sha256"],
+                show_selected_action=False, **opts)
+            exact = {
+                "task_key_claimed": task,
+                "selected_note_sha256": digest,
+                "selected_project_binding_sha256": journey.get("selected_project_binding_sha256"),
+                "checkpoint_sha256": journey.get("checkpoint_sha256"),
+                "current_result_sha256": journey.get("current_result_sha256"),
+                "decision_sha256": journey.get("decision_sha256"),
+                "acceptance_claims_state": journey.get("acceptance_claims_state"),
+                "unresolved_criterion_ids": journey.get("unresolved_criterion_ids"),
+                "extra_known_gap_acknowledgement_required":
+                    journey.get("extra_known_gap_acknowledgement_required"),
+                "selected_next_action_disclosed": False,
+                "selected_next_action_untrusted": None,
+                "historical_result_current_bytes_verified": False,
+                "separate_exact_decide_with_yes_required": True,
+                "digest_authenticates_user_or_host": False,
+                "result_quality_validated": False,
+                "original_174_protected_fable_granted": False,
+                "original_176_live_episode_or_reuse_eligible": False,
+                "task_completion_approved_or_performed": False,
+                "native_claude_or_hooks_executed": False,
+                "database_contacted": False,
+                "writes_performed": False,
+                "new_store_created": False,
+            }
+            if (type(packet) is not dict
+                    or packet.get("schema") != owner.COMPLETION_BRIEFING_SCHEMA
+                    or packet.get("status") != "READ_ONLY_ONE_TASK_COMPLETION_BRIEFING"
+                    or any((packet.get(name) is not value if type(value) is bool
+                            or value is None else packet.get(name) != value)
+                           for name, value in exact.items())):
+                raise DesktopRefused("Original briefing identity or safety receipt changed.")
+            # Recheck optional #168/#167/#166 sources AFTER the briefing as well.
+            # Neither read nor digest is an atomic or host-identity proof.
+            self._recheck_original_source(task)
+            rendered = owner.render_completion_briefing(packet)
+            if (type(rendered) is not str
+                    or not rendered.startswith(
+                        "Vres-OS PERSONAL COMPLETION BRIEFING -- READ ONLY")
+                    or len(rendered) > 24000):
+                raise DesktopRefused("Original briefing renderer refused.")
+            self._display(rendered)
+            self.status.set(
+                "READ ONLY: original task, result, history counts and known gaps. "
+                "No action disclosed or approval retained. Review decision separately.")
             self._sync_guidance()
         except Exception:
             self._refuse()
