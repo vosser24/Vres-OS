@@ -1472,7 +1472,20 @@ def test_original_archive_exact_owner_write_and_undated_readback(monkeypatch):
     monkeypatch.setattr(desktop, "checked_revision_inventory", lambda *_a, **_k: None)
     monkeypatch.setattr(desktop, "checked_archived_history", lambda *_a: [])
     monkeypatch.setattr(desktop.owner, "review_personal_day", lambda _desk: day)
-    monkeypatch.setattr(desktop.lifecycle, "list_history", lambda _desk: {"history": 1})
+    prior_rows = [
+        {"state": "archived", "task_key_claimed": "TASK-OLD-1",
+         "sha256": "e" * 64, "bytes": 50},
+        {"state": "archived", "task_key_claimed": "TASK-OLD-2",
+         "sha256": "f" * 64, "bytes": 50},
+    ]
+    archived_rows = prior_rows + [
+        {"state": "archived", "task_key_claimed": "TASK-SELECTED",
+         "sha256": "a" * 64, "bytes": 50}]
+    owner_history = iter([
+        {"snapshots": prior_rows}, {"snapshots": prior_rows},
+        {"snapshots": archived_rows}])
+    monkeypatch.setattr(desktop.lifecycle, "list_history",
+                        lambda _desk: next(owner_history))
     monkeypatch.setattr(desktop.messagebox, "askyesno", lambda *_a, **_k: True)
     calls = []
     def archive(desk, task, *, state, approved, expected_sha256):
@@ -1499,7 +1512,10 @@ def test_original_archived_restore_exact_owner_and_preserved_history(monkeypatch
            "manual_revision_recovery_attention_required": False,
            "original_offered_choices": []}
     view.inventory_packet = day
-    view.archive_packet = {"history": 1}
+    immutable_history = {"snapshots": [
+        {"state": "archived", "task_key_claimed": "TASK-ARCHIVED",
+         "sha256": "e" * 64, "bytes": 50}]}
+    view.archive_packet = immutable_history
     view.archive_choices = {"archived-0": ("TASK-ARCHIVED", "e" * 64)}
     class Listing:
         def selection(self):
@@ -1510,7 +1526,7 @@ def test_original_archived_restore_exact_owner_and_preserved_history(monkeypatch
                         lambda _history, _day: [("TASK-ARCHIVED", "e" * 64)])
     monkeypatch.setattr(desktop.owner, "review_personal_day", lambda _desk: day)
     monkeypatch.setattr(desktop.lifecycle, "list_history",
-                        lambda _desk: {"history": 1})
+                        lambda _desk: immutable_history)
     monkeypatch.setattr(desktop.messagebox, "askyesno", lambda *_a, **_k: True)
     calls = []
     def restore(desk, task, *, state, expected_sha256, approved):

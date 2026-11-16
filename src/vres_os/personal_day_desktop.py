@@ -1589,6 +1589,20 @@ class PersonalDayDesktop(ttk.Frame):
                     or day["active_task_count"] != before["active_task_count"] - 1
                     or ("ACTIVE_TASK", task, digest) in triage_personal_day(day)["rows"]):
                 raise DesktopRefused("Archive readback differs; manually inspect history.")
+            # Independently re-query the COMPLETE original history after the write.
+            # Uncertain readback requires inspection, never a blind retry.
+            updated_history = lifecycle.list_history(desk)
+            checked_archived_history(updated_history, day)
+            previous_rows = history["snapshots"]
+            current_rows = updated_history["snapshots"]
+            added_rows = [row for row in current_rows if row not in previous_rows]
+            if (len(current_rows) != len(previous_rows) + 1
+                    or any(row not in current_rows for row in previous_rows)
+                    or len(added_rows) != 1
+                    or added_rows[0]["state"] != "archived"
+                    or added_rows[0]["task_key_claimed"] != task
+                    or added_rows[0]["sha256"] != digest):
+                raise DesktopRefused("Archive history identity changed; inspect history.")
             self.status.set(
                 "Original task archived, NOT completed. No task auto-selected. "
                 "Read archived history separately to restore with new consent.")
@@ -1650,6 +1664,11 @@ class PersonalDayDesktop(ttk.Frame):
                     or day["active_task_count"] != before["active_task_count"] + 1
                     or ("ACTIVE_TASK", task, digest) not in triage_personal_day(day)["rows"]):
                 raise DesktopRefused("Restored active task readback differs; inspect desk.")
+            # Restore must preserve every existing original history identity.
+            updated_history = lifecycle.list_history(desk)
+            checked_archived_history(updated_history, day)
+            if updated_history != history:
+                raise DesktopRefused("Restore changed original history; inspect desk.")
             self.status.set(
                 "Original archived note restored to an ACTIVE slot. "
                 "Archived copy preserved; manually reselect and focus the active task.")
