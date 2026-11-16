@@ -520,9 +520,10 @@ def move_out(value: str | Path, key: str, *, state: str,
             'archived_bytes_preserved': True, 'installed_vres_modified': False}
 
 
-def revise(value: str | Path, key: str, note_file: str | Path,
+def revise(value: str | Path, key: str, note_file: str | Path | None,
            *, approved: bool = False, expected_sha256: str | None = None,
-           expected_new_sha256: str | None = None) -> dict[str, Any]:
+           expected_new_sha256: str | None = None,
+           note_markdown: str | None = None) -> dict[str, Any]:
     """Stage exact approved replacement; preserve previous snapshot before swap.
 
     Optional original preimage + new-note SHA claims are checked BEFORE writing;
@@ -541,10 +542,17 @@ def revise(value: str | Path, key: str, note_file: str | Path,
     active, before = _active(root, key)
     if expected_sha256 is not None and before['sha256'] != expected_sha256:
         raise LifecycleRefused('Original selected note changed before revision')
-    note_path = Path(note_file)
-    if draft._under(note_path, root):
-        raise LifecycleRefused('New Markdown input must be outside the desk')
-    markdown = draft._manual_markdown(note_path)
+    if (note_file is None) == (note_markdown is None):
+        raise LifecycleRefused('Choose exactly one original Markdown source')
+    if note_markdown is None:
+        note_path = Path(note_file)
+        if draft._under(note_path, root):
+            raise LifecycleRefused('New Markdown input must be outside the desk')
+        markdown = draft._manual_markdown(note_path)
+    else:
+        if type(note_markdown) is not str:
+            raise LifecycleRefused('Inline revision must be exact user-authored text')
+        markdown = note_markdown
     continuity._action(markdown)  # guarantee the next focus action is readable
     next_receipt = workbench.preview_note(key, markdown)
     if (expected_new_sha256 is not None

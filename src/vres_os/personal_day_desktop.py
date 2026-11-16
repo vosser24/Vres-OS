@@ -116,7 +116,44 @@ def checked_day(packet: dict, *, selected: bool) -> dict:
     return packet
 
 
-def preview_existing_desk_task(desk_path: str, task: str, note_file: str) -> dict:
+def _selected_note_input(view) -> tuple[str | None, str | None]:
+    """Exactly one explicit source: ordinary file OR transient inline editor.
+
+    Editor bytes are not placed in a temporary file, profile or new store.
+    Approval/owner checks must compare a fresh digest of these same bytes.
+    """
+    note_file = view.values['note'].get().strip()
+    editor = getattr(view, 'inline_editor', None)
+    inline = editor.get('1.0', 'end-1c') if editor is not None else ''
+    if type(inline) is not str or bool(note_file) == bool(inline.strip()):
+        raise DesktopRefused('Choose exactly ONE external note or inline Markdown draft.')
+    return (note_file or None, inline if inline.strip() else None)
+
+
+def _clear_inline_editor(view) -> None:
+    editor = getattr(view, 'inline_editor', None)
+    if editor is not None:
+        editor.delete('1.0', tk.END)
+        editor.edit_modified(False)
+
+
+def _source_markdown(root: Path, note_file: str | None,
+                     note_markdown: str | None) -> str:
+    if (note_file is None) == (note_markdown is None):
+        raise DesktopRefused('Choose exactly one original Markdown source.')
+    if note_markdown is not None:
+        if type(note_markdown) is not str:
+            raise DesktopRefused('Inline draft must be exact Markdown text.')
+        return note_markdown
+    selected_note = Path(note_file)
+    if portable.project_draft._under(selected_note, root):
+        raise DesktopRefused('Input note must remain outside the existing scratch desk.')
+    return portable.project_draft._manual_markdown(note_file)
+
+
+def preview_existing_desk_task(desk_path: str, task: str,
+                               note_file: str | None, *,
+                               note_markdown: str | None = None) -> dict:
     """Bounded, read-only ORIGINAL scratch preview; never writes or selects.
 
     The original #165/#portable owners perform the actual approved write.
@@ -128,10 +165,9 @@ def preview_existing_desk_task(desk_path: str, task: str, note_file: str) -> dic
     if (task in labels or len(labels) >= portable._MAX_CHILDREN
             or portable.workbench._stat(target) is not None):
         raise DesktopRefused("Original desk task already exists or desk is at capacity.")
-    selected_note = Path(note_file)
-    if portable.project_draft._under(selected_note, root):
-        raise DesktopRefused("Input note must remain outside the existing scratch desk.")
-    markdown = portable.project_draft._manual_markdown(note_file)
+    markdown = _source_markdown(root, note_file, note_markdown)
+    if note_markdown is not None:
+        portable.continuity._action(markdown)  # user-authored next action, never executed
     result = portable.workbench.preview_note(task, markdown)
     if (result.get("status") != "DRAFT_PREVIEW_ONLY"
             or result.get("task_key_claimed") != task
@@ -155,7 +191,8 @@ def checked_revision_inventory(packet: dict, *, task: str, note_sha256: str) -> 
 
 
 def preview_selected_task_revision(
-    desk_path: str, task: str, note_file: str, note_sha256: str,
+    desk_path: str, task: str, note_file: str | None, note_sha256: str, *,
+    note_markdown: str | None = None,
 ) -> dict:
     """Read-only original-owner old/new note receipts; no implicit action disclosure.
 
@@ -179,9 +216,7 @@ def preview_selected_task_revision(
             or attention.get("pending_contents_opened") is not False
             or attention.get("writes_performed") is not False):
         raise DesktopRefused("Pending revision or unverified recovery state; inspect manually.")
-    if portable.project_draft._under(Path(note_file), root):
-        raise DesktopRefused("Revision input Markdown must remain outside scratch desk.")
-    markdown = portable.project_draft._manual_markdown(note_file)
+    markdown = _source_markdown(root, note_file, note_markdown)
     portable.continuity._action(markdown)  # original next-action grammar, NOT execution
     preview = portable.workbench.preview_note(task, markdown)
     digest = preview.get("sha256")
@@ -591,9 +626,19 @@ class PersonalDayDesktop(ttk.Frame):
         create.columnconfigure(1, weight=1)
         workspace.add(create, text="Add scratch task")
         self._field(create, 0, "New task key", "new_task")
-        self._field(create, 1, "External Markdown input (add / start / revise)", "note")
+        self._field(create, 1, "Optional external Markdown file (instead of editor)", "note")
+        ttk.Label(create, text=(
+            "Write the task and ## Next action directly here, OR choose an external "
+            "file above. Only one source is accepted; editing is not saved until "
+            "a separately approved original-owner write.")).grid(
+                row=2, column=0, columnspan=2, sticky="w", padx=4, pady=3)
+        self.inline_editor = tk.Text(create, wrap="word", height=5, undo=True)
+        self.inline_editor.grid(
+            row=3, column=0, columnspan=2, sticky="ew", padx=4, pady=3)
+        self.inline_editor.bind("<<Modified>>", self._inline_edited)
+        self.inline_editor.edit_modified(False)
         task_actions = ttk.Frame(create)
-        task_actions.grid(row=2, column=0, columnspan=2, sticky="ew", pady=4)
+        task_actions.grid(row=4, column=0, columnspan=2, sticky="ew", pady=4)
         self.add_button = ttk.Button(
             task_actions, text="Add task to LOADED desk (approve)", command=self.add_existing)
         self.add_button.grid(row=0, column=0, sticky="w", padx=4, pady=3)
@@ -825,6 +870,12 @@ class PersonalDayDesktop(ttk.Frame):
         else:
             self.status.set("Inputs changed. Focus the exact task again before review.")
         self._sync_guidance()
+
+    def _inline_edited(self, _event=None) -> None:
+        """Drop stale task focus/decision when the ephemeral editor changes."""
+        if self.inline_editor.edit_modified():
+            self.inline_editor.edit_modified(False)
+            self._edited("note")
 
     def _invalidate(self) -> None:
         self.focused = None
@@ -1381,16 +1432,17 @@ class PersonalDayDesktop(ttk.Frame):
         try:
             desk = self.values["desk"].get().strip()
             task = self.values["new_task"].get().strip()
-            note = self.values["note"].get().strip()
+            note, inline = _selected_note_input(self)
             if not desk or self.loaded_desk != desk:
                 raise DesktopRefused("Load the exact existing desk before adding a task.")
-            if not task or not note:
-                raise DesktopRefused("Explicit task key and ordinary Markdown note required.")
+            if not task:
+                raise DesktopRefused("Explicit task key required.")
             before = checked_day(owner.review_personal_day(desk), selected=False)
             if before.get("manual_revision_recovery_attention_required") is True:
                 raise DesktopRefused(
                     "Manual revision recovery needed before adding another task.")
-            preview = preview_existing_desk_task(desk, task, note)
+            input_options = {"note_markdown": inline} if inline is not None else {}
+            preview = preview_existing_desk_task(desk, task, note, **input_options)
             if not messagebox.askyesno(
                     "Approve one existing-desk task",
                     f"Add NEW original scratch task {task} to this LOADED desk?\n"
@@ -1406,9 +1458,14 @@ class PersonalDayDesktop(ttk.Frame):
             # retry, and no inferred consent for changed notes or desk state.
             if checked_day(owner.review_personal_day(desk), selected=False) != before:
                 raise DesktopRefused("Original desk changed during approval.")
-            if preview_existing_desk_task(desk, task, note) != preview:
+            if (_selected_note_input(self) != (note, inline)
+                    or preview_existing_desk_task(
+                        desk, task, note, **input_options) != preview):
                 raise DesktopRefused("Selected note or task preview changed during approval.")
-            created = portable.add_task(desk, task, note, approved=True)
+            created = portable.add_task(
+                desk, task, note, approved=True,
+                **({"note_markdown": inline, "expected_sha256": preview["sha256"]}
+                   if inline is not None else {}))
             if (created.get("status") != "USER_AUTHORED_SCRATCH_DRAFT_NOT_VALIDATED"
                     or created.get("task_key_claimed") != task
                     or created.get("sha256") != preview["sha256"]
@@ -1421,6 +1478,7 @@ class PersonalDayDesktop(ttk.Frame):
                 variable.set(False)
             self.values["new_task"].set("")
             self.values["note"].set("")
+            _clear_inline_editor(self)
             if not self.refresh():
                 raise DesktopRefused("Task may exist; original desk refresh failed.")
             if (self.inventory_packet is None
@@ -1448,13 +1506,15 @@ class PersonalDayDesktop(ttk.Frame):
         try:
             kind, task, digest = self._selected()
             desk = self.values["desk"].get().strip()
-            note = self.values["note"].get().strip()
+            note, inline = _selected_note_input(self)
             if (kind != "ACTIVE_TASK" or not desk or self.loaded_desk != desk
-                    or self.inventory_packet is None or not note):
-                raise DesktopRefused("Load and select one active task and external Markdown.")
+                    or self.inventory_packet is None):
+                raise DesktopRefused("Load and select an active task and one Markdown source.")
             before = checked_day(owner.review_personal_day(desk), selected=False)
             checked_revision_inventory(before, task=task, note_sha256=digest)
-            preview = preview_selected_task_revision(desk, task, note, digest)
+            input_options = {"note_markdown": inline} if inline is not None else {}
+            preview = preview_selected_task_revision(
+                desk, task, note, digest, **input_options)
             if not messagebox.askyesno(
                     "Separate original task revision approval",
                     f"REVISE this explicitly selected ACTIVE task {task}?\n"
@@ -1471,11 +1531,14 @@ class PersonalDayDesktop(ttk.Frame):
             if fresh != before:
                 raise DesktopRefused("Original task/history changed during approval.")
             checked_revision_inventory(fresh, task=task, note_sha256=digest)
-            if preview_selected_task_revision(desk, task, note, digest) != preview:
+            if (_selected_note_input(self) != (note, inline)
+                    or preview_selected_task_revision(
+                        desk, task, note, digest, **input_options) != preview):
                 raise DesktopRefused("Selected old or replacement note changed during consent.")
             result = lifecycle.revise(
                 desk, task, note, approved=True,
-                expected_sha256=digest, expected_new_sha256=preview["sha256"])
+                expected_sha256=digest, expected_new_sha256=preview["sha256"],
+                **input_options)
             if (type(result) is not dict
                     or result.get("schema") != lifecycle.SCHEMA
                     or result.get("status") != "OWN_TASK_REVISED"
@@ -1492,6 +1555,7 @@ class PersonalDayDesktop(ttk.Frame):
                 variable.set(False)
             self.values["note"].set("")
             self.values["new_task"].set("")
+            _clear_inline_editor(self)
             if not self.refresh():
                 raise DesktopRefused("Revision may have occurred; original refresh failed.")
             current = self.inventory_packet
@@ -1676,6 +1740,11 @@ class PersonalDayDesktop(ttk.Frame):
             self._refuse()
 
     def start(self) -> None:
+        """Start NEW original desk from one separately approved note source.
+
+        Inline editor contents remain ephemeral until the original owner has
+        created and independently read back exactly one digest-bound note.
+        """
         try:
             context = checked_context(*(self.values[k].get() for k in (
                 "project", "key", "result")))
@@ -1689,23 +1758,60 @@ class PersonalDayDesktop(ttk.Frame):
             if not context["project_root"] or context["result_file"]:
                 raise DesktopRefused("New scratch requires explicit empty project; no result yet.")
             task = self.values["new_task"].get().strip()
-            note = self.values["note"].get().strip()
-            if not task or not note:
-                raise DesktopRefused("Explicit new task and existing note required.")
+            note, inline = _selected_note_input(self)
+            if not task:
+                raise DesktopRefused("Explicit new task required.")
+            desk = self.values["desk"].get().strip()
+            root = portable._desk(desk, must_exist=False)
+            project = owner.intake._plain_project_root(context["project_root"])
+            under = portable.project_draft._under
+            if under(root, project) or under(project, root):
+                raise DesktopRefused("Project and new desk must be separate.")
+            owner._require_empty_new_project(project)
+            if note is not None and under(Path(note), project):
+                raise DesktopRefused("Markdown input must be outside the project.")
+            markdown = _source_markdown(root, note, inline)
+            if inline is not None:
+                portable.continuity._action(markdown)  # read only; no execution
+            preview = portable.workbench.preview_note(task, markdown)
             if not messagebox.askyesno(
                     "Approve new scratch",
                     f"Create a NEW original scratch desk/task {task}?\n"
-                    "Only if desk does NOT exist, project is EMPTY and note is nonsensitive. "
-                    "No installed Windows Vres modification.",
+                    f"Exact note SHA-256: {preview['sha256']}\n"
+                    "Desk must NOT exist; separate project must be EMPTY. "
+                    "Only user-authored nonsensitive notes; no installation or execution. "
+                    "If interrupted, inspect the desk before any retry.",
                     parent=self.master):
+                self.status.set("New scratch cancelled. No original-owner write requested.")
                 return
+            # The note and exact selected fields must remain unchanged across
+            # consent; the original owner still verifies all paths before write.
+            if (_selected_note_input(self) != (note, inline)
+                    or _source_markdown(root, note, inline) != markdown
+                    or portable.workbench.preview_note(task, markdown) != preview
+                    or self.values["desk"].get().strip() != desk
+                    or self.values["new_task"].get().strip() != task
+                    or checked_context(*(self.values[k].get() for k in (
+                        "project", "key", "result"))) != context):
+                raise DesktopRefused("New scratch source or selection changed during consent.")
             result = owner.start_session(
-                self.values["desk"].get().strip(), task, note,
-                context["project_root"], context["project_key"], approved=True)
-            if result.get("status") != "NEW_ORIGINAL_OWNER_WORK_SESSION_STARTED":
+                desk, task, note, context["project_root"], context["project_key"],
+                approved=True, **({"note_markdown": inline,
+                                   "expected_sha256": preview['sha256']}
+                                  if inline is not None else {}))
+            if (result.get("status") != "NEW_ORIGINAL_OWNER_WORK_SESSION_STARTED"
+                    or result.get("task_key_claimed") != task
+                    or result.get("selected_note_sha256") != preview['sha256']
+                    or result.get("installed_vres_modified") is not False):
                 raise DesktopRefused("Original scratch start not verified.")
-            if self.refresh():
-                self.status.set("New original scratch task created; no project file was written.")
+            if (not self.refresh() or self.inventory_packet is None
+                    or ("ACTIVE_TASK", task, preview['sha256'])
+                       not in triage_personal_day(self.inventory_packet)['rows']):
+                raise DesktopRefused("New scratch may exist; inspect original desk before retry.")
+            _clear_inline_editor(self)
+            self.status.set(
+                "New original task saved and verified; no automatic selection. "
+                "Choose its ACTIVE row, view next action, then focus. No project file written.")
         except Exception:
             self._refuse()
 

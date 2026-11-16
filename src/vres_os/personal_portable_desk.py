@@ -117,9 +117,16 @@ def _require_original_recovery_clear(root: Path) -> None:
             "Original pending revision: manual recovery required") from None
 
 
-def add_task(value: str | Path, task: str, note_file: str | Path,
-             *, approved: bool = False) -> dict[str, Any]:
-    """Create exactly one new verified scratch note in an existing desk."""
+def add_task(value: str | Path, task: str, note_file: str | Path | None,
+             *, approved: bool = False,
+             note_markdown: str | None = None,
+             expected_sha256: str | None = None) -> dict[str, Any]:
+    """Create one original scratch task from a selected file OR inline draft.
+
+    The optional in-memory Markdown is for the opt-in Personal Day editor:
+    never write a temporary external source file or introduce another owner.
+    Both paths use the same bounded original workbench and recovery holds.
+    """
     if approved is not True:
         raise PortableDeskRefused("Creating a scratch task needs explicit approval")
     root = _desk(value, must_exist=True)
@@ -128,15 +135,29 @@ def add_task(value: str | Path, task: str, note_file: str | Path,
     labels = _existing_tasks(root)
     if len(labels) >= _MAX_CHILDREN or task in labels:
         raise PortableDeskRefused("Duplicate task or six-task personal desk limit")
-    # Reuse the accepted bounded, ordinary UTF-8 note-input reader.
-    markdown = project_draft._manual_markdown(note_file)
-    # The user's input is kept outside the scratch desk; no accidental
-    # overlap with the owned note, receipt or future removal operation.
-    source = Path(note_file)
-    if project_draft._under(source, root):
-        raise PortableDeskRefused("Input Markdown must be outside the desk")
+    if (note_file is None) == (note_markdown is None):
+        raise PortableDeskRefused("Choose exactly one Markdown source")
+    if note_markdown is None:
+        # Preserve the accepted ordinary-file and outside-desk boundary.
+        source = Path(note_file)
+        if project_draft._under(source, root):
+            raise PortableDeskRefused("Input Markdown must be outside the desk")
+        markdown = project_draft._manual_markdown(note_file)
+    else:
+        if type(note_markdown) is not str:
+            raise PortableDeskRefused("Inline note must be exact user-authored text")
+        markdown = note_markdown
+    preview = workbench.preview_note(task, markdown)  # bounded, NO write
+    if expected_sha256 is not None and (
+            type(expected_sha256) is not str
+            or not workbench._SHA.fullmatch(expected_sha256)
+            or preview['sha256'] != expected_sha256):
+        raise PortableDeskRefused("Selected original task note digest changed")
     _require_original_recovery_clear(root)  # second check immediately before creation
-    return workbench.create_note(target, task, markdown, approved=True)
+    created = workbench.create_note(target, task, markdown, approved=True)
+    if created['sha256'] != preview['sha256']:
+        raise PortableDeskRefused("Original note changed during creation; inspect desk")
+    return created
 
 
 def open_task(value: str | Path, task: str,

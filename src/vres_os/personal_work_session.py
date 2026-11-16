@@ -89,9 +89,11 @@ def _require_empty_new_project(project: Path) -> None:
         raise WorkSessionRefused("Selected project inventory cannot be confirmed") from None
 
 
-def start_session(desk: str | Path, task: str, note_file: str | Path,
+def start_session(desk: str | Path, task: str, note_file: str | Path | None,
                   project_root: str | Path, project_key: str, *,
-                  approved: bool = False) -> dict[str, Any]:
+                  approved: bool = False,
+                  note_markdown: str | None = None,
+                  expected_sha256: str | None = None) -> dict[str, Any]:
     """Start one task only in an absent desk and a separate EMPTY project.
 
     The caller first creates the ordinary project directory and supplies an
@@ -112,15 +114,31 @@ def start_session(desk: str | Path, task: str, note_file: str | Path,
     if under(new_desk, project) or under(project, new_desk):
         raise WorkSessionRefused("Project and scratch desk must be separate")
     _require_empty_new_project(project)
-    source_note = Path(note_file)
-    if under(source_note, project) or under(source_note, new_desk):
-        raise WorkSessionRefused("Input note must be outside desk and project")
-    markdown = portable.project_draft._manual_markdown(note_file)
+    if (note_file is None) == (note_markdown is None):
+        raise WorkSessionRefused("Choose exactly one original Markdown source")
+    if note_markdown is None:
+        source_note = Path(note_file)
+        if under(source_note, project) or under(source_note, new_desk):
+            raise WorkSessionRefused("Input note must be outside desk and project")
+        markdown = portable.project_draft._manual_markdown(note_file)
+    else:
+        if type(note_markdown) is not str:
+            raise WorkSessionRefused("Inline note must be exact user-authored text")
+        markdown = note_markdown
     receipt_preview = workbench.preview_note(task, markdown)
+    if expected_sha256 is not None and (
+            type(expected_sha256) is not str
+            or not workbench._SHA.fullmatch(expected_sha256)
+            or expected_sha256 != receipt_preview['sha256']):
+        raise WorkSessionRefused("Selected original note digest changed")
     # No mutations until all ordinary path, note and preview checks pass.
     portable.init_desk(new_desk, approved=True)
     try:
-        created = portable.add_task(new_desk, task, note_file, approved=True)
+        created = portable.add_task(
+            new_desk, task, note_file, approved=True,
+            **({"note_markdown": note_markdown,
+                "expected_sha256": receipt_preview['sha256']}
+               if note_markdown is not None else {}))
         preview = review_session(
             new_desk, task, project_root=project, project_key=project_key)
         if (preview["status"] != "ACTIVE_WORK_SESSION_REVIEW"
