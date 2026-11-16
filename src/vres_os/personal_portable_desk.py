@@ -103,12 +103,27 @@ def _existing_tasks(root: Path) -> list[str]:
     return task_labels
 
 
+def _require_original_recovery_clear(root: Path) -> None:
+    """Delegate task-mutation holds to the ONE original lifecycle owner.
+
+    Lazy source-local import avoids an import cycle; this is a cooperative
+    pre-write observation, not a filesystem lock or automatic repair.
+    """
+    from vres_os import personal_task_lifecycle as lifecycle
+    try:
+        lifecycle._require_no_pending_revision(root)
+    except lifecycle.LifecycleRefused:
+        raise PortableDeskRefused(
+            "Original pending revision: manual recovery required") from None
+
+
 def add_task(value: str | Path, task: str, note_file: str | Path,
              *, approved: bool = False) -> dict[str, Any]:
     """Create exactly one new verified scratch note in an existing desk."""
     if approved is not True:
         raise PortableDeskRefused("Creating a scratch task needs explicit approval")
     root = _desk(value, must_exist=True)
+    _require_original_recovery_clear(root)
     target = _owned_task(root, task)
     labels = _existing_tasks(root)
     if len(labels) >= _MAX_CHILDREN or task in labels:
@@ -120,6 +135,7 @@ def add_task(value: str | Path, task: str, note_file: str | Path,
     source = Path(note_file)
     if project_draft._under(source, root):
         raise PortableDeskRefused("Input Markdown must be outside the desk")
+    _require_original_recovery_clear(root)  # second check immediately before creation
     return workbench.create_note(target, task, markdown, approved=True)
 
 
@@ -149,10 +165,12 @@ def remove_task(value: str | Path, task: str,
     if approved is not True:
         raise PortableDeskRefused("Scratch task removal needs explicit approval")
     root = _desk(value, must_exist=True)
+    _require_original_recovery_clear(root)
     target = _owned_task(root, task)
     receipt = workbench.inspect_note(target)
     if receipt["task_key_claimed"] != task:
         raise PortableDeskRefused("Selected task does not match the owned receipt")
+    _require_original_recovery_clear(root)  # second check immediately before undo
     return workbench.undo_note(target, approved=True,
                                expected_sha256=receipt["sha256"])
 

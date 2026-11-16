@@ -12,6 +12,7 @@ import pytest
 from vres_os import personal_desk_cli as router
 from vres_os import personal_offline_workbench as workbench
 from vres_os import personal_portable_desk as desk
+from vres_os import personal_task_lifecycle as lifecycle
 
 A, B = 'TASK-DESK-01', 'TASK-DESK-02'
 ACTION_A = 'Review the draft before choosing a change.'
@@ -209,3 +210,53 @@ def test_empty_desk_focus_refuses_instead_of_fabricating_tasks(inputs):
     desk.init_desk(d, approved=True)
     with pytest.raises(desk.ScratchDiscoveryRefused if hasattr(desk, 'ScratchDiscoveryRefused') else ValueError):
         desk.focus_desk(d, A)
+
+
+def test_original_add_and_remove_refuse_real_pending_revision(inputs):
+    """Direct original scratch owners must share the lifecycle recovery hold."""
+    root, note_a, _note_b, untouched, first, second = ready(inputs)
+    pending = root / 'Vres-Lifecycle-History' / 'pending' / 'Vres-Workbench-Ptest'
+    pending.mkdir(parents=True)
+    assert lifecycle.inspect_pending_revision_attention(
+        root)['manual_recovery_attention_required'] is True
+    with pytest.raises(desk.PortableDeskRefused, match='manual recovery'):
+        desk.add_task(root, 'TASK-NEW', note_a, approved=True)
+    with pytest.raises(desk.PortableDeskRefused, match='manual recovery'):
+        desk.remove_task(root, A, approved=True)
+    assert not (root / 'Vres-Workbench-TASK-NEW').exists()
+    assert desk.open_task(root, A)['sha256'] == first['sha256']
+    assert desk.open_task(root, B)['sha256'] == second['sha256']
+    assert untouched.read_bytes() == b'KEEP-UNRELATED-PROJECT-FILE'
+    assert pending.is_dir()
+
+
+def test_late_pending_revision_refuses_original_add_and_remove_before_write(inputs, monkeypatch):
+    """Second checked owner read must block late pending without task mutation."""
+    root, note_a, _note_b, _untouched, first, second = ready(inputs)
+    reads = []
+
+    def attention(_root):
+        reads.append(len(reads))
+        pending = len(reads) >= 2
+        return {
+            'schema': lifecycle.SCHEMA,
+            'status': 'READ_ONLY_PENDING_REVISION_ATTENTION',
+            'pending_revision_staging_present': pending,
+            'manual_recovery_attention_required': pending,
+            'pending_contents_opened': False,
+            'automatic_recovery_performed': False,
+            'writes_performed': False,
+        }
+
+    monkeypatch.setattr(lifecycle, 'inspect_pending_revision_attention', attention)
+    with pytest.raises(desk.PortableDeskRefused, match='manual recovery'):
+        desk.add_task(root, 'TASK-LATE', note_a, approved=True)
+    assert len(reads) == 2
+    reads.clear()
+    with pytest.raises(desk.PortableDeskRefused, match='manual recovery'):
+        desk.remove_task(root, A, approved=True)
+    assert len(reads) == 2
+    assert not (root / 'Vres-Workbench-TASK-LATE').exists()
+    assert desk.open_task(root, A)['sha256'] == first['sha256']
+    assert desk.open_task(root, B)['sha256'] == second['sha256']
+    assert not (root / 'Vres-Lifecycle-History').exists()
