@@ -1,0 +1,81 @@
+# ONE-TIME STATIC-ONLY EXACT-SOURCE EXPORT: never import/execute project modules or tests.
+name: Personal exact-source static-only export 4476e154
+on:
+  push:
+    branches: [feature/personal-exact-source-static-export-20261116]
+permissions:
+  contents: read
+jobs:
+  static-source-archive:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      VRES_ALLOW_TEST_DB: '0'
+      VRES_TEST_DATABASE_URL: ''
+      PYTHONNOUSERSITE: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - name: Authenticate exact parent; export and verify Git blobs statically
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/feature/personal-exact-source-static-export-20261116"
+          test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD^)" = "4476e154ca32778012463ddabcf74047cf1f9636"
+          test "$(git rev-parse 'HEAD^{tree}')" != "da7add92503e61004303ffa0ea5ebdcb4a9710fd"
+          test "$(git rev-parse 'HEAD^^{tree}')" = "da7add92503e61004303ffa0ea5ebdcb4a9710fd"
+          test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/personal-exact-source-static-export-20261116.yml"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git archive --format=zip --output="$RUNNER_TEMP/vres-exact-source-4476e154.zip" HEAD^
+          python3 -I -S -B - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+          import hashlib
+          import os
+          import subprocess
+
+          archive = Path(os.environ["RUNNER_TEMP"]) / "vres-exact-source-4476e154.zip"
+          raw = subprocess.check_output(["git", "ls-tree", "-r", "-z", "HEAD^"])
+          expected = {}
+          for item in raw.split(b"\0"):
+              if not item:
+                  continue
+              meta, raw_path = item.split(b"\t", 1)
+              mode, kind, object_id = meta.split(b" ")
+              assert kind == b"blob", (kind, raw_path)
+              expected[raw_path.decode("utf-8")] = object_id.decode("ascii")
+          with ZipFile(archive) as z:
+              actual = {n for n in z.namelist() if not n.endswith("/")}
+              assert actual == set(expected), (len(actual), len(expected), len(actual ^ set(expected)))
+              assert len(expected) >= 500, len(expected)
+              for name, wanted in expected.items():
+                  payload = z.read(name)
+                  got = hashlib.sha1(b"blob " + str(len(payload)).encode("ascii") + b"\0" + payload).hexdigest()
+                  assert got == wanted, name
+              pinned = {
+                  "src/vres_os/personal_day_desktop.py": "7a58fed6a36a7023de69bfcd7cadaf5456ac0fda",
+                  "tests/test_personal_day_desktop.py": "b8c53b504c4ec327ca828318c20314f568bb09d7",
+                  "src/vres_os/personal_task_lifecycle.py": "737cb7edfc39ec261883ee3356c6e4e145672476",
+                  "tests/test_personal_task_lifecycle.py": "3e9cbf28ef085166844c2f21800ab1169b9c1ada",
+                  "src/vres_os/personal_portable_desk.py": "9306d430142b293e4c8050d6dcfb51a40a9dd200",
+                  "tests/test_personal_portable_desk.py": "2033276e93311a501266cc9d0dbc57afec219273",
+              }
+              assert all(expected.get(k) == v for k, v in pinned.items())
+          print("AUTHENTICATED_SOURCE_COMMIT=4476e154ca32778012463ddabcf74047cf1f9636")
+          print("AUTHENTICATED_SOURCE_TREE=da7add92503e61004303ffa0ea5ebdcb4a9710fd")
+          print("STATIC_BLOB_COUNT=", len(expected))
+          print("ARCHIVE_SHA256=", hashlib.sha256(archive.read_bytes()).hexdigest())
+          print("STATIC_SOURCE_BYTES_PASS; NO PROJECT IMPORT; NO DB; NO NATIVE HOOKS")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vres-exact-source-4476e154
+          path: ${{ runner.temp }}/vres-exact-source-4476e154.zip
+          retention-days: 14
+          if-no-files-found: error
