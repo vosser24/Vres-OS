@@ -27,6 +27,62 @@ class DesktopRefused(ValueError):
     """A UI selection is missing, mixed, stale or outside the original scope."""
 
 
+
+# Only transient Desktop input is cleared; none of these are an owner store.
+_HISTORY_CONTEXT_FIELDS = (
+    "project", "key", "result", "acceptance_path", "acceptance_sha",
+    "catalog_root", "catalog_namespace", "catalog_source", "catalog_sha",
+    "catalog_revision", "synthetic_file", "synthetic_sha",
+)
+
+
+def guided_action_plan(
+    kind: str | None, stage: str | None = None, *,
+    focused: bool = False, decision_ready: bool = False,
+    history_clear: bool = False,
+) -> dict:
+    """Presentation ONLY; all original owners still recheck/authorize actions.
+
+    No background reads or automatic task choice; a disabled/enabled button
+    never becomes evidence, consent or write authority.
+    """
+    enabled = {name: False for name in (
+        "focus", "decision", "complete", "reopen", "replay", "clear_history")}
+    if kind == "ACTIVE_TASK":
+        enabled["focus"] = True
+        if not focused:
+            next_step = "Step 2/4: Focus the explicitly selected task and project context."
+        elif stage == "TASK_SELECTED_NO_PROJECT":
+            next_step = "Step 2/4: Enter an explicit project root and original key; focus again."
+        elif stage == "PROJECT_SELECTED_NO_RESULT":
+            next_step = "Step 2/4: Enter the exact result file when ready; focus again."
+        elif stage == "RESULT_REVIEW_READY_SEPARATE_DECISION":
+            enabled["decision"] = True
+            enabled["complete"] = bool(decision_ready)
+            if decision_ready:
+                next_step = ("Step 4/4: Separately approve completion after reviewing "
+                             "the exact read-only decision. No result-quality proof.")
+            else:
+                next_step = ("Step 3/4: Review the exact read-only completion decision "
+                             "before requesting separate completion consent.")
+        else:
+            next_step = "Review the original selected journey; no write is authorized."
+    elif kind == "SAVED_COMPLETED_RESULT":
+        enabled["clear_history"] = not history_clear
+        enabled["focus"] = bool(history_clear)
+        enabled["reopen"] = bool(history_clear)
+        enabled["replay"] = bool(history_clear)
+        if history_clear:
+            next_step = ("Historical only: inspect, separately approve Reopen, then "
+                         "separately approve saved-byte verification. No auto-replay.")
+        else:
+            next_step = ("Historical only: explicitly clear active UI inputs before "
+                         "inspecting, reopening or checking old saved bytes.")
+    else:
+        next_step = "Step 1/4: Load the exact scratch desk and select one offered task."
+    return {"enabled": enabled, "next_step": next_step}
+
+
 def checked_context(project_root: str, project_key: str, result_file: str) -> dict:
     """Do not silently select a project or open a result file."""
     root, key, result = (v.strip() for v in (project_root, project_key, result_file))
@@ -84,7 +140,17 @@ class PersonalDayDesktop(ttk.Frame):
         self.choices: dict[str, tuple[str, str, str]] = {}
         self.focused: tuple | None = None
         self.decision: dict | None = None
+        self.guide = tk.StringVar(value="Step 1/4: Load an exact desk and select a task.")
+        self.action_buttons = {}
         self._draw()
+        # Editing any path, SHA, opt-in or desk invalidates prior focused claims.
+        for field, variable in self.values.items():
+            variable.trace_add(
+                "write", lambda *_ignored, name=field: self._edited(name))
+        for variable in (self.with_intake, self.with_acceptance,
+                         self.with_catalog, self.with_synthetic):
+            variable.trace_add("write", lambda *_ignored: self._edited(None))
+        self._sync_guidance()
 
     def _field(self, parent, row: int, label: str, key: str) -> None:
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=4, pady=3)
@@ -175,14 +241,18 @@ class PersonalDayDesktop(ttk.Frame):
 
         buttons = ttk.Frame(self)
         buttons.grid(row=4, column=0, sticky="ew", pady=5)
-        for column, (label, method) in enumerate((
-                ("Focus / inspect", self.focus),
-                ("Decision (read only)", self.preview_decision),
-                ("Complete (separate approval)", self.complete),
-                ("Reopen (approval)", self.reopen),
-                ("Verify saved bytes (approval)", self.replay))):
-            ttk.Button(buttons, text=label, command=method).grid(
-                row=0, column=column, padx=3)
+        for column, (name, label, method) in enumerate((
+                ("focus", "Focus / inspect", self.focus),
+                ("decision", "Review decision", self.preview_decision),
+                ("complete", "Complete (approve)", self.complete),
+                ("reopen", "Reopen (approve)", self.reopen),
+                ("replay", "Verify saved bytes", self.replay),
+                ("clear_history", "Clear history inputs", self.clear_history_context))):
+            button = ttk.Button(buttons, text=label, command=method)
+            button.grid(row=0, column=column, padx=3)
+            self.action_buttons[name] = button
+        ttk.Label(buttons, textvariable=self.guide, wraplength=900).grid(
+            row=1, column=0, columnspan=6, sticky="w", pady=(7, 0))
 
         report = ttk.LabelFrame(self, text="Original owner view · historical is NOT current")
         report.grid(row=5, column=0, sticky="nsew", pady=6)
@@ -210,9 +280,52 @@ class PersonalDayDesktop(ttk.Frame):
         self.detail.insert("1.0", content[:24000])
         self.detail.configure(state="disabled")
 
+    def _history_inputs_clear(self) -> bool:
+        return (not any(self.values[name].get().strip()
+                        for name in _HISTORY_CONTEXT_FIELDS)
+                and not any(variable.get() for variable in (
+                    self.with_intake, self.with_acceptance,
+                    self.with_catalog, self.with_synthetic)))
+
+    def _ui_plan(self) -> dict:
+        try:
+            kind, _task, _sha = self._selected()
+            binding = self._binding()
+        except DesktopRefused:
+            return guided_action_plan(None)
+        current_focus = self.focused is not None and self.focused[0] == binding
+        current_decision = (current_focus and self.decision is not None
+                            and self.decision.get("binding") == binding)
+        stage = self.focused[1].get("stage") if current_focus else None
+        return guided_action_plan(
+            kind, stage, focused=current_focus,
+            decision_ready=current_decision,
+            history_clear=self._history_inputs_clear())
+
+    def _sync_guidance(self) -> None:
+        plan = self._ui_plan()
+        for name, button in self.action_buttons.items():
+            button.configure(
+                state="normal" if plan["enabled"][name] else "disabled")
+        self.guide.set(plan["next_step"])
+
+    def _edited(self, field: str | None) -> None:
+        """A changed UI selection cannot retain a ready decision or preview."""
+        if field == "desk":
+            self.choices.clear()
+            self.listing.delete(*self.listing.get_children())
+        self._invalidate()
+        self._display("")
+        if field == "desk":
+            self.status.set("Desk changed. Load this desk before selecting a task.")
+        else:
+            self.status.set("Inputs changed. Focus the exact task again before review.")
+        self._sync_guidance()
+
     def _invalidate(self) -> None:
         self.focused = None
         self.decision = None
+        self._sync_guidance()
 
     def _refuse(self) -> None:
         self._invalidate()
@@ -350,16 +463,40 @@ class PersonalDayDesktop(ttk.Frame):
             raise DesktopRefused(
                 "Original project/catalog/synthetic source context changed; refocus.")
 
+    def clear_history_context(self) -> None:
+        """Clear UI-only fields AFTER explicit request; never touch saved history."""
+        try:
+            kind, _task, _sha = self._selected()
+            if kind != "SAVED_COMPLETED_RESULT":
+                raise DesktopRefused("Select a saved completed result first.")
+            if self._history_inputs_clear():
+                self.status.set("History fields already clear. Inspect or reopen separately.")
+                return
+            if not messagebox.askyesno(
+                    "Clear transient history inputs",
+                    "Clear only the visible project/result/acceptance/source fields "
+                    "and opt-ins to inspect this historical result?\n"
+                    "No task, project, saved result or history file is changed.",
+                    parent=self.master):
+                return
+            for field in _HISTORY_CONTEXT_FIELDS:
+                self.values[field].set("")
+            for variable in (self.with_intake, self.with_acceptance,
+                             self.with_catalog, self.with_synthetic):
+                variable.set(False)
+            self._invalidate()
+            self._display("")
+            self.status.set(
+                "Transient UI fields cleared only. Reopen and saved-byte replay "
+                "still need separate approvals.")
+        except Exception:
+            self._refuse()
+
     def _history_only(self) -> tuple[str, str, str]:
         kind, task, digest = self._selected()
         if kind != "SAVED_COMPLETED_RESULT":
             raise DesktopRefused("Select a saved completed result for this operation.")
-        if (any(self.values[n].get().strip() for n in (
-                "project", "key", "result", "acceptance_path", "acceptance_sha",
-                "catalog_root", "catalog_namespace", "catalog_source",
-                "catalog_sha", "catalog_revision", "synthetic_file", "synthetic_sha"))
-                or self.with_intake.get() or self.with_acceptance.get()
-                or self.with_catalog.get() or self.with_synthetic.get()):
+        if not self._history_inputs_clear():
             raise DesktopRefused("Clear active context and opt-ins before saved history.")
         return kind, task, digest
 
@@ -383,6 +520,7 @@ class PersonalDayDesktop(ttk.Frame):
                 f"Read-only: {packet['active_task_count']} active; "
                 f"{packet['saved_completed_snapshot_count']} historical completed snapshots (undated).")
             self._display(owner.render_personal_day(packet))
+            self._sync_guidance()
             return True
         except Exception:
             self._refuse()
@@ -435,6 +573,7 @@ class PersonalDayDesktop(ttk.Frame):
             }
             self.status.set("READ ONLY. " + guidance.get(
                 stage, "No action, quality validation or authority was granted."))
+            self._sync_guidance()
         except Exception:
             self._refuse()
 
@@ -473,6 +612,7 @@ class PersonalDayDesktop(ttk.Frame):
                 f"Unresolved criterion IDs: {', '.join(preview['unresolved_criterion_ids']) or 'none'}\n"
                 f"Separate gap acknowledgement: {preview['extra_known_gap_acknowledgement_required']}\n"
                 f"{preview['next_safe_step']}")
+            self._sync_guidance()
         except Exception:
             self._refuse()
 

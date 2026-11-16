@@ -362,3 +362,126 @@ def test_desktop_source_is_rechecked_after_separate_known_gap_consent(monkeypatc
     assert approvals == ["Separate completion approval",
                          "Separate known-gap acknowledgement"]
     assert refused == ["REFUSED"]
+
+
+def test_guided_active_task_steps_never_skip_original_decision():
+    plan = desktop.guided_action_plan("ACTIVE_TASK")
+    assert plan["enabled"]["focus"] is True
+    assert not plan["enabled"]["decision"]
+    assert not plan["enabled"]["complete"]
+    for stage in ("TASK_SELECTED_NO_PROJECT", "PROJECT_SELECTED_NO_RESULT"):
+        plan = desktop.guided_action_plan("ACTIVE_TASK", stage, focused=True)
+        assert plan["enabled"]["focus"]
+        assert not plan["enabled"]["decision"]
+        assert not plan["enabled"]["complete"]
+    ready = desktop.guided_action_plan(
+        "ACTIVE_TASK", "RESULT_REVIEW_READY_SEPARATE_DECISION", focused=True)
+    assert ready["enabled"]["decision"]
+    assert not ready["enabled"]["complete"]
+    approved_for_button = desktop.guided_action_plan(
+        "ACTIVE_TASK", "RESULT_REVIEW_READY_SEPARATE_DECISION",
+        focused=True, decision_ready=True)
+    assert approved_for_button["enabled"]["complete"]
+    assert not approved_for_button["enabled"]["reopen"]
+    assert not approved_for_button["enabled"]["replay"]
+    assert "consent" in approved_for_button["next_step"].lower()
+
+
+def test_guided_history_stays_separate_and_requires_cleared_ui():
+    dirty = desktop.guided_action_plan("SAVED_COMPLETED_RESULT")
+    assert dirty["enabled"]["clear_history"]
+    assert not dirty["enabled"]["focus"]
+    assert not dirty["enabled"]["reopen"]
+    assert not dirty["enabled"]["replay"]
+    clean = desktop.guided_action_plan(
+        "SAVED_COMPLETED_RESULT", history_clear=True)
+    assert not clean["enabled"]["clear_history"]
+    assert clean["enabled"]["focus"]
+    assert clean["enabled"]["reopen"]
+    assert clean["enabled"]["replay"]
+    assert not clean["enabled"]["decision"]
+    assert not clean["enabled"]["complete"]
+    assert "separately" in clean["next_step"].lower()
+
+
+def test_guided_no_or_untrusted_selection_cannot_offer_any_action():
+    for kind in (None, "UNVERIFIED_KIND", ""):
+        plan = desktop.guided_action_plan(
+            kind, "RESULT_REVIEW_READY_SEPARATE_DECISION",
+            focused=True, decision_ready=True, history_clear=True)
+        assert not any(plan["enabled"].values())
+
+
+def test_ui_plan_rejects_stale_binding_and_unfocused_decision():
+    view = _View()
+    view._selected = lambda: ("ACTIVE_TASK", "TASK-SYNTHETIC", "a" * 64)
+    view._binding = lambda: ("new-context",)
+    view.focused = (("old-context",),
+                    {"stage": "RESULT_REVIEW_READY_SEPARATE_DECISION"}, None)
+    view.decision = {"binding": ("old-context",), "packet": {}}
+    view._history_inputs_clear = lambda: True
+    plan = desktop.PersonalDayDesktop._ui_plan(view)
+    assert plan["enabled"]["focus"]
+    assert not plan["enabled"]["decision"]
+    assert not plan["enabled"]["complete"]
+    view.focused = (("new-context",),
+                    {"stage": "RESULT_REVIEW_READY_SEPARATE_DECISION"}, None)
+    plan = desktop.PersonalDayDesktop._ui_plan(view)
+    assert plan["enabled"]["decision"]
+    assert not plan["enabled"]["complete"]
+
+
+def test_history_clear_requires_explicit_yes_and_never_calls_original_owner(monkeypatch):
+    view = _View()
+    fields = desktop._HISTORY_CONTEXT_FIELDS
+    view.values = {name: _Var("transient") for name in fields}
+    view.with_intake, view.with_acceptance = _Var(True), _Var(True)
+    view.with_catalog, view.with_synthetic = _Var(True), _Var(True)
+    view._selected = lambda: ("SAVED_COMPLETED_RESULT", "TASK-SYNTHETIC", "d" * 64)
+    view._history_inputs_clear = lambda: desktop.PersonalDayDesktop._history_inputs_clear(view)
+    invalidations = []
+    view._invalidate = lambda: invalidations.append(True)
+    view._display = lambda content: None
+    view.status = _Var("")
+    view.master = None
+    view._refuse = lambda: pytest.fail("UI-only history clear should not refuse")
+    monkeypatch.setattr(desktop.owner, "reopen_saved",
+                        lambda *a, **k: pytest.fail("History must not reopen"))
+    monkeypatch.setattr(desktop.owner, "replay_saved",
+                        lambda *a, **k: pytest.fail("History must not replay"))
+    monkeypatch.setattr(desktop.messagebox, "askyesno", lambda *a, **k: False)
+    desktop.PersonalDayDesktop.clear_history_context(view)
+    assert all(view.values[name].get() == "transient" for name in fields)
+    assert not invalidations
+    monkeypatch.setattr(desktop.messagebox, "askyesno", lambda *a, **k: True)
+    desktop.PersonalDayDesktop.clear_history_context(view)
+    assert all(view.values[name].get() == "" for name in fields)
+    assert not any(v.get() for v in (
+        view.with_intake, view.with_acceptance, view.with_catalog,
+        view.with_synthetic))
+    assert invalidations == [True]
+    assert "separate approvals" in view.status.get()
+
+
+def test_editing_selected_desk_drops_old_inventory_without_auto_selection():
+    view = _View()
+    class Listing:
+        def __init__(self):
+            self.items = ["choice-0"]
+        def get_children(self):
+            return tuple(self.items)
+        def delete(self, *selected):
+            self.items = [x for x in self.items if x not in selected]
+    view.listing = Listing()
+    view.choices = {"choice-0": ("ACTIVE_TASK", "TASK-OLD", "a" * 64)}
+    view.focused = (("old",), {"stage": "RESULT_REVIEW_READY_SEPARATE_DECISION"}, None)
+    view.decision = {"binding": ("old",), "packet": {}}
+    view.status = _Var("")
+    displayed = []
+    view._display = displayed.append
+    view._sync_guidance = lambda: None
+    desktop.PersonalDayDesktop._edited(view, "desk")
+    assert not view.choices and not view.listing.items
+    assert view.focused is None and view.decision is None
+    assert displayed == [""]
+    assert "Load this desk" in view.status.get()
