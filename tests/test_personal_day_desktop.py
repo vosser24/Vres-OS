@@ -75,6 +75,8 @@ def _completion_view(known_gaps=False):
     }
     ui._binding = lambda: ("stable",)
     ui._selected = lambda: ("ACTIVE_TASK", "TASK-SYNTHETIC", "c" * 64)
+    ui.focused = (("stable",), {"stage": "RESULT_REVIEW_READY_SEPARATE_DECISION"}, None)
+    ui._recheck_original_source = lambda _task: None
     ui._acceptance = lambda _desk: {}
     ui.values = {
         "desk": _Var("/bounded/Vres-Desk-Synthetic"),
@@ -277,3 +279,86 @@ def test_desktop_source_edit_invalidates_exact_prior_preview_binding():
     first = desktop.PersonalDayDesktop._binding(view)
     view.values["catalog_revision"].set("4")
     assert desktop.PersonalDayDesktop._binding(view) != first
+
+def test_desktop_opted_in_source_recheck_refuses_changed_original_digest(monkeypatch):
+    view = _source_view(catalog=True)
+    view.values.update({
+        "desk": _Var("/scratch/Vres-Desk-TEST"),
+        "project": _Var("/scratch/Project"),
+        "key": _Var("project:" + "a" * 24),
+        "result": _Var("/scratch/Project/report.md"),
+    })
+    journey = {"stage": "RESULT_REVIEW_READY_SEPARATE_DECISION",
+               "selected_note_sha256": "b" * 64}
+    view.focused = (("stable",), journey, "c" * 64)
+    view._binding = lambda: ("stable",)
+    view._acceptance = lambda _desk: {}
+    view._sources = lambda _desk: {"include_saved_catalog": True}
+    packet = {
+        "schema": desktop.owner.PERSONAL_DAY_SCHEMA,
+        "status": "READ_ONLY_ONE_ORIGINAL_CHAIRMAN_PERSONAL_DAY",
+        "task_selection_or_completion_performed": False,
+        "native_claude_or_hooks_executed": False,
+        "database_contacted": False,
+        "original_166_168_activation_or_rollback_performed": False,
+        "original_167_live_catalog_freshness_verified": False,
+        "original_174_protected_fable_granted": False,
+        "original_176_live_memory_eligibility_or_promotion": False,
+        "writes_performed": False,
+        "task_selected_explicitly": True,
+        "selected_choice_kind": "ACTIVE_TASK",
+        "selected_original_journey": journey,
+        "selected_original_source_context": {
+            "integrated_source_context_sha256": "c" * 64},
+    }
+    calls = []
+    def review(*args, **kwargs):
+        calls.append((args, kwargs))
+        return packet
+    monkeypatch.setattr(desktop.owner, "review_personal_day", review)
+    monkeypatch.setattr(desktop.owner, "render_personal_day", lambda _packet: "read only")
+    desktop.PersonalDayDesktop._recheck_original_source(view, "TASK-SYNTHETIC")
+    assert len(calls) == 1
+    assert calls[0][1]["include_source_context"] is True
+    assert calls[0][1]["include_saved_catalog"] is True
+    packet["selected_original_source_context"]["integrated_source_context_sha256"] = "d" * 64
+    with pytest.raises(desktop.DesktopRefused):
+        desktop.PersonalDayDesktop._recheck_original_source(view, "TASK-SYNTHETIC")
+    packet["selected_original_source_context"]["integrated_source_context_sha256"] = "c" * 64
+    packet["selected_original_journey"] = {"stage": "PROJECT_SELECTED_NO_RESULT"}
+    with pytest.raises(desktop.DesktopRefused):
+        desktop.PersonalDayDesktop._recheck_original_source(view, "TASK-SYNTHETIC")
+
+
+def test_desktop_source_drift_blocks_completion_before_any_approval(monkeypatch):
+    view, refused = _completion_view()
+    view._recheck_original_source = lambda _task: (_ for _ in ()).throw(
+        desktop.DesktopRefused("changed source"))
+    monkeypatch.setattr(desktop.messagebox, "askyesno",
+                        lambda *a, **k: pytest.fail("No consent after source drift"))
+    monkeypatch.setattr(desktop.owner, "finish_reviewed_decision",
+                        lambda *a, **k: pytest.fail("No original write after source drift"))
+    desktop.PersonalDayDesktop.complete(view)
+    assert refused == ["REFUSED"]
+
+
+def test_desktop_source_is_rechecked_after_separate_known_gap_consent(monkeypatch):
+    view, refused = _completion_view(known_gaps=True)
+    checks = []
+    def source_check(_task):
+        checks.append("RECHECK")
+        if len(checks) == 2:
+            raise desktop.DesktopRefused("post-consent source changed")
+    view._recheck_original_source = source_check
+    approvals = []
+    def approve(title, *_args, **_kwargs):
+        approvals.append(title)
+        return True
+    monkeypatch.setattr(desktop.messagebox, "askyesno", approve)
+    monkeypatch.setattr(desktop.owner, "finish_reviewed_decision",
+                        lambda *a, **k: pytest.fail("No write after late source drift"))
+    desktop.PersonalDayDesktop.complete(view)
+    assert checks == ["RECHECK", "RECHECK"]
+    assert approvals == ["Separate completion approval",
+                         "Separate known-gap acknowledgement"]
+    assert refused == ["REFUSED"]

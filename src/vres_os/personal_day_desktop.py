@@ -316,6 +316,40 @@ class PersonalDayDesktop(ttk.Frame):
             })
         return result
 
+    def _recheck_original_source(self, task: str) -> None:
+        """Re-attest optional original owner context before a completion decision.
+
+        This is an opt-in, bounded, read-only recheck of #168/#167/#166/#176,
+        NOT an atomic read, host identity proof, quality proof or new owner.
+        The original completion owner still checks its own exact write boundary.
+        """
+        if self.focused is None or self.focused[0] != self._binding():
+            raise DesktopRefused("Refocus the exact unchanged original task first.")
+        source_sha = self.focused[2]
+        if not self.with_intake.get():
+            if source_sha is not None:
+                raise DesktopRefused("Previously selected project source context changed.")
+            return
+        if (type(source_sha) is not str or len(source_sha) != 64
+                or any(c not in "0123456789abcdef" for c in source_sha)):
+            raise DesktopRefused("Original source focus digest unavailable.")
+        desk = self.values["desk"].get().strip()
+        context = checked_context(*(self.values[k].get() for k in (
+            "project", "key", "result")))
+        opts = self._acceptance(desk)
+        sources = self._sources(desk)
+        current = checked_day(owner.review_personal_day(
+            desk, task, include_source_context=True, **context, **opts, **sources),
+            selected=True)
+        selected = current.get("selected_original_journey")
+        original_context = current.get("selected_original_source_context")
+        if (current.get("selected_choice_kind") != "ACTIVE_TASK"
+                or selected != self.focused[1]
+                or type(original_context) is not dict
+                or original_context.get("integrated_source_context_sha256") != source_sha):
+            raise DesktopRefused(
+                "Original project/catalog/synthetic source context changed; refocus.")
+
     def _history_only(self) -> tuple[str, str, str]:
         kind, task, digest = self._selected()
         if kind != "SAVED_COMPLETED_RESULT":
@@ -377,7 +411,16 @@ class PersonalDayDesktop(ttk.Frame):
             journey = packet["selected_original_journey"]
             if journey["selected_note_sha256"] != digest:
                 raise DesktopRefused("Selected original note changed.")
-            self.focused = (self._binding(), journey)
+            source = packet.get("selected_original_source_context")
+            if self.with_intake.get():
+                if type(source) is not dict:
+                    raise DesktopRefused("Selected original project context unavailable.")
+                source_sha = source["integrated_source_context_sha256"]
+            elif source is not None:
+                raise DesktopRefused("Unselected original source context returned.")
+            else:
+                source_sha = None
+            self.focused = (self._binding(), journey, source_sha)
             self._display(owner.render_personal_day(packet))
             stage = journey["stage"]
             guidance = {
@@ -404,6 +447,7 @@ class PersonalDayDesktop(ttk.Frame):
             journey = self.focused[1]
             if kind != "ACTIVE_TASK" or journey["stage"] != "RESULT_REVIEW_READY_SEPARATE_DECISION":
                 raise DesktopRefused("Select an active task with an exact observed result.")
+            self._recheck_original_source(task)
             context = checked_context(*(self.values[k].get() for k in (
                 "project", "key", "result")))
             opts = self._acceptance(self.values["desk"].get().strip())
@@ -418,7 +462,9 @@ class PersonalDayDesktop(ttk.Frame):
                     or preview.get("result_quality_validated") is not False):
                 raise DesktopRefused("Original exact decision changed.")
             self.decision = {"binding": self._binding(), "packet": preview}
-            self.status.set("Decision prepared READ ONLY. Completion requires another action.")
+            self.status.set(
+                "Read-only decision ready. Optional source context rechecked; "
+                "complete only after separate approval, never as quality/host proof.")
             self._display(
                 "READ-ONLY DECISION / NOT QUALITY VALIDATION\n"
                 f"Task: {task}\nCheckpoint SHA-256: {preview['checkpoint_sha256']}\n"
@@ -441,6 +487,7 @@ class PersonalDayDesktop(ttk.Frame):
             context = checked_context(*(self.values[k].get() for k in (
                 "project", "key", "result")))
             opts = self._acceptance(self.values["desk"].get().strip())
+            self._recheck_original_source(task)
             approved = messagebox.askyesno(
                 "Separate completion approval",
                 f"Complete task {task} into ORIGINAL immutable history?\n"
@@ -458,6 +505,9 @@ class PersonalDayDesktop(ttk.Frame):
                     parent=self.master):
                 self.status.set("Completion cancelled: known gaps not acknowledged.")
                 return
+            # Check again AFTER both consents; exact original completion digests
+            # are independently re-attested by finish_reviewed_decision.
+            self._recheck_original_source(task)
             result = owner.finish_reviewed_decision(
                 self.values["desk"].get().strip(), task,
                 context["project_root"], context["project_key"], context["result_file"],
