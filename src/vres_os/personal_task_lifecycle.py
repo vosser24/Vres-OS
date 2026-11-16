@@ -536,8 +536,7 @@ def revise(value: str | Path, key: str, note_file: str | Path,
                 type(digest) is not str or not workbench._SHA.fullmatch(digest)):
             raise LifecycleRefused('Exact lowercase original revision SHA required')
     root = _root(value)
-    if inspect_pending_revision_attention(root)['manual_revision_recovery_attention_required']:
-        raise LifecycleRefused('Interrupted revision pending; manual recovery required')
+    _require_no_pending_revision(root)
     desk._existing_tasks(root)
     active, before = _active(root, key)
     if expected_sha256 is not None and before['sha256'] != expected_sha256:
@@ -557,6 +556,9 @@ def revise(value: str | Path, key: str, note_file: str | Path,
     if hist is not None:
         _snapshots(hist)
         _archive_destination(hist, 'revisions', key, before['sha256'])
+    # Refuse an interrupted revision newly observed during note/history review.
+    # Cooperative pre-staging guard, not an atomic filesystem lock.
+    _require_no_pending_revision(root)
     hist = _history(root, create=True)
     assert hist is not None
     archived = _archive_destination(hist, 'revisions', key, before['sha256'])

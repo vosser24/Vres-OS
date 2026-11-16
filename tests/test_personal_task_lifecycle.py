@@ -112,7 +112,15 @@ def test_original_revision_requires_exact_preimage_and_replacement_before_write(
     # A recovered/abandoned original pending revision blocks new writes.
     original_attention = lifecycle.inspect_pending_revision_attention
     monkeypatch.setattr(lifecycle, 'inspect_pending_revision_attention',
-                        lambda value: {'manual_revision_recovery_attention_required': True})
+                        lambda value: {
+                            'schema': lifecycle.SCHEMA,
+                            'status': 'READ_ONLY_PENDING_REVISION_ATTENTION',
+                            'pending_revision_staging_present': True,
+                            'manual_recovery_attention_required': True,
+                            'pending_contents_opened': False,
+                            'automatic_recovery_performed': False,
+                            'writes_performed': False,
+                        })
     with pytest.raises(lifecycle.LifecycleRefused, match='manual'):
         lifecycle.revise(root, A, updated, approved=True,
                          expected_sha256=old['sha256'], expected_new_sha256=next_digest)
@@ -183,3 +191,40 @@ def test_pending_revision_appearing_late_blocks_original_final_move(tmp_path, mo
                            expected_sha256=initial['sha256'])
     assert len(reads) == 2
     assert desk.open_task(root, A)['sha256'] == initial['sha256']
+
+
+def test_late_pending_revision_refuses_before_original_staging(tmp_path, monkeypatch):
+    """A second original-owner recovery read must refuse before staging files."""
+    root = tmp_path / 'Vres-Desk-Revision-Late-Hold'
+    notes = tmp_path / 'inputs'
+    notes.mkdir()
+    old = notes / 'old.md'
+    new = notes / 'new.md'
+    old.write_text('# Day\n\n## Next action\n- Review.\n', encoding='utf-8')
+    new.write_text('# Day\n\n## Next action\n- Update.\n', encoding='utf-8')
+    desk.init_desk(root, approved=True)
+    first = desk.add_task(root, A, old, approved=True)
+    reads = []
+
+    def attention(_root):
+        reads.append(len(reads))
+        pending = len(reads) >= 2
+        return {
+            'schema': lifecycle.SCHEMA,
+            'status': 'READ_ONLY_PENDING_REVISION_ATTENTION',
+            'pending_revision_staging_present': pending,
+            'manual_recovery_attention_required': pending,
+            'pending_contents_opened': False,
+            'automatic_recovery_performed': False,
+            'writes_performed': False,
+        }
+
+    monkeypatch.setattr(lifecycle, 'inspect_pending_revision_attention', attention)
+    with pytest.raises(lifecycle.LifecycleRefused, match='manual'):
+        lifecycle.revise(root, A, new, approved=True,
+                         expected_sha256=first['sha256'],
+                         expected_new_sha256=hashlib.sha256(new.read_bytes()).hexdigest())
+    assert len(reads) == 2
+    assert desk.open_task(root, A)['sha256'] == first['sha256']
+    assert lifecycle.list_history(root)['count'] == 0
+    assert not (root / 'Vres-Lifecycle-History').exists()
