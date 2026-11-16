@@ -264,6 +264,99 @@ def triage_personal_day(packet: dict, *, query: str = "", mode: str = "ALL") -> 
             "manual_recovery_attention_required": attention}
 
 
+
+def render_verified_workday_home(day: dict, home: dict) -> str:
+    """One read-only original Workday Home, reconciled to the Personal Day.
+
+    Never choose a task, disclose unselected actions, repair interrupted writes,
+    or treat saved results as current. This is a cooperative snapshot, not an
+    atomic filesystem or user/host authentication guarantee.
+    """
+    offered = triage_personal_day(day)
+    fields = (
+        ("active_count", "active_task_count"),
+        ("completed_snapshot_count", "saved_completed_snapshot_count"),
+        ("archived_snapshot_count", "archived_snapshot_count"),
+        ("revision_snapshot_count", "revision_snapshot_count"),
+    )
+    false_fields = (
+        "automatic_revision_recovery_performed", "automatic_task_selection_performed",
+        "history_has_timestamps", "historical_document_current_bytes_verified",
+        "result_quality_validated", "task_reopened_or_completed",
+        "native_chairman_task_bound", "native_claude_or_hooks_executed",
+        "database_contacted", "writes_performed", "new_store_created",
+        "installed_vres_modified",
+    )
+    if (type(home) is not dict
+            or home.get("schema") != owner.WORKDAY_SCHEMA
+            or home.get("status") != "READ_ONLY_INTEGRATED_PERSONAL_WORKDAY_HOME"
+            or home.get("selected_review") is not None
+            or type(home.get("manual_revision_recovery_attention_required")) is not bool
+            or home["manual_revision_recovery_attention_required"]
+               is not offered["manual_recovery_attention_required"]
+            or any(home.get(name) is not False for name in false_fields)
+            or any(type(home.get(name)) is not int
+                   or home[name] != day[day_name] for name, day_name in fields)):
+        raise DesktopRefused("Original workday home identity, counts or holds changed.")
+    active = home.get("active_tasks")
+    history = home.get("saved_history")
+    expected_history = (day["saved_completed_snapshot_count"]
+                        + day["archived_snapshot_count"]
+                        + day["revision_snapshot_count"])
+    if (type(active) is not list or len(active) != day["active_task_count"]
+            or type(history) is not list or len(history) != expected_history
+            or len(history) > 48):
+        raise DesktopRefused("Original workday inventory is not bounded.")
+    observed_active = []
+    for row in active:
+        if (type(row) is not dict
+                or type(row.get("task_key_claimed")) is not str
+                or not portable.workbench._TASK_KEY.fullmatch(row["task_key_claimed"])
+                or type(row.get("note_sha256")) is not str
+                or not portable.workbench._SHA.fullmatch(row["note_sha256"])
+                or type(row.get("note_bytes")) is not int
+                or not 0 < row["note_bytes"] <= 32768):
+            raise DesktopRefused("Original workday active task receipt invalid.")
+        observed_active.append((row["task_key_claimed"], row["note_sha256"]))
+    expected_active = [
+        (task, digest) for kind, task, digest in offered["rows"]
+        if kind == "ACTIVE_TASK"
+    ]
+    if sorted(observed_active) != sorted(expected_active):
+        raise DesktopRefused("Original active task inventory changed between owners.")
+    counts = {"completed": 0, "archived": 0, "revisions": 0}
+    linked = []
+    for row in history:
+        if (type(row) is not dict or row.get("state") not in counts
+                or type(row.get("task_key_claimed")) is not str
+                or not portable.workbench._TASK_KEY.fullmatch(row["task_key_claimed"])
+                or type(row.get("note_sha256")) is not str
+                or not portable.workbench._SHA.fullmatch(row["note_sha256"])
+                or type(row.get("saved_result_linked")) is not bool
+                or row.get("current_result_bytes_verified") is not False
+                or row["state"] != "completed" and row["saved_result_linked"]):
+            raise DesktopRefused("Historical snapshot cannot become a current result.")
+        counts[row["state"]] += 1
+        if row["saved_result_linked"]:
+            linked.append((row["task_key_claimed"], row["note_sha256"]))
+    expected_linked = [
+        (task, digest) for kind, task, digest in offered["rows"]
+        if kind == "SAVED_COMPLETED_RESULT"
+    ]
+    if (counts != {
+            "completed": day["saved_completed_snapshot_count"],
+            "archived": day["archived_snapshot_count"],
+            "revisions": day["revision_snapshot_count"]}
+            or sorted(linked) != sorted(expected_linked)):
+        raise DesktopRefused("Original completed-result history and offered choices differ.")
+    rendered = owner.render_workday(home)
+    if (type(rendered) is not str
+            or not rendered.startswith("Vres-OS PERSONAL WORKDAY HOME -- READ ONLY")
+            or len(rendered) > 24000):
+        raise DesktopRefused("Original read-only workday renderer refused.")
+    return rendered
+
+
 class PersonalDayDesktop(ttk.Frame):
     """Ephemeral view state ONLY; original owners own all task/history writes."""
 
@@ -428,6 +521,9 @@ class PersonalDayDesktop(ttk.Frame):
                 button = ttk.Button(buttons, text=label, command=method)
                 button.grid(row=line, column=column, sticky="ew", padx=3, pady=2)
                 self.action_buttons[name] = button
+        self.home_button = ttk.Button(
+            buttons, text="Workday / recovery (read only)", command=self.review_home)
+        self.home_button.grid(row=1, column=3, sticky="ew", padx=3, pady=2)
         for column in range(4):
             buttons.columnconfigure(column, weight=1)
         ttk.Label(buttons, textvariable=self.guide, wraplength=900).grid(
@@ -529,15 +625,31 @@ class PersonalDayDesktop(ttk.Frame):
             kind, _task, _sha = self._selected()
             binding = self._binding()
         except DesktopRefused:
-            return guided_action_plan(None)
+            plan = guided_action_plan(None)
+            if (getattr(self, "inventory_packet", None) is not None
+                    and self.inventory_packet.get(
+                        "manual_revision_recovery_attention_required") is True):
+                plan["next_step"] = (
+                    "MANUAL RECOVERY HOLD: inspect original pending revision staging. "
+                    "No task write or automatic repair.")
+            return plan
         current_focus = self.focused is not None and self.focused[0] == binding
         current_decision = (current_focus and self.decision is not None
                             and self.decision.get("binding") == binding)
         stage = self.focused[1].get("stage") if current_focus else None
-        return guided_action_plan(
+        plan = guided_action_plan(
             kind, stage, focused=current_focus,
             decision_ready=current_decision,
             history_clear=self._history_inputs_clear())
+        if (getattr(self, "inventory_packet", None) is not None
+                and self.inventory_packet.get(
+                    "manual_revision_recovery_attention_required") is True):
+            plan["enabled"]["complete"] = False
+            plan["enabled"]["reopen"] = False
+            plan["next_step"] = (
+                "MANUAL RECOVERY HOLD: inspect original pending revision staging. "
+                "Only read-only inspection; no automatic repair or task write.")
+        return plan
 
     def _sync_guidance(self) -> None:
         plan = self._ui_plan()
@@ -547,7 +659,16 @@ class PersonalDayDesktop(ttk.Frame):
         self.guide.set(plan["next_step"])
         self.add_button.configure(
             state="normal" if self.loaded_desk == self.values["desk"].get().strip()
-            and bool(self.loaded_desk) else "disabled")
+            and bool(self.loaded_desk)
+            and self.inventory_packet is not None
+            and self.inventory_packet.get(
+                "manual_revision_recovery_attention_required") is False
+            else "disabled")
+        if hasattr(self, "home_button"):
+            self.home_button.configure(
+                state="normal" if self.loaded_desk == self.values["desk"].get().strip()
+                and bool(self.loaded_desk) and self.inventory_packet is not None
+                else "disabled")
         try:
             kind, _task, _sha = self._selected()
         except DesktopRefused:
@@ -793,6 +914,41 @@ class PersonalDayDesktop(ttk.Frame):
             self.triage_summary.set("Original snapshot unavailable; inspect desk before retry.")
             self._refuse()
             return False
+
+    def review_home(self) -> None:
+        """Show existing ORIGINAL #165 Workday Home plus manual recovery attention.
+
+        No task automatically selected, action disclosed, or saved bytes promoted.
+        Existing focused decisions are cleared even when the read is refused.
+        """
+        self._invalidate()
+        self._display("")
+        try:
+            desk = self.values["desk"].get().strip()
+            if (not desk or self.loaded_desk != desk
+                    or self.inventory_packet is None):
+                raise DesktopRefused("Load the exact original desk before Workday Home.")
+            before = checked_day(owner.review_personal_day(desk), selected=False)
+            if before != self.inventory_packet:
+                raise DesktopRefused("Original inventory changed; reload the day first.")
+            rendered = render_verified_workday_home(
+                before, owner.review_workday(desk))
+            after = checked_day(owner.review_personal_day(desk), selected=False)
+            if after != before:
+                raise DesktopRefused("Original workday changed during read-only review.")
+            self._display(rendered)
+            if before["manual_revision_recovery_attention_required"]:
+                self.status.set(
+                    "MANUAL RECOVERY ATTENTION: interrupted original revision staging. "
+                    "No write/repair; inspect original files independently.")
+            else:
+                self.status.set(
+                    "Original read-only Workday Home: active, saved completed, archived "
+                    "and revision inventory. No task automatically selected, saved bytes rechecked or "
+                    "result quality certified.")
+            self._sync_guidance()
+        except Exception:
+            self._refuse()
 
     def inspect_next_action(self) -> None:
         """Show one explicitly selected original task's next step as DATA only.
@@ -1110,6 +1266,9 @@ class PersonalDayDesktop(ttk.Frame):
             if not task or not note:
                 raise DesktopRefused("Explicit task key and ordinary Markdown note required.")
             before = checked_day(owner.review_personal_day(desk), selected=False)
+            if before.get("manual_revision_recovery_attention_required") is True:
+                raise DesktopRefused(
+                    "Manual revision recovery needed before adding another task.")
             preview = preview_existing_desk_task(desk, task, note)
             if not messagebox.askyesno(
                     "Approve one existing-desk task",

@@ -5,6 +5,8 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
+
 from vres_os import personal_offline_workbench as workbench
 from vres_os import personal_portable_desk as desk
 from vres_os import personal_task_lifecycle as lifecycle
@@ -127,3 +129,57 @@ def test_original_revision_requires_exact_preimage_and_replacement_before_write(
     assert history['snapshots'][0]['state'] == 'revisions'
     assert history['snapshots'][0]['sha256'] == old['sha256']
     assert prior.read_text(encoding='utf-8').endswith('Plan the day.\n')
+
+
+def test_interrupted_original_revision_blocks_completion_and_reopen(tmp_path):
+    """One synthetic scratch: no mutation while staged revision needs manual review."""
+    root = tmp_path / 'Vres-Desk-Recovery-Hold'
+    inputs = tmp_path / 'inputs'
+    inputs.mkdir()
+    note = inputs / 'only.md'
+    note.write_text('# Task\n\n## Next action\n- Inspect results.\n', encoding='utf-8')
+    desk.init_desk(root, approved=True)
+    created = desk.add_task(root, A, note, approved=True)
+    pending = root / 'Vres-Lifecycle-History' / 'pending' / 'Vres-Workbench-Ptest'
+    pending.mkdir(parents=True)
+    attention = lifecycle.inspect_pending_revision_attention(root)
+    assert attention['manual_recovery_attention_required'] is True
+    with pytest.raises(lifecycle.LifecycleRefused, match='manual'):
+        lifecycle.move_out(root, A, state='completed', approved=True)
+    assert desk.open_task(root, A)['sha256'] == created['sha256']
+    pending.rmdir()  # synthetic human-controlled test fixture only
+    completed = lifecycle.move_out(root, A, state='completed', approved=True)
+    assert completed['sha256'] == created['sha256']
+    pending.mkdir()
+    with pytest.raises(lifecycle.LifecycleRefused, match='manual'):
+        lifecycle.reopen(root, A, state='completed', approved=True)
+    assert not (root / ('Vres-Workbench-' + A)).exists()
+    assert lifecycle.list_history(root)['count'] == 1
+
+
+def test_pending_revision_appearing_late_blocks_original_final_move(tmp_path, monkeypatch):
+    """Cooperative second pre-move read is a guard, not an atomic transaction."""
+    root = tmp_path / 'Vres-Desk-Late-Recovery-Hold'
+    inputs = tmp_path / 'inputs'
+    inputs.mkdir()
+    note = inputs / 'only.md'
+    note.write_text('# Task\n\n## Next action\n- Inspect results.\n', encoding='utf-8')
+    desk.init_desk(root, approved=True)
+    initial = desk.add_task(root, A, note, approved=True)
+    reads = []
+    def attention(_root):
+        reads.append(len(reads))
+        pending = len(reads) >= 2
+        return {'schema': lifecycle.SCHEMA,
+                'status': 'READ_ONLY_PENDING_REVISION_ATTENTION',
+                'pending_revision_staging_present': pending,
+                'manual_recovery_attention_required': pending,
+                'pending_contents_opened': False,
+                'automatic_recovery_performed': False,
+                'writes_performed': False}
+    monkeypatch.setattr(lifecycle, 'inspect_pending_revision_attention', attention)
+    with pytest.raises(lifecycle.LifecycleRefused, match='manual'):
+        lifecycle.move_out(root, A, state='completed', approved=True,
+                           expected_sha256=initial['sha256'])
+    assert len(reads) == 2
+    assert desk.open_task(root, A)['sha256'] == initial['sha256']

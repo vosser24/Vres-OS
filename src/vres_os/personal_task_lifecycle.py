@@ -451,6 +451,23 @@ def inspect_pending_revision_attention(value: str | Path) -> dict[str, Any]:
     }
 
 
+
+def _require_no_pending_revision(root: Path) -> None:
+    """Block unrelated task writes while any original revision is unresolved."""
+    attention = inspect_pending_revision_attention(root)
+    if (type(attention) is not dict or attention.get('schema') != SCHEMA
+            or attention.get('status') != 'READ_ONLY_PENDING_REVISION_ATTENTION'
+            or type(attention.get('pending_revision_staging_present')) is not bool
+            or attention.get('manual_recovery_attention_required')
+               is not attention['pending_revision_staging_present']
+            or attention.get('pending_contents_opened') is not False
+            or attention.get('automatic_recovery_performed') is not False
+            or attention.get('writes_performed') is not False):
+        raise LifecycleRefused('Original revision staging unverified; manual recovery required')
+    if attention['manual_recovery_attention_required']:
+        raise LifecycleRefused('Interrupted revision staging; manual recovery required')
+
+
 def render_daily_review(report: dict[str, Any]) -> str:
     """Human-readable display of verified metadata; never disclose note text."""
     lines = ['Vres-OS PERSONAL -- DAILY REVIEW (READ ONLY)',
@@ -476,6 +493,7 @@ def move_out(value: str | Path, key: str, *, state: str,
             type(expected_sha256) is not str or not workbench._SHA.fullmatch(expected_sha256)):
         raise LifecycleRefused('Require an exact lowercase task receipt SHA-256')
     root = _root(value)
+    _require_no_pending_revision(root)
     desk._existing_tasks(root)  # refuse inconsistent active receipt inventory
     active, receipt = _active(root, key)
     if expected_sha256 is not None and receipt['sha256'] != expected_sha256:
@@ -491,6 +509,8 @@ def move_out(value: str | Path, key: str, *, state: str,
     if (workbench.inspect_note(active) != receipt or
             (expected_sha256 is not None and receipt['sha256'] != expected_sha256)):
         raise LifecycleRefused('Selected task changed before completion')
+    # A different interrupted revision must not appear during approval.
+    _require_no_pending_revision(root)
     # Move, never unlink. A failure leaves the original intact for inspection.
     active.rename(target)
     if workbench.inspect_note(target) != receipt:
@@ -572,6 +592,7 @@ def reopen(value: str | Path, key: str, *, state: str = 'completed',
     if approved is not True or state not in _STATES:
         raise LifecycleRefused('Explicit reopen approval and state required')
     root = _root(value)
+    _require_no_pending_revision(root)
     active_keys = desk._existing_tasks(root)
     if len(active_keys) >= desk._MAX_CHILDREN:
         raise LifecycleRefused('Personal desk already has six active tasks')
@@ -594,6 +615,7 @@ def reopen(value: str | Path, key: str, *, state: str = 'completed',
         raise LifecycleRefused('History changed during reopen')
     markdown = raw.decode('utf-8')
     continuity._action(markdown)
+    _require_no_pending_revision(root)
     restored = workbench.create_note(target, key, markdown, approved=True)
     if restored['sha256'] != chosen['sha256'] or workbench.inspect_note(source) != verified:
         raise LifecycleRefused('Reopened task readback mismatch')

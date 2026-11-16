@@ -1273,3 +1273,134 @@ def test_revision_button_enabled_only_for_loaded_explicit_active_choice():
     view.loaded_desk = "/test/Vres-Desk-Other"
     desktop.PersonalDayDesktop._sync_guidance(view)
     assert view.revise_button.state == "disabled"
+
+
+def _workday_home_fixture():
+    """Original owner-shaped bounded day/home with pending recovery attention."""
+    day = _triage_owner_packet()
+    saved = [
+        ("completed", "TASK-OLD", "b" * 64, True),
+        ("completed", "TASK-TODAY", "c" * 64, True),
+        ("completed", "TASK-UNLINKED", "d" * 64, False),
+        ("archived", "TASK-ARCHIVED", "e" * 64, False),
+        ("revisions", "TASK-REV1", "f" * 64, False),
+        ("revisions", "TASK-REV2", "0" * 64, False),
+    ]
+    history = [
+        {"state": state, "task_key_claimed": task, "note_sha256": sha,
+         "saved_result_linked": linked, "current_result_bytes_verified": False,
+         "saved_acceptance_self_claims_linked": False}
+        for state, task, sha, linked in saved
+    ]
+    home = {
+        "schema": desktop.owner.WORKDAY_SCHEMA,
+        "status": "READ_ONLY_INTEGRATED_PERSONAL_WORKDAY_HOME",
+        "active_count": 1,
+        "active_tasks": [{"task_key_claimed": "TASK-TODAY",
+                          "note_sha256": "a" * 64, "note_bytes": 50}],
+        "completed_snapshot_count": 3,
+        "archived_snapshot_count": 1,
+        "revision_snapshot_count": 2,
+        "saved_history": history,
+        "selected_review": None,
+        "manual_revision_recovery_attention_required": True,
+    }
+    for field in (
+            "automatic_revision_recovery_performed", "automatic_task_selection_performed",
+            "history_has_timestamps", "historical_document_current_bytes_verified",
+            "result_quality_validated", "task_reopened_or_completed",
+            "native_chairman_task_bound", "native_claude_or_hooks_executed",
+            "database_contacted", "writes_performed", "new_store_created",
+            "installed_vres_modified"):
+        home[field] = False
+    return day, home
+
+
+def test_workday_home_reads_original_bounded_day_and_pending_attention(monkeypatch):
+    day, home = _workday_home_fixture()
+    monkeypatch.setattr(desktop.owner, "render_personal_day",
+                        lambda p: "ORIGINAL PERSONAL DAY READ ONLY")
+    text = desktop.render_verified_workday_home(day, home)
+    assert text.startswith("Vres-OS PERSONAL WORKDAY HOME -- READ ONLY")
+    assert "interrupted task revision staging" in text
+    assert "Saved completed snapshots (UNDATED): 3" in text
+    assert "No task automatically selected" in text
+    assert "Task note action hidden" not in text
+
+
+def test_workday_home_refuses_owner_or_history_drift_and_claims(monkeypatch):
+    day, home = _workday_home_fixture()
+    monkeypatch.setattr(desktop.owner, "render_personal_day", lambda p: "READ ONLY")
+    for field, forged in (
+            ("active_count", 2), ("writes_performed", True),
+            ("selected_review", {"kind": "EXPLICIT_ACTIVE_TASK"}),
+            ("manual_revision_recovery_attention_required", False)):
+        with pytest.raises(desktop.DesktopRefused):
+            desktop.render_verified_workday_home(day, {**home, field: forged})
+    for modified in ("note", "linked", "count", "unsafe_history"):
+        other = {**home, "active_tasks": [dict(row) for row in home["active_tasks"]],
+                 "saved_history": [dict(row) for row in home["saved_history"]]}
+        if modified == "note":
+            other["active_tasks"][0]["note_sha256"] = "f" * 64
+        elif modified == "linked":
+            other["saved_history"][0]["saved_result_linked"] = False
+        elif modified == "count":
+            other["saved_history"].pop()
+        else:
+            other["saved_history"][3]["current_result_bytes_verified"] = True
+        with pytest.raises(desktop.DesktopRefused):
+            desktop.render_verified_workday_home(day, other)
+
+
+def test_workday_home_desktop_clears_old_decision_without_any_write(monkeypatch):
+    day, home = _workday_home_fixture()
+    view, shown, refused = _next_action_view()
+    view.inventory_packet = day
+    monkeypatch.setattr(desktop.owner, "review_personal_day",
+                        lambda *a, **k: day)
+    monkeypatch.setattr(desktop.owner, "review_workday",
+                        lambda *a, **k: home)
+    monkeypatch.setattr(desktop.owner, "render_personal_day",
+                        lambda p: "ORIGINAL DAY READ ONLY")
+    monkeypatch.setattr(desktop.owner, "finish_reviewed_decision",
+                        lambda *a, **k: pytest.fail("Read-only Workday Home cannot finish"))
+    desktop.PersonalDayDesktop.review_home(view)
+    assert not refused
+    assert view.focused is None and view.decision is None
+    assert shown[-1].startswith("Vres-OS PERSONAL WORKDAY HOME -- READ ONLY")
+    assert "MANUAL RECOVERY ATTENTION" in view.status.get()
+
+
+def test_workday_home_refuses_changed_original_day_after_render(monkeypatch):
+    day, home = _workday_home_fixture()
+    view, shown, refused = _next_action_view()
+    view.inventory_packet = day
+    visits = []
+    def changing_day(_desk):
+        visits.append("READ")
+        return day if len(visits) == 1 else {**day, "proposal_sha256": "f" * 64}
+    monkeypatch.setattr(desktop.owner, "review_personal_day", changing_day)
+    monkeypatch.setattr(desktop.owner, "review_workday", lambda _desk: home)
+    monkeypatch.setattr(desktop.owner, "render_personal_day", lambda p: "READ ONLY")
+    desktop.PersonalDayDesktop.review_home(view)
+    assert visits == ["READ", "READ"]
+    assert refused == ["REFUSED"]
+    assert shown == [""]
+    assert view.decision is None
+
+
+def test_recovery_hold_guidance_disables_completion_and_reopen():
+    view, _, _ = _next_action_view()
+    view.inventory_packet = {"manual_revision_recovery_attention_required": True}
+    view._binding = lambda: ("stable",)
+    view._history_inputs_clear = lambda: True
+    view.focused = (("stable",),
+                    {"stage": "RESULT_REVIEW_READY_SEPARATE_DECISION"}, None)
+    view.decision = {"binding": ("stable",)}
+    plan = desktop.PersonalDayDesktop._ui_plan(view)
+    assert not plan["enabled"]["complete"]
+    assert "MANUAL RECOVERY HOLD" in plan["next_step"]
+    view._selected = lambda: ("SAVED_COMPLETED_RESULT", "TASK-OLD", "b" * 64)
+    plan = desktop.PersonalDayDesktop._ui_plan(view)
+    assert not plan["enabled"]["reopen"]
+    assert plan["enabled"]["replay"]  # read-only explicit verification remains possible
