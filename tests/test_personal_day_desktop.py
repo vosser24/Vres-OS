@@ -626,6 +626,9 @@ def test_existing_add_success_delegates_one_original_write_then_unselects(monkey
                 "installed_or_project_write_authorized": False}
     monkeypatch.setattr(desktop.portable, "add_task", add)
     def refresh():
+        view.inventory_packet = {"original_offered_choices": [{
+            "kind": "ACTIVE_TASK", "task_key_claimed": "TASK-NEXT",
+            "selected_note_sha256": "a" * 64}]}
         view.choices = {"new": ("ACTIVE_TASK", "TASK-NEXT", "a" * 64)}
         return True
     view.refresh = refresh
@@ -652,3 +655,115 @@ def test_selection_change_drops_old_decision_and_visible_preview():
     assert view.focused is None and view.decision is None
     assert displayed == [""]
     assert "Focus" in view.status.get()
+
+
+def _triage_owner_packet():
+    return {
+        "schema": desktop.owner.PERSONAL_DAY_SCHEMA,
+        "status": "READ_ONLY_ONE_ORIGINAL_CHAIRMAN_PERSONAL_DAY",
+        "task_selection_or_completion_performed": False,
+        "native_claude_or_hooks_executed": False,
+        "database_contacted": False,
+        "original_166_168_activation_or_rollback_performed": False,
+        "original_167_live_catalog_freshness_verified": False,
+        "original_174_protected_fable_granted": False,
+        "original_176_live_memory_eligibility_or_promotion": False,
+        "writes_performed": False, "task_selected_explicitly": False,
+        "active_task_count": 1, "linked_historical_result_choice_count": 2,
+        "saved_completed_snapshot_count": 3, "archived_snapshot_count": 1,
+        "revision_snapshot_count": 2,
+        "manual_revision_recovery_attention_required": True,
+        "original_offered_choices": [
+            {"kind": "ACTIVE_TASK", "task_key_claimed": "TASK-TODAY",
+             "selected_note_sha256": "a" * 64},
+            {"kind": "SAVED_COMPLETED_RESULT", "task_key_claimed": "TASK-OLD",
+             "selected_note_sha256": "b" * 64},
+            {"kind": "SAVED_COMPLETED_RESULT", "task_key_claimed": "TASK-TODAY",
+             "selected_note_sha256": "c" * 64},
+        ],
+    }
+
+
+def test_triage_original_active_and_saved_choices_are_not_mixed(monkeypatch):
+    monkeypatch.setattr(desktop.owner, "render_personal_day", lambda p: "read only")
+    packet = _triage_owner_packet()
+    assert len(desktop.triage_personal_day(packet)["rows"]) == 3
+    active = desktop.triage_personal_day(packet, query="today", mode="ACTIVE")
+    saved = desktop.triage_personal_day(packet, query="today", mode="HISTORY")
+    assert active["rows"] == [("ACTIVE_TASK", "TASK-TODAY", "a" * 64)]
+    assert saved["rows"] == [("SAVED_COMPLETED_RESULT", "TASK-TODAY", "c" * 64)]
+    assert saved["manual_recovery_attention_required"] is True
+    assert "MANUAL RECOVERY ATTENTION" in saved["summary"]
+    assert "NEVER current" in saved["summary"]
+
+
+def test_triage_refuses_invalid_filter_and_mismatched_original_counts(monkeypatch):
+    monkeypatch.setattr(desktop.owner, "render_personal_day", lambda p: "read only")
+    packet = _triage_owner_packet()
+    for query, mode in (("a" * 65, "ALL"), ("", "INVALID")):
+        with pytest.raises(desktop.DesktopRefused):
+            desktop.triage_personal_day(packet, query=query, mode=mode)
+    for field, value in (("active_task_count", 2),
+                         ("linked_historical_result_choice_count", 0),
+                         ("manual_revision_recovery_attention_required", None)):
+        with pytest.raises(desktop.DesktopRefused):
+            desktop.triage_personal_day({**packet, field: value})
+    duplicated = {**packet, "original_offered_choices":
+                  packet["original_offered_choices"] +
+                  [packet["original_offered_choices"][0]]}
+    with pytest.raises(desktop.DesktopRefused):
+        desktop.triage_personal_day(duplicated)
+
+
+def test_triage_edit_invalidates_decision_with_zero_owner_actions(monkeypatch):
+    monkeypatch.setattr(desktop.owner, "render_personal_day", lambda p: "read only")
+    monkeypatch.setattr(desktop.owner, "review_personal_day",
+                        lambda *a, **k: pytest.fail("No owner reads on filter edit"))
+    class Listing:
+        def __init__(self): self.items = {"old": None}
+        def get_children(self): return tuple(self.items)
+        def delete(self, *names):
+            for name in names: self.items.pop(name, None)
+        def insert(self, *a, **kw): self.items[kw["iid"]] = kw["values"]
+    view = _View()
+    view.inventory_packet = _triage_owner_packet()
+    view.triage_query, view.triage_mode = _Var("today"), _Var("HISTORY")
+    view.triage_summary, view.status = _Var(""), _Var("")
+    view.listing, view.choices = Listing(), {"old": ("ACTIVE_TASK", "TASK-TODAY", "a"*64)}
+    view.focused, view.decision = (("old",), {}, None), {"binding": ("old",)}
+    view._sync_guidance = lambda: None
+    shown = []
+    view._display = shown.append
+    view._invalidate = lambda: desktop.PersonalDayDesktop._invalidate(view)
+    view._render_triage = lambda: desktop.PersonalDayDesktop._render_triage(view)
+    desktop.PersonalDayDesktop._triage_changed(view)
+    assert view.focused is None and view.decision is None
+    assert view.choices == {
+        "choice-0": ("SAVED_COMPLETED_RESULT", "TASK-TODAY", "c" * 64)}
+    assert view.listing.items["choice-0"][0] == "SAVED · HISTORICAL"
+    assert shown == ["", "read only"]
+
+
+def test_add_task_with_history_filter_verifies_unfiltered_owner_receipt(monkeypatch):
+    view, refusals = _existing_add_view()
+    _mock_existing_day(monkeypatch)
+    _mock_existing_preview(monkeypatch)
+    monkeypatch.setattr(desktop.messagebox, "askyesno", lambda *a, **k: True)
+    calls = []
+    def add(*a, **kw):
+        calls.append(kw["approved"])
+        return {"status": "USER_AUTHORED_SCRATCH_DRAFT_NOT_VALIDATED",
+                "task_key_claimed": "TASK-NEXT", "sha256": "a" * 64,
+                "installed_or_project_write_authorized": False}
+    monkeypatch.setattr(desktop.portable, "add_task", add)
+    def refresh():
+        view.choices = {}  # HISTORY view hides new ACTIVE task.
+        view.inventory_packet = {"original_offered_choices": [{
+            "kind": "ACTIVE_TASK", "task_key_claimed": "TASK-NEXT",
+            "selected_note_sha256": "a" * 64}]}
+        return True
+    view.refresh = refresh
+    desktop.PersonalDayDesktop.add_existing(view)
+    assert refusals == [] and calls == [True]
+    assert view.choices == {}  # No implicit current task selection.
+    assert "ALL/ACTIVE" in view.status.get()

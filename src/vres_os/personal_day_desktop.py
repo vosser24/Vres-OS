@@ -141,6 +141,69 @@ def preview_existing_desk_task(desk_path: str, task: str, note_file: str) -> dic
     return result
 
 
+def triage_personal_day(packet: dict, *, query: str = "", mode: str = "ALL") -> dict:
+    """Search only verified original offered task KEYS, with history still historical.
+
+    Never open notes or guess projects/results. Snapshot is not fresh by
+    default; every subsequent owner action independently revalidates.
+    """
+    checked_day(packet, selected=False)
+    if (type(query) is not str or len(query) > 64
+            or any(not c.isprintable() for c in query)
+            or type(mode) is not str or mode not in {"ALL", "ACTIVE", "HISTORY"}):
+        raise DesktopRefused("Triage requires a short printable key query and known view.")
+    offered = packet.get("original_offered_choices")
+    if type(offered) is not list or len(offered) > 54:
+        raise DesktopRefused("Original offered choices unavailable.")
+    fields = ("active_task_count", "linked_historical_result_choice_count",
+              "saved_completed_snapshot_count", "archived_snapshot_count",
+              "revision_snapshot_count")
+    if any(type(packet.get(k)) is not int or packet[k] < 0 for k in fields):
+        raise DesktopRefused("Original task/history counts unavailable.")
+    attention = packet.get("manual_revision_recovery_attention_required")
+    if type(attention) is not bool:
+        raise DesktopRefused("Original recovery attention state unavailable.")
+    rows, seen = [], set()
+    active = history = 0
+    term = query.strip().casefold()
+    for item in offered:
+        if type(item) is not dict:
+            raise DesktopRefused("Malformed original offered choice.")
+        kind, task, sha = (item.get("kind"), item.get("task_key_claimed"),
+                           item.get("selected_note_sha256"))
+        if (type(kind) is not str
+                or kind not in {"ACTIVE_TASK", "SAVED_COMPLETED_RESULT"}
+                or type(task) is not str or not task.startswith("TASK-")
+                or type(sha) is not str or len(sha) != 64
+                or any(c not in "0123456789abcdef" for c in sha)):
+            raise DesktopRefused("Original task identity invalid.")
+        identity = (kind, task, sha)
+        if identity in seen:
+            raise DesktopRefused("Duplicate original task/snapshot choice.")
+        seen.add(identity)
+        active += kind == "ACTIVE_TASK"
+        history += kind == "SAVED_COMPLETED_RESULT"
+        if term in task.casefold() and (
+                mode == "ALL" or
+                (mode == "ACTIVE" and kind == "ACTIVE_TASK") or
+                (mode == "HISTORY" and kind == "SAVED_COMPLETED_RESULT")):
+            rows.append(identity)
+    if (active != packet["active_task_count"]
+            or history != packet["linked_historical_result_choice_count"]):
+        raise DesktopRefused("Original offered day counts mismatch.")
+    summary = (
+        f"Showing {len(rows)}/{len(offered)} choices · {active} active · "
+        f"{history} historical offered · "
+        f"{packet['saved_completed_snapshot_count']} completed snapshots · "
+        f"{packet['archived_snapshot_count']} archived · "
+        f"{packet['revision_snapshot_count']} revisions. "
+        "Historical is NEVER current by default.")
+    if attention:
+        summary += " MANUAL RECOVERY ATTENTION: original revisions need review."
+    return {"rows": rows, "summary": summary,
+            "manual_recovery_attention_required": attention}
+
+
 class PersonalDayDesktop(ttk.Frame):
     """Ephemeral view state ONLY; original owners own all task/history writes."""
 
@@ -167,6 +230,10 @@ class PersonalDayDesktop(ttk.Frame):
         self.status = tk.StringVar(value="Choose an explicit scratch desk and select Load.")
         self.choices: dict[str, tuple[str, str, str]] = {}
         self.loaded_desk: str | None = None
+        self.inventory_packet: dict | None = None
+        self.triage_query = tk.StringVar(value="")
+        self.triage_mode = tk.StringVar(value="ALL")
+        self.triage_summary = tk.StringVar(value="Load the original day for triage.")
         self.focused: tuple | None = None
         self.decision: dict | None = None
         self.guide = tk.StringVar(value="Step 1/4: Load an exact desk and select a task.")
@@ -179,6 +246,8 @@ class PersonalDayDesktop(ttk.Frame):
         for variable in (self.with_intake, self.with_acceptance,
                          self.with_catalog, self.with_synthetic):
             variable.trace_add("write", lambda *_ignored: self._edited(None))
+        for variable in (self.triage_query, self.triage_mode):
+            variable.trace_add("write", lambda *_ignored: self._triage_changed())
         self._sync_guidance()
 
     def _field(self, parent, row: int, label: str, key: str) -> None:
@@ -201,7 +270,17 @@ class PersonalDayDesktop(ttk.Frame):
         tasks = ttk.LabelFrame(self, text="Choose one original task or historical result")
         tasks.grid(row=2, column=0, sticky="nsew", pady=6)
         tasks.columnconfigure(0, weight=1)
-        tasks.rowconfigure(0, weight=1)
+        tasks.rowconfigure(1, weight=1)
+        triage = ttk.Frame(tasks)
+        triage.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 4))
+        triage.columnconfigure(1, weight=1)
+        ttk.Label(triage, text="Find task key").grid(row=0, column=0, padx=4)
+        ttk.Entry(triage, textvariable=self.triage_query).grid(
+            row=0, column=1, sticky="ew", padx=4)
+        ttk.Label(triage, text="View").grid(row=0, column=2, padx=4)
+        ttk.Combobox(triage, textvariable=self.triage_mode, state="readonly",
+                     values=("ALL", "ACTIVE", "HISTORY"), width=11).grid(
+                         row=0, column=3, padx=4)
         self.listing = ttk.Treeview(
             tasks, columns=("kind", "task", "note"), show="headings",
             selectmode="browse", height=7)
@@ -210,11 +289,13 @@ class PersonalDayDesktop(ttk.Frame):
                 ("note", "Note SHA-256 (short display)", 280)):
             self.listing.heading(name, text=heading)
             self.listing.column(name, width=width, anchor="w")
-        self.listing.grid(row=0, column=0, sticky="nsew")
+        self.listing.grid(row=1, column=0, sticky="nsew")
         scrollbar = ttk.Scrollbar(tasks, orient="vertical", command=self.listing.yview)
-        scrollbar.grid(row=0, column=1, sticky="ns")
+        scrollbar.grid(row=1, column=1, sticky="ns")
         self.listing.configure(yscrollcommand=scrollbar.set)
         self.listing.bind("<<TreeviewSelect>>", lambda _event: self._selection_changed())
+        ttk.Label(tasks, textvariable=self.triage_summary, wraplength=900).grid(
+            row=2, column=0, columnspan=2, sticky="w", pady=(5, 0))
 
         workspace = ttk.Notebook(self)
         workspace.grid(row=3, column=0, sticky="ew", pady=6)
@@ -293,9 +374,9 @@ class PersonalDayDesktop(ttk.Frame):
         report_scroll.grid(row=0, column=1, sticky="ns")
         self.detail.configure(yscrollcommand=report_scroll.set)
 
-        create = ttk.LabelFrame(self, text="Original scratch tasks · add to LOADED desk or start a NEW desk")
-        create.grid(row=6, column=0, sticky="ew")
+        create = ttk.Frame(workspace, padding=5)
         create.columnconfigure(1, weight=1)
+        workspace.add(create, text="Add scratch task")
         self._field(create, 0, "New task key", "new_task")
         self._field(create, 1, "Existing nonsensitive Markdown note", "note")
         task_actions = ttk.Frame(create)
@@ -308,7 +389,46 @@ class PersonalDayDesktop(ttk.Frame):
         ttk.Label(task_actions, text="No automatic selection or project binding.").pack(
             side="left", padx=10)
         ttk.Label(self, textvariable=self.status, wraplength=900).grid(
-            row=7, column=0, sticky="w", pady=5)
+            row=6, column=0, sticky="w", pady=5)
+
+    def _render_triage(self) -> None:
+        """Pure presentation of current read-only inventory; no auto-selection."""
+        self.choices.clear()
+        self.listing.delete(*self.listing.get_children())
+        if self.inventory_packet is None:
+            self.triage_summary.set("Load the original day for triage.")
+            return
+        plan = triage_personal_day(
+            self.inventory_packet, query=self.triage_query.get(),
+            mode=self.triage_mode.get())
+        for index, identity in enumerate(plan["rows"]):
+            iid = f"choice-{index}"
+            self.choices[iid] = identity
+            label = ("ACTIVE TASK" if identity[0] == "ACTIVE_TASK"
+                     else "SAVED · HISTORICAL")
+            self.listing.insert("", "end", iid=iid, values=(
+                label, identity[1], identity[2][:16]))
+        self.triage_summary.set(plan["summary"])
+
+    def _triage_changed(self) -> None:
+        """Changed filters invalidate prior focus, decision and selected row."""
+        self.choices.clear()
+        self.listing.delete(*self.listing.get_children())
+        self._invalidate()
+        self._display("")
+        try:
+            self._render_triage()
+            if self.inventory_packet is not None:
+                self._display(owner.render_personal_day(self.inventory_packet))
+                self.status.set(
+                    "Read-only task-key filter. Select one visible row and focus; "
+                    "refresh for a new original-owner snapshot.")
+        except Exception:
+            self.choices.clear()
+            self.listing.delete(*self.listing.get_children())
+            self.triage_summary.set("Invalid filter or original snapshot; refresh required.")
+            self.status.set("No task selected; use <=64 printable filter characters.")
+        self._sync_guidance()
 
     def _display(self, content: str) -> None:
         self.detail.configure(state="normal")
@@ -358,8 +478,12 @@ class PersonalDayDesktop(ttk.Frame):
         """A changed UI selection cannot retain a ready decision or preview."""
         if field == "desk":
             self.loaded_desk = None
+            self.inventory_packet = None
             self.choices.clear()
             self.listing.delete(*self.listing.get_children())
+            self.triage_query.set("")
+            self.triage_mode.set("ALL")
+            self.triage_summary.set("Desk changed; load a verified owner snapshot.")
         self._invalidate()
         self._display("")
         if field == "desk":
@@ -549,28 +673,30 @@ class PersonalDayDesktop(ttk.Frame):
     def refresh(self) -> bool:
         self._invalidate()
         self.loaded_desk = None
+        self.inventory_packet = None
         self.choices.clear()
         self.listing.delete(*self.listing.get_children())
+        self.triage_summary.set("Loading original read-only day.")
         self._display("")
         try:
             packet = checked_day(
                 owner.review_personal_day(self.values["desk"].get().strip()),
                 selected=False)
-            for idx, item in enumerate(packet["original_offered_choices"]):
-                identity = (item["kind"], item["task_key_claimed"],
-                            item["selected_note_sha256"])
-                iid = f"choice-{idx}"
-                self.choices[iid] = identity
-                self.listing.insert("", "end", iid=iid, values=(
-                    identity[0], identity[1], identity[2][:16]))
+            self.inventory_packet = packet
+            self._render_triage()
             self.status.set(
                 f"Read-only: {packet['active_task_count']} active; "
-                f"{packet['saved_completed_snapshot_count']} historical completed snapshots (undated).")
+                f"{packet['saved_completed_snapshot_count']} completed snapshots (undated). "
+                "Select an original row explicitly; refresh for a fresh snapshot.")
             self._display(owner.render_personal_day(packet))
             self.loaded_desk = self.values["desk"].get().strip()
             self._sync_guidance()
             return True
         except Exception:
+            self.inventory_packet = None
+            self.choices.clear()
+            self.listing.delete(*self.listing.get_children())
+            self.triage_summary.set("Original snapshot unavailable; inspect desk before retry.")
             self._refuse()
             return False
 
@@ -805,12 +931,17 @@ class PersonalDayDesktop(ttk.Frame):
             self.values["note"].set("")
             if not self.refresh():
                 raise DesktopRefused("Task may exist; original desk refresh failed.")
-            if not any(choice == ("ACTIVE_TASK", task, preview["sha256"])
-                       for choice in self.choices.values()):
-                raise DesktopRefused("New original task not offered after refresh; inspect desk.")
+            if (self.inventory_packet is None
+                    or not any(
+                        item["kind"] == "ACTIVE_TASK"
+                        and item["task_key_claimed"] == task
+                        and item["selected_note_sha256"] == preview["sha256"]
+                        for item in self.inventory_packet["original_offered_choices"])):
+                raise DesktopRefused(
+                    "New original task absent from unfiltered owner inventory; inspect desk.")
             self.status.set(
                 "Task added to original desk; no project bound or row selected. "
-                "Explicitly select and focus it next.")
+                "Switch to ALL/ACTIVE, then explicitly select and focus it.")
         except Exception:
             self._refuse()
 
