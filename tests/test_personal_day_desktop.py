@@ -485,3 +485,170 @@ def test_editing_selected_desk_drops_old_inventory_without_auto_selection():
     assert view.focused is None and view.decision is None
     assert displayed == [""]
     assert "Load this desk" in view.status.get()
+
+
+def _existing_add_view():
+    """Headless existing-desk form; no real filesystem or Tk window."""
+    view = _View()
+    view.values = {
+        name: _Var("") for name in (
+            "desk", "new_task", "note", *desktop._HISTORY_CONTEXT_FIELDS)}
+    view.values["desk"].set("/test/Vres-Desk-Existing")
+    view.values["new_task"].set("TASK-NEXT")
+    view.values["note"].set("/test/note.md")
+    view.loaded_desk = "/test/Vres-Desk-Existing"
+    view.with_intake = _Var(True)
+    view.with_acceptance = _Var(True)
+    view.with_catalog = _Var(True)
+    view.with_synthetic = _Var(True)
+    view.status = _Var("")
+    view.master = None
+    view.focused = None
+    view.decision = None
+    view.choices = {}
+    view._invalidate = lambda: None
+    view._display = lambda value: None
+    refusals = []
+    view._refuse = lambda: refusals.append(True)
+    return view, refusals
+
+
+def _mock_existing_day(monkeypatch, *, drift=False):
+    snapshots = []
+    def day(_desk):
+        packet = {"proposal_sha256": "p" * 64, "active_task_count": 1,
+                  "original_offered_choices": []}
+        if drift and snapshots:
+            packet["proposal_sha256"] = "q" * 64
+        snapshots.append(packet)
+        return packet
+    monkeypatch.setattr(desktop.owner, "review_personal_day", day)
+    monkeypatch.setattr(desktop, "checked_day", lambda value, *, selected: value)
+    return snapshots
+
+
+def _mock_existing_preview(monkeypatch, *, drift=False):
+    calls = []
+    def preview(*args):
+        calls.append(args)
+        return {"sha256": ("b" if drift and len(calls) > 1 else "a") * 64}
+    monkeypatch.setattr(desktop, "preview_existing_desk_task", preview)
+    return calls
+
+
+def test_existing_task_preview_uses_only_original_bounded_scratch_owners(monkeypatch):
+    from pathlib import Path
+    root = Path("/test/Vres-Desk-Existing")
+    visited = []
+    monkeypatch.setattr(desktop.portable, "_desk",
+                        lambda value, *, must_exist: root)
+    monkeypatch.setattr(desktop.portable, "_owned_task",
+                        lambda value, task: root / ("Vres-Workbench-" + task))
+    monkeypatch.setattr(desktop.portable, "_existing_tasks", lambda value: ["TASK-OLD"])
+    monkeypatch.setattr(desktop.portable.workbench, "_stat", lambda value: None)
+    monkeypatch.setattr(desktop.portable.project_draft, "_under",
+                        lambda path, ancestor: False)
+    monkeypatch.setattr(desktop.portable.project_draft, "_manual_markdown",
+                        lambda file: (visited.append(file) or "# new"))
+    monkeypatch.setattr(desktop.portable.workbench, "preview_note",
+                        lambda task, body: {
+                            "status": "DRAFT_PREVIEW_ONLY",
+                            "task_key_claimed": task, "sha256": "a" * 64,
+                            "writes_performed": False,
+                            "installed_or_project_write_authorized": False})
+    assert desktop.preview_existing_desk_task(str(root), "TASK-NEXT", "/test/note.md")[
+        "sha256"] == "a" * 64
+    assert visited == ["/test/note.md"]
+    monkeypatch.setattr(desktop.portable, "_existing_tasks", lambda value: ["TASK-NEXT"])
+    with pytest.raises(desktop.DesktopRefused):
+        desktop.preview_existing_desk_task(str(root), "TASK-NEXT", "/test/note.md")
+    monkeypatch.setattr(desktop.portable, "_existing_tasks",
+                        lambda value: ["TASK-" + str(i) for i in range(6)])
+    with pytest.raises(desktop.DesktopRefused):
+        desktop.preview_existing_desk_task(str(root), "TASK-NEXT", "/test/note.md")
+    monkeypatch.setattr(desktop.portable, "_existing_tasks", lambda value: [])
+    monkeypatch.setattr(desktop.portable.project_draft, "_under",
+                        lambda path, ancestor: True)
+    with pytest.raises(desktop.DesktopRefused):
+        desktop.preview_existing_desk_task(str(root), "TASK-NEXT", "/test/note.md")
+    assert visited == ["/test/note.md"]
+
+
+def test_existing_add_refuses_unloaded_desk_before_original_reads(monkeypatch):
+    view, refusals = _existing_add_view()
+    view.loaded_desk = None
+    monkeypatch.setattr(desktop.owner, "review_personal_day",
+                        lambda *_: pytest.fail("Unloaded desk must not be read"))
+    monkeypatch.setattr(desktop.portable, "add_task",
+                        lambda *_a, **_kw: pytest.fail("Unloaded desk must not be written"))
+    desktop.PersonalDayDesktop.add_existing(view)
+    assert refusals == [True]
+
+
+def test_existing_add_cancel_has_no_original_task_write(monkeypatch):
+    view, refusals = _existing_add_view()
+    snapshots = _mock_existing_day(monkeypatch)
+    calls = _mock_existing_preview(monkeypatch)
+    monkeypatch.setattr(desktop.messagebox, "askyesno", lambda *a, **k: False)
+    monkeypatch.setattr(desktop.portable, "add_task",
+                        lambda *_a, **_kw: pytest.fail("No approval: no write"))
+    desktop.PersonalDayDesktop.add_existing(view)
+    assert not refusals
+    assert len(snapshots) == 1 and len(calls) == 1
+    assert view.values["new_task"].get() == "TASK-NEXT"
+    assert "cancelled" in view.status.get()
+
+
+def test_existing_add_refuses_changed_owner_or_note_after_consent(monkeypatch):
+    for source in ("owner", "note"):
+        view, refusals = _existing_add_view()
+        snapshots = _mock_existing_day(monkeypatch, drift=(source == "owner"))
+        previews = _mock_existing_preview(monkeypatch, drift=(source == "note"))
+        monkeypatch.setattr(desktop.messagebox, "askyesno", lambda *a, **k: True)
+        monkeypatch.setattr(desktop.portable, "add_task",
+                            lambda *_a, **_kw: pytest.fail("Drift must not write"))
+        desktop.PersonalDayDesktop.add_existing(view)
+        assert refusals == [True]
+        assert len(snapshots) == 2
+        assert len(previews) == (1 if source == "owner" else 2)
+
+
+def test_existing_add_success_delegates_one_original_write_then_unselects(monkeypatch):
+    view, refusals = _existing_add_view()
+    snapshots = _mock_existing_day(monkeypatch)
+    previews = _mock_existing_preview(monkeypatch)
+    monkeypatch.setattr(desktop.messagebox, "askyesno", lambda *a, **k: True)
+    writes = []
+    def add(desk, task, note, *, approved=False):
+        writes.append((desk, task, note, approved))
+        return {"status": "USER_AUTHORED_SCRATCH_DRAFT_NOT_VALIDATED",
+                "task_key_claimed": task, "sha256": "a" * 64,
+                "installed_or_project_write_authorized": False}
+    monkeypatch.setattr(desktop.portable, "add_task", add)
+    def refresh():
+        view.choices = {"new": ("ACTIVE_TASK", "TASK-NEXT", "a" * 64)}
+        return True
+    view.refresh = refresh
+    desktop.PersonalDayDesktop.add_existing(view)
+    assert not refusals
+    assert len(snapshots) == 2 and len(previews) == 2
+    assert writes == [("/test/Vres-Desk-Existing", "TASK-NEXT", "/test/note.md", True)]
+    assert view.values["new_task"].get() == "" and view.values["note"].get() == ""
+    assert all(view.values[name].get() == "" for name in desktop._HISTORY_CONTEXT_FIELDS)
+    assert not any(flag.get() for flag in (view.with_intake, view.with_acceptance,
+                                          view.with_catalog, view.with_synthetic))
+    assert "no project bound" in view.status.get().lower()
+
+
+def test_selection_change_drops_old_decision_and_visible_preview():
+    view = _View()
+    view.focused = (("old",), {"stage": "RESULT_REVIEW_READY_SEPARATE_DECISION"}, None)
+    view.decision = {"binding": ("old",), "packet": {}}
+    view._sync_guidance = lambda: None
+    displayed = []
+    view._display = displayed.append
+    view.status = _Var("")
+    desktop.PersonalDayDesktop._selection_changed(view)
+    assert view.focused is None and view.decision is None
+    assert displayed == [""]
+    assert "Focus" in view.status.get()

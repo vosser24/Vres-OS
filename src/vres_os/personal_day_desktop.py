@@ -113,6 +113,34 @@ def checked_day(packet: dict, *, selected: bool) -> dict:
     return packet
 
 
+def preview_existing_desk_task(desk_path: str, task: str, note_file: str) -> dict:
+    """Bounded, read-only ORIGINAL scratch preview; never writes or selects.
+
+    The original #165/#portable owners perform the actual approved write.
+    A preview digest is a byte claim, not task quality or user identity proof.
+    """
+    root = portable._desk(desk_path, must_exist=True)
+    target = portable._owned_task(root, task)
+    labels = portable._existing_tasks(root)
+    if (task in labels or len(labels) >= portable._MAX_CHILDREN
+            or portable.workbench._stat(target) is not None):
+        raise DesktopRefused("Original desk task already exists or desk is at capacity.")
+    selected_note = Path(note_file)
+    if portable.project_draft._under(selected_note, root):
+        raise DesktopRefused("Input note must remain outside the existing scratch desk.")
+    markdown = portable.project_draft._manual_markdown(note_file)
+    result = portable.workbench.preview_note(task, markdown)
+    if (result.get("status") != "DRAFT_PREVIEW_ONLY"
+            or result.get("task_key_claimed") != task
+            or result.get("writes_performed") is not False
+            or result.get("installed_or_project_write_authorized") is not False
+            or type(result.get("sha256")) is not str
+            or len(result["sha256"]) != 64
+            or any(c not in "0123456789abcdef" for c in result["sha256"])):
+        raise DesktopRefused("Original scratch note preview did not verify.")
+    return result
+
+
 class PersonalDayDesktop(ttk.Frame):
     """Ephemeral view state ONLY; original owners own all task/history writes."""
 
@@ -138,6 +166,7 @@ class PersonalDayDesktop(ttk.Frame):
         self.with_synthetic = tk.BooleanVar(value=False)
         self.status = tk.StringVar(value="Choose an explicit scratch desk and select Load.")
         self.choices: dict[str, tuple[str, str, str]] = {}
+        self.loaded_desk: str | None = None
         self.focused: tuple | None = None
         self.decision: dict | None = None
         self.guide = tk.StringVar(value="Step 1/4: Load an exact desk and select a task.")
@@ -185,7 +214,7 @@ class PersonalDayDesktop(ttk.Frame):
         scrollbar = ttk.Scrollbar(tasks, orient="vertical", command=self.listing.yview)
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.listing.configure(yscrollcommand=scrollbar.set)
-        self.listing.bind("<<TreeviewSelect>>", lambda _event: self._invalidate())
+        self.listing.bind("<<TreeviewSelect>>", lambda _event: self._selection_changed())
 
         workspace = ttk.Notebook(self)
         workspace.grid(row=3, column=0, sticky="ew", pady=6)
@@ -264,13 +293,20 @@ class PersonalDayDesktop(ttk.Frame):
         report_scroll.grid(row=0, column=1, sticky="ns")
         self.detail.configure(yscrollcommand=report_scroll.set)
 
-        create = ttk.LabelFrame(self, text="Optional NEW scratch start (absent desk + empty project only)")
+        create = ttk.LabelFrame(self, text="Original scratch tasks · add to LOADED desk or start a NEW desk")
         create.grid(row=6, column=0, sticky="ew")
         create.columnconfigure(1, weight=1)
         self._field(create, 0, "New task key", "new_task")
         self._field(create, 1, "Existing nonsensitive Markdown note", "note")
-        ttk.Button(create, text="Start NEW scratch with separate approval",
-                   command=self.start).grid(row=1, column=2, padx=4)
+        task_actions = ttk.Frame(create)
+        task_actions.grid(row=2, column=0, columnspan=2, sticky="w", pady=4)
+        self.add_button = ttk.Button(
+            task_actions, text="Add task to LOADED desk (approve)", command=self.add_existing)
+        self.add_button.pack(side="left", padx=4)
+        ttk.Button(task_actions, text="Start NEW desk/task (approve)",
+                   command=self.start).pack(side="left", padx=4)
+        ttk.Label(task_actions, text="No automatic selection or project binding.").pack(
+            side="left", padx=10)
         ttk.Label(self, textvariable=self.status, wraplength=900).grid(
             row=7, column=0, sticky="w", pady=5)
 
@@ -279,6 +315,12 @@ class PersonalDayDesktop(ttk.Frame):
         self.detail.delete("1.0", tk.END)
         self.detail.insert("1.0", content[:24000])
         self.detail.configure(state="disabled")
+
+    def _selection_changed(self) -> None:
+        """Never display the previous task's decision under a new selection."""
+        self._invalidate()
+        self._display("")
+        self.status.set("Selection changed. Focus the exact offered row before reviewing.")
 
     def _history_inputs_clear(self) -> bool:
         return (not any(self.values[name].get().strip()
@@ -308,10 +350,14 @@ class PersonalDayDesktop(ttk.Frame):
             button.configure(
                 state="normal" if plan["enabled"][name] else "disabled")
         self.guide.set(plan["next_step"])
+        self.add_button.configure(
+            state="normal" if self.loaded_desk == self.values["desk"].get().strip()
+            and bool(self.loaded_desk) else "disabled")
 
     def _edited(self, field: str | None) -> None:
         """A changed UI selection cannot retain a ready decision or preview."""
         if field == "desk":
+            self.loaded_desk = None
             self.choices.clear()
             self.listing.delete(*self.listing.get_children())
         self._invalidate()
@@ -502,6 +548,7 @@ class PersonalDayDesktop(ttk.Frame):
 
     def refresh(self) -> bool:
         self._invalidate()
+        self.loaded_desk = None
         self.choices.clear()
         self.listing.delete(*self.listing.get_children())
         self._display("")
@@ -520,6 +567,7 @@ class PersonalDayDesktop(ttk.Frame):
                 f"Read-only: {packet['active_task_count']} active; "
                 f"{packet['saved_completed_snapshot_count']} historical completed snapshots (undated).")
             self._display(owner.render_personal_day(packet))
+            self.loaded_desk = self.values["desk"].get().strip()
             self._sync_guidance()
             return True
         except Exception:
@@ -705,6 +753,64 @@ class PersonalDayDesktop(ttk.Frame):
                 f"Result SHA-256: {result['result_sha256']}\n"
                 f"Checkpoint SHA-256: {result['checkpoint_sha256']}\n"
                 "No F1/Fable, memory, host, database or future-byte authority.")
+        except Exception:
+            self._refuse()
+
+    def add_existing(self) -> None:
+        """Approved one-task addition on a LOADED original desk, not a new store.
+
+        Existing project/result/source form fields are only ephemeral UI state;
+        approval explicitly covers clearing them AFTER a confirmed owner write.
+        No active or historical choice is automatically focused after refresh.
+        """
+        try:
+            desk = self.values["desk"].get().strip()
+            task = self.values["new_task"].get().strip()
+            note = self.values["note"].get().strip()
+            if not desk or self.loaded_desk != desk:
+                raise DesktopRefused("Load the exact existing desk before adding a task.")
+            if not task or not note:
+                raise DesktopRefused("Explicit task key and ordinary Markdown note required.")
+            before = checked_day(owner.review_personal_day(desk), selected=False)
+            preview = preview_existing_desk_task(desk, task, note)
+            if not messagebox.askyesno(
+                    "Approve one existing-desk task",
+                    f"Add NEW original scratch task {task} to this LOADED desk?\n"
+                    f"Exact note SHA-256: {preview['sha256']}\n"
+                    "Maximum six current tasks; no project binding, code execution, "
+                    "installed change or result-quality proof.\n"
+                    "On success, clear temporary project/result/source inputs and "
+                    "reload without selecting a task.",
+                    parent=self.master):
+                self.status.set("Add task cancelled. No owner write requested.")
+                return
+            # Re-attest original day and selected input AFTER consent. No blind
+            # retry, and no inferred consent for changed notes or desk state.
+            if checked_day(owner.review_personal_day(desk), selected=False) != before:
+                raise DesktopRefused("Original desk changed during approval.")
+            if preview_existing_desk_task(desk, task, note) != preview:
+                raise DesktopRefused("Selected note or task preview changed during approval.")
+            created = portable.add_task(desk, task, note, approved=True)
+            if (created.get("status") != "USER_AUTHORED_SCRATCH_DRAFT_NOT_VALIDATED"
+                    or created.get("task_key_claimed") != task
+                    or created.get("sha256") != preview["sha256"]
+                    or created.get("installed_or_project_write_authorized") is not False):
+                raise DesktopRefused("Original task creation was not confirmed; inspect desk.")
+            for field in _HISTORY_CONTEXT_FIELDS:
+                self.values[field].set("")
+            for variable in (self.with_intake, self.with_acceptance,
+                             self.with_catalog, self.with_synthetic):
+                variable.set(False)
+            self.values["new_task"].set("")
+            self.values["note"].set("")
+            if not self.refresh():
+                raise DesktopRefused("Task may exist; original desk refresh failed.")
+            if not any(choice == ("ACTIVE_TASK", task, preview["sha256"])
+                       for choice in self.choices.values()):
+                raise DesktopRefused("New original task not offered after refresh; inspect desk.")
+            self.status.set(
+                "Task added to original desk; no project bound or row selected. "
+                "Explicitly select and focus it next.")
         except Exception:
             self._refuse()
 
