@@ -1,0 +1,66 @@
+# Vres-OS — 2026-11-16 — Original Personal Day Archive/Restore; 83 Recent Synthetic Tests NOT_RUN
+
+READ FIRST — NEW SOURCE MILESTONE PUBLISHED AND VERIFIED; NOT A RELEASE. One PERSONAL daily-operations Windows application for ONE user. Five NEW headless synthetic test functions AUTHORED NOT_RUN; 83 cumulative recent related headless synthetic functions AUTHORED NOT_RUN. Exact CURRENT source compilation, guarded suite, Tk/Linux GUI acceptance, Windows UAT and independent security review NOT_RUN. Isolation smoke PASS applies ONLY to non-project disposable probe, not Vres source. All absolute holds remain OPEN. Current installed Windows identity UNKNOWN.
+
+## 1. Owner direction, original functional scope, limits
+
+Continue meaningful integrated development towards first FULL production-quality one-user Windows Vres-OS, prioritizing useful daily planning, task execution, task revision, manual recovery, completion with result evidence, immutable saved-result history and explicit history reopening/replay. Avoid enterprise IAM/multitenancy, second task/Chairman/history/catalog/memory owner or store, endless microphases and unexecuted small test campaigns. Preserve all DISTINCT original V-01..V-42, M0..M8, W0..W3, W4 R1..R13, C2B/K0, original October 22/30/31 and November 5 roadmaps. Use proportional P0/P1/P2/P3 approvals. GitHub-only safe source, synthetic-test authoring, docs on appropriate feature/docs branches authorized. Installed Windows/profile, credentials, real legacy projects, protected Windows worktrees, PostgreSQL even SELECT, native Claude/hooks, protected merges, installers, release activation, rollback NOT AUTHORIZED. Owner-selected nonsensitive Windows dummy-project UAT NOT NOW; requires substantive first-FULL readiness, independent incident/F1 clearance and fresh explicit consent.
+
+Repository https://github.com/vosser24/Vres-OS; ID 1368577038; authenticated GitHub user vosser24, connection and permissions verified LIVE. Original functionality register docs/roadmap/VRES-FULL-SCOPE-FUNCTIONALITY-REGISTER-2026-10-22.md blob c6c8c24e4a38efb2e7589017e98b43b2015821df, 42 distinct V-01..V-42 verified LIVE. This register is not activation authorization.
+
+## 2. Incoming continuity and live repo verification
+
+Incoming canonical docs branch docs/chatgpt-continuity-20261023, HEAD aaeda4fba93043b5c200fe3c36ad545444917d2c, TREE 1c68651287b6237639c868a6ac142cd9acb265e6, sole PARENT 87c12c6dca3105987f8f7a09285710bbe78b111c; direct parent 1 ahead/0 behind with exactly two documentation paths. READ FIRST index docs/handoffs/VRES-CHATGPT-CONTINUITY-INDEX.md blob 11d1f0681564ad336d8e93ff151af490e1039a4a. Previous detailed handoff docs/handoffs/VRES-2026-11-16-ORIGINAL-REVISION-CONTRACT-PORTABLE-RECOVERY-HOLD-3-TESTS-NOTRUN-CHECKPOINT.md blob db161d8964781430d83d680e4587f543d2d05354. Both previous index and handoff read from LIVE GitHub.
+
+Incoming source feature/personal-revision-owner-contract-reliability-20261116 HEAD 09fdacdd9c52c5ebf8464c8197d9d2b2cb7c6f46, TREE 451c1dc5afedb54197a5b380d1a9772e3fe9956a, sole PARENT 8f04e81c35d83324a55a7124dbd1e79920957855. Both recent original source commits 8f04e81c35d83324a55a7124dbd1e79920957855 and 09fdacdd9c52c5ebf8464c8197d9d2b2cb7c6f46 verified; compared with 67ef7210bd083765e4e79bd27cac285c10683e2f: 2 ahead/0 behind, exactly four original lifecycle/portable source/tests paths. Their pending-revision fixes remain cooperative checks, not filesystem transactions. Original desktop was 1434 lines, original desktop test 1407 lines, and both changed only in NEW milestone below.
+
+Protected product main HEAD 9a8acc5d464b96432a93cb95daa9581412fb07ee, TREE 659d3fdd6e635dbaecbd5c492ba7279754edaec7. Protected R13 feature/personal-w4-r13-universal-staging-hold-20261106 HEAD bcf62460d68caebfdbd0e838d44c5997992c5fbc, TREE 9bbc5615fef4a8f785e9ddb0056e9430ffe25d63. Both live verified UNCHANGED; NEVER MERGE.
+
+## 3. NEW completed GitHub-only original-owner source milestone
+
+Branch feature/personal-day-archive-restore-original-owner-20261116, HEAD 766d61c05a46701f4a743171ca45e3e3972802c7, TREE bd2f92e8c29ea938238acad29cca661f35cd2b3a, SOLE PARENT 09fdacdd9c52c5ebf8464c8197d9d2b2cb7c6f46. Commit URL https://github.com/vosser24/Vres-OS/commit/766d61c05a46701f4a743171ca45e3e3972802c7 . NONFORCE expected-SHA lease against exact incoming parent; GitHub remote ref/commit/tree/parent/BLOBS/direct-parent comparison all verified; exactly 1 ahead/0 behind and TWO modified original paths:
+
+- src/vres_os/personal_day_desktop.py, blob 3456d12bd796e96ad20ea2eb4a972104909012ad (1703 lines).
+- tests/test_personal_day_desktop.py, blob cad0d804981442d8b41a944e90d3632fc1dd7231 (1556 lines).
+
+Existing single-user Personal Day Tkinter desktop now contains a dedicated Archive / restore tab. It uses ORIGINAL lifecycle list_history, move_out(state=archived), and reopen(state=archived), never a second store. A read-only archive inventory checks immutable undated snapshots against #165 Personal Day counts, bounded SHA/identity and uniqueness. Active archive requires explicit selection, exact note SHA, separately requested consent, pre/post consent day/history readback, existing recovery refusal, original lifecycle archive, verified changed active/history counts, no automatic focus or completion. Restore requires explicit archived selection and distinct consent, unchanged original history, absent active slot/capacity, exact archived SHA, original lifecycle reopen and postwrite active receipt; original archived copy preserved. Held recovery allows read-only history but blocks writes via UI guidance and original lifecycle checks. Neither operation claims host execution, task/result quality, replay, memory, F1/Fable, OS atomicity or credential/DB authority. Unknown partial writes demand manual inspection and no blind retry.
+
+Five headless test functions were AUTHORED NOT_RUN for bounded immutable archive history, consent cancellation and post-consent drift, archive owner delegation/readback, exact restore with preserved snapshot, and pending-recovery refusal. Direct original lifecycle and portable files remain unchanged at new HEAD, verified SHA:
+- src/vres_os/personal_task_lifecycle.py 737cb7edfc39ec261883ee3356c6e4e145672476
+- tests/test_personal_task_lifecycle.py 3e9cbf28ef085166844c2f21800ab1169b9c1ada
+- src/vres_os/personal_portable_desk.py 9306d430142b293e4c8050d6dcfb51a40a9dd200
+- tests/test_personal_portable_desk.py 2033276e93311a501266cc9d0dbc57afec219273.
+
+## 4. Test provenance, acquisition/isolation blocker
+
+Prior related 78 synthetic functions AUTHORED NOT_RUN; five NEW AUTHORED NOT_RUN; cumulative 83 recent related synthetic functions AUTHORED NOT_RUN. At exact new HEAD 766d61c, complete Python compilation NOT_RUN, full guarded original-owner suite NOT_RUN, all 83 recent related tests NOT_RUN, Tk/Linux GUI acceptance NOT_RUN, Windows acceptance NOT_RUN, independent #185 three-verdict security review NOT_RUN. New source has only static review/readback; do not claim runtime acceptance.
+
+Separate disposable Linux NON-PROJECT seccomp isolation smoke PASS ONLY: kernel NoNewPrivs=1 and Seccomp mode 2, 33 network/child/exec syscalls denied, socket, fork and subprocess spawn EPERM; no inherited socket FDs observed. NO Vres project source imported/executed. A smoke probe does NOT establish complete actual-suite pre-import kernel-enforced NO-network/NO-child isolation, and is NOT a guarded current-source test PASS. Full exact current tree was NOT acquired: raw/codeload/API GitHub archive DNS unavailable in disposable runtime; git connector can fetch single source blobs/tree manifest but not full archive materialization. Live tree API showed src 151 Python files (2,496,657 Python bytes) and tests 250 Python files (3,328,550 Python bytes), not downloaded full source.
+
+Historical source 9607206b9274b8e67ceb3de1d4a3348ec993c644 had 402 Python compilation PASS, 161 guarded synthetic PASS, 0 FAIL/0 SKIP, child exit 0. HISTORICAL DIFFERENT SOURCE ONLY; it cannot validate current source. Do NOT run unsafe ordinary pytest, ordinary PostgreSQL CI, native Claude/hooks or protected CI. Priority is ONE coherent exact-current-source guarded test campaign only AFTER FULL exact source and truly independent pre-import kernel isolation are demonstrably proven; otherwise preserve NOT_RUN and blocker.
+
+## 5. Issue ownership, absolute safety holds, local uncertainty
+
+Live checked original issues: #163/#164 CLOSED (Credential Broker and secret-safe ingress); #165 OPEN (ONE Chairman/Opus medium configurable policy, routing, host-observed telemetry, proposals/tasks/sessions/decisions/completed results/immutable history/replay); #166 OPEN/HELD (current-user global Claude snapshots/KEEP-DROP/adoption/rollback; synthetic preparation only); #167 OPEN (current-user OFFLINE saved data source registry/catalog, NOT live DB freshness); #168 OPEN (project intake/scaffold/adoption/recovery, read-only or held preparation); #169 OPEN (integrated Windows acceptance NOT_RUN); #170 OPEN (production readiness NOT_PROVEN); #174 CLOSED foundation only (trusted independent F1/Fable positive authority NOT_GRANTED); #176 OPEN (episodes/provenance/knowledge/trust/revocation/governed memory/reuse, no automatic eligibility/promotion); #185 OPEN (independent 3-verdict security review NOT_RUN). No issue changes.
+
+ABSOLUTE HOLDS: LIVE_SCHEMA_048_INCIDENT=OPEN (NO PostgreSQL direct or indirect, EVEN SELECT); HOST_HOOK_DB_ROUTE_ATTEMPTED_AND_REFUSED=OPEN (NO ordinary native Claude Code or hooks). Historical P3 incident OPEN. F1/Fable independent positive authority NOT_GRANTED. #185 NOT_RUN. WPR-01..WPR-10 OPEN/NOT_PROVEN/NOT_GRANTED, R13 universal release/staging HOLD ACTIVE. NO merge to main/R13, protected CI/ordinary DB CI, installed P2 overwrite, Windows/profile/worktree modifications, real credentials, real legacy-project changes, TASK-DAY-01, global KEEP/DROP, installer, release activation, rollback or Windows UAT now.
+
+Historical installed P2 source pin 82c82430b38f93bd6b9d5c3af3b5de9c1368af9c. Actual installed Windows source, local unpushed Windows changes, protected Windows worktrees, native host state ALL UNKNOWN; never infer from GitHub.
+
+Preserve rejected commits 54237bf7, 10379454, 0df5ada1, 3cabcb99, 5ea64136, 5addd2a0; rejected blobs cc60e529, 6f85150f; superseded d1554498, 09219bd7, 483e54ee, c7fa8f33; unpublished historical DPAPI 7c73027f24503a531e02b1b24a63cd60cd22e174 and 382dd3e325470a5c0473c9a3213f01f607a4458b. Preserve ARCH-010, previous harness history, missing-pytest/basetemp rejected attempts, successful helper 43422167426, corrected helper fc9f9ef53cfdbf06786d2ec56f170b5d40fda8bd, failed helper 43421892182, old archive 14033589857 availability UNKNOWN. No rejected/historical attempt grants protected operational authority.
+
+## 6. Exact next operation and mandatory hard checkpoint
+
+FIRST READ LIVE canonical docs branch READ FIRST index and NEWEST detailed handoff, reverify docs HEAD/TREE/PARENT/index/handoff blobs/direct-parent comparison, not assume any old SHA is current. Reverify new feature source branch HEAD 766d61c05a46701f4a743171ca45e3e3972802c7, TREE bd2f92e8c29ea938238acad29cca661f35cd2b3a, sole PARENT 09fdacdd9c52c5ebf8464c8197d9d2b2cb7c6f46, modified desktop/test blobs, unchanged owners, direct-parent compare 1 ahead/0 behind; protect main/R13, issues and all 42 original V requirements.
+
+SECOND: Independent static review of new Desktop Archive/Restore and headless tests, particularly import cycle, Tkinter/Treeview selections, 940px minimum layout, life/history contract, consent/SHA pre/post, pending revision, partial writes and readback outcomes. All runtime statuses NOT_RUN.
+
+THIRD HIGHEST PRIORITY: Acquire COMPLETE EXACT current source into independent disposable environment. Independently prove robust pre-import kernel-level no-network/no-child isolation for the real complete source/test run, beyond smoke. ONLY IF PROVEN run ONE coherent exact-current-source Python compilation plus original-owner guarded synthetic suite including ALL 83 related functions. Otherwise retain NOT_RUN and precise blocker; do NOT accumulate unexecuted microtests.
+
+FOURTH: After validation, continue SUBSTANTIVE integrated first-FULL ONE-user daily planning, task/revision/result/completion/archive/recovery/history with original #165/#167/#168/#176 owners. #166 remains HELD, no duplicate stores or enterprise scope. Windows selected nonsensitive dummy UAT NOT NOW; requires substantive first-FULL, independent incident/F1 clearance and FRESH explicit owner consent.
+
+FIFTH: Publish only safe completed authorized GitHub source/tests/docs on dedicated branches with exact parent, nonforce expected SHA, remote HEAD/TREE/PARENT/BLOBS and direct-parent comparison. Never merge main/R13 or infer local Windows identity.
+
+SIXTH: At/before 20 completed assistant replies or earlier context threshold/uncertainty, stop new feature phases, create next detailed dated docs handoff, prepend READ FIRST canonical index, verify publication and provide FULL inline fresh-chat resume prompt, END chat. No asynchronous handoff, no invented tests or incident clearance.
+
+This detailed handoff and index update are to be published together as one dedicated canonical docs commit and verified afterward. No protected state touched.
