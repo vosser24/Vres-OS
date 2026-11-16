@@ -1030,3 +1030,246 @@ def test_briefing_refuses_late_source_drift_without_render(monkeypatch):
     assert checks == ["CHECK", "CHECK"]
     assert refused == ["REFUSED"] and shown == [""]
     assert view.decision is None
+
+
+def test_revision_inventory_requires_same_active_note_and_no_manual_recovery(monkeypatch):
+    monkeypatch.setattr(desktop.owner, "render_personal_day", lambda p: "READ ONLY")
+    packet = _triage_owner_packet()
+    packet["manual_revision_recovery_attention_required"] = False
+    assert desktop.checked_revision_inventory(
+        packet, task="TASK-TODAY", note_sha256="a" * 64) is None
+    for task, digest in (("TASK-TODAY", "b" * 64),
+                         ("TASK-OLD", "b" * 64),
+                         ("TASK-OTHER", "a" * 64)):
+        with pytest.raises(desktop.DesktopRefused):
+            desktop.checked_revision_inventory(packet, task=task, note_sha256=digest)
+    packet["manual_revision_recovery_attention_required"] = True
+    with pytest.raises(desktop.DesktopRefused, match="MANUAL"):
+        desktop.checked_revision_inventory(
+            packet, task="TASK-TODAY", note_sha256="a" * 64)
+
+
+def test_revision_preview_delegates_exact_original_readers_no_writes(monkeypatch):
+    from pathlib import Path
+    root = Path("/test/Vres-Desk-Existing")
+    visited = []
+    monkeypatch.setattr(desktop.portable, "_desk",
+                        lambda value, *, must_exist: root)
+    monkeypatch.setattr(desktop.portable, "_existing_tasks",
+                        lambda value: ["TASK-TODAY"])
+    monkeypatch.setattr(desktop.lifecycle, "_active",
+                        lambda value, key: (root / "Vres-Workbench-TASK-TODAY",
+                                            {"sha256": "a" * 64}))
+    attention = {
+        "schema": desktop.lifecycle.SCHEMA,
+        "status": "READ_ONLY_PENDING_REVISION_ATTENTION",
+        "manual_recovery_attention_required": False,
+        "automatic_recovery_performed": False,
+        "pending_contents_opened": False,
+        "writes_performed": False,
+    }
+    monkeypatch.setattr(desktop.lifecycle, "inspect_pending_revision_attention",
+                        lambda value: attention)
+    monkeypatch.setattr(desktop.portable.project_draft, "_under",
+                        lambda path, ancestor: False)
+    monkeypatch.setattr(desktop.portable.project_draft, "_manual_markdown",
+                        lambda file: (visited.append(file) or
+                                      "# Task\n\n## Next action\n- Review the note.\n"))
+    monkeypatch.setattr(desktop.portable.continuity, "_action",
+                        lambda text: visited.append("validated-untrusted-action"))
+    receipt = {
+        "status": "DRAFT_PREVIEW_ONLY", "task_key_claimed": "TASK-TODAY",
+        "sha256": "b" * 64, "writes_performed": False,
+        "installed_or_project_write_authorized": False,
+    }
+    monkeypatch.setattr(desktop.portable.workbench, "preview_note",
+                        lambda task, markdown: receipt)
+    out = desktop.preview_selected_task_revision(
+        str(root), "TASK-TODAY", "/test/new.md", "a" * 64)
+    assert out == {
+        "task_key_claimed": "TASK-TODAY", "previous_sha256": "a" * 64,
+        "sha256": "b" * 64, "writes_performed": False,
+    }
+    assert visited == ["/test/new.md", "validated-untrusted-action"]
+    attention["manual_recovery_attention_required"] = True
+    with pytest.raises(desktop.DesktopRefused):
+        desktop.preview_selected_task_revision(
+            str(root), "TASK-TODAY", "/test/new.md", "a" * 64)
+    attention["manual_recovery_attention_required"] = False
+    receipt["writes_performed"] = True
+    with pytest.raises(desktop.DesktopRefused):
+        desktop.preview_selected_task_revision(
+            str(root), "TASK-TODAY", "/test/new.md", "a" * 64)
+    receipt["writes_performed"] = False
+    receipt["sha256"] = "a" * 64
+    with pytest.raises(desktop.DesktopRefused):
+        desktop.preview_selected_task_revision(
+            str(root), "TASK-TODAY", "/test/new.md", "a" * 64)
+
+
+def _revision_view():
+    view, refused = _existing_add_view()
+    view._selected = lambda: ("ACTIVE_TASK", "TASK-TODAY", "a" * 64)
+    view.inventory_packet = {"loaded": True}
+    view.values["note"].set("/test/revised.md")
+    view.focused = (("stale",), {"stage": "RESULT_REVIEW_READY_SEPARATE_DECISION"}, None)
+    view.decision = {"old": True}
+    def invalidate():
+        view.focused = None
+        view.decision = None
+    view._invalidate = invalidate
+    return view, refused
+
+
+def _mock_revision_owner(monkeypatch, *, drift=None):
+    packet = _triage_owner_packet()
+    packet["manual_revision_recovery_attention_required"] = False
+    monkeypatch.setattr(desktop.owner, "render_personal_day", lambda p: "READ ONLY")
+    reads, previews = [], []
+    def day(desk):
+        reads.append(desk)
+        state = dict(packet)
+        if drift == "owner" and len(reads) == 2:
+            state["proposal_sha256"] = "f" * 64
+        return state
+    def preview(desk, task, note, digest):
+        previews.append((desk, task, note, digest))
+        return {"task_key_claimed": task, "previous_sha256": digest,
+                "sha256": ("c" if drift == "note" and len(previews) > 1 else "b") * 64,
+                "writes_performed": False}
+    monkeypatch.setattr(desktop.owner, "review_personal_day", day)
+    monkeypatch.setattr(desktop, "preview_selected_task_revision", preview)
+    return reads, previews, packet
+
+
+def test_revision_refuses_unloaded_saved_or_missing_note_before_owner_reads(monkeypatch):
+    monkeypatch.setattr(desktop.owner, "review_personal_day",
+                        lambda *a: pytest.fail("Invalid selection must not read owner"))
+    monkeypatch.setattr(desktop.lifecycle, "revise",
+                        lambda *a, **k: pytest.fail("Invalid selection must never revise"))
+    for case in ("unloaded", "history", "no-note", "no-snapshot"):
+        view, refused = _revision_view()
+        if case == "unloaded":
+            view.loaded_desk = None
+        elif case == "history":
+            view._selected = lambda: ("SAVED_COMPLETED_RESULT", "TASK-TODAY", "a" * 64)
+        elif case == "no-note":
+            view.values["note"].set("")
+        else:
+            view.inventory_packet = None
+        desktop.PersonalDayDesktop.revise_selected(view)
+        assert refused == [True]
+        assert view.focused is None and view.decision is None
+
+
+def test_revision_cancel_discards_old_decision_without_original_write(monkeypatch):
+    view, refused = _revision_view()
+    reads, previews, _ = _mock_revision_owner(monkeypatch)
+    monkeypatch.setattr(desktop.messagebox, "askyesno", lambda *a, **kw: False)
+    monkeypatch.setattr(desktop.lifecycle, "revise",
+                        lambda *a, **kw: pytest.fail("Cancelled revision cannot write"))
+    desktop.PersonalDayDesktop.revise_selected(view)
+    assert refused == [] and len(reads) == len(previews) == 1
+    assert view.focused is None and view.decision is None
+    assert "cancelled" in view.status.get().lower()
+
+
+def test_revision_refuses_postconsent_owner_or_note_drift_without_write(monkeypatch):
+    monkeypatch.setattr(desktop.messagebox, "askyesno", lambda *a, **kw: True)
+    monkeypatch.setattr(desktop.lifecycle, "revise",
+                        lambda *a, **kw: pytest.fail("Drift cannot call original write"))
+    for case in ("owner", "note"):
+        view, refused = _revision_view()
+        reads, previews, _ = _mock_revision_owner(monkeypatch, drift=case)
+        desktop.PersonalDayDesktop.revise_selected(view)
+        assert refused == [True]
+        assert len(reads) == 2
+        assert len(previews) == (1 if case == "owner" else 2)
+        assert view.decision is None
+
+
+def test_revision_single_exact_owner_write_and_unselected_history_readback(monkeypatch):
+    view, refused = _revision_view()
+    reads, previews, packet = _mock_revision_owner(monkeypatch)
+    monkeypatch.setattr(desktop.messagebox, "askyesno", lambda *a, **kw: True)
+    writes = []
+    def revise(desk, task, note, *, approved=False,
+               expected_sha256=None, expected_new_sha256=None):
+        writes.append((desk, task, note, approved, expected_sha256, expected_new_sha256))
+        return {"schema": desktop.lifecycle.SCHEMA, "status": "OWN_TASK_REVISED",
+                "task_key_claimed": task, "previous_sha256": "a" * 64,
+                "sha256": "b" * 64, "previous_snapshot_preserved": True,
+                "installed_vres_modified": False}
+    monkeypatch.setattr(desktop.lifecycle, "revise", revise)
+    def refresh():
+        view.inventory_packet = {
+            **packet,
+            "revision_snapshot_count": packet["revision_snapshot_count"] + 1,
+            "original_offered_choices": [
+                {**choice, "selected_note_sha256": (
+                    "b" * 64 if choice["kind"] == "ACTIVE_TASK" else choice["selected_note_sha256"])}
+                for choice in packet["original_offered_choices"]],
+        }
+        return True
+    view.refresh = refresh
+    desktop.PersonalDayDesktop.revise_selected(view)
+    assert refused == []
+    assert reads == ["/test/Vres-Desk-Existing"] * 2
+    assert len(previews) == 2
+    assert writes == [("/test/Vres-Desk-Existing", "TASK-TODAY", "/test/revised.md",
+                       True, "a" * 64, "b" * 64)]
+    assert view.focused is None and view.decision is None
+    assert view.values["note"].get() == "" and view.values["new_task"].get() == ""
+    assert all(view.values[field].get() == "" for field in desktop._HISTORY_CONTEXT_FIELDS)
+    assert not any(var.get() for var in (
+        view.with_intake, view.with_acceptance, view.with_catalog, view.with_synthetic))
+    assert "revised" in view.status.get().lower()
+
+
+def test_revision_postwrite_mismatch_refuses_without_auto_retry(monkeypatch):
+    view, refused = _revision_view()
+    _reads, _previews, packet = _mock_revision_owner(monkeypatch)
+    monkeypatch.setattr(desktop.messagebox, "askyesno", lambda *a, **kw: True)
+    calls = []
+    def revise(*a, **kw):
+        calls.append((a, kw))
+        return {"schema": desktop.lifecycle.SCHEMA, "status": "OWN_TASK_REVISED",
+                "task_key_claimed": "TASK-TODAY", "previous_sha256": "a" * 64,
+                "sha256": "b" * 64, "previous_snapshot_preserved": True,
+                "installed_vres_modified": False}
+    monkeypatch.setattr(desktop.lifecycle, "revise", revise)
+    def stale_refresh():
+        view.inventory_packet = packet  # stale OLD active note and revision count
+        return True
+    view.refresh = stale_refresh
+    desktop.PersonalDayDesktop.revise_selected(view)
+    assert refused == [True] and len(calls) == 1
+
+
+def test_revision_button_enabled_only_for_loaded_explicit_active_choice():
+    class Button:
+        def __init__(self):
+            self.state = None
+        def configure(self, **kw):
+            self.state = kw["state"]
+    view, _, _ = _next_action_view()
+    view.action_buttons = {}
+    view.guide = _Var("")
+    view.add_button = Button()
+    view.action_preview_button = Button()
+    view.revise_button = Button()
+    view.inventory_packet = {"manual_revision_recovery_attention_required": False}
+    view._ui_plan = lambda: {"enabled": {}, "next_step": "Read only"}
+    desktop.PersonalDayDesktop._sync_guidance(view)
+    assert view.revise_button.state == "normal"
+    view.inventory_packet["manual_revision_recovery_attention_required"] = True
+    desktop.PersonalDayDesktop._sync_guidance(view)
+    assert view.revise_button.state == "disabled"
+    view.inventory_packet["manual_revision_recovery_attention_required"] = False
+    view._selected = lambda: ("SAVED_COMPLETED_RESULT", "TASK-OLD", "a" * 64)
+    desktop.PersonalDayDesktop._sync_guidance(view)
+    assert view.revise_button.state == "disabled"
+    view._selected = lambda: ("ACTIVE_TASK", "TASK-SELECTED", "a" * 64)
+    view.loaded_desk = "/test/Vres-Desk-Other"
+    desktop.PersonalDayDesktop._sync_guidance(view)
+    assert view.revise_button.state == "disabled"

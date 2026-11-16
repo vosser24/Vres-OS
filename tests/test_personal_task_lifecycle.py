@@ -83,3 +83,47 @@ def test_one_personal_revision_completion_archive_and_reopen_journey(tmp_path, c
     assert untouched.read_bytes() == b'preserve this unrelated user-owned neighbor'
     assert (root / ('Vres-Workbench-' + A)).exists()
     assert (root / ('Vres-Workbench-' + B)).exists()
+
+
+def test_original_revision_requires_exact_preimage_and_replacement_before_write(tmp_path, monkeypatch):
+    """Synthetic scratch only; expected digests fail closed before staging."""
+    import pytest
+    root = tmp_path / 'Vres-Desk-Digest-Bound-Revision'
+    inputs = tmp_path / 'explicit-inputs'
+    inputs.mkdir()
+    prior = inputs / 'original.md'
+    updated = inputs / 'replacement.md'
+    prior.write_text('# Day\n\n## Next action\n- Plan the day.\n', encoding='utf-8')
+    updated.write_text('# Day\n\n## Next action\n- Check the results.\n', encoding='utf-8')
+    desk.init_desk(root, approved=True)
+    old = desk.add_task(root, A, prior, approved=True)
+    next_digest = hashlib.sha256(updated.read_bytes()).hexdigest()
+    for old_digest, new_digest in (
+            ('f' * 64, next_digest), (old['sha256'], 'e' * 64),
+            ('INVALID', next_digest), (old['sha256'], 'INVALID')):
+        with pytest.raises(lifecycle.LifecycleRefused):
+            lifecycle.revise(root, A, updated, approved=True,
+                             expected_sha256=old_digest,
+                             expected_new_sha256=new_digest)
+        assert lifecycle.list_history(root)['count'] == 0
+        assert desk.open_task(root, A)['sha256'] == old['sha256']
+    # A recovered/abandoned original pending revision blocks new writes.
+    original_attention = lifecycle.inspect_pending_revision_attention
+    monkeypatch.setattr(lifecycle, 'inspect_pending_revision_attention',
+                        lambda value: {'manual_revision_recovery_attention_required': True})
+    with pytest.raises(lifecycle.LifecycleRefused, match='manual'):
+        lifecycle.revise(root, A, updated, approved=True,
+                         expected_sha256=old['sha256'], expected_new_sha256=next_digest)
+    monkeypatch.setattr(lifecycle, 'inspect_pending_revision_attention', original_attention)
+    changed = lifecycle.revise(root, A, updated, approved=True,
+                               expected_sha256=old['sha256'],
+                               expected_new_sha256=next_digest)
+    assert changed['status'] == 'OWN_TASK_REVISED'
+    assert changed['previous_sha256'] == old['sha256']
+    assert changed['sha256'] == next_digest
+    assert changed['previous_snapshot_preserved'] is True
+    history = lifecycle.list_history(root)
+    assert history['count'] == 1
+    assert history['snapshots'][0]['state'] == 'revisions'
+    assert history['snapshots'][0]['sha256'] == old['sha256']
+    assert prior.read_text(encoding='utf-8').endswith('Plan the day.\n')

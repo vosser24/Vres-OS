@@ -501,19 +501,36 @@ def move_out(value: str | Path, key: str, *, state: str,
 
 
 def revise(value: str | Path, key: str, note_file: str | Path,
-           *, approved: bool = False) -> dict[str, Any]:
-    """Stage a verified replacement; preserve previous snapshot before swap."""
+           *, approved: bool = False, expected_sha256: str | None = None,
+           expected_new_sha256: str | None = None) -> dict[str, Any]:
+    """Stage exact approved replacement; preserve previous snapshot before swap.
+
+    Optional original preimage + new-note SHA claims are checked BEFORE writing;
+    the same original owner rechecks the active note at the final rename boundary.
+    This is NOT an OS-atomic transaction or a host identity/quality guarantee.
+    """
     if approved is not True:
         raise LifecycleRefused('Explicit revision approval required')
+    for digest in (expected_sha256, expected_new_sha256):
+        if digest is not None and (
+                type(digest) is not str or not workbench._SHA.fullmatch(digest)):
+            raise LifecycleRefused('Exact lowercase original revision SHA required')
     root = _root(value)
+    if inspect_pending_revision_attention(root)['manual_revision_recovery_attention_required']:
+        raise LifecycleRefused('Interrupted revision pending; manual recovery required')
     desk._existing_tasks(root)
     active, before = _active(root, key)
+    if expected_sha256 is not None and before['sha256'] != expected_sha256:
+        raise LifecycleRefused('Original selected note changed before revision')
     note_path = Path(note_file)
     if draft._under(note_path, root):
         raise LifecycleRefused('New Markdown input must be outside the desk')
     markdown = draft._manual_markdown(note_path)
     continuity._action(markdown)  # guarantee the next focus action is readable
     next_receipt = workbench.preview_note(key, markdown)
+    if (expected_new_sha256 is not None
+            and next_receipt['sha256'] != expected_new_sha256):
+        raise LifecycleRefused('Replacement note changed before revision')
     if next_receipt['sha256'] == before['sha256']:
         raise LifecycleRefused('No change to the existing note')
     hist = _history(root, create=False)

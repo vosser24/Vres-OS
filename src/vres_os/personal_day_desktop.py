@@ -18,9 +18,11 @@ if not __package__:
     sys.path.insert(0, str(Path(__file__).absolute().parent.parent))
     from vres_os import personal_work_session as owner
     from vres_os import personal_portable_desk as portable
+    from vres_os import personal_task_lifecycle as lifecycle
 else:
     from . import personal_work_session as owner
     from . import personal_portable_desk as portable
+    from . import personal_task_lifecycle as lifecycle
 
 
 class DesktopRefused(ValueError):
@@ -140,6 +142,63 @@ def preview_existing_desk_task(desk_path: str, task: str, note_file: str) -> dic
             or any(c not in "0123456789abcdef" for c in result["sha256"])):
         raise DesktopRefused("Original scratch note preview did not verify.")
     return result
+
+
+
+def checked_revision_inventory(packet: dict, *, task: str, note_sha256: str) -> None:
+    """Only a current, explicitly selected ACTIVE original task may be revised."""
+    plan = triage_personal_day(packet)
+    if plan["manual_recovery_attention_required"]:
+        raise DesktopRefused("Original pending revision needs MANUAL recovery review.")
+    if ("ACTIVE_TASK", task, note_sha256) not in plan["rows"]:
+        raise DesktopRefused("Selected original active note changed; refresh and reselect.")
+
+
+def preview_selected_task_revision(
+    desk_path: str, task: str, note_file: str, note_sha256: str,
+) -> dict:
+    """Read-only original-owner old/new note receipts; no implicit action disclosure.
+
+    This preview is not authority to write. The original lifecycle owner binds
+    BOTH preimage and replacement digest again inside the approved operation.
+    """
+    if (type(note_sha256) is not str or len(note_sha256) != 64
+            or any(c not in "0123456789abcdef" for c in note_sha256)):
+        raise DesktopRefused("Exact original active note SHA-256 required.")
+    root = portable._desk(desk_path, must_exist=True)
+    portable._existing_tasks(root)
+    _folder, current = lifecycle._active(root, task)
+    if current.get("sha256") != note_sha256:
+        raise DesktopRefused("Original active note is no longer the selected version.")
+    attention = lifecycle.inspect_pending_revision_attention(root)
+    if (type(attention) is not dict
+            or attention.get("schema") != lifecycle.SCHEMA
+            or attention.get("status") != "READ_ONLY_PENDING_REVISION_ATTENTION"
+            or attention.get("manual_recovery_attention_required") is not False
+            or attention.get("automatic_recovery_performed") is not False
+            or attention.get("pending_contents_opened") is not False
+            or attention.get("writes_performed") is not False):
+        raise DesktopRefused("Pending revision or unverified recovery state; inspect manually.")
+    if portable.project_draft._under(Path(note_file), root):
+        raise DesktopRefused("Revision input Markdown must remain outside scratch desk.")
+    markdown = portable.project_draft._manual_markdown(note_file)
+    portable.continuity._action(markdown)  # original next-action grammar, NOT execution
+    preview = portable.workbench.preview_note(task, markdown)
+    digest = preview.get("sha256")
+    if (preview.get("status") != "DRAFT_PREVIEW_ONLY"
+            or preview.get("task_key_claimed") != task
+            or preview.get("writes_performed") is not False
+            or preview.get("installed_or_project_write_authorized") is not False
+            or type(digest) is not str or len(digest) != 64
+            or any(c not in "0123456789abcdef" for c in digest)
+            or digest == note_sha256):
+        raise DesktopRefused("Replacement note preview invalid, identical or not read only.")
+    return {
+        "task_key_claimed": task,
+        "previous_sha256": note_sha256,
+        "sha256": digest,
+        "writes_performed": False,
+    }
 
 
 def triage_personal_day(packet: dict, *, query: str = "", mode: str = "ALL") -> dict:
@@ -388,16 +447,22 @@ class PersonalDayDesktop(ttk.Frame):
         create.columnconfigure(1, weight=1)
         workspace.add(create, text="Add scratch task")
         self._field(create, 0, "New task key", "new_task")
-        self._field(create, 1, "Existing nonsensitive Markdown note", "note")
+        self._field(create, 1, "External Markdown input (add / start / revise)", "note")
         task_actions = ttk.Frame(create)
-        task_actions.grid(row=2, column=0, columnspan=2, sticky="w", pady=4)
+        task_actions.grid(row=2, column=0, columnspan=2, sticky="ew", pady=4)
         self.add_button = ttk.Button(
             task_actions, text="Add task to LOADED desk (approve)", command=self.add_existing)
-        self.add_button.pack(side="left", padx=4)
+        self.add_button.grid(row=0, column=0, sticky="w", padx=4, pady=3)
         ttk.Button(task_actions, text="Start NEW desk/task (approve)",
-                   command=self.start).pack(side="left", padx=4)
-        ttk.Label(task_actions, text="No automatic selection or project binding.").pack(
-            side="left", padx=10)
+                   command=self.start).grid(row=0, column=1, sticky="w", padx=4, pady=3)
+        self.revise_button = ttk.Button(
+            task_actions, text="Revise SELECTED ACTIVE task (approve)",
+            command=self.revise_selected)
+        self.revise_button.grid(row=1, column=0, columnspan=2, sticky="w", padx=4, pady=3)
+        ttk.Label(task_actions,
+                  text="Original revision history preserves the old note. "
+                       "No automatic selection, completion or project binding.").grid(
+                       row=2, column=0, columnspan=2, sticky="w", padx=4, pady=3)
         ttk.Label(self, textvariable=self.status, wraplength=900).grid(
             row=6, column=0, sticky="w", pady=5)
 
@@ -493,6 +558,15 @@ class PersonalDayDesktop(ttk.Frame):
             and bool(self.loaded_desk)
             and self.loaded_desk == self.values["desk"].get().strip()
             else "disabled")
+        if hasattr(self, "revise_button"):
+            self.revise_button.configure(
+                state="normal" if kind == "ACTIVE_TASK"
+                and self.inventory_packet is not None
+                and self.inventory_packet.get(
+                    "manual_revision_recovery_attention_required") is False
+                and bool(self.loaded_desk)
+                and self.loaded_desk == self.values["desk"].get().strip()
+                else "disabled")
 
     def _edited(self, field: str | None) -> None:
         """A changed UI selection cannot retain a ready decision or preview."""
@@ -1080,6 +1154,77 @@ class PersonalDayDesktop(ttk.Frame):
             self.status.set(
                 "Task added to original desk; no project bound or row selected. "
                 "Switch to ALL/ACTIVE, then explicitly select and focus it.")
+        except Exception:
+            self._refuse()
+
+    def revise_selected(self) -> None:
+        """Separately approved original revision: exact old/new digest, preserved history.
+
+        No invented task store, implicit new-action execution, completion or
+        recovery. A refused/partial original write is UNKNOWN: never auto-retry.
+        """
+        self._invalidate()
+        self._display("")
+        try:
+            kind, task, digest = self._selected()
+            desk = self.values["desk"].get().strip()
+            note = self.values["note"].get().strip()
+            if (kind != "ACTIVE_TASK" or not desk or self.loaded_desk != desk
+                    or self.inventory_packet is None or not note):
+                raise DesktopRefused("Load and select one active task and external Markdown.")
+            before = checked_day(owner.review_personal_day(desk), selected=False)
+            checked_revision_inventory(before, task=task, note_sha256=digest)
+            preview = preview_selected_task_revision(desk, task, note, digest)
+            if not messagebox.askyesno(
+                    "Separate original task revision approval",
+                    f"REVISE this explicitly selected ACTIVE task {task}?\n"
+                    f"Existing note SHA-256: {digest}\n"
+                    f"Replacement SHA-256: {preview['sha256']}\n"
+                    "The ORIGINAL owner preserves the previous note in revision history.\n"
+                    "The current project/result/acceptance/source inputs will be cleared.\n"
+                    "No execution, completion or result-quality proof. If interrupted, "
+                    "inspect the original desk manually; do not retry blindly.",
+                    parent=self.master):
+                self.status.set("Revision cancelled. No original revision requested.")
+                return
+            fresh = checked_day(owner.review_personal_day(desk), selected=False)
+            if fresh != before:
+                raise DesktopRefused("Original task/history changed during approval.")
+            checked_revision_inventory(fresh, task=task, note_sha256=digest)
+            if preview_selected_task_revision(desk, task, note, digest) != preview:
+                raise DesktopRefused("Selected old or replacement note changed during consent.")
+            result = lifecycle.revise(
+                desk, task, note, approved=True,
+                expected_sha256=digest, expected_new_sha256=preview["sha256"])
+            if (type(result) is not dict
+                    or result.get("schema") != lifecycle.SCHEMA
+                    or result.get("status") != "OWN_TASK_REVISED"
+                    or result.get("task_key_claimed") != task
+                    or result.get("previous_sha256") != digest
+                    or result.get("sha256") != preview["sha256"]
+                    or result.get("previous_snapshot_preserved") is not True
+                    or result.get("installed_vres_modified") is not False):
+                raise DesktopRefused("Revision owner receipt ambiguous; inspect before retry.")
+            for field in _HISTORY_CONTEXT_FIELDS:
+                self.values[field].set("")
+            for variable in (self.with_intake, self.with_acceptance,
+                             self.with_catalog, self.with_synthetic):
+                variable.set(False)
+            self.values["note"].set("")
+            self.values["new_task"].set("")
+            if not self.refresh():
+                raise DesktopRefused("Revision may have occurred; original refresh failed.")
+            current = self.inventory_packet
+            if (current is None
+                    or current["revision_snapshot_count"] != before["revision_snapshot_count"] + 1
+                    or current["active_task_count"] != before["active_task_count"]
+                    or current["manual_revision_recovery_attention_required"] is not False
+                    or ("ACTIVE_TASK", task, preview["sha256"])
+                       not in triage_personal_day(current)["rows"]):
+                raise DesktopRefused("Revision readback differs; manually inspect history.")
+            self.status.set(
+                "Original task revised; previous note preserved in revisions. "
+                "No active task auto-selected. Select and focus the new note explicitly.")
         except Exception:
             self._refuse()
 
