@@ -767,3 +767,122 @@ def test_add_task_with_history_filter_verifies_unfiltered_owner_receipt(monkeypa
     assert refusals == [] and calls == [True]
     assert view.choices == {}  # No implicit current task selection.
     assert "ALL/ACTIVE" in view.status.get()
+
+
+def _next_action_view():
+    """No Tk or filesystem; all original owners are mocked to prevent effects."""
+    view = _View()
+    view.values = {"desk": _Var("/test/Vres-Desk-Selected")}
+    view.loaded_desk = "/test/Vres-Desk-Selected"
+    view.inventory_packet = {"owner_packet": "read-only"}
+    view._selected = lambda: ("ACTIVE_TASK", "TASK-SELECTED", "a" * 64)
+    view.focused = (("old",), {"stage": "RESULT_REVIEW_READY_SEPARATE_DECISION"}, None)
+    view.decision = {"binding": ("old",)}
+    view.status = _Var("")
+    view._sync_guidance = lambda: None
+    view._invalidate = lambda: desktop.PersonalDayDesktop._invalidate(view)
+    displayed, refusals = [], []
+    view._display = displayed.append
+    view._refuse = lambda: refusals.append("REFUSED")
+    return view, displayed, refusals
+
+
+def _next_action_owner_packet():
+    return {
+        "selected_choice_kind": "ACTIVE_TASK",
+        "selected_task_key_claimed": "TASK-SELECTED",
+        "source_context_selected_explicitly": False,
+        "selected_original_journey": {
+            "selected_note_sha256": "a" * 64,
+            "selected_next_action_disclosed": True,
+            "selected_next_action_untrusted": "Review the task's next manual step.",
+        },
+    }
+
+
+def test_selected_next_action_reads_only_explicit_original_task(monkeypatch):
+    view, shown, refused = _next_action_view()
+    calls = []
+    def original_day(desk, task, *, show_selected_action=False):
+        calls.append((desk, task, show_selected_action))
+        return _next_action_owner_packet()
+    monkeypatch.setattr(desktop.owner, "review_personal_day", original_day)
+    monkeypatch.setattr(desktop, "checked_day", lambda p, *, selected: p)
+    monkeypatch.setattr(desktop.owner, "render_personal_day",
+                        lambda p: "UNTRUSTED TASK ACTION: " +
+                        p["selected_original_journey"]["selected_next_action_untrusted"])
+    monkeypatch.setattr(desktop.owner, "finish_reviewed_decision",
+                        lambda *a, **kw: pytest.fail("Never write or complete"))
+    monkeypatch.setattr(desktop.owner, "reopen_saved",
+                        lambda *a, **kw: pytest.fail("Never reopen history"))
+    desktop.PersonalDayDesktop.inspect_next_action(view)
+    assert refused == []
+    assert calls == [("/test/Vres-Desk-Selected", "TASK-SELECTED", True)]
+    assert view.focused is None and view.decision is None
+    assert shown == ["", "UNTRUSTED TASK ACTION: Review the task's next manual step."]
+    assert "never execute" in view.status.get().lower()
+
+
+def test_selected_next_action_refuses_history_or_unloaded_desk_without_reads(monkeypatch):
+    monkeypatch.setattr(desktop.owner, "review_personal_day",
+                        lambda *a, **k: pytest.fail("Unselected owner must not be read"))
+    for kind, loaded in (("SAVED_COMPLETED_RESULT", "/test/Vres-Desk-Selected"),
+                         ("ACTIVE_TASK", None),
+                         ("ACTIVE_TASK", "/test/Vres-Desk-Other")):
+        view, shown, refused = _next_action_view()
+        view._selected = lambda kind=kind: (kind, "TASK-SELECTED", "a" * 64)
+        view.loaded_desk = loaded
+        desktop.PersonalDayDesktop.inspect_next_action(view)
+        assert refused == ["REFUSED"] and shown == [""]
+        assert view.focused is None and view.decision is None
+
+
+def test_selected_next_action_rejects_stale_or_unauthorized_disclosure(monkeypatch):
+    view, shown, refused = _next_action_view()
+    monkeypatch.setattr(desktop, "checked_day", lambda p, *, selected: p)
+    monkeypatch.setattr(desktop.owner, "render_personal_day",
+                        lambda p: pytest.fail("Refused action must not render"))
+    for change in (
+        {"selected_choice_kind": "SAVED_COMPLETED_RESULT"},
+        {"selected_task_key_claimed": "TASK-OTHER"},
+        {"source_context_selected_explicitly": True},
+        {"selected_original_journey": {"selected_note_sha256": "b" * 64,
+                                       "selected_next_action_disclosed": True,
+                                       "selected_next_action_untrusted": "Never"}},
+        {"selected_original_journey": {"selected_note_sha256": "a" * 64,
+                                       "selected_next_action_disclosed": False,
+                                       "selected_next_action_untrusted": "Never"}},
+        {"selected_original_journey": {"selected_note_sha256": "a" * 64,
+                                       "selected_next_action_disclosed": True,
+                                       "selected_next_action_untrusted": "bad\nnew line"}},
+    ):
+        packet = {**_next_action_owner_packet(), **change}
+        monkeypatch.setattr(desktop.owner, "review_personal_day",
+                            lambda *a, packet=packet, **k: packet)
+        desktop.PersonalDayDesktop.inspect_next_action(view)
+    assert refused == ["REFUSED"] * 6
+    assert shown == [""] * 6
+
+
+def test_next_action_button_only_for_selected_active_loaded_original_owner():
+    class Button:
+        def __init__(self):
+            self.state = None
+        def configure(self, **kw):
+            self.state = kw["state"]
+    view, _, _ = _next_action_view()
+    view.action_buttons = {}
+    view.guide = _Var("")
+    view.add_button = Button()
+    view.action_preview_button = Button()
+    view._ui_plan = lambda: {"enabled": {}, "next_step": "Read only"}
+    view._selected = lambda: ("ACTIVE_TASK", "TASK-SELECTED", "a" * 64)
+    desktop.PersonalDayDesktop._sync_guidance(view)
+    assert view.action_preview_button.state == "normal"
+    view._selected = lambda: ("SAVED_COMPLETED_RESULT", "TASK-OLD", "a" * 64)
+    desktop.PersonalDayDesktop._sync_guidance(view)
+    assert view.action_preview_button.state == "disabled"
+    view._selected = lambda: ("ACTIVE_TASK", "TASK-SELECTED", "a" * 64)
+    view.loaded_desk = "/test/Vres-Desk-Other"
+    desktop.PersonalDayDesktop._sync_guidance(view)
+    assert view.action_preview_button.state == "disabled"

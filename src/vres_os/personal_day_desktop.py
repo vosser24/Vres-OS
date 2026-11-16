@@ -281,6 +281,10 @@ class PersonalDayDesktop(ttk.Frame):
         ttk.Combobox(triage, textvariable=self.triage_mode, state="readonly",
                      values=("ALL", "ACTIVE", "HISTORY"), width=11).grid(
                          row=0, column=3, padx=4)
+        self.action_preview_button = ttk.Button(
+            triage, text="View NEXT ACTION (read only)",
+            command=self.inspect_next_action)
+        self.action_preview_button.grid(row=0, column=4, padx=4)
         self.listing = ttk.Treeview(
             tasks, columns=("kind", "task", "note"), show="headings",
             selectmode="browse", height=7)
@@ -473,6 +477,16 @@ class PersonalDayDesktop(ttk.Frame):
         self.add_button.configure(
             state="normal" if self.loaded_desk == self.values["desk"].get().strip()
             and bool(self.loaded_desk) else "disabled")
+        try:
+            kind, _task, _sha = self._selected()
+        except DesktopRefused:
+            kind = None
+        self.action_preview_button.configure(
+            state="normal" if kind == "ACTIVE_TASK"
+            and self.inventory_packet is not None
+            and bool(self.loaded_desk)
+            and self.loaded_desk == self.values["desk"].get().strip()
+            else "disabled")
 
     def _edited(self, field: str | None) -> None:
         """A changed UI selection cannot retain a ready decision or preview."""
@@ -699,6 +713,43 @@ class PersonalDayDesktop(ttk.Frame):
             self.triage_summary.set("Original snapshot unavailable; inspect desk before retry.")
             self._refuse()
             return False
+
+    def inspect_next_action(self) -> None:
+        """Show one explicitly selected original task's next step as DATA only.
+
+        This is a separate opt-in, read-only ORIGINAL #165/handoff request.
+        No result, project, command, task selection or approval is inferred.
+        """
+        self._invalidate()
+        self._display("")
+        try:
+            kind, task, digest = self._selected()
+            desk = self.values["desk"].get().strip()
+            if (kind != "ACTIVE_TASK" or not desk or self.loaded_desk != desk
+                    or self.inventory_packet is None):
+                raise DesktopRefused("Load the desk and select a current active task.")
+            packet = checked_day(
+                owner.review_personal_day(desk, task, show_selected_action=True),
+                selected=True)
+            journey = packet.get("selected_original_journey")
+            if type(journey) is not dict:
+                raise DesktopRefused("Original selected task action unavailable.")
+            action = journey.get("selected_next_action_untrusted")
+            if (packet.get("selected_choice_kind") != "ACTIVE_TASK"
+                    or packet.get("selected_task_key_claimed") != task
+                    or packet.get("source_context_selected_explicitly") is not False
+                    or journey.get("selected_note_sha256") != digest
+                    or journey.get("selected_next_action_disclosed") is not True
+                    or type(action) is not str or not 0 < len(action) <= 240
+                    or "\n" in action):
+                raise DesktopRefused("Original action disclosure or note receipt changed.")
+            self._display(owner.render_personal_day(packet))
+            self.status.set(
+                "UNTRUSTED note NEXT ACTION displayed from the original verified task. "
+                "Read-only data; never execute it. Focus separately for project/result review.")
+            self._sync_guidance()
+        except Exception:
+            self._refuse()
 
     def focus(self) -> None:
         self._invalidate()
