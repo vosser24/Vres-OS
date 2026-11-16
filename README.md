@@ -2,6 +2,16 @@
 
 **Controlled-live-test preview. Not production-verified.**
 
+**Current safety hold (2026-11-16):** The full Windows installer/update and ordinary
+Claude/host-hook/PostgreSQL routes remain BLOCKED by the open Schema-048 and
+host-hook incidents. A source-only Personal Day GUI package entry is now declared
+as `vres-personal-day`, but it must NOT be installed or launched on the owner's
+real Windows profile without the separately required safety review, full release
+acceptance, target/rollback evidence, and explicit owner authorization. This
+entry delegates to the existing Personal Day owner; it is NOT a second Chairman
+or a claim that the full Vres-OS application is ready.
+
+
 Vres-OS is a new, modular Python/PostgreSQL runtime and Claude Code plugin. The Chairman is the conversational entry point. The runtime preserves task state, documented knowledge, approval-backed procedures and evidence. It draws on AIGO's engineering principles; it does **not** bundle or inherit the validated AIGO runtime/test suite.
 
 Start here: [Windows installation](docs/INSTALL-WINDOWS.md) · [finalization verification](docs/FINAL-VERIFICATION.md) · [full regression catalog](docs/LIVE-VERIFICATION.md) · [release evidence](docs/RELEASE-VALIDATION.md) · [limitations](docs/KNOWN-LIMITATIONS.md).

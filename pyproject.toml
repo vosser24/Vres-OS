@@ -48,6 +48,9 @@ dev = [
 [project.scripts]
 vres = "vres_os.cli:app"
 vres-mcp = "vres_os.company_mcp:main"
+# Explicit opt-in Tk entry; delegates only to the existing Personal Day owner.
+# Publishing this source entry does NOT authorize installing or launching it.
+vres-personal-day = "vres_os.personal_day_desktop:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

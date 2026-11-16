@@ -786,6 +786,15 @@ def _next_action_view():
     view.decision = {"binding": ("old",)}
     view.status = _Var("")
     view.master = None  # headless messagebox parent; production still requires separate approval
+    # The new guided read button is a presentation hint. This headless fixture
+    # intentionally isolates the original owner read from Tk and that hint.
+    view._binding = lambda: ("explicit-test-desk", "ACTIVE_TASK", "TASK-SELECTED", "a" * 64)
+    view._recommended_read = lambda: {"route": None, "label": "Manual owner read"}
+    view.safe_next_label = _Var("")
+    class NoTkButton:
+        def configure(self, **_kwargs):
+            pass
+    view.safe_next_button = NoTkButton()
     view._sync_guidance = lambda: None
     view._invalidate = lambda: desktop.PersonalDayDesktop._invalidate(view)
     displayed, refusals = [], []
