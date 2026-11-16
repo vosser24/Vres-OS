@@ -19,10 +19,12 @@ if not __package__:
     from vres_os import personal_work_session as owner
     from vres_os import personal_portable_desk as portable
     from vres_os import personal_task_lifecycle as lifecycle
+    from vres_os import personal_day_navigation as navigation
 else:
     from . import personal_work_session as owner
     from . import personal_portable_desk as portable
     from . import personal_task_lifecycle as lifecycle
+    from . import personal_day_navigation as navigation
 
 
 class DesktopRefused(ValueError):
@@ -473,6 +475,9 @@ class PersonalDayDesktop(ttk.Frame):
         self.focused: tuple | None = None
         self.decision: dict | None = None
         self.guide = tk.StringVar(value="Step 1/4: Load an exact desk and select a task.")
+        self.safe_next_label = tk.StringVar(value="Enter an exact scratch desk path first")
+        self.action_seen_binding: tuple | None = None
+        self.briefing_seen_binding: tuple | None = None
         self.action_buttons = {}
         self._draw()
         # Editing any path, SHA, opt-in or desk invalidates prior focused claims.
@@ -538,9 +543,11 @@ class PersonalDayDesktop(ttk.Frame):
             row=2, column=0, columnspan=2, sticky="w", pady=(5, 0))
 
         workspace = ttk.Notebook(self)
+        self.workspace = workspace
         workspace.grid(row=3, column=0, sticky="ew", pady=6)
 
         active = ttk.Frame(workspace, padding=5)
+        self.project_tab = active
         active.columnconfigure(1, weight=1)
         workspace.add(active, text="Project / result")
         self._field(active, 0, "Project root (explicit)", "project")
@@ -609,8 +616,13 @@ class PersonalDayDesktop(ttk.Frame):
         self.home_button.grid(row=1, column=3, sticky="ew", padx=3, pady=2)
         for column in range(4):
             buttons.columnconfigure(column, weight=1)
+        self.safe_next_button = ttk.Button(
+            buttons, textvariable=self.safe_next_label,
+            command=self.follow_read_only_step)
+        self.safe_next_button.grid(
+            row=2, column=0, columnspan=4, sticky="ew", padx=3, pady=4)
         ttk.Label(buttons, textvariable=self.guide, wraplength=900).grid(
-            row=2, column=0, columnspan=4, sticky="w", pady=(7, 0))
+            row=3, column=0, columnspan=4, sticky="w", pady=(5, 0))
 
         report = ttk.LabelFrame(self, text="Original owner view · historical is NOT current")
         report.grid(row=5, column=0, sticky="nsew", pady=6)
@@ -652,6 +664,9 @@ class PersonalDayDesktop(ttk.Frame):
                   text="Original revision history preserves the old note. "
                        "No automatic selection, completion or project binding.").grid(
                        row=2, column=0, columnspan=2, sticky="w", padx=4, pady=3)
+        ttk.Button(task_actions, text="Insert editable task starter (no save)",
+                   command=self.insert_starter).grid(
+                       row=3, column=0, columnspan=2, sticky="w", padx=4, pady=3)
         archive_tab = ttk.Frame(workspace, padding=5)
         archive_tab.columnconfigure(0, weight=1)
         archive_tab.rowconfigure(1, weight=1)
@@ -796,12 +811,65 @@ class PersonalDayDesktop(ttk.Frame):
                 "Only read-only inspection; no automatic repair or task write.")
         return plan
 
+    def _recommended_read(self) -> dict:
+        """Ephemeral hint from the current explicit UI selection; no owner writes."""
+        desk = self.values["desk"].get().strip()
+        loaded = bool(desk) and self.loaded_desk == desk and self.inventory_packet is not None
+        if not desk:
+            return {"route": None, "label": "Enter an exact scratch desk path first"}
+        kind, binding = None, None
+        if loaded:
+            try:
+                kind, _task, _sha = self._selected()
+                binding = self._binding()
+            except DesktopRefused:
+                pass
+        focused = bool(binding is not None and self.focused is not None
+                       and self.focused[0] == binding)
+        decision_ready = bool(focused and self.decision is not None
+                              and self.decision.get("binding") == binding)
+        stage = (self.focused[1].get("stage")
+                 if focused and type(self.focused[1]) is dict else None)
+        return navigation.next_read_only_step(
+            day_loaded=loaded, selected_kind=kind, focused=focused, stage=stage,
+            action_seen=bool(binding is not None and self.action_seen_binding == binding),
+            briefing_seen=bool(binding is not None and self.briefing_seen_binding == binding),
+            decision_ready=decision_ready,
+            history_clear=self._history_inputs_clear(),
+            manual_recovery_hold=bool(loaded and self.inventory_packet.get(
+                "manual_revision_recovery_attention_required") is True))
+
+    def follow_read_only_step(self) -> None:
+        """Explicit operator click; ONLY pre-existing READ or notebook navigation."""
+        route = self._recommended_read()["route"]
+        if route == "project_tab":
+            self.workspace.select(self.project_tab)
+            self.status.set("Enter exact project/result fields, then focus again. No write.")
+            return
+        reads = {
+            "refresh": self.refresh,
+            "home": self.review_home,
+            "next_action": self.inspect_next_action,
+            "focus": self.focus,
+            "briefing": self.preview_briefing,
+            "decision": self.preview_decision,
+        }
+        if route not in reads:
+            self.status.set("No read shortcut now. Use the separate explicit approval "
+                            "or manually inspect the original owner state.")
+            return
+        reads[route]()
+
     def _sync_guidance(self) -> None:
         plan = self._ui_plan()
         for name, button in self.action_buttons.items():
             button.configure(
                 state="normal" if plan["enabled"][name] else "disabled")
         self.guide.set(plan["next_step"])
+        hint = self._recommended_read()
+        self.safe_next_label.set(hint["label"])
+        self.safe_next_button.configure(
+            state="normal" if hint["route"] is not None else "disabled")
         self.add_button.configure(
             state="normal" if self.loaded_desk == self.values["desk"].get().strip()
             and bool(self.loaded_desk)
@@ -880,6 +948,8 @@ class PersonalDayDesktop(ttk.Frame):
     def _invalidate(self) -> None:
         self.focused = None
         self.decision = None
+        self.action_seen_binding = None
+        self.briefing_seen_binding = None
         self._sync_guidance()
 
     def _refuse(self) -> None:
@@ -1155,6 +1225,7 @@ class PersonalDayDesktop(ttk.Frame):
             self.status.set(
                 "UNTRUSTED note NEXT ACTION displayed from the original verified task. "
                 "Read-only data; never execute it. Focus separately for project/result review.")
+            self.action_seen_binding = self._binding()
             self._sync_guidance()
         except Exception:
             self._refuse()
@@ -1287,6 +1358,7 @@ class PersonalDayDesktop(ttk.Frame):
             self.status.set(
                 "READ ONLY: original task, result, history counts and known gaps. "
                 "No action disclosed or approval retained. Review decision separately.")
+            self.briefing_seen_binding = self._binding()
             self._sync_guidance()
         except Exception:
             self._refuse()
@@ -1421,6 +1493,18 @@ class PersonalDayDesktop(ttk.Frame):
                 "No F1/Fable, memory, host, database or future-byte authority.")
         except Exception:
             self._refuse()
+
+    def insert_starter(self) -> None:
+        """User-triggered transient Markdown only; never overwrite either source."""
+        if (self.values["note"].get().strip()
+                or self.inline_editor.get("1.0", "end-1c").strip()):
+            self.status.set("Starter NOT inserted: preserve the existing Markdown "
+                            "or external note selection.")
+            return
+        self._edited("note")  # drop focused decisions BEFORE editing the draft
+        self.inline_editor.insert("1.0", "# My task\n\n## Next action\n- \n")
+        self.status.set("Transient starter only. Write a real manual next action "
+                        "before separately approving an original-owner save.")
 
     def add_existing(self) -> None:
         """Approved one-task addition on a LOADED original desk, not a new store.
