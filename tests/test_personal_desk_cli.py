@@ -15,6 +15,13 @@ from types import ModuleType
 import pytest
 
 from vres_os import personal_desk_cli as desk
+import vres_os
+
+
+def install_owner_stub(monkeypatch, fake):
+    """Patch both module cache and package attribute after earlier owner imports."""
+    monkeypatch.setitem(sys.modules, fake.__name__, fake)
+    monkeypatch.setattr(vres_os, fake.__name__.rsplit(".", 1)[-1], fake, raising=False)
 
 
 @pytest.mark.parametrize("command", ["prepare", "create", "inspect", "open", "today", "undo"])
@@ -35,7 +42,7 @@ def test_exact_command_routes_to_existing_owner_preserving_args(monkeypatch, com
         return 0
 
     fake.main = main
-    monkeypatch.setitem(sys.modules, fake.__name__, fake)
+    install_owner_stub(monkeypatch, fake)
     args = ["--some-option", "VALUE", "--workspace", "C:/Explicit Scratch"]
     assert desk.main([command, *args]) == 0
     expected = [command, *args] if command in {"prepare", "create", "inspect", "undo"} else args
@@ -61,7 +68,7 @@ def test_help_is_inert_no_project_or_install_action(command, capsys):
 def test_owner_refusal_exit_preserved(monkeypatch):
     fake = ModuleType("vres_os.personal_task_continuity")
     fake.main = lambda args: 2
-    monkeypatch.setitem(sys.modules, fake.__name__, fake)
+    install_owner_stub(monkeypatch, fake)
     assert desk.main(["open", "--workspace", "untrusted"]) == 2
 
 
@@ -70,7 +77,7 @@ def test_exception_sanitizes_paths_and_contents(monkeypatch, capsys):
     def fail(_):
         raise RuntimeError("C:/Users/Private/SECRET_NEXT_ACTION")
     fake.main = fail
-    monkeypatch.setitem(sys.modules, fake.__name__, fake)
+    install_owner_stub(monkeypatch, fake)
     assert desk.main(["today", "--item", "SECRET_NEXT_ACTION"]) == 2
     output = capsys.readouterr()
     assert not output.out and "VRES_DESK_REFUSED" in output.err
@@ -80,7 +87,7 @@ def test_exception_sanitizes_paths_and_contents(monkeypatch, capsys):
 def test_invalid_owner_return_refused(monkeypatch):
     fake = ModuleType("vres_os.personal_daily_focus")
     fake.main = lambda _: "0"
-    monkeypatch.setitem(sys.modules, fake.__name__, fake)
+    install_owner_stub(monkeypatch, fake)
     assert desk.main(["today"]) == 2
 
 

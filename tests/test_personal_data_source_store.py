@@ -382,7 +382,7 @@ def test_module_imports_cannot_execute_db_network_or_user_credential_locker():
 def test_saved_snapshot_requires_existing_file_and_no_writer_lock(storage):
     import hashlib
 
-    with pytest.raises(CatalogStoreRefused, match="No existing saved"):
+    with pytest.raises(CatalogStoreRefused, match="missing"):
         storage.load_saved_snapshot()
     sid, revision = add_source(storage)
     assert revision == 1

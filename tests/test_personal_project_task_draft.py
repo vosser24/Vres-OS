@@ -33,8 +33,12 @@ def snapshot(*, legacy=False, blocked=False, forged=False):
     return {"preview_status": "LEGACY_MANUAL_REVIEW_REQUIRED" if blocked else
             "LEGACY_KEEP_DROP_REVIEW_REQUIRED" if legacy else "FRESH_SCAFFOLD_CANDIDATE",
             "items": items, "required_review_gates": gates,
+            "priority_review_gate": gates[0] if gates else "NONE",
+            "review_gates_are_non_authorizing": True,
+            "architecture_review_required": False,
             "inventory_item_count": len(items), "inventory_blocker_count": int(blocked),
             "architecture_source_file_count": 1, "architecture_audit_complete": True,
+            "architecture_plan_required": False, "claude_configuration_present": bool(items),
             "activation_allowed": bool(forged), "project_write_permitted": False,
             "state_write_permitted": False, "recorded_adoption_state_inspected": False,
             "snapshot_status": "NOT_SAVED_OR_AUTHORIZED"}
@@ -214,9 +218,14 @@ def test_standalone_python_isolated_cli_with_exact_parent_modules(tmp_path):
         "def preview_project(project):\n"
         "    return {'preview_status':'FRESH_SCAFFOLD_CANDIDATE',\n"
         "            'items':[], 'required_review_gates':[],\n"
+        "            'priority_review_gate':'NONE',\n"
+        "            'review_gates_are_non_authorizing':True,\n"
+        "            'architecture_review_required':False,\n"
         "            'inventory_item_count':0,'inventory_blocker_count':0,\n"
         "            'architecture_source_file_count':1,\n"
         "            'architecture_audit_complete':True,\n"
+        "            'architecture_plan_required':False,\n"
+        "            'claude_configuration_present':False,\n"
         "            'activation_allowed':False,'project_write_permitted':False,\n"
         "            'state_write_permitted':False,\n"
         "            'recorded_adoption_state_inspected':False,\n"

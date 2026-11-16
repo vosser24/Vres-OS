@@ -5,7 +5,6 @@ personal_daily_focus parent modules; these stubs are NOT source acceptance.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import subprocess
 import sys
@@ -14,16 +13,15 @@ from pathlib import Path
 import pytest
 
 from vres_os import personal_scratch_discovery as discovery
+from vres_os import personal_offline_workbench as workbench
 
 
 def write_draft(parent: Path, task: str, label: str, action: str) -> tuple[str, str, Path]:
     folder = parent / f"Vres-Workbench-{label}"
-    notes = folder / "notes"
-    notes.mkdir(parents=True)
-    raw = ("# My task\n\n## Next action\n- " + action + "\n").encode("utf-8")
-    (notes / "next-step.md").write_bytes(raw)
-    digest = hashlib.sha256(raw).hexdigest()
-    (folder / "draft-receipt.json").write_text(json.dumps({"task_key_claimed":task,"sha256":digest}),encoding="utf-8")
+    markdown = "# My task\n\n## Next action\n- " + action + "\n"
+    # Use the ORIGINAL owner to write canonical, digest-bound receipts.
+    # Hand-crafted partial receipts are correctly refused by production.
+    digest = workbench.create_note(folder, task, markdown, approved=True)["sha256"]
     return task,digest,folder
 
 

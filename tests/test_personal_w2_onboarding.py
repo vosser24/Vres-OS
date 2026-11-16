@@ -156,7 +156,7 @@ def test_one_integrated_w2_fresh_legacy_global_stale_and_exact_rollback(tmp_path
             legacy, combined, synthetic_global_session=global_demo,
         )
     remaining = next(x for x in items if x["number"] != executable["number"])
-    with pytest.raises(project_adoption.AdoptionError, match="changed since"):
+    with pytest.raises(project_adoption.AdoptionError, match="differs from current source"):
         project_adoption.decide(legacy, remaining["number"], "KEEP",
                                 authority=_synthetic_operator, data_root=legacy_state)
     settings.write_bytes(original_legacy[".claude/settings.json"])
