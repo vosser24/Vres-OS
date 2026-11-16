@@ -1404,3 +1404,152 @@ def test_recovery_hold_guidance_disables_completion_and_reopen():
     plan = desktop.PersonalDayDesktop._ui_plan(view)
     assert not plan["enabled"]["reopen"]
     assert plan["enabled"]["replay"]  # read-only explicit verification remains possible
+
+
+def test_original_archived_history_is_bounded_undated_and_read_only(monkeypatch):
+    """Only original lifecycle snapshots, never a second task/history store."""
+    day, home = _workday_home_fixture()
+    monkeypatch.setattr(desktop.owner, "render_personal_day", lambda _day: "READ ONLY")
+    rows = [
+        {"state": row["state"], "task_key_claimed": row["task_key_claimed"],
+         "sha256": row["note_sha256"], "bytes": 50}
+        for row in home["saved_history"]]
+    history = {
+        "schema": desktop.lifecycle.SCHEMA,
+        "status": "READ_ONLY_PERSONAL_HISTORY",
+        "snapshots": rows, "count": len(rows),
+        "writes_performed": False, "authoritative_task_store": False,
+        "document_current_bytes_verified": False,
+    }
+    assert desktop.checked_archived_history(history, day) == [
+        ("TASK-ARCHIVED", "e" * 64)]
+    for changed in (
+            {**history, "writes_performed": True},
+            {**history, "count": 999},
+            {**history, "snapshots": rows[:-1]},
+            {**history, "snapshots": rows + [rows[0]]}):
+        with pytest.raises(desktop.DesktopRefused):
+            desktop.checked_archived_history(changed, day)
+    assert desktop.checked_archived_history(history, day) == [
+        ("TASK-ARCHIVED", "e" * 64)]  # even with pending HOLD, READ remains safe
+
+
+def test_original_archive_cancel_and_postconsent_drift_never_move(monkeypatch):
+    view, _, refused = _next_action_view()
+    day = {"archived_snapshot_count": 2, "active_task_count": 1}
+    view.inventory_packet = day
+    monkeypatch.setattr(desktop, "checked_day", lambda packet, *, selected: packet)
+    monkeypatch.setattr(desktop, "checked_revision_inventory", lambda *_a, **_k: None)
+    monkeypatch.setattr(desktop, "checked_archived_history", lambda *_a: [])
+    monkeypatch.setattr(desktop.lifecycle, "list_history", lambda _desk: {"history": 1})
+    monkeypatch.setattr(desktop.owner, "review_personal_day", lambda _desk: day)
+    monkeypatch.setattr(desktop.lifecycle, "move_out",
+                        lambda *_a, **_k: pytest.fail("Cancelled archive cannot move task"))
+    monkeypatch.setattr(desktop.messagebox, "askyesno", lambda *_a, **_k: False)
+    desktop.PersonalDayDesktop.archive_selected(view)
+    assert not refused
+    assert "cancelled" in view.status.get().lower()
+    assert view.focused is None and view.decision is None
+
+    view, _, refused = _next_action_view()
+    view.inventory_packet = day
+    calls = []
+    def changed(_desk):
+        calls.append("READ")
+        return day if len(calls) == 1 else {**day, "active_task_count": 0}
+    monkeypatch.setattr(desktop.owner, "review_personal_day", changed)
+    monkeypatch.setattr(desktop.messagebox, "askyesno", lambda *_a, **_k: True)
+    desktop.PersonalDayDesktop.archive_selected(view)
+    assert calls == ["READ", "READ"]
+    assert refused == ["REFUSED"]
+
+
+def test_original_archive_exact_owner_write_and_undated_readback(monkeypatch):
+    view, _, refused = _next_action_view()
+    day = {"archived_snapshot_count": 2, "active_task_count": 1}
+    view.inventory_packet = day
+    monkeypatch.setattr(desktop, "checked_day", lambda packet, *, selected: packet)
+    monkeypatch.setattr(desktop, "checked_revision_inventory", lambda *_a, **_k: None)
+    monkeypatch.setattr(desktop, "checked_archived_history", lambda *_a: [])
+    monkeypatch.setattr(desktop.owner, "review_personal_day", lambda _desk: day)
+    monkeypatch.setattr(desktop.lifecycle, "list_history", lambda _desk: {"history": 1})
+    monkeypatch.setattr(desktop.messagebox, "askyesno", lambda *_a, **_k: True)
+    calls = []
+    def archive(desk, task, *, state, approved, expected_sha256):
+        calls.append((desk, task, state, approved, expected_sha256))
+        return {"schema": desktop.lifecycle.SCHEMA, "status": "OWN_TASK_ARCHIVED",
+                "task_key_claimed": task, "sha256": expected_sha256,
+                "archived_bytes_preserved": True, "installed_vres_modified": False}
+    monkeypatch.setattr(desktop.lifecycle, "move_out", archive)
+    monkeypatch.setattr(desktop, "triage_personal_day", lambda _day: {"rows": []})
+    def refresh():
+        view.inventory_packet = {"archived_snapshot_count": 3, "active_task_count": 0}
+        return True
+    view.refresh = refresh
+    desktop.PersonalDayDesktop.archive_selected(view)
+    assert not refused
+    assert calls == [("/test/Vres-Desk-Selected", "TASK-SELECTED", "archived",
+                      True, "a" * 64)]
+    assert "NOT completed" in view.status.get()
+
+
+def test_original_archived_restore_exact_owner_and_preserved_history(monkeypatch):
+    view, _, refused = _next_action_view()
+    day = {"archived_snapshot_count": 1, "active_task_count": 0,
+           "manual_revision_recovery_attention_required": False,
+           "original_offered_choices": []}
+    view.inventory_packet = day
+    view.archive_packet = {"history": 1}
+    view.archive_choices = {"archived-0": ("TASK-ARCHIVED", "e" * 64)}
+    class Listing:
+        def selection(self):
+            return ("archived-0",)
+    view.archive_listing = Listing()
+    monkeypatch.setattr(desktop, "checked_day", lambda packet, *, selected: packet)
+    monkeypatch.setattr(desktop, "checked_archived_history",
+                        lambda _history, _day: [("TASK-ARCHIVED", "e" * 64)])
+    monkeypatch.setattr(desktop.owner, "review_personal_day", lambda _desk: day)
+    monkeypatch.setattr(desktop.lifecycle, "list_history",
+                        lambda _desk: {"history": 1})
+    monkeypatch.setattr(desktop.messagebox, "askyesno", lambda *_a, **_k: True)
+    calls = []
+    def restore(desk, task, *, state, expected_sha256, approved):
+        calls.append((desk, task, state, expected_sha256, approved))
+        return {"schema": desktop.lifecycle.SCHEMA, "status": "OWN_TASK_REOPENED",
+                "task_key_claimed": task, "sha256": expected_sha256,
+                "archived_snapshot_preserved": True, "installed_vres_modified": False}
+    monkeypatch.setattr(desktop.lifecycle, "reopen", restore)
+    monkeypatch.setattr(desktop, "triage_personal_day",
+                        lambda _day: {"rows": [
+                            ("ACTIVE_TASK", "TASK-ARCHIVED", "e" * 64)]})
+    def refresh():
+        view.inventory_packet = {"archived_snapshot_count": 1, "active_task_count": 1}
+        return True
+    view.refresh = refresh
+    desktop.PersonalDayDesktop.restore_archived(view)
+    assert not refused
+    assert calls == [("/test/Vres-Desk-Selected", "TASK-ARCHIVED", "archived",
+                      "e" * 64, True)]
+    assert "preserved" in view.status.get().lower()
+
+
+def test_original_archived_restore_refuses_pending_recovery_without_write(monkeypatch):
+    view, _, refused = _next_action_view()
+    view.inventory_packet = {
+        "manual_revision_recovery_attention_required": True}
+    view.archive_packet = {"history": 1}
+    view.archive_choices = {"archived-0": ("TASK-ARCHIVED", "e" * 64)}
+    class Listing:
+        def selection(self):
+            return ("archived-0",)
+    view.archive_listing = Listing()
+    monkeypatch.setattr(desktop, "checked_day", lambda packet, *, selected: packet)
+    monkeypatch.setattr(desktop.owner, "review_personal_day",
+                        lambda _desk: view.inventory_packet)
+    monkeypatch.setattr(desktop.lifecycle, "list_history",
+                        lambda _desk: pytest.fail("Held restore must not read or write history"))
+    monkeypatch.setattr(desktop.lifecycle, "reopen",
+                        lambda *_a, **_k: pytest.fail("Held restore must never reopen"))
+    desktop.PersonalDayDesktop.restore_archived(view)
+    assert refused == ["REFUSED"]
+    assert view.decision is None and view.focused is None

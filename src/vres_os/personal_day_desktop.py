@@ -357,6 +357,51 @@ def render_verified_workday_home(day: dict, home: dict) -> str:
     return rendered
 
 
+def checked_archived_history(history: dict, day: dict) -> list[tuple[str, str]]:
+    """Validate ONLY existing original-owner, undated archived task receipts.
+
+    No archived snapshot becomes active, current, replayable or trusted by this
+    view. All later operations re-attest exact owner state and require consent.
+    """
+    checked_day(day, selected=False)
+    if (type(history) is not dict
+            or history.get("schema") != lifecycle.SCHEMA
+            or history.get("status") != "READ_ONLY_PERSONAL_HISTORY"
+            or history.get("writes_performed") is not False
+            or history.get("authoritative_task_store") is not False
+            or history.get("document_current_bytes_verified") is not False):
+        raise DesktopRefused("Original immutable history contract not verified.")
+    snapshots = history.get("snapshots")
+    if (type(snapshots) is not list or len(snapshots) > 48
+            or type(history.get("count")) is not int
+            or history["count"] != len(snapshots)):
+        raise DesktopRefused("Original history inventory is missing or unbounded.")
+    counts = {"completed": 0, "archived": 0, "revisions": 0}
+    archived = []
+    seen = set()
+    for row in snapshots:
+        if (type(row) is not dict or row.get("state") not in counts
+                or type(row.get("task_key_claimed")) is not str
+                or not portable.workbench._TASK_KEY.fullmatch(row["task_key_claimed"])
+                or type(row.get("sha256")) is not str
+                or not portable.workbench._SHA.fullmatch(row["sha256"])
+                or type(row.get("bytes")) is not int
+                or not 0 < row["bytes"] <= 32768):
+            raise DesktopRefused("Original archived history identity invalid.")
+        identity = (row["state"], row["task_key_claimed"], row["sha256"])
+        if identity in seen:
+            raise DesktopRefused("Duplicate original history snapshot.")
+        seen.add(identity)
+        counts[row["state"]] += 1
+        if row["state"] == "archived":
+            archived.append((row["task_key_claimed"], row["sha256"]))
+    if (counts["completed"] != day["saved_completed_snapshot_count"]
+            or counts["archived"] != day["archived_snapshot_count"]
+            or counts["revisions"] != day["revision_snapshot_count"]):
+        raise DesktopRefused("Original Personal Day and archive inventory differ.")
+    return sorted(archived)
+
+
 class PersonalDayDesktop(ttk.Frame):
     """Ephemeral view state ONLY; original owners own all task/history writes."""
 
@@ -382,6 +427,9 @@ class PersonalDayDesktop(ttk.Frame):
         self.with_synthetic = tk.BooleanVar(value=False)
         self.status = tk.StringVar(value="Choose an explicit scratch desk and select Load.")
         self.choices: dict[str, tuple[str, str, str]] = {}
+        self.archive_choices: dict[str, tuple[str, str]] = {}
+        self.archive_packet: dict | None = None
+        self.archive_summary = tk.StringVar(value="Load original archived history explicitly.")
         self.loaded_desk: str | None = None
         self.inventory_packet: dict | None = None
         self.triage_query = tk.StringVar(value="")
@@ -559,8 +607,60 @@ class PersonalDayDesktop(ttk.Frame):
                   text="Original revision history preserves the old note. "
                        "No automatic selection, completion or project binding.").grid(
                        row=2, column=0, columnspan=2, sticky="w", padx=4, pady=3)
+        archive_tab = ttk.Frame(workspace, padding=5)
+        archive_tab.columnconfigure(0, weight=1)
+        archive_tab.rowconfigure(1, weight=1)
+        workspace.add(archive_tab, text="Archive / restore")
+        ttk.Label(
+            archive_tab, text="ARCHIVED only · verified immutable snapshots · no dates or auto-restore"
+        ).grid(row=0, column=0, sticky="w")
+        self.archive_listing = ttk.Treeview(
+            archive_tab, columns=("task", "sha"), show="headings",
+            selectmode="browse", height=4)
+        self.archive_listing.heading("task", text="Archived task")
+        self.archive_listing.heading("sha", text="Verified note SHA-256 (short display)")
+        self.archive_listing.column("task", width=260, anchor="w")
+        self.archive_listing.column("sha", width=340, anchor="w")
+        self.archive_listing.grid(row=1, column=0, sticky="nsew")
+        archive_scroll = ttk.Scrollbar(
+            archive_tab, orient="vertical", command=self.archive_listing.yview)
+        archive_scroll.grid(row=1, column=1, sticky="ns")
+        self.archive_listing.configure(yscrollcommand=archive_scroll.set)
+        self.archive_listing.bind(
+            "<<TreeviewSelect>>", lambda _event: self._archive_selection_changed())
+        archive_buttons = ttk.Frame(archive_tab)
+        archive_buttons.grid(row=2, column=0, sticky="ew", pady=4)
+        self.archive_button = ttk.Button(
+            archive_buttons, text="Archive selected ACTIVE (approve)",
+            command=self.archive_selected)
+        self.archive_button.grid(row=0, column=0, padx=4)
+        self.load_archive_button = ttk.Button(
+            archive_buttons, text="Read archived history",
+            command=self.load_archived)
+        self.load_archive_button.grid(row=0, column=1, padx=4)
+        self.restore_archive_button = ttk.Button(
+            archive_buttons, text="Restore selected ARCHIVED (approve)",
+            command=self.restore_archived)
+        self.restore_archive_button.grid(row=0, column=2, padx=4)
+        ttk.Label(archive_tab, textvariable=self.archive_summary,
+                  wraplength=900).grid(row=3, column=0, sticky="w")
+
         ttk.Label(self, textvariable=self.status, wraplength=900).grid(
             row=6, column=0, sticky="w", pady=5)
+
+    def _clear_archive_view(self) -> None:
+        """Clear transient archive selection; original saved history is untouched."""
+        self.archive_choices.clear()
+        self.archive_packet = None
+        self.archive_listing.delete(*self.archive_listing.get_children())
+        self.archive_summary.set("Load original archived history explicitly.")
+
+    def _archive_selection_changed(self) -> None:
+        """Archive selection never keeps an old completion decision alive."""
+        self._invalidate()
+        self._display("")
+        self.status.set("Archive selection changed. Reattest before any approved restore.")
+        self._sync_guidance()
 
     def _render_triage(self) -> None:
         """Pure presentation of current read-only inventory; no auto-selection."""
@@ -688,6 +788,23 @@ class PersonalDayDesktop(ttk.Frame):
                 and bool(self.loaded_desk)
                 and self.loaded_desk == self.values["desk"].get().strip()
                 else "disabled")
+        if hasattr(self, "archive_button"):
+            loaded_ready = (self.inventory_packet is not None
+                            and bool(self.loaded_desk)
+                            and self.loaded_desk == self.values["desk"].get().strip())
+            write_ready = (loaded_ready and self.inventory_packet.get(
+                "manual_revision_recovery_attention_required") is False)
+            self.archive_button.configure(
+                state="normal" if write_ready and kind == "ACTIVE_TASK"
+                else "disabled")
+            # Manual-recovery holds never suppress an explicitly chosen READ.
+            self.load_archive_button.configure(
+                state="normal" if loaded_ready else "disabled")
+            selected = self.archive_listing.selection()
+            self.restore_archive_button.configure(
+                state="normal" if write_ready
+                and self.archive_packet is not None and len(selected) == 1
+                and selected[0] in self.archive_choices else "disabled")
 
     def _edited(self, field: str | None) -> None:
         """A changed UI selection cannot retain a ready decision or preview."""
@@ -699,6 +816,8 @@ class PersonalDayDesktop(ttk.Frame):
             self.triage_query.set("")
             self.triage_mode.set("ALL")
             self.triage_summary.set("Desk changed; load a verified owner snapshot.")
+            if hasattr(self, "archive_listing"):
+                self._clear_archive_view()
         self._invalidate()
         self._display("")
         if field == "desk":
@@ -887,6 +1006,8 @@ class PersonalDayDesktop(ttk.Frame):
 
     def refresh(self) -> bool:
         self._invalidate()
+        if hasattr(self, "archive_listing"):
+            self._clear_archive_view()
         self.loaded_desk = None
         self.inventory_packet = None
         self.choices.clear()
@@ -1384,6 +1505,154 @@ class PersonalDayDesktop(ttk.Frame):
             self.status.set(
                 "Original task revised; previous note preserved in revisions. "
                 "No active task auto-selected. Select and focus the new note explicitly.")
+        except Exception:
+            self._refuse()
+
+    def load_archived(self) -> None:
+        """Opt-in immutable original archived-snapshot inventory; no task action."""
+        self._invalidate()
+        self._display("")
+        try:
+            desk = self.values["desk"].get().strip()
+            if (not desk or self.loaded_desk != desk
+                    or self.inventory_packet is None):
+                raise DesktopRefused("Load exact desk before inspecting archived tasks.")
+            before = checked_day(owner.review_personal_day(desk), selected=False)
+            if before != self.inventory_packet:
+                raise DesktopRefused("Original day changed; refresh before archive inspection.")
+            history = lifecycle.list_history(desk)
+            archived = checked_archived_history(history, before)
+            if checked_day(owner.review_personal_day(desk), selected=False) != before:
+                raise DesktopRefused("Original history changed during archive inspection.")
+            self._clear_archive_view()
+            self.archive_packet = history
+            for i, identity in enumerate(archived):
+                iid = f"archived-{i}"
+                self.archive_choices[iid] = identity
+                self.archive_listing.insert(
+                    "", "end", iid=iid, values=(identity[0], identity[1][:16]))
+            self.archive_summary.set(
+                f"{len(archived)} archived snapshot(s), UNDATED. "
+                "Select exactly one; restoration requires separate approval.")
+            self.status.set(
+                "READ ONLY: original immutable archive inventory verified. "
+                "Historical results were NOT opened or promoted to current.")
+            self._sync_guidance()
+        except Exception:
+            self._clear_archive_view()
+            self._refuse()
+
+    def archive_selected(self) -> None:
+        """Explicit selected active → original archived history, preserving bytes."""
+        self._invalidate()
+        self._display("")
+        try:
+            kind, task, digest = self._selected()
+            desk = self.values["desk"].get().strip()
+            if (kind != "ACTIVE_TASK" or not desk or self.loaded_desk != desk
+                    or self.inventory_packet is None):
+                raise DesktopRefused("Select one active task in the loaded original desk.")
+            before = checked_day(owner.review_personal_day(desk), selected=False)
+            if before != self.inventory_packet:
+                raise DesktopRefused("Original day changed; refresh before archiving.")
+            checked_revision_inventory(before, task=task, note_sha256=digest)
+            history = lifecycle.list_history(desk)
+            checked_archived_history(history, before)
+            if not messagebox.askyesno(
+                    "Separate archive approval",
+                    f"ARCHIVE selected ACTIVE task {task}?\n"
+                    f"Exact note SHA-256: {digest}\n"
+                    "The original note moves into immutable ARCHIVED history. "
+                    "It is NOT completed and cannot be replayed as a saved result.\n"
+                    "Restoring requires separate approval. No automatic focus.",
+                    parent=self.master):
+                self.status.set("Archive cancelled. No original task write requested.")
+                return
+            if (checked_day(owner.review_personal_day(desk), selected=False) != before
+                    or lifecycle.list_history(desk) != history):
+                raise DesktopRefused("Original day/history changed during archive approval.")
+            checked_revision_inventory(before, task=task, note_sha256=digest)
+            moved = lifecycle.move_out(
+                desk, task, state="archived", approved=True, expected_sha256=digest)
+            if (type(moved) is not dict or moved.get("schema") != lifecycle.SCHEMA
+                    or moved.get("status") != "OWN_TASK_ARCHIVED"
+                    or moved.get("task_key_claimed") != task
+                    or moved.get("sha256") != digest
+                    or moved.get("archived_bytes_preserved") is not True
+                    or moved.get("installed_vres_modified") is not False):
+                raise DesktopRefused("Archive write uncertain; inspect original history.")
+            if not self.refresh():
+                raise DesktopRefused("Archive may exist; original day refresh failed.")
+            day = self.inventory_packet
+            if (day is None
+                    or day["archived_snapshot_count"] != before["archived_snapshot_count"] + 1
+                    or day["active_task_count"] != before["active_task_count"] - 1
+                    or ("ACTIVE_TASK", task, digest) in triage_personal_day(day)["rows"]):
+                raise DesktopRefused("Archive readback differs; manually inspect history.")
+            self.status.set(
+                "Original task archived, NOT completed. No task auto-selected. "
+                "Read archived history separately to restore with new consent.")
+        except Exception:
+            self._refuse()
+
+    def restore_archived(self) -> None:
+        """Explicit original archived snapshot → new active task, no overwrite."""
+        self._invalidate()
+        self._display("")
+        try:
+            desk = self.values["desk"].get().strip()
+            selected = self.archive_listing.selection()
+            if (not desk or self.loaded_desk != desk
+                    or self.inventory_packet is None or self.archive_packet is None
+                    or len(selected) != 1 or selected[0] not in self.archive_choices):
+                raise DesktopRefused("Load and select exactly one original archived snapshot.")
+            task, digest = self.archive_choices[selected[0]]
+            before = checked_day(owner.review_personal_day(desk), selected=False)
+            if (before != self.inventory_packet
+                    or before["manual_revision_recovery_attention_required"] is not False):
+                raise DesktopRefused("Original day changed or pending revision needs review.")
+            history = lifecycle.list_history(desk)
+            if (history != self.archive_packet
+                    or (task, digest) not in checked_archived_history(history, before)):
+                raise DesktopRefused("Original archived snapshot changed; reload history.")
+            if (before["active_task_count"] >= portable._MAX_CHILDREN
+                    or any(item["kind"] == "ACTIVE_TASK"
+                           and item["task_key_claimed"] == task
+                           for item in before["original_offered_choices"])):
+                raise DesktopRefused("Original active task slot unavailable for restore.")
+            if not messagebox.askyesno(
+                    "Separate archived-task restore approval",
+                    f"RESTORE original archived task {task} into an ABSENT active slot?\n"
+                    f"Historical note SHA-256: {digest}\n"
+                    "Original archived snapshot stays preserved. This does not "
+                    "complete or replay a result; no automatic focus or execution.",
+                    parent=self.master):
+                self.status.set("Restore cancelled. No original task write requested.")
+                return
+            if (checked_day(owner.review_personal_day(desk), selected=False) != before
+                    or lifecycle.list_history(desk) != history):
+                raise DesktopRefused("Original day or archived history changed during approval.")
+            reopened = lifecycle.reopen(
+                desk, task, state="archived", expected_sha256=digest, approved=True)
+            if (type(reopened) is not dict
+                    or reopened.get("schema") != lifecycle.SCHEMA
+                    or reopened.get("status") != "OWN_TASK_REOPENED"
+                    or reopened.get("task_key_claimed") != task
+                    or reopened.get("sha256") != digest
+                    or reopened.get("archived_snapshot_preserved") is not True
+                    or reopened.get("installed_vres_modified") is not False):
+                raise DesktopRefused("Archive restore uncertain; inspect original desk.")
+            if not self.refresh():
+                raise DesktopRefused("Restore may exist; original day refresh failed.")
+            day = self.inventory_packet
+            if (day is None
+                    or day["archived_snapshot_count"] != before["archived_snapshot_count"]
+                    or day["active_task_count"] != before["active_task_count"] + 1
+                    or ("ACTIVE_TASK", task, digest) not in triage_personal_day(day)["rows"]):
+                raise DesktopRefused("Restored active task readback differs; inspect desk.")
+            self.status.set(
+                "Original archived note restored to an ACTIVE slot. "
+                "Archived copy preserved; manually reselect and focus the active task.")
         except Exception:
             self._refuse()
 
