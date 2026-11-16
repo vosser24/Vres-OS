@@ -63,8 +63,8 @@ def guided_action_plan(
             enabled["decision"] = True
             enabled["complete"] = bool(decision_ready)
             if decision_ready:
-                next_step = ("Step 4/4: Separately approve completion after reviewing "
-                             "the exact read-only decision. No result-quality proof.")
+                next_step = ("Step 4/4: Give separate, explicit completion consent after "
+                             "reviewing the exact read-only decision. No result-quality proof.")
             else:
                 next_step = ("Step 3/4: Review the exact read-only completion decision "
                              "before requesting separate completion consent.")

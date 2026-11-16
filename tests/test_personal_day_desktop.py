@@ -266,6 +266,7 @@ def test_desktop_history_refuses_any_source_context_even_when_opted_in():
         view.values[name] = _Var("")
     view.with_acceptance = _Var(False)
     view._selected = lambda: ("SAVED_COMPLETED_RESULT", "TASK-SYNTHETIC", "e" * 64)
+    view._history_inputs_clear = lambda: desktop.PersonalDayDesktop._history_inputs_clear(view)
     with pytest.raises(desktop.DesktopRefused):
         desktop.PersonalDayDesktop._history_only(view)
 
@@ -473,6 +474,9 @@ def test_editing_selected_desk_drops_old_inventory_without_auto_selection():
         def delete(self, *selected):
             self.items = [x for x in self.items if x not in selected]
     view.listing = Listing()
+    view.triage_query = _Var("stale-query")
+    view.triage_mode = _Var("ACTIVE")
+    view.triage_summary = _Var("stale-summary")
     view.choices = {"choice-0": ("ACTIVE_TASK", "TASK-OLD", "a" * 64)}
     view.focused = (("old",), {"stage": "RESULT_REVIEW_READY_SEPARATE_DECISION"}, None)
     view.decision = {"binding": ("old",), "packet": {}}
@@ -480,6 +484,7 @@ def test_editing_selected_desk_drops_old_inventory_without_auto_selection():
     displayed = []
     view._display = displayed.append
     view._sync_guidance = lambda: None
+    view._invalidate = lambda: desktop.PersonalDayDesktop._invalidate(view)
     desktop.PersonalDayDesktop._edited(view, "desk")
     assert not view.choices and not view.listing.items
     assert view.focused is None and view.decision is None
@@ -648,6 +653,7 @@ def test_selection_change_drops_old_decision_and_visible_preview():
     view.focused = (("old",), {"stage": "RESULT_REVIEW_READY_SEPARATE_DECISION"}, None)
     view.decision = {"binding": ("old",), "packet": {}}
     view._sync_guidance = lambda: None
+    view._invalidate = lambda: desktop.PersonalDayDesktop._invalidate(view)
     displayed = []
     view._display = displayed.append
     view.status = _Var("")
@@ -779,6 +785,7 @@ def _next_action_view():
     view.focused = (("old",), {"stage": "RESULT_REVIEW_READY_SEPARATE_DECISION"}, None)
     view.decision = {"binding": ("old",)}
     view.status = _Var("")
+    view.master = None  # headless messagebox parent; production still requires separate approval
     view._sync_guidance = lambda: None
     view._invalidate = lambda: desktop.PersonalDayDesktop._invalidate(view)
     displayed, refusals = [], []
