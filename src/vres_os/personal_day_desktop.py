@@ -20,11 +20,13 @@ if not __package__:
     from vres_os import personal_portable_desk as portable
     from vres_os import personal_task_lifecycle as lifecycle
     from vres_os import personal_day_navigation as navigation
+    from vres_os import personal_day_plan as dayplan
 else:
     from . import personal_work_session as owner
     from . import personal_portable_desk as portable
     from . import personal_task_lifecycle as lifecycle
     from . import personal_day_navigation as navigation
+    from . import personal_day_plan as dayplan
 
 
 class DesktopRefused(ValueError):
@@ -623,6 +625,11 @@ class PersonalDayDesktop(ttk.Frame):
             row=2, column=0, columnspan=4, sticky="ew", padx=3, pady=4)
         ttk.Label(buttons, textvariable=self.guide, wraplength=900).grid(
             row=3, column=0, columnspan=4, sticky="w", pady=(5, 0))
+        self.plan_button = ttk.Button(
+            buttons, text="Daily plan / selected action (read only)",
+            command=self.review_day_plan)
+        self.plan_button.grid(
+            row=4, column=0, columnspan=4, sticky="ew", padx=3, pady=3)
 
         report = ttk.LabelFrame(self, text="Original owner view · historical is NOT current")
         report.grid(row=5, column=0, sticky="nsew", pady=6)
@@ -886,6 +893,12 @@ class PersonalDayDesktop(ttk.Frame):
             kind, _task, _sha = self._selected()
         except DesktopRefused:
             kind = None
+        if hasattr(self, "plan_button"):
+            self.plan_button.configure(
+                state="normal" if self.inventory_packet is not None
+                and bool(self.loaded_desk)
+                and self.loaded_desk == self.values["desk"].get().strip()
+                and kind in (None, "ACTIVE_TASK") else "disabled")
         self.action_preview_button.configure(
             state="normal" if kind == "ACTIVE_TASK"
             and self.inventory_packet is not None
@@ -1156,6 +1169,50 @@ class PersonalDayDesktop(ttk.Frame):
             self.triage_summary.set("Original snapshot unavailable; inspect desk before retry.")
             self._refuse()
             return False
+
+    def review_day_plan(self) -> None:
+        """Explicit, read-only human plan over the original day and workday owners.
+
+        The plan is not a source of persistence, approval, priority, result
+        acceptance, automatic task choice or authority to execute note text.
+        """
+        self._invalidate()
+        self._display("")
+        try:
+            desk = self.values["desk"].get().strip()
+            if (not desk or self.loaded_desk != desk
+                    or self.inventory_packet is None):
+                raise DesktopRefused("Load the exact original day before its plan.")
+            before = checked_day(owner.review_personal_day(desk), selected=False)
+            if before != self.inventory_packet:
+                raise DesktopRefused("Original day changed; reload before planning.")
+            selected_key, selected_digest = None, None
+            try:
+                kind, task, digest = self._selected()
+            except DesktopRefused:
+                kind = None
+            if kind == "SAVED_COMPLETED_RESULT":
+                raise DesktopRefused("Saved result remains historical, not an active plan.")
+            if kind == "ACTIVE_TASK":
+                selected_key, selected_digest = task, digest
+            packet = dayplan.build_manual_day_plan(
+                desk, selected_task=selected_key,
+                show_selected_action=selected_key is not None)
+            after = checked_day(owner.review_personal_day(desk), selected=False)
+            if (after != before or packet.get("status") !=
+                    "READ_ONLY_HUMAN_DIRECTED_ORIGINAL_DAY_PLAN"
+                    or packet.get("active_task_count") != before["active_task_count"]
+                    or packet.get("selected_note_sha256") != selected_digest
+                    or packet.get("writes_performed") is not False):
+                raise DesktopRefused("Original day/plan changed or became authoritative.")
+            self._display(dayplan.render_manual_day_plan(packet))
+            self.status.set(
+                "Read-only manual plan; any explicitly selected NEXT ACTION is "
+                "UNTRUSTED DATA, not an executable command. Re-focus and "
+                "approve any original-owner write separately.")
+            self._sync_guidance()
+        except Exception:
+            self._refuse()
 
     def review_home(self) -> None:
         """Show existing ORIGINAL #165 Workday Home plus manual recovery attention.

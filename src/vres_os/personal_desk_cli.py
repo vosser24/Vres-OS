@@ -85,6 +85,9 @@ Usage: python -I -S -B personal_desk_cli.py COMMAND [command options]
             day replay --desk ABS --task-key TASK-*
               --snapshot-sha256 HEX --yes (explicit current-byte check)
             Legacy day --desk ... remains unchanged and read-only.
+  plan      One manual READ-ONLY daily plan from original task/history owners.
+            --desk ABS-Vres-Desk-* [--select TASK-* --show-selected-action]
+            [--format text|json]. No automatic task choice, execution or approval.
   home      One READ-ONLY workday view across existing task/history owners
             --desk ABS-Vres-Desk-* [--task-key TASK-*]
             [--show-selected-action] [--project-root ABS --project-key project:*]
@@ -245,7 +248,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     action, rest = args[0], args[1:]
     # Constant dispatch only. Never import arbitrary modules from operator data.
-    if action not in {"prepare", "create", "inspect", "open", "today", "today-here", "work", "work-result", "work-finish", "work-session", "home", "day", "undo", "desk"}:
+    if action not in {"prepare", "create", "inspect", "open", "today", "today-here", "work", "work-result", "work-finish", "work-session", "home", "day", "plan", "undo", "desk"}:
         print("VRES_DESK_REFUSED: unknown command; run 'help'.", file=sys.stderr)
         return 2
     try:
@@ -272,6 +275,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             outcome = owner.main(rest)
         elif action == "work-finish":
             from vres_os import personal_work_completion as owner
+            outcome = owner.main(rest)
+        elif action == "plan":
+            from vres_os import personal_day_plan as owner
             outcome = owner.main(rest)
         elif action in {"work-session", "home", "day"}:
             from vres_os import personal_work_session as owner
