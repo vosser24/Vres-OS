@@ -782,6 +782,20 @@ def _next_action_view():
     view.loaded_desk = "/test/Vres-Desk-Selected"
     view.inventory_packet = {"owner_packet": "read-only"}
     view._selected = lambda: ("ACTIVE_TASK", "TASK-SELECTED", "a" * 64)
+    # Keep the headless view aligned with the real Desktop's explicit selection
+    # receipt and transient read-only navigation. No owner is called here.
+    view._binding = lambda: (
+        "mock-original-ui", view.values["desk"].get().strip(), *view._selected())
+    view._history_inputs_clear = lambda: True
+    view.action_seen_binding = None
+    view.briefing_seen_binding = None
+    view._recommended_read = lambda: desktop.PersonalDayDesktop._recommended_read(view)
+    view.safe_next_label = _Var("")
+    class _GuideButton:
+        state = None
+        def configure(self, **kwargs):
+            self.state = kwargs["state"]
+    view.safe_next_button = _GuideButton()
     view.focused = (("old",), {"stage": "RESULT_REVIEW_READY_SEPARATE_DECISION"}, None)
     view.decision = {"binding": ("old",)}
     view.status = _Var("")
@@ -893,6 +907,65 @@ def test_next_action_button_only_for_selected_active_loaded_original_owner():
     view.loaded_desk = "/test/Vres-Desk-Other"
     desktop.PersonalDayDesktop._sync_guidance(view)
     assert view.action_preview_button.state == "disabled"
+
+
+def test_guidance_button_refreshes_transient_read_route_without_authority():
+    """The original Desktop renders a read-only hint; never an approval."""
+    view, _, refused = _next_action_view()
+    class Button:
+        state = None
+        def configure(self, **kw):
+            self.state = kw["state"]
+    view.action_buttons = {}
+    view.guide = _Var("")
+    view.add_button = Button()
+    view.action_preview_button = Button()
+    view._ui_plan = lambda: {"enabled": {}, "next_step": "Read only"}
+    view.inventory_packet = {"manual_revision_recovery_attention_required": False}
+    desktop.PersonalDayDesktop._sync_guidance(view)
+    assert view.safe_next_button.state == "normal"
+    assert "NEXT ACTION" in view.safe_next_label.get()
+    assert not refused
+    view.action_seen_binding = view._binding()
+    desktop.PersonalDayDesktop._sync_guidance(view)
+    assert "Focus selected task" in view.safe_next_label.get()
+    view.inventory_packet["manual_revision_recovery_attention_required"] = True
+    desktop.PersonalDayDesktop._sync_guidance(view)
+    assert "manual recovery hold" in view.safe_next_label.get().lower()
+    view.loaded_desk = "/test/Vres-Desk-Stale"
+    desktop.PersonalDayDesktop._sync_guidance(view)
+    assert "Load original day" in view.safe_next_label.get()
+    assert not refused
+
+
+def test_guided_click_only_dispatches_whitelisted_existing_read_routes():
+    """An explicit button click never calls completion, archive or host actions."""
+    view, _, refused = _next_action_view()
+    calls = []
+    for method in ("refresh", "review_home", "inspect_next_action", "focus",
+                   "preview_briefing", "preview_decision"):
+        setattr(view, method, lambda method=method: calls.append(method))
+    class Workspace:
+        def select(self, tab):
+            calls.append(("select_project_tab", tab))
+    view.workspace = Workspace()
+    view.project_tab = object()
+    for route, expected in (
+        ("refresh", "refresh"), ("home", "review_home"),
+        ("next_action", "inspect_next_action"), ("focus", "focus"),
+        ("briefing", "preview_briefing"), ("decision", "preview_decision"),
+        ("project_tab", ("select_project_tab", view.project_tab)),
+    ):
+        view._recommended_read = lambda route=route: {"route": route}
+        desktop.PersonalDayDesktop.follow_read_only_step(view)
+        assert calls[-1] == expected
+    prior = list(calls)
+    for forbidden in ("complete", "reopen", "archive", "execute", None):
+        view._recommended_read = lambda route=forbidden: {"route": route}
+        desktop.PersonalDayDesktop.follow_read_only_step(view)
+        assert calls == prior
+    assert "separate explicit approval" in view.status.get().lower()
+    assert not refused
 
 
 def _completion_briefing_view():
