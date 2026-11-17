@@ -53,7 +53,10 @@ def test_all_original_claude_hook_entrypoints_stop_before_accessing_runtime_or_p
         assert commands[0].startswith("throw 'VRES_W4_HELD_HOST_HOOK:"), name
         assert "HOST_HOOK_DB_ROUTE_ATTEMPTED_AND_REFUSED" in commands[0], name
         assert commands.index(commands[0]) == 0, name
-        assert "resolve-runtime.ps1" in script, name  # original owner retained
+        if name == "vres-session-end.ps1":
+            assert "Start-Process" in script, name  # original detached-worker route retained
+        else:
+            assert "resolve-runtime.ps1" in script, name  # original runtime resolver retained
 
 
 def test_original_claude_host_hook_configuration_stays_owned_and_held():
