@@ -1,0 +1,328 @@
+{
+  "schema": "vres-w4-first-full-personal-source-read-only-audit/1",
+  "status": "P0_STATIC_GITHUB_GET_EVIDENCE_ONLY_NOT_A_RUNTIME_CLOSURE_NOT_A_RELEASE",
+  "source_commit": "179dbfc81a076f2aa1600e3392f538885c8178b3",
+  "source_tree": "219fb4a7147a029a36a7db89f98497dd39dd59af",
+  "source_parent": "9e2b538b06f34926f611db7e20120be572577101",
+  "source_tree_truncated": false,
+  "source_tree_entry_count": 601,
+  "source_python_files": 153,
+  "source_sql_migrations": 41,
+  "selected_dependency_evidence": [
+    {
+      "path": "src/vres_os/__init__.py",
+      "git_blob_sha1": "cae9ae5f04d1005900c8e82b1564abb164520851",
+      "classification": "OBSERVED_ENTRYPOINT_OR_IMMEDIATE_OWNER"
+    },
+    {
+      "path": "src/vres_os/personal_day_desktop.py",
+      "git_blob_sha1": "316e2507f2cb615fe5926a6d76cd02de92f84cd4",
+      "classification": "OBSERVED_ENTRYPOINT_OR_IMMEDIATE_OWNER"
+    },
+    {
+      "path": "src/vres_os/personal_desk_cli.py",
+      "git_blob_sha1": "48ed4929cbf47cd603c044bc9521ac2830d2252f",
+      "classification": "OBSERVED_ENTRYPOINT_OR_IMMEDIATE_OWNER"
+    },
+    {
+      "path": "src/vres_os/personal_day_plan.py",
+      "git_blob_sha1": "4db132b310f8f4ed4c8623a72eb7f1550c44f1e6",
+      "classification": "OBSERVED_ENTRYPOINT_OR_IMMEDIATE_OWNER"
+    },
+    {
+      "path": "src/vres_os/personal_day_navigation.py",
+      "git_blob_sha1": "21af052bf96f44eb9817a05eeeeeebacc334897b",
+      "classification": "OBSERVED_ENTRYPOINT_OR_IMMEDIATE_OWNER"
+    },
+    {
+      "path": "src/vres_os/personal_work_session.py",
+      "git_blob_sha1": "9e118b71f6dc39d15f030bf8e016c8591602f32a",
+      "classification": "OBSERVED_ENTRYPOINT_OR_IMMEDIATE_OWNER"
+    },
+    {
+      "path": "src/vres_os/personal_portable_desk.py",
+      "git_blob_sha1": "a55da385b3677fb24e22351a4ab1908760410628",
+      "classification": "OBSERVED_ENTRYPOINT_OR_IMMEDIATE_OWNER"
+    },
+    {
+      "path": "src/vres_os/personal_task_lifecycle.py",
+      "git_blob_sha1": "01a478b6360dde31565b5a35b94033f376da832b",
+      "classification": "OBSERVED_ENTRYPOINT_OR_IMMEDIATE_OWNER"
+    },
+    {
+      "path": "src/vres_os/personal_offline_workbench.py",
+      "git_blob_sha1": "636d40b7229d27da6442e8089120cad0c3840529",
+      "classification": "OBSERVED_ENTRYPOINT_OR_IMMEDIATE_OWNER"
+    },
+    {
+      "path": "src/vres_os/personal_task_continuity.py",
+      "git_blob_sha1": "949993cb7b730712e600cd71dac6181e0dc7ef9a",
+      "classification": "OBSERVED_ENTRYPOINT_OR_IMMEDIATE_OWNER"
+    },
+    {
+      "path": "src/vres_os/personal_scratch_discovery.py",
+      "git_blob_sha1": "695e864129cf14a920346b9a514f332d363c7094",
+      "classification": "OBSERVED_ENTRYPOINT_OR_IMMEDIATE_OWNER"
+    },
+    {
+      "path": "src/vres_os/personal_daily_focus.py",
+      "git_blob_sha1": "7f66743a9ac305294a4e9a0b5a04c6fda89ebd0a",
+      "classification": "OBSERVED_ENTRYPOINT_OR_IMMEDIATE_OWNER"
+    },
+    {
+      "path": "src/vres_os/personal_project_task_draft.py",
+      "git_blob_sha1": "92016e79b22705c15cba6ee634ef135a7bc3eb21",
+      "classification": "OBSERVED_ENTRYPOINT_OR_IMMEDIATE_OWNER"
+    },
+    {
+      "path": "src/vres_os/personal_project_intake.py",
+      "git_blob_sha1": "e6c5db932dc151e045eb9261e0fa461ba7b4d600",
+      "classification": "OBSERVED_ENTRYPOINT_OR_IMMEDIATE_OWNER"
+    },
+    {
+      "path": "src/vres_os/personal_desk_chairman_handoff.py",
+      "git_blob_sha1": "8f937521e37923d0d7a76c13c5b72b6fda0d5cb3",
+      "classification": "OBSERVED_ENTRYPOINT_OR_IMMEDIATE_OWNER"
+    },
+    {
+      "path": "src/vres_os/personal_work_result.py",
+      "git_blob_sha1": "1d55f664a61a681ccea96726ecd16e76c9004b34",
+      "classification": "OBSERVED_ENTRYPOINT_OR_IMMEDIATE_OWNER"
+    },
+    {
+      "path": "src/vres_os/personal_work_completion.py",
+      "git_blob_sha1": "f416bbebf1c492dbcfbb174024de2d448e15b07e",
+      "classification": "OBSERVED_ENTRYPOINT_OR_IMMEDIATE_OWNER"
+    },
+    {
+      "path": "src/vres_os/personal_result_acceptance.py",
+      "git_blob_sha1": "274cae99dc3f59e9f0d1132ba5c408f2f1823a57",
+      "classification": "OBSERVED_ENTRYPOINT_OR_IMMEDIATE_OWNER"
+    },
+    {
+      "path": "src/vres_os/personal_data_sources.py",
+      "git_blob_sha1": "ad08616bf89d34c0c5f52affff30813562d7a2f7",
+      "classification": "OBSERVED_ENTRYPOINT_OR_IMMEDIATE_OWNER"
+    },
+    {
+      "path": "src/vres_os/personal_chairman_result_handoff.py",
+      "git_blob_sha1": "c2e5e17775ecc1d9a4662914c04fdbf464915d31",
+      "classification": "OBSERVED_ENTRYPOINT_OR_IMMEDIATE_OWNER"
+    },
+    {
+      "path": "src/vres_os/personal_data_source_store.py",
+      "git_blob_sha1": "91b906005b9096831983e50893e86b461b84da6c",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    },
+    {
+      "path": "src/vres_os/project_adoption.py",
+      "git_blob_sha1": "bc5d4bf73727ea5da920e5f348df80aab8a8038f",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    },
+    {
+      "path": "src/vres_os/chairman_policy_history.py",
+      "git_blob_sha1": "406254773c5e8f8825d6ff01673f21da1a4e0fb0",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    },
+    {
+      "path": "src/vres_os/global_claude_adoption_plan.py",
+      "git_blob_sha1": "83db9b97ed6c616faa2ebc4a02c3e47cf4b07434",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    },
+    {
+      "path": "src/vres_os/personal_chairman_decision_support.py",
+      "git_blob_sha1": "56eb4e0edd85819d0c40bbe4e5344987b72c6825",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    },
+    {
+      "path": "src/vres_os/personal_w2_onboarding.py",
+      "git_blob_sha1": "76acfcb1350a767fee216aaeb743cbf5066c07ba",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    },
+    {
+      "path": "src/vres_os/project.py",
+      "git_blob_sha1": "1174025eb49d6ff938e8de89f2a0e7236cf4ea5d",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    },
+    {
+      "path": "src/vres_os/project_preview.py",
+      "git_blob_sha1": "58c769d4dc46eee90201963f0ed17887b8471d73",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    },
+    {
+      "path": "src/vres_os/global_claude_synthetic_operator.py",
+      "git_blob_sha1": "78695f60ba735eba83cea702a956ab9697922808",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    },
+    {
+      "path": "src/vres_os/architecture_governance.py",
+      "git_blob_sha1": "091d6a46523122c05eaf66a3a3dc56a4089eeda6",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    },
+    {
+      "path": "src/vres_os/architecture_plan.py",
+      "git_blob_sha1": "a6e45acbc48ae6ee370ad6cd5f6f9d637ef0ced3",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    },
+    {
+      "path": "src/vres_os/architecture_policy.py",
+      "git_blob_sha1": "26bab7b8ba009a97776ed3aac517a04208ea69bc",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    },
+    {
+      "path": "src/vres_os/sensitive_policy.py",
+      "git_blob_sha1": "dc5891e88635c6e0af128cede5ee742c718b63a5",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    },
+    {
+      "path": "src/vres_os/redaction.py",
+      "git_blob_sha1": "44381a15c20836fa5afa572b6e88be798620ce4f",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    },
+    {
+      "path": "src/vres_os/_windows_held_privacy.py",
+      "git_blob_sha1": "438c9bad95a3e4fb724476aa5b6c3a35424ce60b",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    },
+    {
+      "path": "src/vres_os/_windows_held_storage_probe.py",
+      "git_blob_sha1": "933d17d80ffff62703f37273e68b8eebf67f3f62",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    },
+    {
+      "path": "src/vres_os/_windows_held_journal_policy.py",
+      "git_blob_sha1": "cb05533b88133b9023ca5a4195de00578d69f06e",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    },
+    {
+      "path": "src/vres_os/local_secrets.py",
+      "git_blob_sha1": "c5dc226fd30b44b64d915bbbc4d0aa794b07862c",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    },
+    {
+      "path": "src/vres_os/personal_profile.py",
+      "git_blob_sha1": "be9f593af09991dd6d69cc3c62b8f1d9d8d78f1d",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    },
+    {
+      "path": "src/vres_os/processes.py",
+      "git_blob_sha1": "af68290eeaba19c02ad46116f3f0312c3921de0b",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    },
+    {
+      "path": "src/vres_os/sources.py",
+      "git_blob_sha1": "3fe9d097c330ac20f9861a758e11bb734de979dd",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    },
+    {
+      "path": "src/vres_os/approvals.py",
+      "git_blob_sha1": "39701d4ccef8f2f16e6fe85ecd9bef1fbdaf60de",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    },
+    {
+      "path": "src/vres_os/db.py",
+      "git_blob_sha1": "df80d7b2d494ac78867f26c54d3501f93a7f8df1",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    },
+    {
+      "path": "src/vres_os/global_claude_disposable_disk_fixture.py",
+      "git_blob_sha1": "dab6bf9a7e1f4d37b2ffe1a876e629e7b7403e53",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    },
+    {
+      "path": "src/vres_os/global_claude_fixture_transaction.py",
+      "git_blob_sha1": "ced29e0346aa31abf35b986e2d36fde675d22616",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    },
+    {
+      "path": "src/vres_os/global_claude_migration_review.py",
+      "git_blob_sha1": "c78f4c9b50328312554870a4bf5735d75b0924e6",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    },
+    {
+      "path": "src/vres_os/secrets.py",
+      "git_blob_sha1": "4f3f4c8f1c1956e43a796141ecf118b93b665c5e",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    },
+    {
+      "path": "src/vres_os/chunking.py",
+      "git_blob_sha1": "ae99395b051a696924cff57efe7dc8eaf224ad08",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    },
+    {
+      "path": "src/vres_os/paths.py",
+      "git_blob_sha1": "1456cf9c53ff18cfe950f63255956c17756a8620",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    },
+    {
+      "path": "src/vres_os/chairman_policy.py",
+      "git_blob_sha1": "36e62d6a2712ac305fd4070bac658b94d61d155e",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    },
+    {
+      "path": "src/vres_os/authority.py",
+      "git_blob_sha1": "477ee752f434e4ac2c6f8dff9d3ece2fa1623947",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    },
+    {
+      "path": "src/vres_os/config.py",
+      "git_blob_sha1": "f746824aeddd1043d06a68b9be61ec8daf3c3d30",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    },
+    {
+      "path": "src/vres_os/database_targets.py",
+      "git_blob_sha1": "cf292984331cf6e7aca07e9fc573f0ade0e9e579",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    },
+    {
+      "path": "src/vres_os/database_boundary.py",
+      "git_blob_sha1": "70ab1d3c7232329ce6b70f59a6de9d9e19d12654",
+      "classification": "OBSERVED_CONDITIONAL_OR_TRANSITIVE_REVIEW_CANDIDATE"
+    }
+  ],
+  "release_path_evidence": [
+    {
+      "path": "src/vres_os/personal_portable_delivery.py",
+      "git_blob_sha1": "79180e365179f53c74bc2f397c6b88f96805730c"
+    },
+    {
+      "path": "src/vres_os/release_artifact.py",
+      "git_blob_sha1": "497fa3d96742a868f8b00b5dcb26e8afe03fd159"
+    },
+    {
+      "path": "src/vres_os/release_inputs.py",
+      "git_blob_sha1": "a0cdf3195f0cf0f2a61ce32521a74f78260832f7"
+    },
+    {
+      "path": "pyproject.toml",
+      "git_blob_sha1": "b2d5e30d10d7be0613e90bf3ed1e346be5678969"
+    }
+  ],
+  "observed_entrypoints": [
+    "src/vres_os/personal_day_desktop.py",
+    "src/vres_os/personal_desk_cli.py"
+  ],
+  "old_portable_runtime_pins": "historical TEN; intentionally NOT updated",
+  "old_portable_max_per_source_bytes": 131072,
+  "source_owner_sizes_verified_utf8_characters": {
+    "src/vres_os/personal_work_session.py": 217433,
+    "src/vres_os/project_adoption.py": 194199,
+    "src/vres_os/personal_day_desktop.py": 108019
+  },
+  "separate_protected_r13_branch": "feature/personal-w4-r13-universal-staging-hold-20261106",
+  "r13_current_source_relationship": "DIVERGED_106_AHEAD_13_BEHIND_FROM_R13; R13 modules absent from candidate tree",
+  "exclusions": "Not an exhaustive import graph. Do not package, execute, stage, install, or treat any listed SHA-1 as publisher authentication.",
+  "test_results_for_exact_source": "WHOLE_TREE_NOT_RUN; PREVIOUS_PARENT_732_PASS_DOES_NOT_TRANSFER",
+  "review_issue": 185,
+  "independent_review": "NOT_RUN",
+  "holds": [
+    "LIVE_SCHEMA_048_INCIDENT_OPEN_NO_POSTGRESQL_EVEN_SELECT",
+    "HOST_HOOK_DB_ROUTE_ATTEMPTED_AND_REFUSED_OPEN",
+    "P3_OPEN",
+    "F1_FABLE_POSITIVE_AUTHORITY_NOT_GRANTED",
+    "PROTECTED_MAIN_R13_P2_NO_MERGE_OR_INSTALL",
+    "WINDOWS_DUMMY_UAT_NOT_NOW"
+  ],
+  "verified_at_calendar_date": "2026-11-17",
+  "environment": "Authenticated read-only GitHub Git-data/content/issue calls, not local Windows"
+}
