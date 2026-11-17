@@ -6,17 +6,18 @@ ROOT = Path(__file__).parents[1]
 
 def test_installer_defers_credentials_and_requires_operator_consent():
     text = (ROOT/'install.ps1').read_text()
-    for pkg in ('Anthropic.ClaudeCode','PostgreSQL.PostgreSQL.17','Python.Python.3.12','@openai/codex'):
+    for pkg in ('Anthropic.ClaudeCode','PostgreSQL.PostgreSQL.17','@openai/codex'):
         assert pkg in text
     assert 'Read-Host' in text and 'start vres' in text
     assert 'getpass' not in text and 'CREATE ROLE' not in text
     assert 'controlled-live-test preview' in text
+    assert "Winget-Install 'Python.Python.3.12'" not in text
 
 
 def test_python_runtime_staged_before_active_pointer_changes():
     text = (ROOT/'install.ps1').read_text()
     assert "Join-Path $ReleaseRoot $ReleaseId" in text
-    assert text.index("Run $NewPython @('-m','pip','check')") < text.index('Write-JsonAtomic $ActivePath')
+    assert text.index("Run $NewPython @('-I','-m','pip','--isolated','check')") < text.index('Write-JsonAtomic $ActivePath')
     assert text.index("Run 'claude' @('plugin','validate',$StagedPlugin)") < text.index('Write-JsonAtomic $ActivePath')
     assert "[IO.File]::Replace" in text and "$oldPointer" in text
     assert 'Move-Item -LiteralPath $PluginBackup -Destination $PluginTarget' in text
@@ -56,7 +57,8 @@ def test_uninstall_removes_only_vres_owned_statusline_before_runtime_removal():
 def test_update_uses_same_transaction_implementation():
     text = (ROOT/'update.ps1').read_text()
     assert "install.ps1') -Update" in text
-    assert 'pip install' not in text and 'Remove-Item' not in text
+    assert 'pip install' not in text and 'New-Item -ItemType Directory' not in text
+    assert '-PythonExecutable $PythonExecutable -PythonSha256 $PythonSha256' in text
 
 def test_maintenance_update_refuses_missing_active_release_before_native_commands():
     """Update cannot silently become an initial install or create a partial Vres plugin."""
@@ -74,9 +76,10 @@ def test_maintenance_update_never_acquires_external_packages_or_checks_postgres_
     text = (ROOT / 'install.ps1').read_text(encoding='utf-8')
     prereqs = text.split('foreach ($item in @(', 1)[1].split('# Personal-release inputs', 1)[0]
     assert 'if ($Update) { throw "Update refused: missing $($item[0])' in prereqs
-    assert "if ($Update) { throw 'Update refused: compatible Python is missing" in prereqs
+    assert '$Python = Confirm-PinnedPython' in prereqs
+    assert 'Find-Python' not in prereqs
+    assert "Winget-Install 'Python.Python.3.12'" not in prereqs
     assert prereqs.index('if ($Update) { throw "Update refused: missing') < prereqs.index('Winget-Install $item[1]')
-    assert prereqs.index("if ($Update) { throw 'Update refused: compatible Python") < prereqs.index("Winget-Install 'Python.Python.3.12'")
     postgres = text.split('# Maintenance updates never inspect/provision local PostgreSQL', 1)[1]
     assert "if (-not $Update -and -not $UseRemotePostgres" in postgres.split("if ($WithCodex", 1)[0]
     codex = text.split("if ($WithCodex -and -not (Have 'codex'))", 1)[1].split('# Personal plugin discovery', 1)[0]
@@ -141,21 +144,18 @@ def test_static_windows_release_path_cannot_be_parent_traversal():
     assert "pending-install.json" in uninstall
 
 
-def test_static_python_discovery_checks_supported_side_by_side_versions():
-    text = (Path(__file__).parents[1] / "install.ps1").read_text()
-    assert "@('-3.13','-3.12')" in text
-
-
-def test_static_python_probe_treats_missing_selector_as_dependency_absence():
+def test_static_pinned_python_requires_explicit_digest_before_isolated_probe():
     text = (ROOT / "install.ps1").read_text()
-    assert "function Probe-Python" in text
-    probe = text.split("function Probe-Python", 1)[1].split("function Find-Python", 1)[0]
-    assert "$savedErrorActionPreference = $ErrorActionPreference" in probe
-    assert "$ErrorActionPreference = 'SilentlyContinue'" in probe
-    assert "$ErrorActionPreference = $savedErrorActionPreference" in probe
-    find = text.split("function Find-Python", 1)[1].split("function Write-JsonAtomic", 1)[0]
-    assert "Probe-Python 'py'" in find
-    assert "Probe-Python 'python'" in find
+    pinned = text.split("function Confirm-PinnedPython", 1)[1].split(
+        "function Write-JsonAtomic", 1)[0]
+    assert "Get-FileHash -LiteralPath $approved -Algorithm SHA256" in pinned
+    assert pinned.index("Get-FileHash") < pinned.index("& $approved -I -S -B -c $probe")
+    assert "(3,12) <= sys.version_info[:2] < (3,14)" in pinned
+    assert "sys.maxsize > 2**32" in pinned
+    assert "VRES_PINNED_PYTHON_X64_312_313" in pinned
+    assert "function Probe-Python" not in text
+    assert "function Find-Python" not in text
+    assert "$Python = Confirm-PinnedPython" in text
 
 
 def test_static_windows_import_smoke_avoids_nested_native_quoting():

@@ -8,6 +8,8 @@ param(
     [string]$SourceTree,
     [string]$GitExecutable,
     [string]$GitSha256,
+    [string]$PythonExecutable,
+    [string]$PythonSha256,
     [string]$WheelhouseDir,
     [string]$WheelLockFile,
     [string]$WheelLockSha256,
@@ -62,6 +64,24 @@ if ((Get-Item -LiteralPath $GitExecutable).Attributes -band [IO.FileAttributes]:
 }
 if ((Get-FileHash -LiteralPath $GitExecutable -Algorithm SHA256).Hash -cne $GitSha256.ToUpperInvariant()) {
     throw 'Update refused: pinned Git executable SHA-256 differs.'
+}
+# Independently chosen bootstrap Python executable/digest, NOT a publisher verdict.
+# No ambient py.exe/PATH discovery is allowed in the original first-FULL route.
+if ([string]::IsNullOrWhiteSpace($PythonExecutable) -or
+    -not [IO.Path]::IsPathRooted($PythonExecutable) -or
+    $PythonSha256 -notmatch '^[0-9a-fA-F]{64}\z') {
+    throw 'Update refused: approved absolute -PythonExecutable and -PythonSha256 required.'
+}
+$PythonExecutable = [IO.Path]::GetFullPath($PythonExecutable)
+if ([IO.Path]::GetExtension($PythonExecutable) -ine '.exe' -or
+    -not (Test-Path -LiteralPath $PythonExecutable -PathType Leaf)) {
+    throw 'Update refused: pinned Python executable is not an existing .exe file.'
+}
+if ((Get-Item -LiteralPath $PythonExecutable).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+    throw 'Update refused: pinned Python executable is a reparse point.'
+}
+if ((Get-FileHash -LiteralPath $PythonExecutable -Algorithm SHA256).Hash -cne $PythonSha256.ToUpperInvariant()) {
+    throw 'Update refused: pinned Python executable SHA-256 differs.'
 }
 if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot '.git') -PathType Container)) {
     throw 'Update refused: a separate normal checkout is required, not a linked worktree.'
@@ -192,6 +212,7 @@ try {
 
 if ($PreflightOnly) {
     Write-Host 'VRES_W4_PINNED_GIT_CHECKOUT_MATCH_ONLY'
+    Write-Host 'Pinned Python executable file SHA-256 checked; NO Python/Tcl/Tk/native DLL runtime trust proven.'
     Write-Host "Observed HEAD: $Head"
     Write-Host "Observed TREE: $HeadTree"
     Write-Host 'NO installation, DB, Claude, migration, credential, profile or release action performed.'
@@ -206,4 +227,4 @@ if ($PreflightOnly) {
 if (-not (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'VresOS\active-install.json') -PathType Leaf)) {
     throw 'Update requires an existing managed Vres installation; use separately approved install.ps1 for first installation.'
 }
-& (Join-Path $PSScriptRoot 'install.ps1') -Update -WithEmbeddings:$WithEmbeddings -WithCodex:$WithCodex -UseRemotePostgres:$UseRemotePostgres -SourceCommit $SourceCommit -SourceTree $SourceTree -GitExecutable $GitExecutable -GitSha256 $GitSha256 -WheelhouseDir $WheelhouseDir -WheelLockFile $WheelLockFile -WheelLockSha256 $WheelLockSha256
+& (Join-Path $PSScriptRoot 'install.ps1') -Update -WithEmbeddings:$WithEmbeddings -WithCodex:$WithCodex -UseRemotePostgres:$UseRemotePostgres -SourceCommit $SourceCommit -SourceTree $SourceTree -GitExecutable $GitExecutable -GitSha256 $GitSha256 -PythonExecutable $PythonExecutable -PythonSha256 $PythonSha256 -WheelhouseDir $WheelhouseDir -WheelLockFile $WheelLockFile -WheelLockSha256 $WheelLockSha256

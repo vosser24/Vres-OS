@@ -10,6 +10,8 @@ param(
     [string]$SourceTree,
     [string]$GitExecutable,
     [string]$GitSha256,
+    [string]$PythonExecutable,
+    [string]$PythonSha256,
     [string]$WheelhouseDir,
     [string]$WheelLockFile,
     [string]$WheelLockSha256
@@ -49,7 +51,7 @@ if ($SourceCommit -notmatch '^[0-9a-fA-F]{40}\z' -or
     $SourceTree -notmatch '^[0-9a-fA-F]{40}\z') {
     throw 'Installation refused: independently approved full -SourceCommit and -SourceTree required.'
 }
-& (Join-Path $PSScriptRoot 'update.ps1') -PreflightOnly -SourceCommit $SourceCommit -SourceTree $SourceTree -GitExecutable $GitExecutable -GitSha256 $GitSha256
+& (Join-Path $PSScriptRoot 'update.ps1') -PreflightOnly -SourceCommit $SourceCommit -SourceTree $SourceTree -GitExecutable $GitExecutable -GitSha256 $GitSha256 -PythonExecutable $PythonExecutable -PythonSha256 $PythonSha256
 
 # Complete OFFLINE binary wheel input, approved independently of this checkout.
 # Pip must neither reach an index nor build an unpinned sdist or Vres source tree.
@@ -151,37 +153,36 @@ function Winget-Install([string]$Id) {
     Run 'winget' @('install','--id',$Id,'--exact','--source','winget','--accept-package-agreements','--accept-source-agreements')
     Refresh-Path
 }
-function Probe-Python([string]$Exe, [string[]]$Arguments) {
-    # Native launchers such as py.exe write selector-missing messages to stderr.
-    # Under the installer's global Stop preference, Windows PowerShell can turn
-    # that expected probe failure into a terminating NativeCommandError before
-    # Find-Python can inspect LASTEXITCODE. Suppress native probe errors only
-    # for this bounded discovery call, then restore strict installer behavior.
-    $savedErrorActionPreference = $ErrorActionPreference
-    try {
-        $ErrorActionPreference = 'SilentlyContinue'
-        $result = & $Exe @Arguments 2>$null
-        $exitCode = $LASTEXITCODE
-    } finally {
-        $ErrorActionPreference = $savedErrorActionPreference
+function Confirm-PinnedPython {
+    # This is a file pin and bounded self-report, never Python DLL/Tcl/Tk/publisher
+    # trust, NTFS ancestor identity, process isolation, or release authorization.
+    if ([string]::IsNullOrWhiteSpace($PythonExecutable) -or
+        -not [IO.Path]::IsPathRooted($PythonExecutable) -or
+        $PythonSha256 -notmatch '^[0-9a-fA-F]{64}\z') {
+        throw 'VRES_PYTHON_PIN_REFUSED: independently approved absolute executable/SHA-256 required.'
     }
-    if ($exitCode -eq 0) { return ($result | Select-Object -Last 1) }
-    return $null
-}
-function Find-Python {
-    # A newer unsupported default Python must not hide an installed supported version.
-    $probe = "import sys; print(sys.executable); raise SystemExit(0 if (3,12) <= sys.version_info[:2] < (3,14) else 1)"
-    if (Have 'py') {
-        foreach ($selector in @('-3.13','-3.12')) {
-            $result = Probe-Python 'py' @($selector,'-c',$probe)
-            if ($result) { return $result }
-        }
+    $approved = [IO.Path]::GetFullPath($PythonExecutable)
+    if ([IO.Path]::GetExtension($approved) -ine '.exe' -or
+        -not (Test-Path -LiteralPath $approved -PathType Leaf) -or
+        ((Get-Item -LiteralPath $approved).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw 'VRES_PYTHON_PIN_REFUSED: Python executable must be an ordinary .exe file.'
     }
-    if (Have 'python') {
-        $result = Probe-Python 'python' @('-c',$probe)
-        if ($result) { return $result }
+    if ((Get-FileHash -LiteralPath $approved -Algorithm SHA256).Hash -cne $PythonSha256.ToUpperInvariant()) {
+        throw 'VRES_PYTHON_PIN_REFUSED: Python SHA-256 no longer matches approved bytes.'
     }
-    return $null
+    # Only AFTER the digest recheck, launch that explicit executable in isolated,
+    # no-site, no-bytecode mode for a version/bitness/path self-report. This
+    # self-report cannot authenticate the loaded native dependency closure.
+    $probe = 'import sys; print(sys.executable); print("VRES_PINNED_PYTHON_X64_312_313" if (3,12) <= sys.version_info[:2] < (3,14) and sys.maxsize > 2**32 else "UNSUPPORTED")'
+    $identity = @(& $approved -I -S -B -c $probe)
+    if ($LASTEXITCODE -ne 0 -or $identity.Count -ne 2 -or
+        [string]$identity[1] -cne 'VRES_PINNED_PYTHON_X64_312_313' -or
+        -not [string]::Equals(
+            [IO.Path]::GetFullPath([string]$identity[0]), $approved,
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'VRES_PYTHON_PIN_REFUSED: pinned interpreter version, x64 or executable path mismatch.'
+    }
+    return $approved
 }
 function Write-JsonAtomic([string]$Path, $Value) {
     $id = [guid]::NewGuid().ToString('N')
@@ -294,14 +295,9 @@ foreach ($item in @(@('claude','Anthropic.ClaudeCode'))) {
         Winget-Install $item[1]
     }
 }
-$Python = Find-Python
-if (-not $Python) {
-    if ($Update) { throw 'Update refused: compatible Python is missing; no prerequisite package will be installed during a Vres update.' }
-    if (-not (Confirm-Choice 'Python 3.12 or 3.13 is missing. Install Python 3.12?' $true)) { throw 'Compatible Python is required.' }
-    Winget-Install 'Python.Python.3.12'
-    $Python = Find-Python
-    if (-not $Python) { throw 'Open a fresh terminal so Python becomes visible, then rerun.' }
-}
+# No ambient Python/py discovery or automatic Python download. One exact
+# out-of-band file pin flows from original update.ps1 into this installer.
+$Python = Confirm-PinnedPython
 # Personal-release inputs (pinned migrations 001-041, no C2B/R0/F2 experimental files) are
 # validated from the source tree before any install root, venv or package is created.
 # Hygiene-only reorder; release_artifact still imports release_inputs before
