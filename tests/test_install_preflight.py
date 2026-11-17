@@ -139,7 +139,7 @@ def test_installer_preflight_never_contacts_the_database_and_keeps_its_integrity
     # Source identity, staging, package verification, journal and rollback are unchanged and in order.
     stage = at("'stage','--root',$RepoRoot,'--out',$StagedSource,'--manifest',$ReleaseManifest,'--source-commit',"
                "$SourceCommit")
-    assert at("if ($SourceCommit -notmatch '^[0-9a-fA-F]{40}$')") < at("'check','--root',$RepoRoot") < stage
+    assert at("if ($SourceCommit -notmatch '^[0-9a-fA-F]{40}\\z'") < at("'check','--root',$RepoRoot") < stage
     verify = at("'verify-installed','--manifest',$ReleaseManifest")
     assert verify < at("from vres_os.cli import app") < at("'doctor','--allow-unconfigured','--skip-database'")
     assert at("'doctor','--allow-unconfigured','--skip-database'") < at("'pending-install.json') @{")

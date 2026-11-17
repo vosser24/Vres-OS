@@ -47,28 +47,33 @@ These mechanisms have different evidence levels. Local tests execute Python/pars
 
 **Registered recipes are not a general verified executable compiler.** Vres can execute the bounded code-owned JSON recipe family described above, but it does not treat arbitrary procedure text, Python, shell, external programs or generated code as trusted executable recipes. New executor families require explicit code registration plus their own input/output, permission and validation contracts.
 
-## Windows preview installation
+## Windows installation — HELD, source-only candidate
 
-Use a disposable project, a dedicated PostgreSQL test database and a Windows snapshot/backup. Create a git checkout of the approved release commit from the release Git bundle ([Windows installation](docs/INSTALL-WINDOWS.md), section 2), then run in a separate PowerShell window:
+**Do not install or update Vres-OS from the current engineering source.**
+The original `update.ps1` and `install.ps1` remain mechanically held.
+Current code has not passed exact-tree Python/pytest, PowerShell, original
+Windows installation/recovery or full Tk/CLI/MCP/Chairman UAT. Protected
+Windows P2 and the user's credentials are not to be changed.
 
-```powershell
-cd C:\Install\Vres-OS
-Set-ExecutionPolicy -Scope Process Bypass
-.\install.ps1 -SourceCommit <commit>
-```
+After a genuinely independent security review, resolution of the separate
+Schema-048 and native Claude/hook incidents, trusted Git/Python/Tcl/Tk/native
+DLLs/complete offline hash-locked wheelhouse, and specific owner approval,
+the chosen future path is a separate clean Windows Git checkout at an exact
+approved COMMIT/TREE, followed by the **original** `update.ps1` preflight and
+normal update using the **original** `install.ps1 -Update` and its journal
+and recovery. Do not use source ZIPs or an alternate installer.
 
-`-SourceCommit` (the full 40-hex commit you approved) is always required; source ZIPs are not installable. Optional flags: `-WithEmbeddings`, `-WithCodex`, `-UseRemotePostgres`. Embeddings are **off by default** so installation does not silently download a large model runtime.
+The original installer now refuses missing host dependencies rather than
+acquiring Claude Code, PostgreSQL, Node.js or Codex through WinGet/npm.
+A reviewed Python.exe SHA-256 and Git.exe SHA-256 do not by themselves certify
+publishers, DLLs, Git configuration/helpers, NTFS ancestry or host isolation.
+See [Windows installation / holds](docs/INSTALL-WINDOWS.md).
 
-The installer requires current Claude Code (preview compatibility floor: 2.1.246), Python 3.12 or 3.13, and Git. It prompts before installing missing dependencies. It stages a versioned runtime under `%LOCALAPPDATA%\VresOS\releases`, validates it, and selects it through `active-install.json`. It installs the personal plugin at `%USERPROFILE%\.claude\skills\vres-os` (or the equivalent under `CLAUDE_CONFIG_DIR`). It does not rewrite unrelated settings or delete marketplaces.
-
-In a **new** terminal:
-
-```powershell
-cd C:\Projects\Vres-Live-Test
-claude
-```
-
-Say `start vres`. Enter database credentials only in the separate local setup console. Native vendor authentication remains with Claude/Codex.
+The intended user experience remains ONE original personal Windows
+application, with one Chairman and one Tk Desktop + CLI/MCP front end.
+Credentials belong in the separately approved local setup workflow, never
+in a chat. No PostgreSQL contact, including SELECT, or native Claude
+hooks is currently permitted.
 
 ## Architecture and ownership
 

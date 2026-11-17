@@ -147,12 +147,6 @@ function Run([string]$Exe, [string[]]$Arguments) {
     & $Exe @Arguments
     if ($LASTEXITCODE -ne 0) { throw "A required executable failed (exit $LASTEXITCODE): $Exe. Installation stopped." }
 }
-function Winget-Install([string]$Id) {
-    if (-not (Have 'winget')) { throw 'Windows App Installer / winget is required. Install it from Microsoft Store and rerun.' }
-    Run 'winget' @('show','--id',$Id,'--exact','--source','winget','--accept-source-agreements')
-    Run 'winget' @('install','--id',$Id,'--exact','--source','winget','--accept-package-agreements','--accept-source-agreements')
-    Refresh-Path
-}
 function Confirm-PinnedPython {
     # This is a file pin and bounded self-report, never Python DLL/Tcl/Tk/publisher
     # trust, NTFS ancestor identity, process isolation, or release authorization.
@@ -288,12 +282,10 @@ if ($Update) {
 }
 # Git is supplied ONLY by the independently pinned -GitExecutable verified in
 # original update.ps1; ambient PATH git and an automatic Git install are not release inputs.
-foreach ($item in @(@('claude','Anthropic.ClaudeCode'))) {
-    if (-not (Have $item[0])) {
-        if ($Update) { throw "Update refused: missing $($item[0]); no prerequisite package will be installed during a Vres update." }
-        if (-not (Confirm-Choice "$($item[0]) is missing. Install its Windows package?" $true)) { throw "$($item[0]) is required." }
-        Winget-Install $item[1]
-    }
+# Neither fresh nor update may acquire host tools automatically. Provision,
+# review, and approve native Claude Code separately before this installer runs.
+if (-not (Have 'claude')) {
+    throw 'Claude Code is missing; independently review and provision it separately. No installer-owned winget action is permitted.'
 }
 # No ambient Python/py discovery or automatic Python download. One exact
 # out-of-band file pin flows from original update.ps1 into this installer.
@@ -308,17 +300,17 @@ Run $Python @('-I','-B','-X','utf8',(Join-Path $RepoRoot 'src\vres_os\release_in
 $cv = & claude --version
 if ($LASTEXITCODE -ne 0 -or "$cv" -notmatch '(\d+\.\d+\.\d+)') { throw 'Could not determine Claude Code version.' }
 if ([version]$Matches[1] -lt [version]'2.1.246') { throw 'Update Claude Code to 2.1.246 or newer, then rerun. This preview does not emulate older plugin APIs.' }
-# Maintenance updates never inspect/provision local PostgreSQL, even to check whether
-# an executable/service exists. DB-dependent behavior stays disabled under the incident.
+# Neither fresh installation nor maintenance update auto-installs dependencies.
+# Update does not even probe the local PostgreSQL service. Fresh installation
+# only checks whether the user has an existing local server, without starting
+# a service or touching the database; this is NOT database trust evidence.
 if (-not $Update -and -not $UseRemotePostgres -and -not (Have 'psql') -and -not (Get-Service -Name 'postgresql*' -ErrorAction SilentlyContinue)) {
-    if (Confirm-Choice 'Local PostgreSQL was not detected. Install PostgreSQL 17?' $true) { Winget-Install 'PostgreSQL.PostgreSQL.17' }
-    else { throw 'Install PostgreSQL, or rerun with -UseRemotePostgres for an existing server.' }
+    throw 'No local PostgreSQL detected; provision an approved server separately, or explicitly choose -UseRemotePostgres. No winget was invoked.'
 }
+# Codex is optional; never install Node.js or an npm global package on behalf
+# of the user. Independently installed Codex will be checked in its own workflow.
 if ($WithCodex -and -not (Have 'codex')) {
-    if ($Update) { throw 'Update refused: optional Codex is missing; no npm/global package changes during a Vres update.' }
-    if (-not (Have 'npm')) { Winget-Install 'OpenJS.NodeJS.LTS' }
-    Run 'npm' @('install','-g','@openai/codex')
-    Refresh-Path
+    throw 'Optional Codex is missing; provision it separately under approval, or omit -WithCodex. No npm or winget was invoked.'
 }
 # Personal plugin discovery avoids destructive marketplace removal and cache re-registration.
 $installedPlugins = & claude plugin list --json

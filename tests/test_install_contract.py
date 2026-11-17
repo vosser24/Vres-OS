@@ -4,14 +4,16 @@ from pathlib import Path
 ROOT = Path(__file__).parents[1]
 
 
-def test_installer_defers_credentials_and_requires_operator_consent():
-    text = (ROOT/'install.ps1').read_text()
-    for pkg in ('Anthropic.ClaudeCode','PostgreSQL.PostgreSQL.17','@openai/codex'):
-        assert pkg in text
-    assert 'Read-Host' in text and 'start vres' in text
+def test_installer_defers_credentials_and_never_downloads_host_packages():
+    """Original install/update must not silently provision Claude, PG, Node or Codex."""
+    text = (ROOT / 'install.ps1').read_text(encoding='utf-8')
+    for token in ("Have 'claude'", "Have 'psql'", "Have 'codex'",
+                  "Read-Host", "start vres", "Confirm-PinnedPython"):
+        assert token in text
     assert 'getpass' not in text and 'CREATE ROLE' not in text
     assert 'controlled-live-test preview' in text
-    assert "Winget-Install 'Python.Python.3.12'" not in text
+    assert 'Winget-Install' not in text
+    assert "Run 'winget'" not in text and "Run 'npm'" not in text
 
 
 def test_python_runtime_staged_before_active_pointer_changes():
@@ -41,8 +43,8 @@ def test_statusline_install_is_transactional_and_uses_staged_runtime():
     assert "'-m','vres_os.statusline','install'" in text
     assert "'--runtime-python',$NewPython" in text
     assert text.index("Write-JsonAtomic $ActivePath") < text.index("'-m','vres_os.statusline','install'")
-    assert "[IO.File]::WriteAllBytes($ClaudeSettingsPath, $ClaudeSettingsBefore)" in text
-    assert "Remove-Item -LiteralPath $ClaudeSettingsPath -Force -ErrorAction SilentlyContinue" in text
+    assert "Restore-OriginalBytesAtomic $ClaudeSettingsPath $ClaudeSettingsBefore" in text
+    assert "Restore-OriginalBytesAtomic $GlobalClaudePath $GlobalClaudeBefore" in text
 
 
 def test_uninstall_removes_only_vres_owned_statusline_before_runtime_removal():
@@ -71,19 +73,23 @@ def test_maintenance_update_refuses_missing_active_release_before_native_command
     assert 'Update requires an existing active Vres release and installed managed plugin' in text[start:native]
 
 
-def test_maintenance_update_never_acquires_external_packages_or_checks_postgres_service():
-    """No winget/npm/PG prerequisite checks are reachable on the Update path."""
+def test_fresh_and_update_have_no_implicit_host_package_installer():
+    """Python, Claude, PostgreSQL and optional Codex are separately provisioned."""
     text = (ROOT / 'install.ps1').read_text(encoding='utf-8')
-    prereqs = text.split('foreach ($item in @(', 1)[1].split('# Personal-release inputs', 1)[0]
-    assert 'if ($Update) { throw "Update refused: missing $($item[0])' in prereqs
-    assert '$Python = Confirm-PinnedPython' in prereqs
-    assert 'Find-Python' not in prereqs
-    assert "Winget-Install 'Python.Python.3.12'" not in prereqs
-    assert prereqs.index('if ($Update) { throw "Update refused: missing') < prereqs.index('Winget-Install $item[1]')
-    postgres = text.split('# Maintenance updates never inspect/provision local PostgreSQL', 1)[1]
-    assert "if (-not $Update -and -not $UseRemotePostgres" in postgres.split("if ($WithCodex", 1)[0]
-    codex = text.split("if ($WithCodex -and -not (Have 'codex'))", 1)[1].split('# Personal plugin discovery', 1)[0]
-    assert codex.index("if ($Update) { throw 'Update refused: optional Codex is missing") < codex.index("Run 'npm'")
+    assert '$Python = Confirm-PinnedPython' in text
+    assert 'Find-Python' not in text and 'Probe-Python' not in text
+    assert 'Winget-Install' not in text
+    assert "Run 'npm'" not in text and "Run 'winget'" not in text
+    host = text.split("# Neither fresh nor update may acquire host tools automatically.", 1)[1]
+    assert "if (-not (Have 'claude'))" in host
+    assert 'No installer-owned winget action is permitted.' in host
+    postgres = text.split("# Neither fresh installation nor maintenance update auto-installs dependencies.", 1)[1]
+    pg, codex = postgres.split("if ($WithCodex -and -not (Have 'codex'))", 1)
+    assert "if (-not $Update -and -not $UseRemotePostgres" in pg
+    assert "Get-Service -Name 'postgresql*'" in pg
+    assert 'No npm or winget was invoked.' in codex
+    assert text.index("if (-not (Have 'claude'))") < text.index("$Python = Confirm-PinnedPython")
+    assert text.index("$Python = Confirm-PinnedPython") < text.index("$cv = & claude --version")
 
 
 def test_maintenance_update_preserves_current_user_path_from_recovery_gap():
