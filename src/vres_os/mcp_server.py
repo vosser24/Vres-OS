@@ -38,6 +38,7 @@ from .source_revocation import SourceRevocationService, bound_public_result
 from .sources import SourceService
 from .redaction import redact_text
 from .metrics import validate_metrics
+from .w4_runtime_holds import require_w4_native_host_clearance
 
 class VresMCP(FastMCP):
     """The single Vres MCP server; every registration module adds its tools to this instance.
@@ -977,6 +978,7 @@ def codex_handoff_execute(handoff_key: str, session_id: str) -> dict:
 
 
 def main() -> None:
+    require_w4_native_host_clearance()  # P0: source-only held direct-route boundary
     mcp.run()
 
 

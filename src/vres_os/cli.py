@@ -28,6 +28,7 @@ from .personal_profile import (
 from .project import discover_project
 from .repository import Repository
 from .redaction import redact, redact_text
+from .w4_runtime_holds import require_w4_original_runtime_clearance
 
 app = typer.Typer(pretty_exceptions_show_locals=False, help="Vres-OS control CLI. Normal users primarily interact through the Claude Code Chairman.")
 hook_app = typer.Typer(hidden=True)
@@ -47,6 +48,12 @@ app.add_typer(recovery_app, name="recovery")
 project_app = typer.Typer(help="Review and adopt this project's existing Claude configuration (operator console).")
 app.add_typer(project_app, name="project")
 console = Console()
+
+
+@app.callback()
+def _w4_original_cli_callback() -> None:
+    """Refuse direct Typer command dispatch while first-FULL runtime is held."""
+    require_w4_original_runtime_clearance()
 
 
 def _personal_fence(capability: str) -> None:
@@ -963,5 +970,10 @@ def project_plan_template(
     )
 
 
-if __name__ == "__main__":
+def main() -> None:
+    require_w4_original_runtime_clearance()
     app()
+
+
+if __name__ == "__main__":
+    main()

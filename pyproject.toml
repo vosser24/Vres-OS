@@ -46,7 +46,7 @@ dev = [
 ]
 
 [project.scripts]
-vres = "vres_os.cli:app"
+vres = "vres_os.cli:main"
 vres-mcp = "vres_os.company_mcp:main"
 vres-day = "vres_os.personal_w4_windows_entry:main"
 

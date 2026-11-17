@@ -16,6 +16,7 @@ from .repository import Repository
 from .routing import RoutingService, _json_report
 from .routing_rejection import record_stale_routing_rejection
 from .transcript import _text_from_content, transcript_tail
+from .w4_runtime_holds import require_w4_native_host_clearance
 
 
 def _input() -> dict[str, Any]:
@@ -170,6 +171,7 @@ def _routing_payload_with_handback(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def main() -> None:
+    require_w4_native_host_clearance()  # P0: source-only held direct-route boundary
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
     payload = _input()
     try:

@@ -18,6 +18,7 @@ from .registry import RegistryService, registry_publish_subject
 from .reply_guard import confirm_reply_gate
 from .replay import ReplayService
 from .sources import SourceService, source_publish_subject
+from .w4_runtime_holds import require_w4_native_host_clearance
 
 
 def _preview(action: str, subject: dict[str, Any], **extra: Any) -> dict[str, Any]:
@@ -481,6 +482,7 @@ def procedure_replay_finalize(
 
 
 def main() -> None:
+    require_w4_native_host_clearance()  # P0: source-only held direct-route boundary
     mcp.run()
 
 

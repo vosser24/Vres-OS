@@ -327,6 +327,7 @@ def _target_from_params(params: Mapping[str, object]) -> DatabaseTarget:
 
 def target_from_conninfo(conninfo: str) -> DatabaseTarget:
     """Parse a connection string offline. Parser errors are not chained: they can echo the input."""
+    require_w4_schema_clearance()  # P0: source-only held direct-route boundary
     from psycopg.conninfo import conninfo_to_dict
 
     try:
@@ -614,6 +615,7 @@ def hold_target(host: str, port: int, *, reason: str, dbname: str | None = None)
     A hold covers literal loopback aliases (including IPv4 127/8 and mapped IPv6),
     but not unproven DNS aliases or LAN/computer names for that same machine.
     """
+    require_w4_schema_clearance()  # P0: source-only held direct-route boundary
     if not reason.strip():
         raise ValueError("A hold needs a reason")
     root = personal_release_root()
@@ -638,6 +640,7 @@ def hold_target(host: str, port: int, *, reason: str, dbname: str | None = None)
 
 def main(argv: list[str] | None = None) -> int:
     """Status, add-only server holds and interactive approval. Never opens PostgreSQL or reads a credential."""
+    require_w4_schema_clearance()  # P0: source-only held direct-route boundary
     parser = argparse.ArgumentParser(prog="python -m vres_os.database_targets", description=main.__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("status")

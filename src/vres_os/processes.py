@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .redaction import redact_text
+from .w4_runtime_holds import require_w4_original_runtime_clearance
 
 MAX_PROMPT_BYTES = 64 * 1024
 MAX_OUTPUT_BYTES = 2 * 1024 * 1024
@@ -64,6 +65,7 @@ def run_bounded(
     temporary file. Both modes are independent of parent stdin. ``env`` is passed
     only to the child and never changes the parent process environment.
     """
+    require_w4_original_runtime_clearance()  # P0: source-only held direct-route boundary
     if not 0 < timeout <= 3600:
         raise ValueError("Subprocess timeout must be in (0, 3600] seconds")
     if (

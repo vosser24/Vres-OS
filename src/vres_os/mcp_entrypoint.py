@@ -13,6 +13,7 @@ from .mcp_server import _current_session, _project, _require_node
 from .reply_guard import observe_reply_activity
 from .task_decisions import TaskDecisionService
 from .task_lifecycle import transition_task_status
+from .w4_runtime_holds import require_w4_native_host_clearance
 
 
 def _observe_reply_hook_activity(
@@ -168,6 +169,7 @@ def task_decision_retire(
 
 
 def main() -> None:
+    require_w4_native_host_clearance()  # P0: source-only held direct-route boundary
     mcp.run()
 
 

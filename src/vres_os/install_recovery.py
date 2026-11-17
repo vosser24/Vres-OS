@@ -54,6 +54,18 @@ class InstallRecoveryError(RuntimeError):
     pass
 
 
+W4_INSTALL_RECOVERY_SOURCE_INTERLOCK = "HELD_NO_INSTALL_OR_RECOVERY"
+
+
+def require_w4_install_recovery_clearance() -> None:
+    """Source-only P0 hold; not an OS-enforced installation permission."""
+    if W4_INSTALL_RECOVERY_SOURCE_INTERLOCK != "INDEPENDENT_RELEASE_AND_OWNER_APPROVED":
+        raise InstallRecoveryError(
+            "VRES_W4_HELD_INSTALL_RECOVERY: original installation and recovery "
+            "are blocked; installed P2 and Claude profile must remain untouched."
+        )
+
+
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -125,6 +137,7 @@ def _tree_digest(root: Path) -> str | None:
 
 
 def _write_atomic(path: Path, data: bytes) -> None:
+    require_w4_install_recovery_clearance()  # P0: source-only held direct-route boundary
     tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
         with open(tmp, "xb") as handle:
@@ -143,6 +156,7 @@ def _entry(data: bytes | None) -> dict[str, Any]:
 
 def snapshot(install_root: Path, claude_home: Path, release: str) -> Path:
     """Persist and verify exact pre-install bytes. Must run before the journal and any mutation."""
+    require_w4_install_recovery_clearance()  # P0: source-only held direct-route boundary
     if not release or any(c in release for c in "\\/:.") or len(release) > 80:
         raise InstallRecoveryError("Invalid release id")
     if not _plain_dir(install_root):
@@ -227,6 +241,7 @@ def _release_of(pointer: Any) -> str | None:
 
 def inspect(install_root: Path) -> dict[str, Any]:
     """Deterministic recovery plan from the journal and verified evidence, or the reasons it is ambiguous."""
+    require_w4_install_recovery_clearance()  # P0: source-only held direct-route boundary
     install_root = Path(install_root)
     raw = _file(install_root / JOURNAL)
     if raw is None:
@@ -357,6 +372,7 @@ def verify_restored(install_root: Path, claude_home: Path, release: str) -> dict
     named in the original snapshot. Never inspect credentials, other plugins or a DB.
     A v1 snapshot cannot prove the prior plugin tree; fail closed for this new gate.
     """
+    require_w4_install_recovery_clearance()  # P0: source-only held direct-route boundary
     install_root, claude_home = Path(install_root), Path(claude_home)
     if not isinstance(release, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", release):
         raise InstallRecoveryError("Rollback verification requires a safe release identifier")
@@ -436,6 +452,7 @@ def verify_restored(install_root: Path, claude_home: Path, release: str) -> dict
 
 def recover(install_root: Path, *, confirm: bool) -> dict[str, Any]:
     """Carry out the inspected plan; refuse on any ambiguity or without explicit confirmation."""
+    require_w4_install_recovery_clearance()  # P0: source-only held direct-route boundary
     install_root = Path(install_root)
     plan = inspect(install_root)
     if not plan["journal"]:
@@ -506,6 +523,7 @@ def recover(install_root: Path, *, confirm: bool) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    require_w4_install_recovery_clearance()  # P0: source-only held direct-route boundary
     parser = argparse.ArgumentParser(description="Vres interrupted-installation snapshot/inspect/recover.")
     commands = parser.add_subparsers(dest="command", required=True)
     snap = commands.add_parser("snapshot")

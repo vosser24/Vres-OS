@@ -33,6 +33,7 @@ from .session_prompts import (
     stage_user_instruction,
 )
 from .transcript import last_assistant_snapshot
+from .w4_runtime_holds import require_w4_native_host_clearance
 
 
 def _input() -> dict[str, Any]:
@@ -115,6 +116,7 @@ def _resume_message(state: dict[str, Any], *, label: str) -> str:
     return render_personal_resume_briefing(state, label=label)
 
 def session_start() -> None:
+    require_w4_native_host_clearance()  # P0: source-only held direct-route boundary
     payload = _input()
     if payload.get("agent_id"):
         return
@@ -221,6 +223,7 @@ def _credential_ingress_guard(payload: dict[str, Any], prompt: str) -> bool:
 
 
 def user_prompt() -> None:
+    require_w4_native_host_clearance()  # P0: source-only held direct-route boundary
     payload = _input()
     if payload.get("agent_id"):
         return
@@ -288,6 +291,7 @@ def user_prompt() -> None:
 
 
 def compact(reason: str, payload: dict[str, Any] | None = None) -> None:
+    require_w4_native_host_clearance()  # P0: source-only held direct-route boundary
     payload = payload if payload is not None else _input()
     if payload.get("agent_id"):
         return
@@ -333,6 +337,7 @@ def compact(reason: str, payload: dict[str, Any] | None = None) -> None:
 
 
 def post_compact() -> None:
+    require_w4_native_host_clearance()  # P0: source-only held direct-route boundary
     payload = _input()
     if payload.get("agent_id"):
         return
@@ -360,6 +365,7 @@ def post_compact() -> None:
 
 
 def session_end() -> None:
+    require_w4_native_host_clearance()  # P0: source-only held direct-route boundary
     payload = _input()
     if payload.get("agent_id"):
         return
@@ -389,6 +395,7 @@ def session_end() -> None:
 
 
 def stop() -> None:
+    require_w4_native_host_clearance()  # P0: source-only held direct-route boundary
     payload = _input()
     if payload.get("agent_id"):
         return
@@ -491,6 +498,7 @@ def _public_text_reference(payload: dict[str, Any], project_id: int, sid: str | 
 
 
 def validator_stop() -> None:
+    require_w4_native_host_clearance()  # P0: source-only held direct-route boundary
     payload = _input()
     pid: int | None = None
     try:
@@ -555,6 +563,7 @@ def experience_observe() -> None:
     Prints nothing, always returns normally and logs only a fixed bounded code (never payload, ids, query, memory text
     or exception bodies). Telemetry gaps are visible as codes; ``recorded`` and ``duplicate`` are not errors.
     """
+    require_w4_native_host_clearance()  # P0: source-only held direct-route boundary
     from .experience_observability import TOOL_NAME, ObservationRejected, observe_retrieval
 
     try:
