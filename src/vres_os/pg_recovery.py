@@ -51,6 +51,7 @@ from pathlib import Path
 from typing import Any
 
 from .database_targets import require_contact, target_for
+from .db import require_w4_schema_clearance
 from .redaction import redact_text
 
 FORMAT = "vres-db-backup"
@@ -90,6 +91,7 @@ class DatabaseRecoveryError(RuntimeError):
 
 
 def _conninfo(host: str, port: int, dbname: str, user: str, sslmode: str) -> str:
+    require_w4_schema_clearance()  # P0 Schema-048: before driver, I/O, prompt or child process
     from psycopg.conninfo import make_conninfo
 
     return make_conninfo(host=host, port=port, dbname=dbname, user=user, sslmode=sslmode, connect_timeout=10)
@@ -103,6 +105,7 @@ def _child_env(password: str | None) -> dict[str, str]:
 
 
 def _default_runner(argv: list[str], env: dict[str, str]) -> subprocess.CompletedProcess:
+    require_w4_schema_clearance()  # P0 Schema-048: before driver, I/O, prompt or child process
     return subprocess.run(argv, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True,
                           encoding="utf-8", errors="replace", timeout=6 * 3600, check=False)
 
@@ -147,6 +150,7 @@ def _ordinary(path: Path, *, directory: bool) -> bool:
 
 def trusted_client_dir() -> Path:
     """The bin directory of the highest installed <Program Files>\\PostgreSQL\\<major>; refuse anything else."""
+    require_w4_schema_clearance()  # P0 Schema-048: before driver, I/O, prompt or child process
     base = _program_files() / "PostgreSQL"
     if not _ordinary(base.parent, directory=True) or not _ordinary(base, directory=True):
         raise DatabaseRecoveryError("No trusted PostgreSQL installation under Program Files; nothing was run")
@@ -163,6 +167,7 @@ def trusted_client_dir() -> Path:
 
 
 def _clients(client_dir: Callable[[], Path]) -> tuple[str, str]:
+    require_w4_schema_clearance()  # P0 Schema-048: before driver, I/O, prompt or child process
     bin_dir = Path(client_dir())
     if not bin_dir.is_absolute() or not all(_ordinary(bin_dir / exe, directory=False) for exe in _CLIENTS):
         raise DatabaseRecoveryError("PostgreSQL client tools are not verified absolute ordinary files; nothing was run")
@@ -176,6 +181,7 @@ def _default_protect(path: Path) -> None:
 
 
 def _run(run: Runner, argv: list[str], env: dict[str, str], step: str) -> Any:
+    require_w4_schema_clearance()  # P0 Schema-048: before driver, I/O, prompt or child process
     try:
         return run(argv, env)
     except subprocess.TimeoutExpired:
@@ -235,6 +241,7 @@ def backup_database(
     client_dir: Callable[[], Path] = trusted_client_dir,
     protect: Callable[[Path], None] | None = None,
 ) -> dict[str, Any]:
+    require_w4_schema_clearance()  # P0 Schema-048: before driver, I/O, prompt or child process
     target = _conninfo(host, port, dbname, user, sslmode)
     require_contact(target)  # P2-A1: before any credential, file or process
     output = Path(output)
@@ -307,6 +314,7 @@ def load_backup(archive: Path) -> dict[str, Any]:
 
 def inspect_target(conninfo: str, dbname: str, password: str | None) -> dict[str, Any]:
     """Guarded, read-only identity and emptiness check of the exact approved restore target."""
+    require_w4_schema_clearance()  # P0 Schema-048: before driver, I/O, prompt or child process
     from .db import _driver
 
     require_contact(conninfo)
@@ -328,6 +336,7 @@ def inspect_target(conninfo: str, dbname: str, password: str | None) -> dict[str
 
 def _default_verifier(conninfo: str, manifest: dict[str, Any], password: str | None) -> dict[str, Any]:
     """Read-only check of the restored database through the guarded Vres driver seam."""
+    require_w4_schema_clearance()  # P0 Schema-048: before driver, I/O, prompt or child process
     from .db import _driver, _migration_package
 
     require_contact(conninfo)
@@ -357,6 +366,7 @@ def restore_database(
     verifier: Callable[[str, dict[str, Any], str | None], dict[str, Any]] = _default_verifier,
     client_dir: Callable[[], Path] = trusted_client_dir,
 ) -> dict[str, Any]:
+    require_w4_schema_clearance()  # P0 Schema-048: before driver, I/O, prompt or child process
     manifest = load_backup(Path(archive))
     if not RECOVERY_DATABASE.fullmatch(dbname):
         raise DatabaseRecoveryError("Restore targets only a dedicated disposable recovery database named vres_restore_*")

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from .config import ConfigStore, VresConfig
 from .database_targets import require_admin_contact
-from .db import MIGRATION_LEDGER_DDL, _driver, require_setup_compatibility
+from .db import MIGRATION_LEDGER_DDL, _driver, require_setup_compatibility, require_w4_schema_clearance
 from .secrets import SecretStore
 
 BOUNDARY_VERSION = 1
@@ -75,6 +75,7 @@ def default_boundary_roles(runtime_user: str) -> tuple[str, str]:
 
 
 def _runtime_dsn(cfg: VresConfig, *, user: str, password: str, database: str | None = None) -> str:
+    require_w4_schema_clearance()  # P0 Schema-048: before driver, I/O, prompt or child process
     from psycopg.conninfo import make_conninfo
 
     return make_conninfo(
@@ -89,6 +90,7 @@ def _runtime_dsn(cfg: VresConfig, *, user: str, password: str, database: str | N
 
 
 def _transfer_vres_ownership(conn, *, new_owner: str) -> None:
+    require_w4_schema_clearance()  # P0 Schema-048: before driver, I/O, prompt or child process
     from psycopg import sql
 
     schema = conn.execute("SELECT 1 FROM pg_namespace WHERE nspname='vres'").fetchone()
@@ -178,6 +180,7 @@ def provision_boundary(
     administrator connection: an incompatible or unidentifiable database is refused before
     any role, ownership or grant change.
     """
+    require_w4_schema_clearance()  # P0 Schema-048: before driver, I/O, prompt or child process
     from psycopg import sql
     from psycopg.rows import dict_row
 
@@ -277,6 +280,7 @@ def provision_boundary(
 
 def rollback_boundary_provision(cfg: VresConfig, credentials: BoundaryCredentials, *, admin_dsn: str) -> None:
     """Undo only a pre-migration role split whose local credential persistence failed."""
+    require_w4_schema_clearance()  # P0 Schema-048: before driver, I/O, prompt or child process
     from psycopg import sql
     from psycopg.rows import dict_row
 
@@ -331,6 +335,7 @@ def mark_boundary_ready(
 
 def activate_boundary(conn, cfg: VresConfig) -> None:
     """Bind migration-023 protected surfaces to the configured writer role."""
+    require_w4_schema_clearance()  # P0 Schema-048: before driver, I/O, prompt or child process
     from psycopg import sql
 
     if not cfg.database.provenance_writer_user:
@@ -380,6 +385,7 @@ def activate_boundary(conn, cfg: VresConfig) -> None:
 
 def _activate_context_refresh_attestations(conn, runtime: str, writer: str) -> None:
     """Migration 040: writer mints, runtime consumes; neither touches the table, sequence or trigger function."""
+    require_w4_schema_clearance()  # P0 Schema-048: before driver, I/O, prompt or child process
     from psycopg import sql
 
     row = conn.execute("SELECT to_regclass('vres.context_refresh_attestations') IS NOT NULL AS present").fetchone()
@@ -401,6 +407,7 @@ def _activate_context_refresh_attestations(conn, runtime: str, writer: str) -> N
 
 def _activate_experience_observability(conn, runtime: str, writer: str) -> None:
     """Migration 041: the runtime may read the append-only ledger; only the writer may record through the function."""
+    require_w4_schema_clearance()  # P0 Schema-048: before driver, I/O, prompt or child process
     from psycopg import sql
 
     row = conn.execute("SELECT to_regclass('vres.experience_retrieval_observations') IS NOT NULL AS present").fetchone()

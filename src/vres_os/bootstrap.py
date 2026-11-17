@@ -13,7 +13,7 @@ import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 
-from .db import DatabaseTargetRefused, _driver
+from .db import DatabaseTargetRefused, _driver, require_w4_schema_clearance
 
 from .config import ConfigStore
 from .database_targets import confirm_target_for_setup, require_admin_contact, require_contact
@@ -123,6 +123,7 @@ def _yes_no(prompt: str, default: bool = True) -> bool:
 
 
 def _runtime_dsn(*, host: str, port: int, database: str, user: str, password: str, sslmode: str) -> str:
+    require_w4_schema_clearance()  # P0 Schema-048: before driver, I/O, prompt or child process
     from psycopg.conninfo import make_conninfo
 
     return make_conninfo(
@@ -152,6 +153,7 @@ def _test_database(*, host: str, port: int, database: str, user: str, password: 
 
 def _cleanup_provisioned_local_database(provisioned: _ProvisionedLocalDatabase) -> None:
     """Remove only the roles/database created by this exact setup attempt."""
+    require_w4_schema_clearance()  # P0 Schema-048: before driver, I/O, prompt or child process
     from psycopg import sql
 
     writer_user, migration_user = default_boundary_roles(provisioned.runtime_user)
@@ -169,6 +171,7 @@ def _cleanup_provisioned_local_database(provisioned: _ProvisionedLocalDatabase) 
 def _provision_local_database(
     *, host: str, port: int, database: str, runtime_user: str, sslmode: str
 ) -> _ProvisionedLocalDatabase:
+    require_w4_schema_clearance()  # P0 Schema-048: before driver, I/O, prompt or child process
     admin_user = _ask("PostgreSQL administrator user", "postgres")
     admin_password = getpass.getpass("PostgreSQL administrator password (not stored): ")
     if not admin_password:
@@ -246,6 +249,7 @@ def _provision_local_database(
 
 
 def _target_admin_dsn(cfg, *, admin_dsn: str | None = None) -> str:
+    require_w4_schema_clearance()  # P0 Schema-048: before driver, I/O, prompt or child process
     if admin_dsn:
         from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
@@ -273,6 +277,7 @@ def _configure_provenance_boundary(
     secret_store: SecretStore,
     admin_dsn: str | None = None,
 ) -> None:
+    require_w4_schema_clearance()  # P0 Schema-048: before driver, I/O, prompt or child process
     if boundary_credentials_present(cfg, secret_store=secret_store):
         return
     print("\nVres is isolating user-authority provenance from the ordinary runtime database credential.")
@@ -306,6 +311,7 @@ def _configure_provenance_boundary(
 
 
 def _upgrade_existing_boundary(store: ConfigStore, cfg, *, secret_store: SecretStore) -> None:
+    require_w4_schema_clearance()  # P0 Schema-048: before driver, I/O, prompt or child process
     _write_setup_result("in_progress")
     print("\nVres-OS secure provenance-boundary upgrade")
     print("==========================================")
@@ -341,6 +347,7 @@ def _upgrade_existing_boundary(store: ConfigStore, cfg, *, secret_store: SecretS
 
 
 def _interactive_setup() -> None:
+    require_w4_schema_clearance()  # P0 Schema-048: before driver, I/O, prompt or child process
     store = ConfigStore()
     cfg = store.load()
     secret_store = SecretStore()
@@ -496,6 +503,7 @@ def _pause_setup_console() -> None:
 
 
 def interactive_setup() -> None:
+    require_w4_schema_clearance()  # P0 Schema-048: before driver, I/O, prompt or child process
     from .locking import local_lock
 
     with local_lock("secure-setup") as acquired:
@@ -514,6 +522,7 @@ def _ready_config(cfg) -> bool:
 
 
 def launch_secure_setup_and_wait(timeout_seconds: int = 2) -> dict:
+    require_w4_schema_clearance()  # P0 Schema-048: before driver, I/O, prompt or child process
     cfg = ConfigStore().load()
     if _ready_config(cfg):
         return {"ready": True, "launched": False, "last_setup": last_setup_result()}
@@ -580,6 +589,7 @@ def _project_adoption(project) -> dict:
 
 
 def start_for_project(project_root: str = ".") -> dict:
+    require_w4_schema_clearance()  # P0 Schema-048: before driver, I/O, prompt or child process
     # Adoption readiness comes first: a project still under review, or with an interrupted
     # adoption, never reaches secure setup, migration or registration and is never READY.
     project = discover_project(project_root)

@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 
 
 def _driver():
+    require_w4_schema_clearance()  # P0 Schema-048: before driver, I/O, prompt or child process
     import psycopg
     return psycopg
 
