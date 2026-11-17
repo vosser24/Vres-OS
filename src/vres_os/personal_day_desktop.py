@@ -21,12 +21,14 @@ if not __package__:
     from vres_os import personal_task_lifecycle as lifecycle
     from vres_os import personal_day_navigation as navigation
     from vres_os import personal_day_plan as dayplan
+    from vres_os.w4_runtime_holds import require_w4_original_runtime_clearance
 else:
     from . import personal_work_session as owner
     from . import personal_portable_desk as portable
     from . import personal_task_lifecycle as lifecycle
     from . import personal_day_navigation as navigation
     from . import personal_day_plan as dayplan
+    from .w4_runtime_holds import require_w4_original_runtime_clearance
 
 
 class DesktopRefused(ValueError):
@@ -445,6 +447,7 @@ class PersonalDayDesktop(ttk.Frame):
     """Ephemeral view state ONLY; original owners own all task/history writes."""
 
     def __init__(self, master: tk.Tk):
+        require_w4_original_runtime_clearance()  # before original Tk widget construction
         super().__init__(master, padding=12)
         self.master = master
         self.master.title("Vres-OS | Personal Day (source-only preview)")
@@ -1959,6 +1962,7 @@ class PersonalDayDesktop(ttk.Frame):
 
 def main() -> None:
     """Only a manually invoked source entry; never auto-invoked by import."""
+    require_w4_original_runtime_clearance()  # before tk.Tk() even on direct module launch
     window = tk.Tk()
     PersonalDayDesktop(window)
     window.mainloop()

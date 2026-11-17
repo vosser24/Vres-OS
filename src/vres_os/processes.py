@@ -24,6 +24,7 @@ class ProcessResult:
 
 
 def _terminate(proc: subprocess.Popen) -> None:
+    require_w4_original_runtime_clearance()  # before taskkill or process manipulation
     if proc.poll() is not None:
         return
     if os.name == "nt":
@@ -125,6 +126,7 @@ def run_bounded(
 
 def worker_command(module: str, *arguments: str) -> list[str]:
     """Import only this installed/source distribution, never a project shadow package."""
+    require_w4_original_runtime_clearance()  # direct worker-command generation is held
     import sys
 
     if module not in {"vres_os.cli", "vres_os.parse_worker", "vres_os.procedure_worker"}:

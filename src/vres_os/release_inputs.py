@@ -17,6 +17,21 @@ import re
 import sys
 from pathlib import Path
 
+W4_RELEASE_INPUT_SOURCE_INTERLOCK = "HELD_NO_ORIGINAL_RELEASE_VALIDATION"
+
+
+class ReleaseInputHeld(RuntimeError):
+    """The standalone original release-input path is not authorized to run."""
+
+
+def require_w4_release_input_clearance() -> None:
+    if W4_RELEASE_INPUT_SOURCE_INTERLOCK != "REVIEWED_RELEASE_CLEARED":
+        raise ReleaseInputHeld(
+            "VRES_W4_HELD: original release-input inspection requires separate "
+            "trusted review and owner authorization"
+        )
+
+
 PERSONAL_RELEASE_MAX_MIGRATION = 41
 MIGRATIONS_DIR = Path("src/vres_os/migrations")
 PERSONAL_MIGRATION_PINS = {
@@ -78,10 +93,12 @@ _EXPERIMENTAL = (
 
 
 def migration_digest(path: Path) -> str:
+    require_w4_release_input_clearance()
     return hashlib.sha256(path.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
 
 
 def _files(root: Path):
+    require_w4_release_input_clearance()
     for directory, dirs, names in os.walk(root, followlinks=False):
         dirs[:] = sorted(d for d in dirs if d not in _SKIP_DIRS and not d.endswith(".egg-info"))
         for name in sorted(names):
@@ -90,6 +107,7 @@ def _files(root: Path):
 
 def release_input_problems(root: Path) -> list[str]:
     """Every reason the tree at root is not a valid personal-release input; empty when valid."""
+    require_w4_release_input_clearance()
     root = Path(root)
     problems: list[str] = []
     migrations = root / MIGRATIONS_DIR
@@ -116,6 +134,7 @@ def release_input_problems(root: Path) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    require_w4_release_input_clearance()  # before filesystem inspection or parsing
     parser = argparse.ArgumentParser(description="Validate a Vres personal-release source tree.")
     parser.add_argument("--root", type=Path, required=True)
     args = parser.parse_args(argv)

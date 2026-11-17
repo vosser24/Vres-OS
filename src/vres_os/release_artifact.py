@@ -91,13 +91,21 @@ class ReleaseArtifactError(RuntimeError):
     """The artifact was refused; nothing is claimed as staged, installed or verified."""
 
 
+def require_w4_original_release_clearance() -> None:
+    """Negative source-only gate; not independent release or publisher authority."""
+    if W4_STAGE_SOURCE_INTERLOCK != "REVIEWED_RELEASE_CLEARED":
+        raise ReleaseArtifactError(
+            "VRES_W4_HELD: original release Git, source verification and staging "
+            "require independent trust review and separate owner authorization"
+        )
+
+
 def release_input_problems(root: Path) -> list[str]:
     """Defer original validator import until AFTER the held direct stage() gate.
 
     This is not an independent trusted Python bootstrap.
     """
-    if W4_STAGE_SOURCE_INTERLOCK != "REVIEWED_RELEASE_CLEARED":
-        raise ReleaseArtifactError("VRES_W4_HELD: original release-input runtime blocked")
+    require_w4_original_release_clearance()
     try:
         from .release_inputs import release_input_problems as validate
     except ImportError:  # installer directly runs this file
@@ -188,6 +196,7 @@ _GIT_OPTIONS = ("-c", "core.quotepath=off", "-c", "core.fsmonitor=false")
 
 def _git_runner(root: Path) -> GitRunner:
     def run(args: list[str]) -> str:
+        require_w4_original_release_clearance()  # before subprocess.run
         try:
             done = subprocess.run(["git", "-C", str(root), *_GIT_OPTIONS, *args], capture_output=True,
                                   check=False, timeout=120, env=_git_env())
@@ -205,6 +214,7 @@ class _CatFile:
     """One `git cat-file --batch` process: object id in, (type, content) out. Content is verified by the caller."""
 
     def __init__(self, root: Path):
+        require_w4_original_release_clearance()  # before subprocess.Popen
         try:
             self._proc = subprocess.Popen(["git", "-C", str(root), *_GIT_OPTIONS, "cat-file", "--batch"],
                                           stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -331,6 +341,7 @@ def _pathspecs() -> list[str]:
 def verified_source(root: Path, source_commit: str | None, *, git: GitRunner | None = None,
                     objects: ObjectReader | None = None) -> tuple[str, str, dict[str, tuple[str, str, bytes]]]:
     """(commit, tree, files) of the pinned commit at root, refusing anything that does not bind to it."""
+    require_w4_original_release_clearance()
     root = Path(root)
     pin = _pin(source_commit)
     if not os.path.lexists(root / ".git"):
@@ -368,6 +379,7 @@ def verified_source(root: Path, source_commit: str | None, *, git: GitRunner | N
 
 
 def load_manifest(path: Path) -> dict[str, Any]:
+    require_w4_original_release_clearance()
     try:
         manifest = json.loads(Path(path).read_bytes().decode("utf-8"))
     except FileNotFoundError:
@@ -399,8 +411,7 @@ def stage(root: Path, out: Path, manifest_path: Path, *, source_commit: str | No
     """Copy the pinned commit's release files into the new directory out and record their manifest."""
     # K1: also stop DIRECT original stage() calls before any output-path work.
     # This is source-owned only; trusted out-of-band pre-execution gate absent.
-    if W4_STAGE_SOURCE_INTERLOCK != "REVIEWED_RELEASE_CLEARED":
-        raise ReleaseArtifactError("VRES_W4_HELD: original release stage() blocked")
+    require_w4_original_release_clearance()
     root, out, manifest_path = Path(root), Path(out), Path(manifest_path)
     if os.path.lexists(out) or os.path.lexists(manifest_path):
         raise ReleaseArtifactError("The staging directory or manifest already exists and is never overwritten")
@@ -455,6 +466,7 @@ def _compare(expected: dict[str, str], directory: Path, actual: list[str], label
 
 def verify_installed(manifest: dict[str, Any], package_dir: Path) -> dict[str, Any]:
     """The installed vres_os package holds exactly the released files and directories, nothing else of any kind."""
+    require_w4_original_release_clearance()
     package_dir = Path(package_dir)
     if not package_dir.is_dir() or _is_link(os.lstat(package_dir)):
         raise ReleaseArtifactError(f"Installed package directory is missing or a link: {package_dir}")
@@ -474,6 +486,7 @@ def verify_installed(manifest: dict[str, Any], package_dir: Path) -> dict[str, A
 
 def verify_tree(manifest: dict[str, Any], prefix: str, directory: Path, *, allow_extra: tuple[str, ...] = ()) -> dict:
     """The directory holds exactly the manifest files under prefix (plus named top-level extras)."""
+    require_w4_original_release_clearance()
     prefix = prefix.rstrip("/") + "/"
     if prefix not in SCOPE_DIRS:
         raise ReleaseArtifactError(f"Not a release directory: {prefix}")
@@ -487,6 +500,7 @@ def verify_tree(manifest: dict[str, Any], prefix: str, directory: Path, *, allow
 
 
 def main(argv: list[str] | None = None) -> int:
+    require_w4_original_release_clearance()  # before argparse or any original release command
     parser = argparse.ArgumentParser(description="Stage and verify the exact Vres personal-release artifact.")
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("check")

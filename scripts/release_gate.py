@@ -21,9 +21,23 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 EXCLUDE = {'.git', '.pytest_cache', '__pycache__', 'build', 'dist', '.venv', 'htmlcov', '.live-test-venv'}
 PYTEST_TIMEOUT_SECONDS = 900
+W4_RELEASE_TEST_GATE_INTERLOCK = "HELD_NO_RELEASE_TEST_EXECUTION"
+
+
+class ReleaseTestGateHeld(RuntimeError):
+    """Source-only P0 hold; no pytest/build/compile/subprocess execution."""
+
+
+def require_w4_release_test_gate_clearance() -> None:
+    if W4_RELEASE_TEST_GATE_INTERLOCK != "REVIEWED_TEST_EXECUTION_CLEARED":
+        raise ReleaseTestGateHeld(
+            "VRES_W4_HELD: original release tests, builds and subprocesses "
+            "are not approved for execution"
+        )
 
 
 def files():
+    require_w4_release_test_gate_clearance()
     for p in sorted(ROOT.rglob('*')):
         rel = p.relative_to(ROOT)
         if p.is_file() and not any(x in EXCLUDE or x.endswith('.egg-info') for x in rel.parts):
@@ -40,10 +54,12 @@ def migration_digest(path: Path) -> str:
     Path.read_text() uses universal-newline translation, matching the runtime
     migrator's checksum semantics on LF and CRLF worktrees.
     """
+    require_w4_release_test_gate_clearance()
     return digest(path.read_text(encoding="utf-8").encode("utf-8"))
 
 
 def command(args: list[str], output: Path, name: str, *, cwd: Path = ROOT, env: dict | None = None, timeout: int = 180):
+    require_w4_release_test_gate_clearance()  # before subprocess.run and log writes
     result = subprocess.run(args, cwd=cwd, env=env, capture_output=True, text=True,
                             encoding='utf-8', errors='replace', timeout=timeout, check=False)
     (output / (name + '.log')).write_text(
@@ -82,6 +98,7 @@ def require_personal_release_inputs(root: Path) -> None:
 
     An explicit raise, not assert: the refusal must hold even under python -O.
     """
+    require_w4_release_test_gate_clearance()
     if str(ROOT / 'src') not in sys.path:
         sys.path.insert(0, str(ROOT / 'src'))
     from vres_os.release_inputs import release_input_problems
@@ -91,6 +108,7 @@ def require_personal_release_inputs(root: Path) -> None:
 
 
 def structure():
+    require_w4_release_test_gate_clearance()
     import yaml
     from packaging.version import Version
     config = tomllib.loads((ROOT / 'pyproject.toml').read_text())
@@ -230,6 +248,7 @@ def structure():
 
 
 def package(output: Path, env: dict):
+    require_w4_release_test_gate_clearance()
     wheel_dir = output / 'wheel'
     wheel_dir.mkdir()
     command([sys.executable, '-m', 'pip', 'wheel', '.', '--no-deps', '--no-build-isolation',
@@ -289,6 +308,7 @@ print('selected imports, structured task-decision provenance, task lifecycle, su
 
 
 def ledger(output: Path, coverage_data: dict):
+    require_w4_release_test_gate_clearance()
     coverage_files = coverage_data.get('files', {})
     rows = []
     for p in files():
@@ -326,6 +346,7 @@ def ledger(output: Path, coverage_data: dict):
 
 
 def main():
+    require_w4_release_test_gate_clearance()  # before output directory, pytest or build
     # This gate deliberately uses assertions for source contracts. Never silently
     # strip them with Python -O / PYTHONOPTIMIZE.
     if not __debug__:

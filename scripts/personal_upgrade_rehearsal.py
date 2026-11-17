@@ -33,12 +33,24 @@ class RehearsalRefused(RuntimeError):
     pass
 
 
+W4_ORIGINAL_REHEARSAL_INTERLOCK = "HELD_NO_ORIGINAL_UPGRADE_REHEARSAL"
+
+
+def require_w4_original_rehearsal_clearance() -> None:
+    if W4_ORIGINAL_REHEARSAL_INTERLOCK != "REVIEWED_REHEARSAL_CLEARED":
+        raise RehearsalRefused(
+            "VRES_W4_HELD: original upgrade Git, staging, recovery rehearsal "
+            "and filesystem operations require separate trusted authorization"
+        )
+
+
 def require(condition: bool, reason: str) -> None:
     if not condition:
         raise RehearsalRefused(reason)
 
 
 def load_source(name: str, path: Path):
+    require_w4_original_rehearsal_clearance()  # before exec_module
     spec = importlib.util.spec_from_file_location(name, path)
     require(spec is not None and spec.loader is not None, f"Offline source module absent: {name}")
     module = importlib.util.module_from_spec(spec)
@@ -47,6 +59,7 @@ def load_source(name: str, path: Path):
 
 
 def git(root: Path, *args: str) -> bytes:
+    require_w4_original_rehearsal_clearance()  # before subprocess.run
     env = {k: v for k, v in os.environ.items() if not k.upper().startswith("GIT_")}
     env.update(GIT_NO_REPLACE_OBJECTS="1", GIT_OPTIONAL_LOCKS="0", GIT_TERMINAL_PROMPT="0")
     try:
@@ -64,6 +77,7 @@ def git_blob(data: bytes) -> str:
 
 def previous_plugin_from_git(source: Path, dest: Path) -> int:
     """Reconstruct complete original P2 plugin from commit objects into disposable path."""
+    require_w4_original_rehearsal_clearance()
     require(git(source, "rev-parse", "--show-object-format").strip() == b"sha1",
             "P2 rehearsal requires SHA-1 Git objects")
     rows = git(source, "ls-tree", "--full-tree", "-r", "-z",
@@ -108,11 +122,13 @@ def previous_plugin_from_git(source: Path, dest: Path) -> int:
 
 
 def inventory(path: Path) -> dict[str, bytes]:
+    require_w4_original_rehearsal_clearance()
     return {p.relative_to(path).as_posix(): p.read_bytes()
             for p in path.rglob("*") if p.is_file()}
 
 
 def make_previous(disposable: Path, source: Path, release: str, recovery) -> dict:
+    require_w4_original_rehearsal_clearance()
     install, home = disposable / "install", disposable / "claude"
     (install / "bin").mkdir(parents=True)
     (install / "backups").mkdir()
@@ -149,6 +165,7 @@ def make_previous(disposable: Path, source: Path, release: str, recovery) -> dic
 
 def simulate_interrupted_upgrade(state: dict, staged: Path, release: str,
                                  artifact, manifest: dict, recovery) -> None:
+    require_w4_original_rehearsal_clearance()
     install, home, plugin = state["install"], state["home"], state["plugin"]
     shutil.move(str(plugin), str(state["backup"]))
     shutil.copytree(staged / "plugins" / "vres-os", plugin)
@@ -163,6 +180,7 @@ def simulate_interrupted_upgrade(state: dict, staged: Path, release: str,
 
 
 def verify_rollback(state: dict, recovery) -> None:
+    require_w4_original_rehearsal_clearance()
     old, home, install = state["original"], state["home"], state["install"]
     require(inventory(state["plugin"]) == old["plugin"], "Old plugin bytes not restored")
     require(inventory(install / "bin") == old["bin"], "Old launchers not restored")
@@ -177,6 +195,7 @@ def verify_rollback(state: dict, recovery) -> None:
 
 
 def run(root: Path, source_commit: str) -> dict:
+    require_w4_original_rehearsal_clearance()  # before root.resolve or any Git action
     root = root.resolve(strict=True)
     require(bool(_HEX40.fullmatch(source_commit)), "Exact full lowercase source SHA required")
     git(root, "merge-base", "--is-ancestor", PREVIOUS_SOURCE, source_commit)
@@ -239,6 +258,7 @@ def run(root: Path, source_commit: str) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
+    require_w4_original_rehearsal_clearance()  # before arguments or disk actions
     parser = argparse.ArgumentParser(description="P2 to SHA-pinned personal release disposable rehearsal")
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--source-commit", required=True)
