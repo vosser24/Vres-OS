@@ -21,13 +21,14 @@ the manifest's modules and migrations, with their SHA-256, and no other file or 
 (no bytecode, extension module, .pth or data file). verify-tree checks the staged or installed
 plugin the same way. Neither monitors the files afterwards.
 
-Dependencies are not part of the artifact identity: pip resolves them at install time within
-pyproject.toml's ranges (the installer records the result in resolved-dependencies.txt), so
-this manifest does not claim a reproducible dependency set.
+Dependencies are not part of the artifact identity: the original installer requires an
+independently approved offline SHA-256 wheel lock. The manifest itself does not authenticate
+the dependency publisher, native toolchain or installed Windows environment.
 
 Run: python -I src/vres_os/release_artifact.py check --root <checkout> --source-commit <40-hex>
+         --git-executable <approved-absolute-git> --git-sha256 <approved-64-hex>
      python -I src/vres_os/release_artifact.py stage --root <checkout> --out <new dir> --manifest <file>
-         --source-commit <40-hex>
+         --source-commit <40-hex> --git-executable <approved-absolute-git> --git-sha256 <approved-64-hex>
      python -I src/vres_os/release_artifact.py verify-installed --manifest <file> --package-dir <dir>
      python -I src/vres_os/release_artifact.py verify-tree --manifest <file> --prefix plugins/vres-os --dir <dir>
          [--allow-extra .vres-managed]
@@ -178,7 +179,7 @@ def _git_env() -> dict[str, str]:
     # Reassert the safety settings here so they survive the environment scrub.
     env = {
         key: value for key, value in os.environ.items()
-        if not key.upper().startswith(("GIT_", "PG", "POSTGRES", "VRES_", "CLAUDE_", "ANTHROPIC_"))
+        if not key.upper().startswith(("GIT_", "GCM_", "SSH_ASKPASS", "PG", "POSTGRES", "VRES_", "CLAUDE_", "ANTHROPIC_"))
         and key.upper() not in {"DATABASE_URL", "SQLALCHEMY_DATABASE_URI"}
     }
     env.update(
@@ -187,25 +188,55 @@ def _git_env() -> dict[str, str]:
         GIT_NO_LAZY_FETCH="1",
         GIT_ALLOW_PROTOCOL="file",
         GIT_NO_REPLACE_OBJECTS="1",
+        GIT_PROTOCOL_FROM_USER="0",
         GIT_TERMINAL_PROMPT="0",
         GIT_OPTIONAL_LOCKS="0",
     )
     return env
 
 
-_GIT_OPTIONS = ("-c", "core.quotepath=off", "-c", "core.fsmonitor=false")
+# Direct Git calls must never resolve via PATH. This identity pin alone does NOT
+# authenticate Git DLLs/GCM/config, Windows NTFS path ancestry or the publisher.
+_GIT_OPTIONS = ("--no-optional-locks", "-c", "core.quotepath=off",
+                "-c", "core.fsmonitor=false", "-c", "core.hooksPath=NUL",
+                "-c", "credential.helper=", "-c", "protocol.allow=never")
 
 
-def _git_runner(root: Path) -> GitRunner:
+def _approved_git_path(git_executable: Path | str | None, git_sha256: str | None) -> str:
+    """Recheck the exact operator-approved Git executable before EACH Git child."""
+    if (git_executable is None or not isinstance(git_sha256, str)
+            or not re.fullmatch(r"[0-9a-fA-F]{64}", git_sha256)):
+        raise ReleaseArtifactError("Approved absolute Git executable and SHA-256 are required")
+    candidate = os.fspath(git_executable)
+    if not os.path.isabs(candidate):
+        raise ReleaseArtifactError("Approved Git executable must be an absolute path, not PATH lookup")
+    path = os.path.abspath(candidate)
+    try:
+        if not stat.S_ISREG(os.lstat(path).st_mode):
+            raise ReleaseArtifactError("Approved Git executable must be an ordinary file, not a link")
+        digest = hashlib.sha256()
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError as exc:
+        raise ReleaseArtifactError(f"Approved Git executable cannot be read: {exc}") from None
+    if digest.hexdigest() != git_sha256.lower():
+        raise ReleaseArtifactError("Approved Git executable SHA-256 differs")
+    return path
+
+
+def _git_runner(root: Path, *, git_executable: Path | str | None = None,
+                git_sha256: str | None = None) -> GitRunner:
     def run(args: list[str]) -> str:
-        require_w4_original_release_clearance()  # before subprocess.run
+        require_w4_original_release_clearance()  # before digest or subprocess.run
+        git_path = _approved_git_path(git_executable, git_sha256)
         try:
-            done = subprocess.run(["git", "-C", str(root), *_GIT_OPTIONS, *args], capture_output=True,
+            done = subprocess.run([git_path, "-C", str(root), *_GIT_OPTIONS, *args], capture_output=True,
                                   check=False, timeout=120, env=_git_env())
         except (OSError, subprocess.TimeoutExpired) as exc:
-            raise ReleaseArtifactError(f"git is unavailable for source identification: {exc}") from None
+            raise ReleaseArtifactError(f"pinned git is unavailable for source identification: {exc}") from None
         if done.returncode != 0:
-            raise ReleaseArtifactError("git could not identify the source: "
+            raise ReleaseArtifactError("pinned git could not identify the source: "
                                        + done.stderr.decode("utf-8", "replace").strip()[:300])
         return done.stdout.decode("utf-8")
 
@@ -215,10 +246,12 @@ def _git_runner(root: Path) -> GitRunner:
 class _CatFile:
     """One `git cat-file --batch` process: object id in, (type, content) out. Content is verified by the caller."""
 
-    def __init__(self, root: Path):
-        require_w4_original_release_clearance()  # before subprocess.Popen
+    def __init__(self, root: Path, *, git_executable: Path | str | None = None,
+                 git_sha256: str | None = None):
+        require_w4_original_release_clearance()  # before digest or subprocess.Popen
+        git_path = _approved_git_path(git_executable, git_sha256)
         try:
-            self._proc = subprocess.Popen(["git", "-C", str(root), *_GIT_OPTIONS, "cat-file", "--batch"],
+            self._proc = subprocess.Popen([git_path, "-C", str(root), *_GIT_OPTIONS, "cat-file", "--batch"],
                                           stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                           stderr=subprocess.DEVNULL, env=_git_env())
         except OSError as exc:
@@ -254,8 +287,9 @@ class _CatFile:
             self._proc.wait()
 
 
-def _object_reader(root: Path) -> ObjectReader:
-    return _CatFile(root)
+def _object_reader(root: Path, *, git_executable: Path | str | None = None,
+                   git_sha256: str | None = None) -> ObjectReader:
+    return _CatFile(root, git_executable=git_executable, git_sha256=git_sha256)
 
 
 def _read_object(objects: ObjectReader, oid: str, kind: str) -> bytes:
@@ -341,7 +375,9 @@ def _pathspecs() -> list[str]:
 
 
 def verified_source(root: Path, source_commit: str | None, *, git: GitRunner | None = None,
-                    objects: ObjectReader | None = None) -> tuple[str, str, dict[str, tuple[str, str, bytes]]]:
+                    objects: ObjectReader | None = None,
+                    git_executable: Path | str | None = None,
+                    git_sha256: str | None = None) -> tuple[str, str, dict[str, tuple[str, str, bytes]]]:
     """(commit, tree, files) of the pinned commit at root, refusing anything that does not bind to it."""
     require_w4_original_release_clearance()
     root = Path(root)
@@ -349,7 +385,7 @@ def verified_source(root: Path, source_commit: str | None, *, git: GitRunner | N
     if not os.path.lexists(root / ".git"):
         raise ReleaseArtifactError("The source is not a git checkout; source ZIPs and other copies without git "
                                    "objects are refused. Clone the release git bundle and check out the commit")
-    git = git or _git_runner(root)
+    git = git or _git_runner(root, git_executable=git_executable, git_sha256=git_sha256)
     object_format = git(["rev-parse", "--show-object-format"]).strip()
     if object_format != OBJECT_FORMAT:
         raise ReleaseArtifactError(f"Unsupported git object format {object_format!r}; only sha1 is supported")
@@ -364,7 +400,7 @@ def verified_source(root: Path, source_commit: str | None, *, git: GitRunner | N
         changed = [entry[3:] for entry in dirty.split("\0") if entry][:5]
         raise ReleaseArtifactError("The source tree differs from commit " + pin[:12] + " inside the release "
                                    "scope (" + ", ".join(changed) + "); commit or remove those changes first")
-    reader = objects or _object_reader(root)
+    reader = objects or _object_reader(root, git_executable=git_executable, git_sha256=git_sha256)
     try:
         tree, files = _commit_files(reader, pin)
     finally:
@@ -409,7 +445,9 @@ def load_manifest(path: Path) -> dict[str, Any]:
 
 
 def stage(root: Path, out: Path, manifest_path: Path, *, source_commit: str | None,
-          git: GitRunner | None = None, objects: ObjectReader | None = None) -> dict[str, Any]:
+          git: GitRunner | None = None, objects: ObjectReader | None = None,
+          git_executable: Path | str | None = None,
+          git_sha256: str | None = None) -> dict[str, Any]:
     """Copy the pinned commit's release files into the new directory out and record their manifest."""
     # K1: also stop DIRECT original stage() calls before any output-path work.
     # This is source-owned only; trusted out-of-band pre-execution gate absent.
@@ -419,7 +457,10 @@ def stage(root: Path, out: Path, manifest_path: Path, *, source_commit: str | No
         raise ReleaseArtifactError("The staging directory or manifest already exists and is never overwritten")
     if not out.parent.is_dir() or _is_link(os.lstat(out.parent)):
         raise ReleaseArtifactError("The staging parent must be an existing ordinary directory")
-    commit, tree, files = verified_source(root, source_commit, git=git, objects=objects)
+    commit, tree, files = verified_source(
+        root, source_commit, git=git, objects=objects,
+        git_executable=git_executable, git_sha256=git_sha256
+    )
     manifest = {
         "format": FORMAT, "version": VERSION, "object_format": OBJECT_FORMAT, "source_origin": "git-objects",
         "source_commit": commit, "source_tree": tree,
@@ -595,11 +636,15 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("check")
     p.add_argument("--root", type=Path, required=True)
     p.add_argument("--source-commit", required=True)
+    p.add_argument("--git-executable", type=Path, required=True)
+    p.add_argument("--git-sha256", required=True)
     p = sub.add_parser("stage")
     p.add_argument("--root", type=Path, required=True)
     p.add_argument("--out", type=Path, required=True)
     p.add_argument("--manifest", type=Path, required=True)
     p.add_argument("--source-commit", required=True)
+    p.add_argument("--git-executable", type=Path, required=True)
+    p.add_argument("--git-sha256", required=True)
     p = sub.add_parser("verify-root-wheel")
     p.add_argument("--manifest", type=Path, required=True)
     p.add_argument("--wheel", type=Path, required=True)
@@ -614,11 +659,17 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.command == "check":
-            commit, tree, files = verified_source(args.root, args.source_commit)
+            commit, tree, files = verified_source(
+                args.root, args.source_commit,
+                git_executable=args.git_executable, git_sha256=args.git_sha256
+            )
             print(f"personal-release source verified: commit {commit} (tree {tree}), {len(files)} files; "
                   "nothing was staged")
         elif args.command == "stage":
-            result = stage(args.root, args.out, args.manifest, source_commit=args.source_commit)
+            result = stage(
+                args.root, args.out, args.manifest, source_commit=args.source_commit,
+                git_executable=args.git_executable, git_sha256=args.git_sha256
+            )
             print(f"personal-release artifact staged: commit {result['source_commit']} "
                   f"({result['source_origin']}), {len(result['files'])} files")
         else:

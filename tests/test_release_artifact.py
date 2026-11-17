@@ -38,6 +38,18 @@ _SOURCE = {
 _GIT_ID = ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"]
 
 
+def _test_git_pin() -> dict[str, str]:
+    """Synthetic fixture only; original production source NEVER selects Git from PATH."""
+    executable = shutil.which("git")
+    assert executable is not None, "test fixture requires Git"
+    absolute = str(Path(executable).absolute())
+    return {"git_executable": absolute, "git_sha256": hashlib.sha256(Path(absolute).read_bytes()).hexdigest()}
+
+
+def _stage(*args, **kwargs):
+    return release_artifact.stage(*args, **_test_git_pin(), **kwargs)
+
+
 @pytest.fixture(autouse=True)
 def _hermetic_git(monkeypatch):
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
@@ -111,7 +123,7 @@ class Hooked:
     """The real git runner, with an action injected right after the clean-tree check."""
 
     def __init__(self, root: Path, after_status):
-        self.run, self.after_status = release_artifact._git_runner(root), after_status
+        self.run, self.after_status = release_artifact._git_runner(root, **_test_git_pin()), after_status
 
     def __call__(self, args):
         out = self.run(args)
@@ -124,7 +136,7 @@ class Hooked:
 def staged(tmp_path):
     root, head = _repo(tmp_path)
     out, manifest_path = _paths(tmp_path)
-    manifest = release_artifact.stage(root, out, manifest_path, source_commit=head)
+    manifest = _stage(root, out, manifest_path, source_commit=head)
     return root, head, out, manifest_path, manifest
 
 
@@ -214,8 +226,10 @@ def test_the_installer_runs_the_tool_as_a_plain_file_under_isolated_python(tmp_p
     tool = root / "src/vres_os/release_artifact.py"  # the installer runs the checkout's copy first
 
     def run(*args):
-        return subprocess.run([sys.executable, "-I", "-X", "utf8", str(tool), *args], capture_output=True,
-                              text=True, timeout=120)
+        pin = _test_git_pin()
+        return subprocess.run([sys.executable, "-I", "-X", "utf8", str(tool), *args,
+                               "--git-executable", pin["git_executable"], "--git-sha256", pin["git_sha256"]],
+                              capture_output=True, text=True, timeout=120)
 
     checked = run("check", "--root", str(root), "--source-commit", head)
     assert checked.returncode == 0, checked.stderr
@@ -238,7 +252,7 @@ def test_staging_never_overwrites_an_existing_release(staged):
     before = _tree(out), manifest_path.read_bytes()
 
     with pytest.raises(ReleaseArtifactError, match="never overwritten"):
-        release_artifact.stage(root, out, manifest_path, source_commit=head)
+        _stage(root, out, manifest_path, source_commit=head)
     assert (_tree(out), manifest_path.read_bytes()) == before
 
 
@@ -249,7 +263,7 @@ def test_a_working_tree_change_after_the_clean_check_cannot_reach_the_artifact(t
     out, manifest_path = _paths(tmp_path)
     git = Hooked(root, lambda: _write(root, "src/vres_os/cli.py", b"# swapped after the check\n"))
 
-    manifest = release_artifact.stage(root, out, manifest_path, source_commit=head, git=git)
+    manifest = _stage(root, out, manifest_path, source_commit=head, git=git)
 
     assert (out / "src/vres_os/cli.py").read_bytes() == _blob(root, head, "src/vres_os/cli.py") == b"# cli\n"
     entry = next(f for f in manifest["files"] if f["path"] == "src/vres_os/cli.py")
@@ -265,7 +279,7 @@ def test_a_commit_landing_after_resolution_cannot_reach_the_artifact(tmp_path):
         _write(root, "plugins/vres-os/hooks/extra.ps1", b"Remove-Item C:\\\n")
         _commit_all(root)
 
-    manifest = release_artifact.stage(root, out, manifest_path, source_commit=head, git=Hooked(root, new_commit))
+    manifest = _stage(root, out, manifest_path, source_commit=head, git=Hooked(root, new_commit))
 
     assert _rev(root, "HEAD") != head and manifest["source_commit"] == head
     assert (out / "src/vres_os/cli.py").read_bytes() == b"# cli\n"
@@ -277,7 +291,7 @@ def test_a_crlf_checkout_stages_the_exact_committed_bytes(tmp_path):
     assert (root / "src/vres_os/cli.py").read_bytes() == b"# cli\r\n"  # the checkout differs from the blob
     out, manifest_path = _paths(tmp_path)
 
-    manifest = release_artifact.stage(root, out, manifest_path, source_commit=head)
+    manifest = _stage(root, out, manifest_path, source_commit=head)
 
     for f in manifest["files"]:
         blob = _blob(root, head, f["path"])
@@ -289,7 +303,7 @@ class LyingObjects:
     """The real object reader, except that one object's content is swapped under its unchanged id."""
 
     def __init__(self, root: Path, oid: str, forged: bytes):
-        self.real, self.oid, self.forged = release_artifact._object_reader(root), oid, forged
+        self.real, self.oid, self.forged = release_artifact._object_reader(root, **_test_git_pin()), oid, forged
 
     def __call__(self, oid):
         kind, body = self.real(oid)
@@ -312,7 +326,7 @@ def test_an_object_whose_content_does_not_match_its_id_is_refused(tmp_path, targ
         oid, forged = head, _git(root, "cat-file", "commit", head).replace(b"synthetic", b"forged!!!")
 
     with pytest.raises(ReleaseArtifactError, match="does not match its object id"):
-        release_artifact.stage(root, out, manifest_path, source_commit=head,
+        _stage(root, out, manifest_path, source_commit=head,
                                objects=LyingObjects(root, oid, forged))
     assert _no_artifact(tmp_path)
 
@@ -334,7 +348,7 @@ def test_symlink_and_submodule_entries_in_scope_are_refused(tmp_path, kind):
     out, manifest_path = _paths(tmp_path)
 
     with pytest.raises(ReleaseArtifactError, match="symbolic link|submodule"):
-        release_artifact.stage(root, out, manifest_path, source_commit=head)
+        _stage(root, out, manifest_path, source_commit=head)
     assert _no_artifact(tmp_path)
 
 
@@ -344,7 +358,7 @@ def test_a_staging_tool_that_differs_from_the_pinned_commit_is_refused(tmp_path)
     out, manifest_path = _paths(tmp_path)
 
     with pytest.raises(ReleaseArtifactError, match="staging tool"):
-        release_artifact.stage(root, out, manifest_path, source_commit=head)
+        _stage(root, out, manifest_path, source_commit=head)
     assert _no_artifact(tmp_path)
 
 
@@ -398,7 +412,7 @@ def test_invalid_sources_are_refused_and_nothing_is_staged(tmp_path, problem, ma
         _write(root, "plugins/vres-os/hooks/new.ps1", b"# untracked\n")
 
     with pytest.raises(ReleaseArtifactError, match=match):
-        release_artifact.stage(root, out, manifest_path, source_commit=pin)
+        _stage(root, out, manifest_path, source_commit=pin)
     assert _no_artifact(tmp_path)
 
 
@@ -426,7 +440,7 @@ def test_a_zip_with_a_self_consistent_manifest_claiming_a_real_commit_is_refused
     out, manifest_path = _paths(tmp_path)
 
     with pytest.raises(ReleaseArtifactError, match="not a git checkout"):
-        release_artifact.stage(extracted, out, manifest_path, source_commit=head)
+        _stage(extracted, out, manifest_path, source_commit=head)
     assert _no_artifact(tmp_path)
 
 
@@ -437,7 +451,9 @@ def test_non_git_sources_and_the_manifest_command_are_refused(tmp_path):
     out, manifest_path = _paths(tmp_path)
 
     assert release_artifact.main(["stage", "--root", str(plain), "--out", str(out), "--manifest",
-                                  str(manifest_path), "--source-commit", head]) == 1
+                                  str(manifest_path), "--source-commit", head,
+                                  "--git-executable", _test_git_pin()["git_executable"],
+                                  "--git-sha256", _test_git_pin()["git_sha256"]]) == 1
     assert _no_artifact(tmp_path)
     with pytest.raises(SystemExit) as exit_info:
         release_artifact.main(["manifest", "--root", str(root), "--out", str(tmp_path / "m.json")])

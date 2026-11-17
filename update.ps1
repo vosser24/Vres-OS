@@ -201,6 +201,8 @@ if ($PreflightOnly) {
 
 # Preserve the original update owner and staging/recovery path: never install
 # fresh implicitly and never fall back to an alternate release/stage method.
+# The SAME -GitExecutable and -GitSha256 pins must continue through original
+# install.ps1 to BOTH release_artifact Git runner and cat-file object reader.
 if (-not (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'VresOS\active-install.json') -PathType Leaf)) {
     throw 'Update requires an existing managed Vres installation; use separately approved install.ps1 for first installation.'
 }

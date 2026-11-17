@@ -285,7 +285,9 @@ if ($Update) {
     Write-Host 'A secure separate window will request database credentials after you type start vres in Claude.'
     if (-not (Confirm-Choice 'Install this preview for a disposable project and dedicated test database?' $false)) { exit 0 }
 }
-foreach ($item in @(@('git','Git.Git'), @('claude','Anthropic.ClaudeCode'))) {
+# Git is supplied ONLY by the independently pinned -GitExecutable verified in
+# original update.ps1; ambient PATH git and an automatic Git install are not release inputs.
+foreach ($item in @(@('claude','Anthropic.ClaudeCode'))) {
     if (-not (Have $item[0])) {
         if ($Update) { throw "Update refused: missing $($item[0]); no prerequisite package will be installed during a Vres update." }
         if (-not (Confirm-Choice "$($item[0]) is missing. Install its Windows package?" $true)) { throw "$($item[0]) is required." }
@@ -304,7 +306,7 @@ if (-not $Python) {
 # validated from the source tree before any install root, venv or package is created.
 # Hygiene-only reorder; release_artifact still imports release_inputs before
 # internal verification. Trusted out-of-band pre-execution proof is NOT provided.
-Run $Python @('-I','-B','-X','utf8',(Join-Path $RepoRoot 'src\vres_os\release_artifact.py'),'check','--root',$RepoRoot,'--source-commit',$SourceCommit)
+Run $Python @('-I','-B','-X','utf8',(Join-Path $RepoRoot 'src\vres_os\release_artifact.py'),'check','--root',$RepoRoot,'--source-commit',$SourceCommit,'--git-executable',$GitExecutable,'--git-sha256',$GitSha256)
 Run $Python @('-I','-B','-X','utf8',(Join-Path $RepoRoot 'src\vres_os\release_inputs.py'),'--root',$RepoRoot)
 # The user-scoped skills-directory plugin facility requires a current Claude version.
 $cv = & claude --version
@@ -351,7 +353,7 @@ try {
     # installs from this copy and runs the staged tools; $RepoRoot is not read again.
     $StagedSource = Join-Path $NewRelease 'source'
     $ReleaseManifest = Join-Path $NewRelease 'release-manifest.json'
-    Run $Python @('-I','-X','utf8',(Join-Path $RepoRoot 'src\vres_os\release_artifact.py'),'stage','--root',$RepoRoot,'--out',$StagedSource,'--manifest',$ReleaseManifest,'--source-commit',$SourceCommit)
+    Run $Python @('-I','-X','utf8',(Join-Path $RepoRoot 'src\vres_os\release_artifact.py'),'stage','--root',$RepoRoot,'--out',$StagedSource,'--manifest',$ReleaseManifest,'--source-commit',$SourceCommit,'--git-executable',$GitExecutable,'--git-sha256',$GitSha256)
     $ArtifactTool = Join-Path $StagedSource 'src\vres_os\release_artifact.py'
     # Original root wheel must match exact staged Git source before any pip invocation.
     Run $Python @('-I','-X','utf8',$ArtifactTool,'verify-root-wheel','--manifest',$ReleaseManifest,'--wheel',$RootWheels[0].FullName)
