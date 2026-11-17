@@ -297,7 +297,7 @@ def test_installer_requires_offline_hash_locked_wheels_and_records_dependency_re
     text = _installer()
     at = text.index
 
-    pip = at("Run $NewPython @('-m','pip','install','--no-compile','--no-index','--no-cache-dir','--only-binary=:all:','--require-hashes','--find-links',$WheelhouseDir,'--report',$PipReport,'-r',$WheelLockFile)")
+    pip = at("Run $NewPython @('-I','-m','pip','--isolated','install','--no-compile','--no-index','--no-cache-dir','--only-binary=:all:','--require-hashes','--find-links',$WheelhouseDir,'--report',$PipReport,'-r',$WheelLockFile)")
     assert "$PipReport = Join-Path $NewRelease 'pip-install-report.json'" in text
     assert at("$PipVersionCheck") < at("Run $NewPython @('-I','-c',$PipVersionCheck)") < pip
     assert "(23, 0)" in text  # installation-report schema version 1 is stable from pip 23.0

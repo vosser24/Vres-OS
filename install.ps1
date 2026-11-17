@@ -99,6 +99,21 @@ if ($WheelLockText -match '(?im)^\s*-(?!-hash=sha256:)' -or
     $WheelLockText -match '(?m)^[^#\r\n]*@') {
     throw 'Installation refused: requirements contain indirect/remote instructions.'
 }
+
+# Check all candidate wheel SHA-256 digests BEFORE pip, not just the lock file.
+# This is not independent wheel publisher trust or NTFS/ACL/isolation closure.
+foreach ($wheel in $WheelFiles) {
+    $Digest = (Get-FileHash -LiteralPath $wheel.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($WheelLockText.IndexOf(('--hash=sha256:' + $Digest), [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+        throw 'Installation refused: wheelhouse archive SHA-256 absent from approved requirements lock.'
+    }
+}
+$RootWheels = @($WheelFiles | Where-Object {
+    $_.Name -cmatch '^vres_os-0[.]2[.]0a1-(?:[0-9][A-Za-z0-9_.]*-)?[A-Za-z0-9_.]+-[A-Za-z0-9_.]+-[A-Za-z0-9_.]+[.]whl$'
+})
+if ($RootWheels.Count -ne 1) {
+    throw 'Installation refused: exactly one original Vres 0.2.0a1 root wheel is required.'
+}
 $RepoRoot = $PSScriptRoot
 $InstallRoot = Join-Path $env:LOCALAPPDATA 'VresOS'
 $Bin = Join-Path $InstallRoot 'bin'
@@ -338,6 +353,8 @@ try {
     $ReleaseManifest = Join-Path $NewRelease 'release-manifest.json'
     Run $Python @('-I','-X','utf8',(Join-Path $RepoRoot 'src\vres_os\release_artifact.py'),'stage','--root',$RepoRoot,'--out',$StagedSource,'--manifest',$ReleaseManifest,'--source-commit',$SourceCommit)
     $ArtifactTool = Join-Path $StagedSource 'src\vres_os\release_artifact.py'
+    # Original root wheel must match exact staged Git source before any pip invocation.
+    Run $Python @('-I','-X','utf8',$ArtifactTool,'verify-root-wheel','--manifest',$ReleaseManifest,'--wheel',$RootWheels[0].FullName)
     # Build venv at its permanent path: Windows entry points contain absolute paths.
     Run $Python @('-m','venv',(Join-Path $NewRelease 'venv'))
     $NewPython = Join-Path $NewRelease 'venv\Scripts\python.exe'
@@ -348,8 +365,8 @@ try {
     Run $NewPython @('-I','-c',$PipVersionCheck)
     $PipReport = Join-Path $NewRelease 'pip-install-report.json'
     # No bytecode is written at install time, so the installed package can be verified as exactly the release.
-    Run $NewPython @('-m','pip','install','--no-compile','--no-index','--no-cache-dir','--only-binary=:all:','--require-hashes','--find-links',$WheelhouseDir,'--report',$PipReport,'-r',$WheelLockFile)
-    Run $NewPython @('-m','pip','check')
+    Run $NewPython @('-I','-m','pip','--isolated','install','--no-compile','--no-index','--no-cache-dir','--only-binary=:all:','--require-hashes','--find-links',$WheelhouseDir,'--report',$PipReport,'-r',$WheelLockFile)
+    Run $NewPython @('-I','-m','pip','--isolated','check')
     # Locate the package without importing it (-B: no bytecode), then verify its complete file inventory:
     # exactly the released modules and migrations, no compiled, native, .pth or other file. This is a
     # point-in-time installation check, not ongoing integrity monitoring.
@@ -359,7 +376,7 @@ try {
     if (-not $PackageDir.StartsWith((Join-Path $NewRelease 'venv') + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'The located Vres package is not inside the new runtime.' }
     Run $Python @('-I','-X','utf8',$ArtifactTool,'verify-installed','--manifest',$ReleaseManifest,'--package-dir',$PackageDir)
     Run $NewPython @('-B','-c','from vres_os.cli import app; from vres_os.mcp_server import mcp; from vres_os.db import migrate; from vres_os.autocompact import install_autocompact')
-    $freeze = & $NewPython -m pip freeze --all
+    $freeze = & $NewPython -I -m pip --isolated freeze --all
     if ($LASTEXITCODE -ne 0) { throw 'Dependency inventory failed.' }
     [IO.File]::WriteAllLines((Join-Path $NewRelease 'resolved-dependencies.txt'), [string[]]$freeze, (New-Object System.Text.UTF8Encoding $false))
     # Validate pip's report and refuse any wheel lacking a recorded SHA-256.

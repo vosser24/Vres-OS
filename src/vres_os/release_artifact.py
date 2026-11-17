@@ -35,6 +35,7 @@ Run: python -I src/vres_os/release_artifact.py check --root <checkout> --source-
 from __future__ import annotations
 
 import argparse
+import configparser
 import hashlib
 import json
 import os
@@ -44,6 +45,7 @@ import stat
 import subprocess
 import sys
 import uuid
+import zipfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
@@ -70,8 +72,8 @@ _BOOTSTRAP = {
     "src/vres_os/release_inputs.py": Path(__file__).with_name("release_inputs.py"),
 }
 DEPENDENCIES_NOTE = (
-    "Not pinned by this artifact: pip resolves dependencies within pyproject.toml's ranges at install time; "
-    "the installer records what was resolved in resolved-dependencies.txt."
+    "Not authenticated by the source manifest: original installer separately requires an out-of-band "
+    "approved complete offline SHA-256 wheel lock and records installed dependencies."
 )
 IDENTITY_NOTE = (
     "Every file was read from the git objects of source_commit and re-hashed against its object id; "
@@ -464,6 +466,93 @@ def _compare(expected: dict[str, str], directory: Path, actual: list[str], label
         raise ReleaseArtifactError(f"{label} differs from the release manifest: {changed[:5]}")
 
 
+
+def verify_original_vres_wheel(manifest: dict[str, Any], wheel_path: Path) -> dict[str, Any]:
+    """Match the original distribution wheel to exact Git source BEFORE any pip.
+
+    Source-owned static hygiene only: no independent publisher, runtime or dependency
+    trust, OS object identity, execution authorization or provenance attestation.
+    """
+    require_w4_original_release_clearance()
+    wheel_path = Path(wheel_path)
+    try:
+        info = os.lstat(wheel_path)
+    except OSError as exc:
+        raise ReleaseArtifactError(f"Original Vres wheel unavailable: {exc}") from None
+    if not stat.S_ISREG(info.st_mode) or _is_link(info):
+        raise ReleaseArtifactError("Original Vres wheel must be an ordinary non-linked file")
+    if not re.fullmatch(
+        r"vres_os-0\.2\.0a1-(?:[0-9][A-Za-z0-9_.]*-)?[A-Za-z0-9_.]+-[A-Za-z0-9_.]+-[A-Za-z0-9_.]+\.whl",
+        wheel_path.name,
+    ):
+        raise ReleaseArtifactError("Original Vres wheel filename/version is not approved")
+    expected = {
+        "vres_os/" + f["path"][len(PACKAGE_PREFIX):]: (f["sha256"], f["bytes"])
+        for f in manifest["files"] if f["path"].startswith(PACKAGE_PREFIX)
+    }
+    if not expected:
+        raise ReleaseArtifactError("Original source manifest has no Vres package files")
+    dist = "vres_os-0.2.0a1.dist-info/"
+    required = {dist + x for x in ("METADATA", "WHEEL", "RECORD", "entry_points.txt")}
+    optional = {dist + x for x in ("top_level.txt", "LICENSE", "NOTICE", "COPYING")}
+    directories = {"vres_os/", "vres_os/migrations/", dist, dist + "licenses/"}
+    scripts = {
+        "vres": "vres_os.cli:main",
+        "vres-mcp": "vres_os.company_mcp:main",
+        "vres-day": "vres_os.personal_w4_windows_entry:main",
+    }
+    try:
+        with zipfile.ZipFile(wheel_path, "r") as archive:
+            entries = archive.infolist()
+            names = [item.filename for item in entries]
+            if not names or len(names) != len(set(names)) or len(names) != len({n.casefold() for n in names}):
+                raise ReleaseArtifactError("Original root wheel has missing/duplicate/case-aliased members")
+            actual = set()
+            metadata_size = 0
+            for item in entries:
+                rel = item.filename
+                _check_rel(rel.rstrip("/") if item.is_dir() else rel)
+                kind = stat.S_IFMT(item.external_attr >> 16)
+                allowed_kind = (0, stat.S_IFDIR) if item.is_dir() else (0, stat.S_IFREG)
+                if item.flag_bits & 1 or kind not in allowed_kind:
+                    raise ReleaseArtifactError("Original root wheel contains encrypted or nonregular members")
+                if item.is_dir():
+                    if rel not in directories:
+                        raise ReleaseArtifactError(f"Unexpected root-wheel directory: {rel}")
+                    continue
+                if rel in expected:
+                    if item.file_size != expected[rel][1]:
+                        raise ReleaseArtifactError(f"Original source file size differs in wheel: {rel}")
+                elif rel in required or rel in optional or (
+                    rel.startswith(dist + "licenses/") and rel.count("/") == 2
+                ):
+                    metadata_size += item.file_size
+                    if metadata_size > 2 * 1024 * 1024:
+                        raise ReleaseArtifactError("Original root wheel metadata exceeds inspection limit")
+                else:
+                    raise ReleaseArtifactError(f"Unexpected root-wheel member: {rel}")
+                actual.add(rel)
+            if expected.keys() - actual or required - actual:
+                raise ReleaseArtifactError("Original wheel is missing source files or required metadata")
+            for rel, (sha, _size) in expected.items():
+                if _sha256(archive.read(rel)) != sha:
+                    raise ReleaseArtifactError(f"Original wheel differs from exact source: {rel}")
+            meta = archive.read(dist + "METADATA").decode("utf-8")
+            wheel = archive.read(dist + "WHEEL").decode("utf-8")
+            if (not re.search(r"(?im)^Name:\s*vres-os\s*$", meta)
+                    or not re.search(r"(?im)^Version:\s*0\.2\.0a1\s*$", meta)
+                    or not re.search(r"(?im)^Root-Is-Purelib:\s*true\s*$", wheel)):
+                raise ReleaseArtifactError("Original root wheel metadata/purelib differs")
+            entry = configparser.ConfigParser(interpolation=None)
+            entry.optionxform = str
+            entry.read_string(archive.read(dist + "entry_points.txt").decode("utf-8"))
+            if set(entry.sections()) != {"console_scripts"} or dict(entry["console_scripts"]) != scripts:
+                raise ReleaseArtifactError("Original wheel would install unexpected CLI entry points")
+    except (zipfile.BadZipFile, zipfile.LargeZipFile, UnicodeDecodeError, configparser.Error) as exc:
+        raise ReleaseArtifactError(f"Original Vres wheel malformed: {type(exc).__name__}") from None
+    return {"verified": True, "source_commit": manifest["source_commit"], "files": len(expected)}
+
+
 def verify_installed(manifest: dict[str, Any], package_dir: Path) -> dict[str, Any]:
     """The installed vres_os package holds exactly the released files and directories, nothing else of any kind."""
     require_w4_original_release_clearance()
@@ -511,6 +600,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--out", type=Path, required=True)
     p.add_argument("--manifest", type=Path, required=True)
     p.add_argument("--source-commit", required=True)
+    p = sub.add_parser("verify-root-wheel")
+    p.add_argument("--manifest", type=Path, required=True)
+    p.add_argument("--wheel", type=Path, required=True)
     p = sub.add_parser("verify-installed")
     p.add_argument("--manifest", type=Path, required=True)
     p.add_argument("--package-dir", type=Path, required=True)
@@ -531,7 +623,9 @@ def main(argv: list[str] | None = None) -> int:
                   f"({result['source_origin']}), {len(result['files'])} files")
         else:
             manifest = load_manifest(args.manifest)
-            if args.command == "verify-installed":
+            if args.command == "verify-root-wheel":
+                result = verify_original_vres_wheel(manifest, args.wheel)
+            elif args.command == "verify-installed":
                 result = verify_installed(manifest, args.package_dir)
             else:
                 result = verify_tree(manifest, args.prefix, args.dir, allow_extra=tuple(args.allow_extra))
