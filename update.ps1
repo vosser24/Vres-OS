@@ -8,6 +8,9 @@ param(
     [string]$SourceTree,
     [string]$GitExecutable,
     [string]$GitSha256,
+    [string]$WheelhouseDir,
+    [string]$WheelLockFile,
+    [string]$WheelLockSha256,
     [switch]$PreflightOnly
 )
 # W4: operator fetches an independently approved Git commit OUTSIDE this script.
@@ -201,4 +204,4 @@ if ($PreflightOnly) {
 if (-not (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'VresOS\active-install.json') -PathType Leaf)) {
     throw 'Update requires an existing managed Vres installation; use separately approved install.ps1 for first installation.'
 }
-& (Join-Path $PSScriptRoot 'install.ps1') -Update -WithEmbeddings:$WithEmbeddings -WithCodex:$WithCodex -UseRemotePostgres:$UseRemotePostgres -SourceCommit $SourceCommit
+& (Join-Path $PSScriptRoot 'install.ps1') -Update -WithEmbeddings:$WithEmbeddings -WithCodex:$WithCodex -UseRemotePostgres:$UseRemotePostgres -SourceCommit $SourceCommit -SourceTree $SourceTree -GitExecutable $GitExecutable -GitSha256 $GitSha256 -WheelhouseDir $WheelhouseDir -WheelLockFile $WheelLockFile -WheelLockSha256 $WheelLockSha256

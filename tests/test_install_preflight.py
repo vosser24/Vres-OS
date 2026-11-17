@@ -293,20 +293,22 @@ def test_no_unverified_claim_that_the_whole_installer_avoids_the_database():
     assert "schema-048 incident database" in docs
 
 
-def test_installer_records_the_dependency_report_without_claiming_reproducibility():
+def test_installer_requires_offline_hash_locked_wheels_and_records_dependency_report():
     text = _installer()
     at = text.index
 
-    pip = at("Run $NewPython @('-m','pip','install','--no-compile','--report',$PipReport,\"$StagedSource[$extras]\")")
+    pip = at("Run $NewPython @('-m','pip','install','--no-compile','--no-index','--no-cache-dir','--only-binary=:all:','--require-hashes','--find-links',$WheelhouseDir,'--report',$PipReport,'-r',$WheelLockFile)")
     assert "$PipReport = Join-Path $NewRelease 'pip-install-report.json'" in text
     assert at("$PipVersionCheck") < at("Run $NewPython @('-I','-c',$PipVersionCheck)") < pip
     assert "(23, 0)" in text  # installation-report schema version 1 is stable from pip 23.0
     # The report is checked only after the installed package is verified, and before anything is activated.
     assert at("'verify-installed','--manifest',$ReleaseManifest") < at("Run $Python @('-I','-c',$PipReportCheck,$PipReport)")
     assert at("$PipReportCheck,$PipReport") < at("'pending-install.json') @{")
-    summary = text[at("Dependency report:"):].split("\n", 1)[0]
-    assert "not a hash-locked or reproducible resolution" in summary and "build" in summary
-    assert "--index-url" not in text and "--extra-index-url" not in text and "--find-links" not in text
+    summary = text[at("Offline hash-locked pip report:"):].split("\n", 1)[0]
+    assert "Independent wheel trust" in summary
+    assert "'--no-index'" in text and "'--require-hashes'" in text
+    assert "'--only-binary=:all:'" in text and "'--find-links',$WheelhouseDir" in text
+    assert '"$StagedSource[$extras]"' not in text
 
 
 # ------------------------------------------------------------------------------- documentation (T6)

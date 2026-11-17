@@ -6,7 +6,13 @@ param(
     [switch]$UseRemotePostgres,
     [switch]$Update,
     # Required: the full 40-hex source commit the operator approved; this checkout's HEAD must be it.
-    [string]$SourceCommit
+    [string]$SourceCommit,
+    [string]$SourceTree,
+    [string]$GitExecutable,
+    [string]$GitSha256,
+    [string]$WheelhouseDir,
+    [string]$WheelLockFile,
+    [string]$WheelLockSha256
 )
 # Installation is interactive, user-scoped and conservative. No database credentials here.
 $ErrorActionPreference = 'Stop'
@@ -36,7 +42,63 @@ if ($W4RuntimeClosureInterlock -cne 'INDEPENDENTLY_VERIFIED_AND_AUTHORIZED' -or
     $W4HostInterlock -cne 'INCIDENTS_RESOLVED_AND_AUTHORIZED') {
     throw 'VRES_W4_HELD_CLOSURE: runtime wheels, Schema-048 and native Claude are not cleared.'
 }
-if ($SourceCommit -notmatch '^[0-9a-fA-F]{40}\z') { throw 'Pass -SourceCommit <full 40-hex commit> naming the release commit you approved. Nothing was changed.' }
+# A direct call to the ORIGINAL installer must pass the ORIGINAL updater's
+# pinned Git checkout verification, not just a 40-character commit string.
+# Holds ABOVE remain first, and an independent trusted source gate is still required.
+if ($SourceCommit -notmatch '^[0-9a-fA-F]{40}\z' -or
+    $SourceTree -notmatch '^[0-9a-fA-F]{40}\z') {
+    throw 'Installation refused: independently approved full -SourceCommit and -SourceTree required.'
+}
+& (Join-Path $PSScriptRoot 'update.ps1') -PreflightOnly -SourceCommit $SourceCommit -SourceTree $SourceTree -GitExecutable $GitExecutable -GitSha256 $GitSha256
+
+# Complete OFFLINE binary wheel input, approved independently of this checkout.
+# Pip must neither reach an index nor build an unpinned sdist or Vres source tree.
+if ([string]::IsNullOrWhiteSpace($WheelhouseDir) -or
+    [string]::IsNullOrWhiteSpace($WheelLockFile) -or
+    -not [IO.Path]::IsPathRooted($WheelhouseDir) -or
+    -not [IO.Path]::IsPathRooted($WheelLockFile) -or
+    $WheelLockSha256 -notmatch '^[0-9a-fA-F]{64}\z') {
+    throw 'Installation refused: absolute -WheelhouseDir, -WheelLockFile and approved -WheelLockSha256 are required.'
+}
+$WheelhouseDir = [IO.Path]::GetFullPath($WheelhouseDir)
+$WheelLockFile = [IO.Path]::GetFullPath($WheelLockFile)
+if (-not (Test-Path -LiteralPath $WheelhouseDir -PathType Container) -or
+    -not (Test-Path -LiteralPath $WheelLockFile -PathType Leaf)) {
+    throw 'Installation refused: locked offline requirements or wheelhouse missing.'
+}
+foreach ($candidate in @($WheelhouseDir, $WheelLockFile)) {
+    if ((Get-Item -LiteralPath $candidate -ErrorAction Stop).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        throw 'Installation refused: wheelhouse and requirements cannot be reparse points.'
+    }
+}
+$CheckoutPrefix = [IO.Path]::GetFullPath($PSScriptRoot).TrimEnd([char[]]@('\','/')) + '\'
+if ($WheelhouseDir.StartsWith($CheckoutPrefix, [StringComparison]::OrdinalIgnoreCase) -or
+    $WheelLockFile.StartsWith($CheckoutPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Installation refused: offline dependencies must be outside the immutable source checkout.'
+}
+$WheelFiles = @(Get-ChildItem -Force -LiteralPath $WheelhouseDir -ErrorAction Stop)
+if ($WheelFiles.Count -eq 0) { throw 'Installation refused: empty offline wheelhouse.' }
+foreach ($wheel in $WheelFiles) {
+    if ($wheel.PSIsContainer -or $wheel.Extension -cne '.whl' -or
+        ($wheel.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw 'Installation refused: wheelhouse must contain only ordinary .whl files.'
+    }
+}
+if ((Get-FileHash -LiteralPath $WheelLockFile -Algorithm SHA256).Hash -cne $WheelLockSha256.ToUpperInvariant()) {
+    throw 'Installation refused: requirements lock differs from approved SHA-256.'
+}
+$WheelLockText = [IO.File]::ReadAllText($WheelLockFile)
+$ExpectedRootRequirement = if ($WithEmbeddings) { 'vres-os[full,embeddings]==0.2.0a1' } else { 'vres-os[full]==0.2.0a1' }
+if ($WheelLockText.IndexOf($ExpectedRootRequirement, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+    throw 'Installation refused: lock lacks the selected original Vres full extras/version.'
+}
+# No nested -r/-c directives, URLs, index switches or local direct references.
+# A regular pip-tools --hash=sha256 continuation is the sole allowed switch.
+if ($WheelLockText -match '(?im)^\s*-(?!-hash=sha256:)' -or
+    $WheelLockText -match '(?i)(?:https?|ftp|git|file)://' -or
+    $WheelLockText -match '(?m)^[^#\r\n]*@') {
+    throw 'Installation refused: requirements contain indirect/remote instructions.'
+}
 $RepoRoot = $PSScriptRoot
 $InstallRoot = Join-Path $env:LOCALAPPDATA 'VresOS'
 $Bin = Join-Path $InstallRoot 'bin'
@@ -279,15 +341,14 @@ try {
     # Build venv at its permanent path: Windows entry points contain absolute paths.
     Run $Python @('-m','venv',(Join-Path $NewRelease 'venv'))
     $NewPython = Join-Path $NewRelease 'venv\Scripts\python.exe'
-    $extras = if ($WithEmbeddings) { 'full,embeddings' } else { 'full' }
-    # pip records what it resolved and downloaded (--report; installation-report schema version 1 is stable
-    # from pip 23.0, so older pip is refused here, before any download). That is audit evidence, not a lock:
-    # dependencies are still resolved within pyproject.toml's ranges at install time.
+    # Only the independently pinned, offline complete wheel lock may supply original Vres
+    # plus full dependencies. No source build, remote resolver or pip bootstrap is authorized.
+    # The pip report is separate audit evidence, not external publisher/toolchain trust.
     $PipVersionCheck = 'import pip, re, sys; m = re.match(''([0-9]+)[.]([0-9]+)'', pip.__version__); sys.exit(0 if m and (int(m[1]), int(m[2])) >= (23, 0) else 1)'
     Run $NewPython @('-I','-c',$PipVersionCheck)
     $PipReport = Join-Path $NewRelease 'pip-install-report.json'
     # No bytecode is written at install time, so the installed package can be verified as exactly the release.
-    Run $NewPython @('-m','pip','install','--no-compile','--report',$PipReport,"$StagedSource[$extras]")
+    Run $NewPython @('-m','pip','install','--no-compile','--no-index','--no-cache-dir','--only-binary=:all:','--require-hashes','--find-links',$WheelhouseDir,'--report',$PipReport,'-r',$WheelLockFile)
     Run $NewPython @('-m','pip','check')
     # Locate the package without importing it (-B: no bytecode), then verify its complete file inventory:
     # exactly the released modules and migrations, no compiled, native, .pth or other file. This is a
@@ -301,10 +362,13 @@ try {
     $freeze = & $NewPython -m pip freeze --all
     if ($LASTEXITCODE -ne 0) { throw 'Dependency inventory failed.' }
     [IO.File]::WriteAllLines((Join-Path $NewRelease 'resolved-dependencies.txt'), [string[]]$freeze, (New-Object System.Text.UTF8Encoding $false))
-    # Validate pip's report and count entries without a well-formed recorded SHA-256 (e.g. the local staged source).
+    # Validate pip's report and refuse any wheel lacking a recorded SHA-256.
     $PipReportCheck = 'import json, re, sys; g = lambda d, k: d.get(k) if isinstance(d, dict) else None; r = json.load(open(sys.argv[1], encoding=''utf-8'')); i = g(r, ''install''); ok = g(r, ''version'') == ''1'' and isinstance(i, list) and len(i) > 0 and all(isinstance(g(e, ''metadata''), dict) and bool(g(g(e, ''metadata''), ''name'')) and bool(g(g(e, ''metadata''), ''version'')) for e in i); sha = lambda e: g(g(g(g(e, ''download_info''), ''archive_info''), ''hashes''), ''sha256''); sys.exit(1) if not ok else print(len(i), sum(1 for e in i if not (isinstance(sha(e), str) and re.fullmatch(''[0-9a-fA-F]{64}'', sha(e)))))'
     $PipReportCounts = "$(Run $Python @('-I','-c',$PipReportCheck,$PipReport) | Select-Object -Last 1)".Split(' ')
-    Write-Host "Dependency report: $($PipReportCounts[0]) packages recorded in pip-install-report.json, $($PipReportCounts[1]) without a well-formed recorded SHA-256 (the local staged Vres source has none). A recorded digest is pip's own record, not an independent check of the bytes. This is an audit record, not a hash-locked or reproducible resolution; isolated build dependencies (such as setuptools) are not included."
+    if ($PipReportCounts.Count -ne 2 -or $PipReportCounts[1] -cne '0') {
+        throw 'Installation refused: pip report contains unresolved or un-hashed dependency records.'
+    }
+    Write-Host "Offline hash-locked pip report: $($PipReportCounts[0]) packages; no un-hashed records reported. Independent wheel trust, Python/Tk/DLLs and host clearance remain separate gates."
     Copy-Item -Recurse -LiteralPath (Join-Path $StagedSource 'plugins\vres-os') -Destination $StagedPlugin
     Run $Python @('-I','-X','utf8',$ArtifactTool,'verify-tree','--manifest',$ReleaseManifest,'--prefix','plugins/vres-os','--dir',$StagedPlugin)
     [IO.File]::WriteAllText((Join-Path $StagedPlugin '.vres-managed'), 'Vres-OS')
