@@ -52,7 +52,7 @@ These mechanisms have different evidence levels. Local tests execute Python/pars
 **Do not install or update Vres-OS from the current engineering source.**
 The original `update.ps1` and `install.ps1` remain mechanically held.
 Current code has not passed exact-tree Python/pytest, PowerShell, original
-Windows installation/recovery or full Tk/CLI/MCP/Chairman UAT. Protected
+Windows installation/recovery or full Claude CLI/MCP/Chairman UAT. Protected
 Windows P2 and the user's credentials are not to be changed.
 
 After a genuinely independent security review, resolution of the separate
@@ -63,14 +63,19 @@ approved COMMIT/TREE, followed by the **original** `update.ps1` preflight and
 normal update using the **original** `install.ps1 -Update` and its journal
 and recovery. Do not use source ZIPs or an alternate installer.
 
-The original installer now refuses missing host dependencies rather than
-acquiring Claude Code, PostgreSQL, Node.js or Codex through WinGet/npm.
+The ORIGINAL fresh installer retains operator-confirmed WinGet/npm setup of
+missing Claude Code, PostgreSQL 17, optional Node.js LTS and Codex.
+The original maintenance update refuses to install missing host packages.
+Git.exe and Python.exe remain explicitly SHA-256 pinned on this held candidate.
 A reviewed Python.exe SHA-256 and Git.exe SHA-256 do not by themselves certify
 publishers, DLLs, Git configuration/helpers, NTFS ancestry or host isolation.
 See [Windows installation / holds](docs/INSTALL-WINDOWS.md).
 
-The intended user experience remains ONE original personal Windows
-application, with one Chairman and one Tk Desktop + CLI/MCP front end.
+**Vres-OS is the personal companion to Claude Code CLI through MCP.**
+Claude Code CLI is the primary interface; the original Chairman, task/state,
+projects, credentials, experience and MCP stay one system. No additional GUI
+or Tk Desktop development is required for the current milestone. Previously
+authored Tk source remains untouched, without changing the original scope.
 Credentials belong in the separately approved local setup workflow, never
 in a chat. No PostgreSQL contact, including SELECT, or native Claude
 hooks is currently permitted.

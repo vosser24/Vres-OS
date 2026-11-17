@@ -18,11 +18,13 @@ Version: **0.2.0-alpha.1 / Python package 0.2.0a1**. Target: native Windows, Pyt
 
 Use a Windows VM/snapshot or an account that does not contain production credentials. Use a dedicated `vres_test` database/user. Do not point the preview at the company's operational database. Existing AIGO stays unchanged. Close Claude Code, Codex and Vres workers before installation or update.
 
-Future approved deployment is user-scoped, but externally provided Git, Python,
-Claude Code, PostgreSQL (when used) and optional Codex/Node must be independently
-provisioned and approved **before** this original installer. It does not acquire
-those host packages through WinGet or npm. No current toolchain/publisher or
-native runtime trust has been established.
+Future approved deployment is user-scoped. The ORIGINAL fresh installer
+retains explicit consent prompts for missing Claude Code, PostgreSQL 17,
+optional Node.js LTS and Codex via WinGet/npm. Maintenance update refuses
+missing dependencies instead of auto-provisioning them. Git.exe and Python.exe
+retain independently approved exact executable/SHA-256 pins, and the complete
+offline Vres wheel lock remains separately required. There is NO current
+Windows execution authorization or native toolchain trust.
 
 Download the release Git bundle and the evidence/checksum files, and note the full 40-hex release commit id from the release record. A source ZIP is not installable: it carries no git objects, so its contents cannot be bound to a commit. Verify the bundle hash in PowerShell:
 
@@ -67,11 +69,14 @@ The process-only execution policy expires when this terminal closes. Vres does n
 - pip installs with `--no-compile`. Before activation, the complete installed `vres_os` package must be exactly the released modules and migrations: any other file or directory, including bytecode (`.pyc`), extension modules (`.pyd`, `.so`, `.dll`) and `.pth` files, stops the installation with the usual rollback. The plugin is compared with the manifest the same way. The installer prevents bytecode writing during its own Vres imports and verifies the package again after final configuration. These are point-in-time checks, not continuous integrity monitoring: ordinary Vres use may create Python bytecode caches later.
 - Dependencies are not part of this identity; see `resolved-dependencies.txt` below.
 
-The original installer retains explicit user confirmation, but **does not
-install missing host packages**. A missing Claude executable, local PostgreSQL
-server (when selected), or optional Codex results in refusal; Python and Git
-must be supplied by separately approved pinned executable/digest parameters.
-No one should use this paragraph to justify a package-manager command today.
+In a future authorized **fresh installation**, original `install.ps1`
+asks permission before any missing host package is installed: Claude Code
+(`Anthropic.ClaudeCode`), local PostgreSQL 17
+(`PostgreSQL.PostgreSQL.17`), Node.js LTS (`OpenJS.NodeJS.LTS`)
+or optional Codex (`@openai/codex`). `-Update` cannot silently
+provision packages. Neither mode can use ambient PATH Git or Python;
+those remain independently pinned. These are source design facts,
+**not instructions or authorization to run the installer today**.
 
 Claude Code compatibility floor is 2.1.246 in the original source. Its
 authenticity, plugins, host hooks and native dependencies still need separate
@@ -88,18 +93,19 @@ review, and the live Claude-host incident is still OPEN.
 These historical examples are **NOT executable instructions today** and
 omit newly required pins. The original `-UseRemotePostgres` option only selects
 a separately approved existing database path; it does not clear Schema-048
-or authorize any database contact. `-WithCodex` requires independently
-provisioned Codex; the original installer no longer runs npm or installs
-Node.js. `-WithEmbeddings` remains optional but requires an independently
-approved complete hash-locked offline wheel set.
+or authorize any database contact. For a future approved **fresh install**,
+`-WithCodex` prompts before installing missing Node.js LTS and optional
+Codex via npm; `-Update` never does. `-WithEmbeddings` remains optional
+and requires an independently approved hash-locked offline wheel set.
 
 The original installer must use only an approved **external wheelhouse** plus
 SHA-256 pinned lock via `--no-index --only-binary=:all: --require-hashes`.
 The original Vres root wheel is verified against the exact Git source manifest
 before pip; an isolated pip report and resolved-dependencies inventory are
 retained, but are not publisher attestation. No auto PyPI fallback, unapproved
-wheelhouse, ambient Python/Git discovery or implicit host package acquisition
-is permitted in this source-only candidate. Publisher, DLL, Tcl/Tk, Git
+wheelhouse or ambient Python/Git discovery is permitted in this source-only
+candidate. Separately authorized fresh installation may use the original
+explicitly consented WinGet/npm host-package path. Publisher, DLL, Tcl/Tk, Git
 helpers/config, NTFS and host/DB boundaries remain unverified, and release
 execution remains HELD.
 

@@ -1,3 +1,10 @@
+> **SUPERSEDED 2026-11-17 by explicit owner correction.**
+> This file documents the now-rejected source-only `d620c679`
+> removal of original fresh-install prerequisite consent. The owner
+> restored the original installer behavior in the successor branch.
+> Consult the latest READ FIRST continuity index before acting.
+> The historical report below is retained for provenance, not as policy.
+
 # W4 — Original host dependency auto-provisioning closed (SOURCE ONLY)
 
 **2026-11-17 Europe/Athens. AUTHORING ONLY / ALL TESTS NOT_RUN.**
