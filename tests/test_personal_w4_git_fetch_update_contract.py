@@ -16,7 +16,7 @@ def _script() -> str:
 def test_original_update_owner_and_user_options_retained():
     script = _script()
     assert "install.ps1') -Update" in script
-    for flag in ("WithEmbeddings", "WithCodex", "UseRemotePostgres", "SourceCommit"):
+    for flag in ("WithEmbeddings", "WithCodex", "UseRemotePostgres", "SourceCommit", "SourceTree", "GitExecutable", "GitSha256"):
         assert f"-{flag}" in script
     assert "active-install.json" in script
     assert "install.ps1 for first installation" in script
@@ -25,15 +25,19 @@ def test_original_update_owner_and_user_options_retained():
 def test_pinned_git_checkout_precedes_any_installer_dispatch():
     script = _script()
     assert "^[0-9a-fA-F]{40}\\z" in script
-    assert "remote get-url origin" in script
+    assert "config --local --get remote.origin.url" in script
     assert "rev-parse --verify 'HEAD^{commit}'" in script
-    assert "status --porcelain=v1 --untracked-files=all" in script
+    assert "status --porcelain=v1 --untracked-files=all --ignored=matching" in script
     assert "core.fsmonitor=false" in script
+    assert "hash-object --no-filters" in script
+    assert "ls-files --stage" in script and "ls-files -v" in script
+    assert "GIT_CONFIG_NOSYSTEM" in script and "GIT_NO_REPLACE_OBJECTS" in script
+    assert "Get-FileHash -LiteralPath $GitExecutable -Algorithm SHA256" in script
     dispatch = script.index("& (Join-Path $PSScriptRoot 'install.ps1')")
     for check in (
-        "remote get-url origin",
+        "config --local --get remote.origin.url",
         "rev-parse --verify 'HEAD^{commit}'",
-        "status --porcelain=v1 --untracked-files=all",
+        "status --porcelain=v1 --untracked-files=all --ignored=matching",
         "if ($PreflightOnly)",
         "active-install.json",
     ):

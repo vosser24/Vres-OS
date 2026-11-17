@@ -48,17 +48,6 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
-try:
-    from . import release_inputs as _release_inputs
-except ImportError:  # run directly as a file by the installer (python -I, no package context)
-    import importlib.util
-
-    sys.dont_write_bytecode = True  # never write a cache into the source checkout or the staged copy
-    _spec = importlib.util.spec_from_file_location("_vres_release_inputs", Path(__file__).with_name("release_inputs.py"))
-    _release_inputs = importlib.util.module_from_spec(_spec)
-    _spec.loader.exec_module(_release_inputs)
-release_input_problems = _release_inputs.release_input_problems
-
 FORMAT = "vres-personal-release-artifact"
 W4_STAGE_SOURCE_INTERLOCK = "HELD_SOURCE_ONLY"
 VERSION = 2
@@ -78,7 +67,7 @@ _MAX_OBJECT = 64 * 1024 * 1024
 # The tool that stages, and the validator it loads, as they run before anything is verified.
 _BOOTSTRAP = {
     "src/vres_os/release_artifact.py": Path(__file__),
-    "src/vres_os/release_inputs.py": Path(_release_inputs.__file__),
+    "src/vres_os/release_inputs.py": Path(__file__).with_name("release_inputs.py"),
 }
 DEPENDENCIES_NOTE = (
     "Not pinned by this artifact: pip resolves dependencies within pyproject.toml's ranges at install time; "
@@ -100,6 +89,30 @@ class ObjectReader(Protocol):
 
 class ReleaseArtifactError(RuntimeError):
     """The artifact was refused; nothing is claimed as staged, installed or verified."""
+
+
+def release_input_problems(root: Path) -> list[str]:
+    """Defer original validator import until AFTER the held direct stage() gate.
+
+    This is not an independent trusted Python bootstrap.
+    """
+    if W4_STAGE_SOURCE_INTERLOCK != "REVIEWED_RELEASE_CLEARED":
+        raise ReleaseArtifactError("VRES_W4_HELD: original release-input runtime blocked")
+    try:
+        from .release_inputs import release_input_problems as validate
+    except ImportError:  # installer directly runs this file
+        import importlib.util
+
+        sys.dont_write_bytecode = True
+        spec = importlib.util.spec_from_file_location(
+            "_vres_release_inputs", Path(__file__).with_name("release_inputs.py")
+        )
+        if spec is None or spec.loader is None:
+            raise ReleaseArtifactError("Original release validator is unavailable")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        validate = module.release_input_problems
+    return validate(root)
 
 
 def _sha256(data: bytes) -> str:

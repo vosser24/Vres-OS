@@ -28,6 +28,18 @@ class DatabaseTargetRefused(DatabaseUnavailable):
     """The personal-release contact guard refused the target before any connection."""
 
 
+W4_SCHEMA_048_SOURCE_INTERLOCK = "HELD_NO_POSTGRESQL_EVEN_SELECT"
+
+
+def require_w4_schema_clearance() -> None:
+    """Refuse BEFORE driver, config, credentials or connection under P0 incident."""
+    if W4_SCHEMA_048_SOURCE_INTERLOCK != "INDEPENDENTLY_REVIEWED_INCIDENT_CLEARED":
+        raise DatabaseTargetRefused(
+            "VRES_W4_HELD_SCHEMA_048: PostgreSQL including SELECT is blocked. "
+            "No connection was attempted."
+        )
+
+
 class MigrationDrift(RuntimeError):
     pass
 
@@ -43,6 +55,7 @@ def _test_single_role_dsn() -> str | None:
 
 
 def build_dsn(purpose: str = "runtime") -> str:
+    require_w4_schema_clearance()
     if purpose not in {"runtime", "writer", "migrator"}:
         raise ValueError(f"Unsupported database connection purpose {purpose!r}")
     env_name = {
@@ -106,6 +119,7 @@ def build_dsn(purpose: str = "runtime") -> str:
 @contextmanager
 def connect(*, autocommit: bool = False, purpose: str = "runtime") -> Iterator[Connection]:
     """Open a purpose-scoped database connection without masking SQL/application defects."""
+    require_w4_schema_clearance()  # BEFORE importing driver
     psycopg = _driver()
     from psycopg.rows import dict_row
 

@@ -28,6 +28,14 @@ if ($W4SourceInterlock -cne 'REVIEWED_RELEASE_CLEARED' -or
     $W4RequestedGate -cne 'REVIEWED_RELEASE_CLEARED') {
     throw 'VRES_W4_HELD: original installer SOURCE ONLY; no P2, native Claude, DB, stage or rollback permitted.'
 }
+# Independent source-owned gate: changing only the generic hold cannot unlock
+# unverified interpreter/Tk/whole-product wheels or the OPEN host incidents.
+$W4RuntimeClosureInterlock = 'HELD_INTERPRETER_TK_AND_HASH_LOCKED_WHEELS'
+$W4HostInterlock = 'HELD_SCHEMA_048_AND_NATIVE_CLAUDE_HOOKS'
+if ($W4RuntimeClosureInterlock -cne 'INDEPENDENTLY_VERIFIED_AND_AUTHORIZED' -or
+    $W4HostInterlock -cne 'INCIDENTS_RESOLVED_AND_AUTHORIZED') {
+    throw 'VRES_W4_HELD_CLOSURE: runtime wheels, Schema-048 and native Claude are not cleared.'
+}
 if ($SourceCommit -notmatch '^[0-9a-fA-F]{40}\z') { throw 'Pass -SourceCommit <full 40-hex commit> naming the release commit you approved. Nothing was changed.' }
 $RepoRoot = $PSScriptRoot
 $InstallRoot = Join-Path $env:LOCALAPPDATA 'VresOS'

@@ -51,7 +51,7 @@ from pathlib import Path
 from typing import Callable, Iterator, Mapping, NamedTuple
 
 from .config import ConfigStore
-from .db import DatabaseTargetRefused
+from .db import DatabaseTargetRefused, require_w4_schema_clearance
 from .paths import APP_NAME
 
 REGISTRY_NAME = "database-targets.json"
@@ -527,6 +527,7 @@ def _decide(root: Path, target: DatabaseTarget) -> None:
 
 def require_contact(conninfo: str) -> None:
     """Refuse, before any connection, a target this personal-release installation has not approved."""
+    require_w4_schema_clearance()  # before Windows profile or registry reads
     root = personal_release_root()
     if root is None:
         return
@@ -536,6 +537,7 @@ def require_contact(conninfo: str) -> None:
 
 def require_admin_contact(admin_conninfo: str, database: str) -> None:
     """A server-level administrator connection is allowed only on behalf of an approved database on that server."""
+    require_w4_schema_clearance()  # before any admin contact
     root = personal_release_root()
     if root is None:
         return
@@ -557,6 +559,7 @@ def confirm_target_for_setup(
     approved_by: str = "secure-setup",
 ) -> None:
     """Record an operator approval of one exact target from an interactive console."""
+    require_w4_schema_clearance()  # no incident-era target approval writes
     ask = ask or input
     root = personal_release_root()
     if root is None:

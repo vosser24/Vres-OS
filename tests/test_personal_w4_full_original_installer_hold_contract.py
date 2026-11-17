@@ -50,3 +50,27 @@ def test_one_original_desktop_launcher_is_wired_but_held():
     assert "Resolve-VresPython" in launch
     assert "-m vres_os.personal_w4_windows_entry" in launch
     assert "PersonalDayOnly" not in install
+
+
+def test_original_runtime_launch_and_database_holds_before_host_access():
+    install = text("install.ps1")
+    assert "HELD_INTERPRETER_TK_AND_HASH_LOCKED_WHEELS" in install
+    assert "HELD_SCHEMA_048_AND_NATIVE_CLAUDE_HOOKS" in install
+    assert install.index("VRES_W4_HELD_CLOSURE") < install.index("$ClaudeHome = if")
+    for name in ("vres-launch.ps1", "vres-mcp-launch.ps1", "vres-day-launch.ps1"):
+        script = text("scripts/windows/" + name)
+        assert "HELD_SOURCE_ONLY" in script
+        assert script.index("VRES_W4_HELD: original managed launcher") < script.index("resolve-runtime.ps1")
+    db = text("src/vres_os/db.py")
+    targets = text("src/vres_os/database_targets.py")
+    assert "HELD_NO_POSTGRESQL_EVEN_SELECT" in db
+    assert db.index("require_w4_schema_clearance()  # BEFORE importing driver") < db.index("psycopg = _driver()")
+    assert "require_w4_schema_clearance()  # before Windows profile" in targets
+    assert "require_w4_schema_clearance()  # before any admin" in targets
+
+
+def test_release_validator_import_is_deferred_past_source_hold():
+    source = text("src/vres_os/release_artifact.py")
+    assert "Path(__file__).with_name(\"release_inputs.py\")" in source
+    assert "VRES_W4_HELD: original release-input runtime blocked" in source
+    assert source.index("W4_STAGE_SOURCE_INTERLOCK !=") < source.index("spec.loader.exec_module(module)")
