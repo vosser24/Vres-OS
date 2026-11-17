@@ -16,18 +16,18 @@ Repository https://github.com/vosser24/Vres-OS, ID **1368577038**. GitHub authen
 
 **LATEST engineering branch**: `feature/personal-w4-original-host-db-direct-route-interlock-20261117`
 
-- HEAD: `6c5186263d48925b9b57e5e248d01c7e9afca0cc`
-- TREE: `4a27053d7b27a332108169ec5cceed3561ac269b`
-- SOLE PARENT: `20a7b40e77f4875507ca4799956e1d4dbc8f6213`
-- BASE PARENT TREE: `3b233b5fdba3cb01d5259f0642764fdf9022c85a`
-- Commit: https://github.com/vosser24/Vres-OS/commit/6c5186263d48925b9b57e5e248d01c7e9afca0cc
-- Nonforce branch publication with **expected-SHA lease**; remote ref readback VERIFIED; comparison sole parent **1 ahead / 0 behind** and precisely 15 changed file paths; all **15 Git blob hashes MATCH**. Original upstream engineering baseline branch `feature/personal-w4-integrated-source-boundary-20261117` remained at `20a7b40e77f4875507ca4799956e1d4dbc8f6213` when branch was created.
-- Current source vs protected main: **223 ahead / 0 behind**. Against protected R13: **DIVERGED, 114 ahead / 13 behind**, no R13 merge or assumption its universal stage hold was inherited.
+- HEAD: `cc1072134093a8b46c09dc5a13142d8881a3123a`
+- TREE: `37b40c585293cc74cea0112ef843b66bcfe68771`
+- SOLE PARENT: `6c5186263d48925b9b57e5e248d01c7e9afca0cc`
+- PARENT TREE: `4a27053d7b27a332108169ec5cceed3561ac269b`; original source baseline `20a7b40e77f4875507ca4799956e1d4dbc8f6213` TREE `3b233b5fdba3cb01d5259f0642764fdf9022c85a`.
+- Latest commit: https://github.com/vosser24/Vres-OS/commit/cc1072134093a8b46c09dc5a13142d8881a3123a ; initial 15-path source milestone https://github.com/vosser24/Vres-OS/commit/6c5186263d48925b9b57e5e248d01c7e9afca0cc.
+- Both commits published with nonforce **expected-SHA lease**. Latest direct parent comparison **1 ahead / 0 behind, ONE test file changed**; cumulative comparison vs original engineering baseline `20a7b40e77f4875507ca4799956e1d4dbc8f6213`: **2 ahead / 0 behind, EXACTLY 15 changed paths**. 14 initial source/docs blobs retained and the test blob corrected as below. Current source branch ref/TREE/parent were independently read back. Original upstream engineering baseline branch remained at that prior HEAD when this feature branch was created.
+- Current source vs protected main: **224 ahead / 0 behind**. Against protected R13: **DIVERGED, 115 ahead / 13 behind**, no R13 merge or assumption its universal stage hold was inherited.
 
-**Canonical documentation baseline before this new handoff:**
-- Branch `docs/chatgpt-continuity-20261023`, verified HEAD `9c154ace9d85ffa37d6b140874a5ec5b2fe2bbe3`
-- TREE `d3a2a9217f3032ddeeafb9b661a9bc0c85b923c8`, sole parent `d56b108560ccb9f30d7790fa0d78b441f05a4cf6`.
-- Previous index blob `e4eab6bf20d243fc150267566d077b988ccb17c4`; previous handoff blob `530b3e4193673048d16a75cb217f11d90f82a001`. This new dated handoff/index update is a separate docs-only commit; its final HEAD/TREE and exact blobs must be independently read back after publication.
+**Canonical documentation baseline before this CORRECTED handoff:**
+- Branch `docs/chatgpt-continuity-20261023`, last verified HEAD `6540bcb350477bedf103bc415bb35883c9b22d05`.
+- TREE `b3183873f20059647348bdb512e706969ef42769`, sole parent `9c154ace9d85ffa37d6b140874a5ec5b2fe2bbe3`.
+- Prior index blob `92215c2e40e96a3fdd3ecaf45d135e1ab1008dcb`; prior handoff blob `b08153a43d2bd382b5634aac23cdd53ba5e9d899`. This corrected handoff/index update is another docs-only commit; its final HEAD/TREE and exact blobs must be independently read back after publication.
 
 **Protected main (unchanged):** `9a8acc5d464b96432a93cb95daa9581412fb07ee`, TREE `659d3fdd6e635dbaecbd5c492ba7279754edaec7`.
 **Protected R13 (unchanged):** branch `feature/personal-w4-r13-universal-staging-hold-20261106`, HEAD `bcf62460d68caebfdbd0e838d44c5997992c5fbc`, TREE `9bbc5615fef4a8f785e9ddb0056e9430ffe25d63`, sole parent `0badcd34d1eafbce5f815512a489d70cb240eecd`.
@@ -51,7 +51,7 @@ Repository https://github.com/vosser24/Vres-OS, ID **1368577038**. GitHub authen
 | `src/vres_os/pg_recovery.py` | `f2a620499cd6da7ce370dcd0da12ae3dc0e8e969` |
 | `src/vres_os/bootstrap.py` | `783a387b26c33d1a427a351ec3adf0de21616c24` |
 | `src/vres_os/database_boundary.py` | `42f01e33cbd6a563808994db80b666e09a51250a` |
-| `tests/test_personal_w4_native_host_and_db_direct_holds_contract.py` | `a038d03e8d04011a3862e1ebd5315cbf08a18ab0` |
+| `tests/test_personal_w4_native_host_and_db_direct_holds_contract.py` | `513cd0afdc6041c295af26344f189b59474cb2fb` |
 | `docs/architecture/VRES-W4-FIRST-FULL-ORIGINAL-DB-AND-NATIVE-HOST-P0-DIRECT-ROUTE-INTERLOCK-2026-11-17.md` | `d1a8adf9cd8bd6eb5e8c4df1f97f0c1a09f0bc87` |
 
 Original source changes:
@@ -66,10 +66,10 @@ These additions do **NOT** prove exhaustive source reachability, OS-enforced iso
 
 ## 4. Exact TEST/verification provenance (do not merge histories)
 
-**Current 6c518626:**
+**Current cc107213 (includes corrected child of 6c518626):**
 - Authenticated GitHub branch ref, commit SHA/TREE/SOLE-PARENT: **VERIFIED**.
-- Exactly 15 changed blob SHA matches and direct parent compare: **VERIFIED**.
-- Source text transformations and initial source ordering assertions: **AUTHOR INSPECTED / STATIC ONLY**; not a security review or executed parser.
+- Cumulative 15 source path blob identities (14 unchanged initial paths + corrected test) and direct parent/cumulative commit comparisons: **VERIFIED**.
+- Read-only source text ordering checks: **AUTHOR INSPECTED / STATIC ONLY**, not an executed parser or independent security review. One original authored test assertion incorrectly expected `resolve-runtime.ps1` in `vres-session-end.ps1`, which actually uses a detached `Start-Process` worker route. It was **identified by source readback, not test execution**, and corrected in child commit `cc107213` with `513cd0af...` test blob. The first attempt remains in commit `6c518626` history. Corrected tests still **NOT_RUN**.
 - New Python AST contract tests: **AUTHORED / NOT_RUN**.
 - Current Python package syntax/whole-tree compile, pytest, integration suite, wheel install: **NOT_RUN**.
 - PowerShell syntax/semantic/runtime checks, Git for Windows execution: **NOT_RUN**.
@@ -77,7 +77,7 @@ These additions do **NOT** prove exhaustive source reachability, OS-enforced iso
 - PostgreSQL including read-only SELECT: **NOT_RUN / BLOCKED**.
 - Whole original V-01..V-42 Windows UAT, release/rollback: **NOT_RUN**.
 
-**Historical only, DIFFERENT source:** 9e2b538b had 407/407 compile PASS and 732/732 guarded eligible tests PASS. Preserve older 727/730 with 3 fixture failures, nine held child-process tests NOT_RUN, 3 psycopg modules NOT_COLLECTED; rejected initial **11 FAIL** incomplete-stub attempt and later synthetic stub-owner 11/11 PASS only in its older isolated context. None is a PASS on current 6c518626.
+**Historical only, DIFFERENT source:** 9e2b538b had 407/407 compile PASS and 732/732 guarded eligible tests PASS. Preserve older 727/730 with 3 fixture failures, nine held child-process tests NOT_RUN, 3 psycopg modules NOT_COLLECTED; rejected initial **11 FAIL** incomplete-stub attempt and later synthetic stub-owner 11/11 PASS only in its older isolated context. None is a PASS on current cc107213.
 
 ## 5. Issue/security decisions
 
@@ -100,7 +100,7 @@ K1 source-order mechanical holds improved, not trusted runtime proof. K2 indepen
 ## 7. Next **exact permitted operation** in fresh chat
 
 1. Reconnect to authenticated live GitHub and independently verify canonical docs branch NEWEST HEAD/TREE/PARENT, new READ FIRST index/handoff blobs; newly published engineering branch `feature/personal-w4-original-host-db-direct-route-interlock-20261117` HEAD/TREE/PARENT/15 blobs, protected main/R13 and issue #185 state.
-2. Continue **source-only integrated original first-FULL** work on a NEW dedicated branch based on latest independently verified 6c518626, first covering remaining alternate database, Claude/hook, CLI/MCP and subprocess paths as one real original-owner readiness improvement. Avoid executing source or touching the Windows host.
+2. Continue **source-only integrated original first-FULL** work on a NEW dedicated branch based on latest independently verified cc107213, first covering remaining alternate database, Claude/hook, CLI/MCP and subprocess paths as one real original-owner readiness improvement. Avoid executing source or touching the Windows host.
 3. Finish independently trusted out-of-band Git/source/Python/Tk/native-wheel closure and original installer NTFS/rollback design; arrange a truly independent, attributable full #185 threat/release/operations review.
 4. Any Python/PowerShell source execution, Windows test, native host, DB even SELECT, migration/install or installed P2 change requires its own cleared incidents, pre-execution trusted containment and fresh explicit owner approval. No claimed asynchronous work. Install via owner's original Git-fetch/PowerShell UPDATE route ONLY after those conditions.
 5. Re-check GitHub refs and branch parents before every repository write. Source/test/docs commits on dedicated branches, no force, with expected-SHA ref lease and remote readback. Protected main/R13 and installed P2 remain untouched.
