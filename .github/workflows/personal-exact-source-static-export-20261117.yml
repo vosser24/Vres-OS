@@ -1,0 +1,75 @@
+# Static-only source transport; never import, build, test or run the Vres-OS application.
+name: Vres personal exact-source 7f6efc0c static export
+on:
+  push:
+    branches: [feature/personal-exact-source-static-export-20261117]
+permissions:
+  contents: read
+jobs:
+  static-export:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      VRES_ALLOW_TEST_DB: '0'
+      VRES_TEST_DATABASE_URL: ''
+      PYTHONNOUSERSITE: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+      GIT_CONFIG_NOSYSTEM: '1'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - name: Authenticate source and archive source Git objects only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/feature/personal-exact-source-static-export-20261117"
+          test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD^)" = "7f6efc0c19ce2200cd0abe0e334611e5f8f741f1"
+          test "$(git rev-parse 'HEAD^^{tree}')" = "263ba3365f578ec074f6ce54d243a2267afb6bc2"
+          test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/personal-exact-source-static-export-20261117.yml"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          git archive --format=zip --output="$RUNNER_TEMP/vres-exact-source-7f6efc0c.zip" HEAD^
+          python3 -I -S -B - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+          import hashlib
+          import os
+          import subprocess
+          archive = Path(os.environ["RUNNER_TEMP"]) / "vres-exact-source-7f6efc0c.zip"
+          git_tree = subprocess.check_output(["git", "ls-tree", "-r", "-z", "HEAD^"])
+          expected = {}
+          for entry in git_tree.split(b"\0"):
+              if not entry:
+                  continue
+              meta, raw_name = entry.split(b"\t", 1)
+              mode, kind, blob_id = meta.split(b" ")
+              assert kind == b"blob" and mode in {b"100644", b"100755"}, (mode, raw_name)
+              name = raw_name.decode("utf-8")
+              assert name not in expected and not name.startswith("/") and ".." not in name.split("/"), name
+              expected[name] = blob_id.decode("ascii")
+          with ZipFile(archive) as z:
+              names = [x for x in z.namelist() if not x.endswith("/")]
+              assert len(names) == len(set(names))
+              assert set(names) == set(expected), (len(names), len(expected))
+              assert len(expected) > 550
+              for name, sha in expected.items():
+                  payload = z.read(name)
+                  actual = hashlib.sha1(b"blob " + str(len(payload)).encode() + b"\0" + payload).hexdigest()
+                  assert actual == sha, name
+          assert subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"]).decode().strip() != "263ba3365f578ec074f6ce54d243a2267afb6bc2"
+          print("EXACT_SOURCE=7f6efc0c19ce2200cd0abe0e334611e5f8f741f1")
+          print("EXACT_TREE=263ba3365f578ec074f6ce54d243a2267afb6bc2")
+          print("FILE_COUNT=", len(expected))
+          print("ZIP_SHA256=", hashlib.sha256(archive.read_bytes()).hexdigest())
+          print("STATIC_GIT_OBJECTS_ONLY; NO PROJECT IMPORT/TEST/DB/HOOK")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vres-exact-source-7f6efc0c
+          path: ${{ runner.temp }}/vres-exact-source-7f6efc0c.zip
+          if-no-files-found: error
+          retention-days: 7
