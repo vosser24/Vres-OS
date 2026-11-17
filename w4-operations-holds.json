@@ -1,0 +1,20 @@
+{
+  "schema": "vres-w4-operations-holds/1",
+  "status": "HELD_SOURCE_ONLY",
+  "git_preflight": "HELD",
+  "windows_update": "HELD",
+  "fresh_install": "HELD",
+  "release_stage": "HELD",
+  "desktop_launch": "HELD",
+  "incidents": {
+    "LIVE_SCHEMA_048_INCIDENT": "OPEN_NO_POSTGRESQL_EVEN_SELECT",
+    "HOST_HOOK_DB_ROUTE_ATTEMPTED_AND_REFUSED": "OPEN_NO_NATIVE_CLAUDE_OR_HOOKS",
+    "P3": "OPEN",
+    "F1_FABLE": "NOT_GRANTED",
+    "WPR_R13": "OPEN",
+    "REVIEW_185": "OPEN_NO_SIGNOFF",
+    "WINDOWS_GIT_L2": "NOT_GRANTED",
+    "P2": "PROTECTED_NO_OVERWRITE"
+  },
+  "note": "No execution authority. Source-owned accident interlocks only. To lift needs a separately reviewed new source commit and exact owner approval."
+}

@@ -11,7 +11,24 @@ param(
 # Installation is interactive, user-scoped and conservative. No database credentials here.
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-if ($SourceCommit -notmatch '^[0-9a-fA-F]{40}$') { throw 'Pass -SourceCommit <full 40-hex commit> naming the release commit you approved. Nothing was changed.' }
+
+# ORIGINAL installer source-owned mechanical hold BEFORE any installed P2,
+# Claude profile, source Python, release staging or rollback operation.
+$W4SourceInterlock = 'HELD_SOURCE_ONLY'
+$W4HoldsPath = Join-Path $PSScriptRoot 'w4-operations-holds.json'
+if (-not (Test-Path -LiteralPath $W4HoldsPath -PathType Leaf)) {
+    throw 'VRES_W4_HELD: operation-hold ledger missing; no installation started.'
+}
+try { $W4Holds = Get-Content -Raw -Encoding UTF8 -LiteralPath $W4HoldsPath | ConvertFrom-Json }
+catch { throw 'VRES_W4_HELD: operation-hold ledger invalid; no installation started.' }
+$W4RequestedGate = if ($Update.IsPresent) { $W4Holds.windows_update } else { $W4Holds.fresh_install }
+if ($W4SourceInterlock -cne 'REVIEWED_RELEASE_CLEARED' -or
+    $W4Holds.schema -cne 'vres-w4-operations-holds/1' -or
+    $W4Holds.status -cne 'REVIEWED_RELEASE_CLEARED' -or
+    $W4RequestedGate -cne 'REVIEWED_RELEASE_CLEARED') {
+    throw 'VRES_W4_HELD: original installer SOURCE ONLY; no P2, native Claude, DB, stage or rollback permitted.'
+}
+if ($SourceCommit -notmatch '^[0-9a-fA-F]{40}\z') { throw 'Pass -SourceCommit <full 40-hex commit> naming the release commit you approved. Nothing was changed.' }
 $RepoRoot = $PSScriptRoot
 $InstallRoot = Join-Path $env:LOCALAPPDATA 'VresOS'
 $Bin = Join-Path $InstallRoot 'bin'
@@ -24,9 +41,10 @@ $BackupRoot = Join-Path $InstallRoot 'backups'
 $GlobalClaudePath = Join-Path $ClaudeHome 'CLAUDE.md'
 $GlobalRulesPath = Join-Path $ClaudeHome 'vres-rules.md'
 $ClaudeSettingsPath = Join-Path $ClaudeHome 'settings.json'
-$GlobalClaudeBefore = if (Test-Path -LiteralPath $GlobalClaudePath) { [IO.File]::ReadAllBytes($GlobalClaudePath) } else { $null }
-$GlobalRulesBefore = if (Test-Path -LiteralPath $GlobalRulesPath) { [IO.File]::ReadAllBytes($GlobalRulesPath) } else { $null }
-$ClaudeSettingsBefore = if (Test-Path -LiteralPath $ClaudeSettingsPath) { [IO.File]::ReadAllBytes($ClaudeSettingsPath) } else { $null }
+$GlobalClaudeBefore = $null
+$GlobalRulesBefore = $null
+$ClaudeSettingsBefore = $null
+# Capture protected profile bytes later at the original recovery boundary.
 
 function Confirm-Choice([string]$Question, [bool]$Default=$false) {
     $hint = if ($Default) { 'Y/n' } else { 'y/N' }
@@ -91,6 +109,35 @@ function Write-JsonAtomic([string]$Path, $Value) {
             # backup-path parameter as an illegal empty path. A real same-directory backup
             # keeps replacement atomic and avoids that native/.NET binder edge case.
             [IO.File]::Replace($tmp, $Path, $backup)
+        } else {
+            [IO.File]::Move($tmp, $Path)
+        }
+    } finally {
+        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
+    }
+}
+function Restore-OriginalBytesAtomic([string]$Path, [byte[]]$Original) {
+    # Attempted-change-only restoration. Never delete an originally absent
+    # Claude file: it may have been independently created after the snapshot.
+    if ($null -eq $Original) {
+        if (Test-Path -LiteralPath $Path) {
+            throw "Recovery HELD: originally absent Claude file exists: $Path. Keep the journal; do not auto-delete."
+        }
+        return
+    }
+    $parent = Split-Path -Parent $Path
+    if (-not (Test-Path -LiteralPath $parent -PathType Container)) {
+        throw "Recovery HELD: original Claude parent directory is missing: $parent"
+    }
+    $tmp = "$Path.$([guid]::NewGuid().ToString('N')).tmp"
+    $backup = "$Path.$([guid]::NewGuid().ToString('N')).bak"
+    try {
+        [IO.File]::WriteAllBytes($tmp, $Original)
+        if (Test-Path -LiteralPath $Path -PathType Leaf) {
+            [IO.File]::Replace($tmp, $Path, $backup)
+        } elseif (Test-Path -LiteralPath $Path) {
+            throw "Recovery HELD: Claude path is not an ordinary file: $Path"
         } else {
             [IO.File]::Move($tmp, $Path)
         }
@@ -170,9 +217,10 @@ if (-not $Python) {
 }
 # Personal-release inputs (pinned migrations 001-041, no C2B/R0/F2 experimental files) are
 # validated from the source tree before any install root, venv or package is created.
-Run $Python @('-I','-X','utf8',(Join-Path $RepoRoot 'src\vres_os\release_inputs.py'),'--root',$RepoRoot)
-# The checkout must be exactly the pinned commit, read and verified from its git objects, before anything is written.
-Run $Python @('-I','-X','utf8',(Join-Path $RepoRoot 'src\vres_os\release_artifact.py'),'check','--root',$RepoRoot,'--source-commit',$SourceCommit)
+# Hygiene-only reorder; release_artifact still imports release_inputs before
+# internal verification. Trusted out-of-band pre-execution proof is NOT provided.
+Run $Python @('-I','-B','-X','utf8',(Join-Path $RepoRoot 'src\vres_os\release_artifact.py'),'check','--root',$RepoRoot,'--source-commit',$SourceCommit)
+Run $Python @('-I','-B','-X','utf8',(Join-Path $RepoRoot 'src\vres_os\release_inputs.py'),'--root',$RepoRoot)
 # The user-scoped skills-directory plugin facility requires a current Claude version.
 $cv = & claude --version
 if ($LASTEXITCODE -ne 0 -or "$cv" -notmatch '(\d+\.\d+\.\d+)') { throw 'Could not determine Claude Code version.' }
@@ -209,6 +257,8 @@ if ($oldPointer -and $oldPointer.PSObject.Properties['autocompact_owned']) {
 }
 $pluginMoved = $false
 $published = $false
+$ClaudeContractAttempted = $false
+$ClaudeSettingsAttempted = $false
 try {
     New-Item -ItemType Directory -Force -Path $NewRelease,$DistributionRoot | Out-Null
     # Stage the release files of the pinned commit, read from its verified git objects (never from
@@ -254,6 +304,9 @@ try {
     # The doctor preflight skips database contact and reports PostgreSQL NOT CHECKED, not healthy. Database
     # isolation of the other installer subprocesses (pip, claude plugin validate) is not independently verified.
     Run $NewPython @('-B','-m','vres_os.cli','doctor','--allow-unconfigured','--skip-database')
+    $GlobalClaudeBefore = if (Test-Path -LiteralPath $GlobalClaudePath -PathType Leaf) { [IO.File]::ReadAllBytes($GlobalClaudePath) } else { $null }
+    $GlobalRulesBefore = if (Test-Path -LiteralPath $GlobalRulesPath -PathType Leaf) { [IO.File]::ReadAllBytes($GlobalRulesPath) } else { $null }
+    $ClaudeSettingsBefore = if (Test-Path -LiteralPath $ClaudeSettingsPath -PathType Leaf) { [IO.File]::ReadAllBytes($ClaudeSettingsPath) } else { $null }
     # Persist and verify exact snapshots of the Claude files and launchers this installer may change,
     # before the journal and before any mutation, so an interrupted install can be recovered exactly.
     Run $Python @('-I','-X','utf8',(Join-Path $StagedSource 'src\vres_os\install_recovery.py'),'snapshot','--install-root',$InstallRoot,'--claude-home',$ClaudeHome,'--release',$ReleaseId)
@@ -273,6 +326,8 @@ try {
     # Unlike Bypass it still enforces signed-script checks on Mark-of-the-Web scripts.
     [IO.File]::WriteAllText((Join-Path $Bin 'vres.cmd'), "@echo off`r`npowershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File `"%~dp0vres-launch.ps1`" %*`r`n", [Text.Encoding]::ASCII)
     [IO.File]::WriteAllText((Join-Path $Bin 'vres-mcp.cmd'), "@echo off`r`npowershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File `"%~dp0vres-mcp-launch.ps1`"`r`n", [Text.Encoding]::ASCII)
+    # SAME original bin and active release; Desktop remains source-HELD.
+    [IO.File]::WriteAllText((Join-Path $Bin 'vres-day.cmd'), "@echo off`r`npowershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File `"%~dp0vres-day-launch.ps1`" %*`r`n", [Text.Encoding]::ASCII)
     $InstalledAt = Get-Date -Format o
     Write-JsonAtomic $ActivePath @{
         product='Vres-OS'
@@ -283,11 +338,13 @@ try {
         autocompact_owned=$AutoCompactOwnedBefore
     }
     $published=$true
+    $ClaudeContractAttempted = $true
     Run $NewPython @(
         '-B','-m','vres_os.claude_contract','install-global',
         '--claude-home',$ClaudeHome,
         '--rules-source',(Join-Path $StagedSource 'rules\vres-rules.md')
     )
+    $ClaudeSettingsAttempted = $true
     Run $NewPython @(
         '-B','-m','vres_os.statusline','install',
         '--claude-home',$ClaudeHome,
@@ -355,23 +412,15 @@ try {
         }
         if ($pluginMoved -and (Test-Path $PluginBackup)) { Move-Item -LiteralPath $PluginBackup -Destination $PluginTarget }
     }
-    if ($null -eq $GlobalClaudeBefore) {
-        Remove-Item -LiteralPath $GlobalClaudePath -Force -ErrorAction SilentlyContinue
-    } else {
-        New-Item -ItemType Directory -Force -Path $ClaudeHome | Out-Null
-        [IO.File]::WriteAllBytes($GlobalClaudePath, $GlobalClaudeBefore)
+    # Only restore profile surfaces the transaction actually attempted to
+    # change. Refuse auto-deletion of new files and retain recovery journal
+    # on uncertain state; source only, no real Windows recovery testing.
+    if ($ClaudeContractAttempted) {
+        Restore-OriginalBytesAtomic $GlobalClaudePath $GlobalClaudeBefore
+        Restore-OriginalBytesAtomic $GlobalRulesPath $GlobalRulesBefore
     }
-    if ($null -eq $GlobalRulesBefore) {
-        Remove-Item -LiteralPath $GlobalRulesPath -Force -ErrorAction SilentlyContinue
-    } else {
-        New-Item -ItemType Directory -Force -Path $ClaudeHome | Out-Null
-        [IO.File]::WriteAllBytes($GlobalRulesPath, $GlobalRulesBefore)
-    }
-    if ($null -eq $ClaudeSettingsBefore) {
-        Remove-Item -LiteralPath $ClaudeSettingsPath -Force -ErrorAction SilentlyContinue
-    } else {
-        New-Item -ItemType Directory -Force -Path $ClaudeHome | Out-Null
-        [IO.File]::WriteAllBytes($ClaudeSettingsPath, $ClaudeSettingsBefore)
+    if ($ClaudeSettingsAttempted) {
+        Restore-OriginalBytesAtomic $ClaudeSettingsPath $ClaudeSettingsBefore
     }
     if (Test-Path (Join-Path $InstallRoot 'pending-install.json')) {
         # A successful *attempt* at restoration is insufficient: verify the exact

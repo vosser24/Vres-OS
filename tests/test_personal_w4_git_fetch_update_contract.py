@@ -24,7 +24,7 @@ def test_original_update_owner_and_user_options_retained():
 
 def test_pinned_git_checkout_precedes_any_installer_dispatch():
     script = _script()
-    assert "^[0-9a-fA-F]{40}$" in script
+    assert "^[0-9a-fA-F]{40}\\z" in script
     assert "remote get-url origin" in script
     assert "rev-parse --verify 'HEAD^{commit}'" in script
     assert "status --porcelain=v1 --untracked-files=all" in script

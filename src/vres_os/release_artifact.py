@@ -60,6 +60,7 @@ except ImportError:  # run directly as a file by the installer (python -I, no pa
 release_input_problems = _release_inputs.release_input_problems
 
 FORMAT = "vres-personal-release-artifact"
+W4_STAGE_SOURCE_INTERLOCK = "HELD_SOURCE_ONLY"
 VERSION = 2
 OBJECT_FORMAT = "sha1"
 # What the installer consumes: the package, the plugin, the launchers, the global rules and the
@@ -383,6 +384,10 @@ def load_manifest(path: Path) -> dict[str, Any]:
 def stage(root: Path, out: Path, manifest_path: Path, *, source_commit: str | None,
           git: GitRunner | None = None, objects: ObjectReader | None = None) -> dict[str, Any]:
     """Copy the pinned commit's release files into the new directory out and record their manifest."""
+    # K1: also stop DIRECT original stage() calls before any output-path work.
+    # This is source-owned only; trusted out-of-band pre-execution gate absent.
+    if W4_STAGE_SOURCE_INTERLOCK != "REVIEWED_RELEASE_CLEARED":
+        raise ReleaseArtifactError("VRES_W4_HELD: original release stage() blocked")
     root, out, manifest_path = Path(root), Path(out), Path(manifest_path)
     if os.path.lexists(out) or os.path.lexists(manifest_path):
         raise ReleaseArtifactError("The staging directory or manifest already exists and is never overwritten")
