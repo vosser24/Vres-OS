@@ -49,6 +49,7 @@ class VresMCP(FastMCP):
     """
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+        require_w4_native_host_clearance()  # before config, DB, or registered tool dispatch
         if not allowed_while_unconfigured(name) and not vres_configured():
             from mcp.server.fastmcp.exceptions import ToolError
 

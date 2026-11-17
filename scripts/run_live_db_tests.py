@@ -7,7 +7,21 @@ import subprocess
 import sys
 
 
+# Independent script-owned accident interlock: direct invocation cannot ask for
+# a credential or spawn pytest while LIVE_SCHEMA_048_INCIDENT remains OPEN.
+W4_LIVE_DB_TEST_SOURCE_INTERLOCK = "HELD_NO_POSTGRESQL_EVEN_SELECT"
+
+
+def require_w4_live_db_test_clearance() -> None:
+    if W4_LIVE_DB_TEST_SOURCE_INTERLOCK != "INDEPENDENT_INCIDENT_CLEARANCE_AND_OWNER_AUTHORIZED":
+        raise RuntimeError(
+            "VRES_W4_HELD_SCHEMA_048: live DB test prompt and pytest subprocess are blocked; "
+            "PostgreSQL even SELECT remains prohibited."
+        )
+
+
 def main() -> int:
+    require_w4_live_db_test_clearance()  # BEFORE Path, terminal, credential or process
     root = Path(__file__).resolve().parents[1]
     if not sys.stdin.isatty():
         print("Use an interactive local terminal for the hidden test credential prompt.", file=sys.stderr)

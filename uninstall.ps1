@@ -3,6 +3,13 @@
 param([switch]$RemoveLocalData)
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
+# W4 first-FULL original uninstall: source-only refusal BEFORE local installation
+# inspection, Get-Process/CIM, Claude profile, credentials or any deletion.
+# A command-line flag or the generic installation ledger cannot lift this hold.
+$W4UninstallSourceInterlock = 'HELD_NO_ORIGINAL_UNINSTALL_OR_PROFILE_MUTATION'
+if ($W4UninstallSourceInterlock -cne 'INDEPENDENTLY_REVIEWED_AND_OWNER_AUTHORIZED') {
+    throw 'VRES_W4_HELD_UNINSTALL: original Windows uninstall is blocked; installed P2 and user profile are protected.'
+}
 $root=Join-Path $env:LOCALAPPDATA 'VresOS'
 $pointer=Join-Path $root 'active-install.json'
 if (-not (Test-Path $pointer)) { throw 'No managed active-install.json found; refusing directory deletion.' }
