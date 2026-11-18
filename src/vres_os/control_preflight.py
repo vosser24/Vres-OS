@@ -26,6 +26,7 @@ _SAFE_VRES_TOOLS = {
     "vres_status",
     "task_open_list",
     "workday_overview",
+    "task_continuity_preview",
     "capability_resolve",
     "project_agent_get",
     "project_agent_search",

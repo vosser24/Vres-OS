@@ -90,6 +90,7 @@ def test_every_registration_module_shares_the_guarded_server():
         ("task_user_instruction_commit", "user_intent_mcp"),
         ("validation_invalidate", "validation_lifecycle_mcp"),
         ("task_open_list", "mcp_server"),
+        ("task_continuity_preview", "mcp_server"),
         ("routing_evidence", "routing_mcp"),
         ("capability_resolve", "mcp_server"),
     ],
@@ -226,6 +227,7 @@ _WRITE_SQL = re.compile(r"\b(INSERT|UPDATE|DELETE|MERGE|UPSERT|TRUNCATE|CONFLICT
 _DIAGNOSTICS = {
     "task_open_list": ({}, None, None),
     "workday_overview": ({}, None, None),
+    "task_continuity_preview": ({"task_key": "T-1"}, None, None),
     "capability_resolve": ({"need": "testing"}, (mcp_server, "CapabilityService"), []),
     "artifact_get": ({"artifact_key": "A-1"}, (mcp_server, "ArtifactService"), {}),
     "routing_evidence": ({"task_key": "T-1"}, (routing_mcp, "RoutingService"), {}),
@@ -265,6 +267,11 @@ class _ScriptedDb:
         row, rows = None, []
         if "FROM vres.projects WHERE project_key" in text:
             row = {"id": 7} if self.registered else None
+        elif "FROM vres.tasks t" in text and "t.project_id=%s AND t.task_key=%s" in text:
+            row = {"id": 19, "task_key": "T-1", "title": "Task", "objective": "Goal",
+                   "task_family": "general", "status": "active", "current_phase": "review",
+                   "pending_work": [], "completed_work": [], "relevant_objects": [],
+                   "validation_status": "pending"}
         elif "FROM vres.tasks WHERE task_key" in text or "FROM vres.artifacts WHERE artifact_key" in text:
             row = {"id": 1, "project_id": 7}
         return SimpleNamespace(fetchone=lambda: row, fetchall=lambda: rows)

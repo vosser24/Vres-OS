@@ -281,6 +281,91 @@ def workday_overview() -> dict:
 
 
 @mcp.tool()
+def task_continuity_preview(task_key: str) -> dict:
+    """Read-only preview of ONE user-identified current-project task.
+
+    Never resumes/selects/binds a task or session; stored validation and experience
+    are historical records, not current approval or execution authority.
+    """
+    pid, project = _existing_project()
+    packet = Repository().inspect_task(pid, task_key)
+    task = packet["task"]
+    checkpoint = packet["latest_checkpoint"] or {}
+    result = packet["recorded_completion"] or {}
+
+    def text_hint(value: Any, width: int) -> str:
+        if not isinstance(value, str):
+            return ""
+        return redact_text(" ".join(value.split()))[:width]
+
+    def stamp(value: Any) -> str | None:
+        return value.isoformat() if hasattr(value, "isoformat") else None
+
+    def hints(value: Any, width: int = 200) -> tuple[list[str], bool]:
+        if not isinstance(value, list):
+            return [], False
+        return [text_hint(item, width) for item in value[:5] if isinstance(item, str)], len(value) > 5
+
+    pending, more_pending = hints(task.get("pending_work"))
+    completed, more_completed = hints(task.get("completed_work"))
+    related, more_related = hints(task.get("relevant_objects"), width=140)
+    status = text_hint(task.get("status"), 40)
+    return {
+        "schema": "vres-original-claude-task-continuity-preview/1",
+        "scope": "current_project_only",
+        "project_key": text_hint(project.key, 140),
+        "read_only": True,
+        "inspected_task_key": text_hint(task.get("task_key"), 120),
+        "selected_task_key": None,
+        "task": {
+            "title": text_hint(task.get("title"), 160),
+            "objective_hint": text_hint(task.get("objective"), 360),
+            "family": text_hint(task.get("task_family"), 80),
+            "status": status,
+            "phase": text_hint(task.get("current_phase"), 90),
+            "step": text_hint(task.get("current_step"), 200),
+            "state_hint": text_hint(task.get("state_summary"), 500),
+            "next_action_hint": text_hint(task.get("next_action"), 320),
+            "latest_user_instruction_hint": text_hint(task.get("latest_user_instruction"), 250),
+            "pending_work": pending,
+            "more_pending_work": more_pending,
+            "completed_work": completed,
+            "more_completed_work": more_completed,
+            "relevant_objects": related,
+            "more_relevant_objects": more_related,
+            "persisted_validation_status": text_hint(task.get("validation_status"), 40),
+            "completed_at": stamp(task.get("completed_at")),
+        },
+        "latest_checkpoint": ({
+            "checkpoint_key": text_hint(checkpoint.get("checkpoint_key"), 120),
+            "summary_hint": text_hint(checkpoint.get("summary"), 380),
+            "position_hint": text_hint(checkpoint.get("current_position"), 180),
+            "next_action_hint": text_hint(checkpoint.get("next_action"), 240),
+            "recorded_at": stamp(checkpoint.get("created_at")),
+        } if checkpoint else None),
+        "recorded_completion": ({
+            "event_id": result.get("event_id"),
+            "event_type": "TASK_COMPLETED",
+            "summary_hint": text_hint(result.get("recorded_summary"), 300),
+            "recorded_at": stamp(result.get("recorded_at")),
+        } if result else None),
+        "experience_reference": {
+            "retrieval_tool": "experience_retrieve",
+            "lookup_performed": False,
+            "episode_key": None,
+            "authority": "not_checked_not_accepted_or_promoted",
+        },
+        "evidence": "persisted_task_checkpoint_and_event_data_not_current_validation_or_approval",
+        "resume_route": ("task_resume_with_real_session_after_explicit_user_choice"
+                         if status in {"active", "waiting_user", "blocked"}
+                         else "completed_or_inactive_record_not_resumable"),
+        "note": ("This is inspection, not task selection or session binding. "
+                 "Use original task_resume only after explicit choice and a real Claude session; "
+                 "experience_retrieve separately governs lessons, not this preview."),
+    }
+
+
+@mcp.tool()
 def task_checkpoint(
     task_key: str,
     summary: str,

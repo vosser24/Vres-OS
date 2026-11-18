@@ -198,6 +198,60 @@ class Repository:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def inspect_task(self, project_id: int, task_key: str) -> dict[str, Any]:
+        """Inspect an explicitly named task without selecting it or binding a session.
+
+        Read the original task, latest checkpoint and completed-task event only.
+        Never call mutating resume_context or make experience/validation claims.
+        """
+        if not isinstance(task_key, str) or not task_key.strip() or len(task_key) > 120:
+            raise ValueError("A valid explicit task_key is required for inspection")
+        with connect() as conn:
+            conn.execute("SET TRANSACTION READ ONLY")
+            task = conn.execute(
+                """
+                SELECT t.id,t.task_key,t.title,t.objective,t.task_family,t.status,t.completed_at,
+                       s.current_phase,s.current_step,s.state_summary,s.next_action,
+                       s.latest_user_instruction,s.pending_work,s.completed_work,
+                       s.relevant_objects,s.validation_status
+                  FROM vres.tasks t
+                  LEFT JOIN vres.task_state s ON s.task_id=t.id
+                 WHERE t.project_id=%s AND t.task_key=%s
+                 LIMIT 1
+                """,
+                (project_id, task_key),
+            ).fetchone()
+            if not task:
+                raise KeyError("Task not found in the current project")
+            task_id = int(task["id"])
+            checkpoint = conn.execute(
+                """
+                SELECT checkpoint_key,summary,current_position,next_action,reason,created_at
+                  FROM vres.checkpoints
+                 WHERE task_id=%s ORDER BY created_at DESC,id DESC LIMIT 1
+                """,
+                (task_id,),
+            ).fetchone()
+            completion = None
+            if task["status"] == "completed":
+                completion = conn.execute(
+                    """
+                    SELECT id AS event_id,payload->>'summary' AS recorded_summary,
+                           created_at AS recorded_at
+                      FROM vres.task_events
+                     WHERE task_id=%s AND event_type='TASK_COMPLETED'
+                     ORDER BY created_at DESC,id DESC LIMIT 1
+                    """,
+                    (task_id,),
+                ).fetchone()
+        data = dict(task)
+        data.pop("id", None)
+        return {
+            "task": data,
+            "latest_checkpoint": dict(checkpoint) if checkpoint else None,
+            "recorded_completion": dict(completion) if completion else None,
+        }
+
     def focus_task(self, project_id: int, task_key: str | None) -> None:
         with connect() as conn, conn.transaction():
             task_id = None
