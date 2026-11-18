@@ -95,6 +95,7 @@ def test_workday_fail_closed_on_scalar_fields_and_recorded_results(monkeypatch):
             "title": "db_credential=opaque-title-value",
             "status": "active",
             "current_phase": "review",
+            "current_step": 'db_credential="tiny"',
             "next_action": "A " * 130 + "ssh_passphrase=opaque-hidden-workday-value",
         }],
         completions=[{
@@ -108,6 +109,7 @@ def test_workday_fail_closed_on_scalar_fields_and_recorded_results(monkeypatch):
     assert packet["tasks"][0]["title"] == sentinel
     assert packet["tasks"][0]["next_action_hint"] == sentinel
     assert packet["tasks"][0]["phase"] == "review"
+    assert packet["tasks"][0]["step"] == sentinel
     assert packet["recent_completions"][0]["recorded_result_hint"] == sentinel
     assert packet["selected_task_key"] is None and packet["read_only"] is True
     assert all(secret not in str(packet) for secret in (

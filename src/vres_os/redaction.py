@@ -48,6 +48,14 @@ _RESIDUAL_ASSIGNMENT = re.compile(
     r"(?:api|private|signing|encryption|master|client|access)[_ -]?key|key-data|\.key)"
     r"[\w.-]{0,32}[\"']?\s*[:=]\s*[\"']?(?!\[REDACTED(?:_SECRET)?\](?![^\s\"',;}\])]))[^\s\"',;]{8,}"
 )
+# Keys not handled by eager KV redaction are unsafe even with short or quoted
+# values (including whitespace). Keep the broader eight-character threshold
+# for lower-confidence suffixes such as password_policy.
+_RESIDUAL_UNMASKED_ASSIGNMENT = re.compile(
+    r"(?i)\b[\w.-]{0,64}(?:passphrase|credential|authorization|auth|"
+    r"(?:signing|encryption|master|client|access|secret)[_ -]?key|key-data|\.key)"
+    r"[\w.-]{0,32}[\"']?\s*[:=]"
+)
 _RESIDUAL_PROVIDER = re.compile(
     r"\bAKIA[0-9A-Z]{16}\b|hooks\.slack\.com/services/T[A-Z0-9]+/|\bxox[abposr]-[A-Za-z0-9-]{10,}|\bAIza[0-9A-Za-z_-]{35}\b|"
     r"\b[sr]k_(?:live|test)_[A-Za-z0-9]{10,}|\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*"
@@ -120,6 +128,7 @@ def sanitize_text(value: str) -> SanitizeResult:
     for rule, pattern in (
         ("residual_private_key_marker", _RESIDUAL_KEY_MARKER),
         ("residual_credential_assignment", _RESIDUAL_ASSIGNMENT),
+        ("residual_unmasked_credential_assignment", _RESIDUAL_UNMASKED_ASSIGNMENT),
         ("residual_provider_token", _RESIDUAL_PROVIDER),
     ):
         hits = len(pattern.findall(result.text))

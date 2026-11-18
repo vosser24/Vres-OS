@@ -133,6 +133,7 @@ def test_preview_fail_closed_on_residual_credentials_in_string_and_nested_hints(
                         "ssh_passphrase=opaque-unguarded-phrase",
                         {"ssh_passphrase": "opaque-nested-phrase", "reference": "DOC-1"},
                         {"db_credential": "opaque-nested-credential"},
+                        {"ssh_passphrase": "two words"},
                         {"reference": "DOC-2"},
                     ],
                     "completed_work": [],
@@ -145,8 +146,8 @@ def test_preview_fail_closed_on_residual_credentials_in_string_and_nested_hints(
     monkeypatch.setattr(mcp_server, "Repository", Repository)
     packet = mcp_server.task_continuity_preview("TASK-REDACTION")
     hints = packet["task"]["pending_work"]
-    assert hints[:3] == ["[REDACTED_UNSAFE_HINT]"] * 3
-    assert hints[3] == '{"reference":"DOC-2"}'
+    assert hints[:4] == ["[REDACTED_UNSAFE_HINT]"] * 4
+    assert hints[4] == '{"reference":"DOC-2"}'
     assert packet["task"]["more_pending_work"] is False
     assert packet["read_only"] is True
     assert packet["selected_task_key"] is None
@@ -154,6 +155,7 @@ def test_preview_fail_closed_on_residual_credentials_in_string_and_nested_hints(
         "opaque-unguarded-phrase",
         "opaque-nested-phrase",
         "opaque-nested-credential",
+        "two words",
     ))
 
 def test_preview_fail_closed_on_scalar_instructions_checkpoint_and_result(monkeypatch):
@@ -169,6 +171,7 @@ def test_preview_fail_closed_on_scalar_instructions_checkpoint_and_result(monkey
                     "task_key": key,
                     "title": "Safe task title",
                     "objective": "ssh_passphrase=opaque-objective-value",
+                    "current_phase": 'ssh_passphrase="blue river"',
                     "state_summary": "A " * 260 + "db_credential=opaque-beyond-visible-limit",
                     "latest_user_instruction": "db_credential=opaque-instruction-value",
                     "next_action": "Review with user",
@@ -193,6 +196,7 @@ def test_preview_fail_closed_on_scalar_instructions_checkpoint_and_result(monkey
     packet = mcp_server.task_continuity_preview("TASK-SCALARS")
     sentinel = "[REDACTED_UNSAFE_HINT]"
     assert packet["task"]["objective_hint"] == sentinel
+    assert packet["task"]["phase"] == sentinel
     assert packet["task"]["state_hint"] == sentinel
     assert packet["task"]["latest_user_instruction_hint"] == sentinel
     assert packet["latest_checkpoint"]["summary_hint"] == sentinel

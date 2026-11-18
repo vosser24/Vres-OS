@@ -131,3 +131,25 @@ def test_password_policy_key_fails_closed_as_documented_false_positive():
     # with a long value is stopped for human review rather than guessed safe.
     assert sanitize_text("password_policy: required-by-security").residual
     assert not sanitize_text("password_policy: on").residual
+
+
+@pytest.mark.parametrize("text", [
+    'ssh_passphrase="blue river"',
+    "db_credential='tiny'",
+    '{"ssh_passphrase": "two words"}',
+    '{"db_credential":"abc"}',
+    "Authorization: Basic abc",
+    "client_key=xy",
+    "secret_key = 'a b'",
+])
+def test_short_or_spaced_unmasked_credential_assignments_fail_closed(text):
+    # AUTHORED/NOT_RUN: key confidence, not an eight-character value threshold.
+    result = sanitize_text(text)
+    assert result.residual.get("residual_unmasked_credential_assignment") == 1
+
+
+def test_short_unmasked_detector_does_not_flag_ordinary_metadata():
+    # Keep the original low-confidence policy-key tradeoff.
+    assert not sanitize_text("password_policy: on").residual
+    assert not sanitize_text("author: Taylor").residual
+    assert not sanitize_text("source_key: SRC-1").residual
