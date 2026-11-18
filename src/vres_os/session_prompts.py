@@ -155,10 +155,11 @@ def _stage_entry(
         safe_text = "Inspection only."
     safe_tool_id = tool_use_id
     safe_question = str(redact_for_persistence(question)) if question else None
-    # An opaque suppressed prompt/answer must not authorize task cancellation.
-    kind = "control" if tainted else (
-        _entry_kind(text) if source == "user_prompt" else "instruction"
-    )
+    # Preserve the original instruction/control classification. In particular,
+    # a strictly suppressed instruction must supersede older cancellation text
+    # as an opaque non-cancelling instruction, not disappear from the latest
+    # instruction query. The SQL writer still detects fixed read-only text.
+    kind = _entry_kind(text) if source == "user_prompt" else "instruction"
     observed_at = datetime.now(timezone.utc)
     with connect(purpose="writer") as conn, conn.transaction():
         row = conn.execute(

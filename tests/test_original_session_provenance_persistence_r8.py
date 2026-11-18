@@ -78,7 +78,7 @@ def test_original_prompt_stage_is_strict_and_preserves_read_only_authority(monke
     call = next(args for sql, args in fake.calls if "stage_user_input" in sql)
     assert call[1] == "SESSION-CLEAN"
     assert call[2] == expected
-    assert call[4] == ("instruction" if expected == "Please continue the selected task" else "control")
+    assert call[4] == ("control" if expected == "Inspection only." else "instruction")
     assert "synthetic,tail" not in str(call)
 
 
@@ -94,7 +94,7 @@ def test_ask_answer_and_question_strictly_suppress_synthetic_secrets(monkeypatch
     ) == 1
     call = next(args for sql, args in fake.calls if "stage_user_input" in sql)
     assert call[2] == "[REDACTED_UNSAFE_FIELD]"
-    assert call[4] == "control"
+    assert call[4] == "instruction"
     assert call[5] == "TOOL-CLEAN:0"
     assert call[6] == "[REDACTED_UNSAFE_FIELD]"
     assert "synthetic,tail" not in str(call)
