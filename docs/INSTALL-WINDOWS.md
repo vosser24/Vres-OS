@@ -70,7 +70,7 @@ The process-only execution policy expires when this terminal closes. Vres does n
 - Dependencies are not part of this identity; see `resolved-dependencies.txt` below.
 
 In a future authorized **fresh installation**, original `install.ps1`
-asks permission before any missing host package is installed: Claude Code
+asks explicit affirmative consent (default NO) before any missing host package is installed: Claude Code
 (`Anthropic.ClaudeCode`), local PostgreSQL 17
 (`PostgreSQL.PostgreSQL.17`), Node.js LTS (`OpenJS.NodeJS.LTS`)
 or optional Codex (`@openai/codex`). `-Update` cannot silently
@@ -94,8 +94,10 @@ These historical examples are **NOT executable instructions today** and
 omit newly required pins. The original `-UseRemotePostgres` option only selects
 a separately approved existing database path; it does not clear Schema-048
 or authorize any database contact. For a future approved **fresh install**,
-`-WithCodex` prompts before installing missing Node.js LTS and optional
-Codex via npm; `-Update` never does. `-WithEmbeddings` remains optional
+`-WithCodex` is an optional feature request, NOT blanket package consent.
+For fresh installation, separate default-NO prompts precede missing Node.js
+LTS through WinGet and optional global `@openai/codex` via npm.
+`-Update` never acquires host packages. `-WithEmbeddings` remains optional
 and requires an independently approved hash-locked offline wheel set.
 
 The original installer must use only an approved **external wheelhouse** plus

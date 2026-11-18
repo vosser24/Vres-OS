@@ -25,6 +25,7 @@ _SAFE_VRES_TOOLS = {
     "validation_evidence",
     "vres_status",
     "task_open_list",
+    "workday_overview",
     "capability_resolve",
     "project_agent_get",
     "project_agent_search",

@@ -72,6 +72,11 @@ publishers, DLLs, Git configuration/helpers, NTFS ancestry or host isolation.
 See [Windows installation / holds](docs/INSTALL-WINDOWS.md).
 
 **Vres-OS is the personal companion to Claude Code CLI through MCP.**
+The same original MCP server now offers `workday_overview` for the Chairman
+to show a bounded, read-only current-project list of unfinished tasks. No
+new task store, task selection, priority, deadline or approval is inferred.
+The workday feature is SOURCE ONLY; native Claude/MCP execution remains HELD.
+
 Claude Code CLI is the primary interface; the original Chairman, task/state,
 projects, credentials, experience and MCP stay one system. No additional GUI
 or Tk Desktop development is required for the current milestone. Previously

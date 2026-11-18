@@ -225,6 +225,7 @@ _WRITE_SQL = re.compile(r"\b(INSERT|UPDATE|DELETE|MERGE|UPSERT|TRUNCATE|CONFLICT
 # tool -> (arguments, (module, service attribute) or None, stubbed service return)
 _DIAGNOSTICS = {
     "task_open_list": ({}, None, None),
+    "workday_overview": ({}, None, None),
     "capability_resolve": ({"need": "testing"}, (mcp_server, "CapabilityService"), []),
     "artifact_get": ({"artifact_key": "A-1"}, (mcp_server, "ArtifactService"), {}),
     "routing_evidence": ({"task_key": "T-1"}, (routing_mcp, "RoutingService"), {}),

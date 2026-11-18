@@ -291,7 +291,7 @@ if ($Update) {
 foreach ($item in @(@('claude','Anthropic.ClaudeCode'))) {
     if (-not (Have $item[0])) {
         if ($Update) { throw "Update refused: missing $($item[0]); no prerequisite package will be installed during a Vres update." }
-        if (-not (Confirm-Choice "$($item[0]) is missing. Install its Windows package?" $true)) { throw "$($item[0]) is required." }
+        if (-not (Confirm-Choice "$($item[0]) is missing. Install its Windows package?" $false)) { throw "$($item[0]) is required." }
         Winget-Install $item[1]
     }
 }
@@ -311,12 +311,22 @@ if ([version]$Matches[1] -lt [version]'2.1.246') { throw 'Update Claude Code to 
 # Maintenance updates never inspect/provision local PostgreSQL, even to check whether
 # an executable/service exists. DB-dependent behavior stays disabled under the incident.
 if (-not $Update -and -not $UseRemotePostgres -and -not (Have 'psql') -and -not (Get-Service -Name 'postgresql*' -ErrorAction SilentlyContinue)) {
-    if (Confirm-Choice 'Local PostgreSQL was not detected. Install PostgreSQL 17?' $true) { Winget-Install 'PostgreSQL.PostgreSQL.17' }
+    if (Confirm-Choice 'Local PostgreSQL was not detected. Install PostgreSQL 17?' $false) { Winget-Install 'PostgreSQL.PostgreSQL.17' }
     else { throw 'Install PostgreSQL, or rerun with -UseRemotePostgres for an existing server.' }
 }
 if ($WithCodex -and -not (Have 'codex')) {
     if ($Update) { throw 'Update refused: optional Codex is missing; no npm/global package changes during a Vres update.' }
-    if (-not (Have 'npm')) { Winget-Install 'OpenJS.NodeJS.LTS' }
+    # -WithCodex requests the option; it is NOT blanket package consent.
+    if (-not (Have 'npm')) {
+        if (-not (Confirm-Choice 'npm missing. Install optional Node.js LTS through WinGet for Codex?' $false)) {
+            throw 'Node.js declined; install separately or rerun without -WithCodex.'
+        }
+        Winget-Install 'OpenJS.NodeJS.LTS'
+        if (-not (Have 'npm')) { throw 'npm still missing after Node.js installation; Codex not installed.' }
+    }
+    if (-not (Confirm-Choice 'Install optional @openai/codex globally using npm?' $false)) {
+        throw 'Codex declined; install separately or rerun without -WithCodex.'
+    }
     Run 'npm' @('install','-g','@openai/codex')
     Refresh-Path
 }

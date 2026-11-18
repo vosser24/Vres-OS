@@ -18,6 +18,21 @@ def test_installer_defers_credentials_and_requires_operator_consent():
     assert "$W4SourceInterlock = 'HELD_SOURCE_ONLY'" in text
 
 
+def test_fresh_optional_host_installs_require_distinct_default_no_consent():
+    """SOURCE ONLY; new exact-tree PowerShell execution remains NOT_RUN."""
+    text = (ROOT / 'install.ps1').read_text(encoding='utf-8')
+    assert 'Install its Windows package?" $false' in text
+    assert "Install PostgreSQL 17?' $false" in text
+    block = text.split("if ($WithCodex -and -not (Have 'codex'))", 1)[1].split(
+        '# Personal plugin discovery', 1)[0]
+    assert "if ($Update) { throw 'Update refused" in block
+    assert "Install optional Node.js LTS through WinGet for Codex?' $false" in block
+    assert "Install optional @openai/codex globally using npm?' $false" in block
+    assert block.index("if ($Update)") < block.index("Winget-Install 'OpenJS.NodeJS.LTS'")
+    assert block.index("Confirm-Choice 'Install optional @openai/codex") < block.index(
+        "Run 'npm' @('install','-g','@openai/codex')")
+
+
 def test_python_runtime_staged_before_active_pointer_changes():
     text = (ROOT/'install.ps1').read_text()
     assert "Join-Path $ReleaseRoot $ReleaseId" in text
