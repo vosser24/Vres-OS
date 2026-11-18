@@ -176,3 +176,29 @@ def test_safe_masked_credential_assignments_remain_non_residual(text):
 def test_credential_assignment_placeholder_tails_still_fail_closed(text):
     # AUTHORED/NOT_RUN: a masked prefix cannot hide attached residual bytes.
     assert sanitize_text(text).residual.get("residual_unmasked_credential_assignment") == 1
+
+
+@pytest.mark.parametrize("text", [
+    'DATABASE_PASSWORD="synthetic-first synthetic-second',
+    "API_KEY='synthetic-first synthetic-second",
+    'password="synthetic-first\nsynthetic-second',
+    'password="[REDACTED] synthetic-tail',
+])
+def test_unclosed_quoted_credential_masks_full_remainder(text):
+    """AUTHORED/NOT_RUN: malformed quote must not leak a spaced/multiline suffix."""
+    result = sanitize_text(text)
+    assert result.text.endswith("[REDACTED]")
+    assert "synthetic-" not in result.text
+    assert not result.residual
+
+
+@pytest.mark.parametrize("text", [
+    'password="[REDACTED]"',
+    "API_KEY='[REDACTED]'",
+    "password=[REDACTED]",
+])
+def test_complete_credential_placeholders_are_still_idempotent(text):
+    """AUTHORED/NOT_RUN: only complete, balanced masks are accepted as such."""
+    result = sanitize_text(text)
+    assert result.text == text
+    assert not result.rule_counts and not result.residual

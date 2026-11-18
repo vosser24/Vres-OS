@@ -129,3 +129,16 @@ def test_workday_keeps_redacted_bearer_hint_without_false_unsafe_suppression(mon
     assert packet["tasks"][0]["title"] == "Authorization: [REDACTED_SECRET]"
     assert "synthetic.bearer.value1234" not in str(packet)
     assert packet["selected_task_key"] is None and packet["read_only"] is True
+
+
+def test_workday_never_exposes_unclosed_quoted_password_tail(monkeypatch):
+    """AUTHORED/NOT_RUN: original MCP output sanitizes a malformed stored scalar."""
+    _fixture(monkeypatch, [{
+        "task_key": "TASK-MALFORMED",
+        "title": 'password="synthetic-first synthetic-leaking-tail',
+        "status": "active",
+    }])
+    packet = mcp_server.workday_overview()
+    assert packet["tasks"][0]["title"] == "password=[REDACTED]"
+    assert "synthetic-leaking-tail" not in str(packet)
+    assert packet["read_only"] is True and packet["selected_task_key"] is None

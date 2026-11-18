@@ -23,7 +23,10 @@ _KEYWORD = (
     r"(?:password|passwd|pwd|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|"
     r"client[_ -]?secret|private[_ -]?key|token|secret)"
 )
-_VALUE = r'''(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;]+)'''
+# Quoted values may contain whitespace/newlines. If a credential quote is
+# unclosed, swallow the rest of this field instead of leaking the tail through
+# the generic unquoted fallback. Malformed fields may be over-redacted.
+_VALUE = r'''(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|"[\s\S]*\Z|'[\s\S]*\Z|[^\s,;]+)'''
 # The key may carry an arbitrary (bounded) prefix: MY_APP_CLIENT_SECRET, github_access_token.
 _KV = re.compile(
     r'(?i)(?P<head>["\']?(?P<key>\b[\w.-]{0,64}?' + _KEYWORD + r')["\']?\s*[:=]\s*)(?P<value>' + _VALUE + ")"
@@ -99,8 +102,13 @@ def _sanitize(value: str) -> SanitizeResult:
         result.rule_counts[rule] = result.rule_counts.get(rule, 0) + 1
 
     def kv(match: re.Match) -> str:
-        if match.group("value").strip("\"'") in _PLACEHOLDERS:
-            return match.group(0)  # already sanitized: idempotent, not a new finding
+        raw = match.group("value")
+        # Only complete unquoted or correctly paired-quoted placeholders are clean.
+        if raw in _PLACEHOLDERS or (
+            len(raw) >= 2 and raw[0] in ("'", '"') and raw[-1] == raw[0]
+            and raw[1:-1] in _PLACEHOLDERS
+        ):
+            return match.group(0)  # idempotent, not a new finding
         count("kv_credential")
         names.add(_key_family(match.group("key")))
         return match.group("head") + "[REDACTED]"

@@ -45,3 +45,18 @@ unmasked bytes continues to fail closed. This remains a best-effort postconditio
 not an independent secret-safety proof. Canonical and original workday MCP
 regressions are AUTHORED NOT_RUN. No native host/DB/Windows execution, installer,
 schema, protected branch or original ownership change is authorized.
+
+
+## Source-only correction — unterminated credential quotes in original MCP hints
+
+Static analysis of the canonical eager key/value redactor found that an opening credential-value
+quote with no closing partner fell through to its generic non-whitespace alternative. For a
+persisted string such as `password="synthetic-first synthetic-second`, only the first
+token was masked and the unmasked suffix could survive the residual postcondition and
+original MCP scalar hint clipping. The SAME canonical redactor now masks through the end
+of the field text for a non-terminated quoted credential value, with deliberate possible
+over-redaction of malformed data. A pre-masked placeholder is considered idempotently safe
+only when its quoting is balanced and complete. Existing multiline properly closed
+credential values remain supported. Canonical regression vectors and one ORIGINAL FastMCP
+workday regression are AUTHORED NOT_RUN, NOT a proven PASS. No alternative MCP owner,
+runtime, GUI, installer or task store, and no host/DB/Windows execution.
