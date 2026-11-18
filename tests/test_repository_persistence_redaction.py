@@ -7,11 +7,13 @@ from __future__ import annotations
 
 import json
 from datetime import date
+from pathlib import Path
 
 import pytest
 
 from vres_os import repository as repository_module
 from vres_os.redaction import redact, redact_for_persistence, redact_text
+from vres_os.project import ProjectIdentity
 
 
 UNSAFE = "[REDACTED_UNSAFE_FIELD]"
@@ -107,6 +109,8 @@ class _NoDbConnection:
 
     def execute(self, sql, params=None):
         self.statements.append((sql, params))
+        if "INSERT INTO vres.projects(" in sql:
+            return _Cursor({"id": 7})
         if "INSERT INTO vres.tasks(" in sql or "SELECT id FROM vres.tasks WHERE task_key" in sql:
             return _Cursor({"id": 19})
         if "SELECT * FROM vres.task_state" in sql:
@@ -219,3 +223,105 @@ def test_original_event_jsonb_structured_sensitive_keys_are_masked(fake_connecti
     }
     assert "synthetic-db-password" not in event[3]
     assert "synthetic-signing-material" not in event[3]
+
+# R-5 source-only regressions, written against the original Repository with a
+# fake connection. NOT_RUN: no actual source Python, PostgreSQL or host access.
+
+
+def _project(*, key="project:synthetic", root=None, name="Safe project",
+             remote_url=None, branch="main"):
+    return ProjectIdentity(
+        root=root or Path("/safe/synthetic-project"), key=key, name=name,
+        remote_url=remote_url, branch=branch,
+    )
+
+
+def test_original_project_metadata_suppresses_secret_fields_without_changing_identity(fake_connection):
+    project = _project(
+        name="password: correct horse battery",
+        remote_url="postgresql://synthetic-user:synthetic-pass@host.example/db",
+        branch="ssh_passphrase: tiny",
+    )
+    assert repository_module.Repository().ensure_project(project) == 7
+    params = _single_statement(fake_connection, "INSERT INTO vres.projects(")
+    assert params == ("project:synthetic", UNSAFE, str(project.root), UNSAFE, UNSAFE)
+    assert "synthetic-pass" not in str(params)
+    assert "correct horse battery" not in str(params)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("key", "password=synthetic-project-secret"),
+    ("root", Path("/safe/password=synthetic-directory-secret")),
+])
+def test_project_join_or_path_identity_is_rejected_before_db_connect(monkeypatch, field, value):
+    project = _project()
+    setattr(project, field, value)
+
+    def forbidden_connect():
+        raise AssertionError("A rejected identity must never open the DB")
+
+    monkeypatch.setattr(repository_module, "connect", forbidden_connect)
+    with pytest.raises(ValueError, match="unsafe credential material"):
+        repository_module.Repository().ensure_project(project)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("task_family", "password=synthetic-task-family"),
+    ("lead_role", "Authorization: Basic synthetic-role-value"),
+])
+def test_begin_task_authority_fields_cannot_enter_sql(fake_connection, field, value):
+    kwargs = dict(project_id=7, title="Safe", objective="Safe objective",
+                  task_family=None, lead_role="chairman")
+    kwargs[field] = value
+    with pytest.raises(ValueError, match="unsafe credential material"):
+        repository_module.Repository().begin_task(**kwargs)
+    assert fake_connection.statements == []
+
+
+@pytest.mark.parametrize("field,value", [
+    ("event_type", "password=synthetic-event-type"),
+    ("actor", "ssh_passphrase: tiny"),
+    ("session_id", "Authorization: Basic synthetic-session"),
+])
+def test_original_event_envelope_identifiers_reject_credential_material_before_connect(
+    fake_connection, field, value
+):
+    kwargs = dict(task_key="TASK-SYNTHETIC", event_type="TASK_UPDATED",
+                  actor="chairman", payload={"summary": "safe"}, session_id=None)
+    kwargs[field] = value
+    with pytest.raises(ValueError, match="unsafe credential material"):
+        repository_module.Repository().record_event(**kwargs)
+    assert fake_connection.statements == []
+
+
+def test_original_session_close_masks_reason_and_keeps_binding_key(fake_connection):
+    repository_module.Repository().close_session(
+        7, "synthetic-claude-session", "password: correct horse battery"
+    )
+    sql, params = next(
+        (sql, params) for sql, params in fake_connection.statements
+        if "UPDATE vres.sessions SET ended_at" in sql
+    )
+    assert "provider_session_id" in sql
+    assert params == (UNSAFE, "synthetic-claude-session", 7)
+
+
+def test_original_checkpoint_reason_is_cleaned_without_changing_actor(fake_connection):
+    repository_module.Repository().checkpoint(
+        "TASK-SYNTHETIC", "Safe review", "position", "next",
+        {"safe": "context"}, "ssh_passphrase: tiny", "chairman",
+    )
+    params = _single_statement(fake_connection, "INSERT INTO vres.checkpoints(")
+    assert params[6] == UNSAFE
+    assert params[7] == "chairman"
+
+
+@pytest.mark.parametrize("method,kwargs", [
+    ("open_session", {"project_id": 7, "provider_session_id": "password=synthetic-session"}),
+    ("bind_session", {"project_id": 7, "provider_session_id": "password=synthetic-session",
+                      "task_key": "TASK-SAFE"}),
+])
+def test_session_binding_identity_refused_before_db_connect(fake_connection, method, kwargs):
+    with pytest.raises(ValueError, match="unsafe credential material"):
+        getattr(repository_module.Repository(), method)(**kwargs)
+    assert fake_connection.statements == []

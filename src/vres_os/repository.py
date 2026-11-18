@@ -38,6 +38,17 @@ def _clip(value: Any, *, max_text: int = _MAX_TEXT, max_list: int = _MAX_LIST) -
     return value
 
 
+def _persist_identity_unmodified(value: str | None, label: str) -> str | None:
+    """Refuse tainted join/authority identifiers, never replace them with a shared mask."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise TypeError(f"{label} must be text")
+    if redact_for_persistence(value) != value:
+        raise ValueError(f"{label} contains unsafe credential material")
+    return value
+
+
 class PendingValidationError(ValueError):
     """A checkpoint was attempted while a protected validation request is pending."""
 
@@ -72,6 +83,13 @@ class Repository:
         return int(row["id"]) if row else None
 
     def ensure_project(self, p: ProjectIdentity) -> int:
+        # Project key and root path determine identity/location: never mask or
+        # change either silently. Human-visible metadata may be suppressed.
+        project_key = _persist_identity_unmodified(p.key, "project_key")
+        root_path = _persist_identity_unmodified(str(p.root), "root_path")
+        safe_name = redact_for_persistence(p.name)
+        safe_remote = redact_for_persistence(p.remote_url)
+        safe_branch = redact_for_persistence(p.branch)
         with connect() as conn, conn.transaction():
             row = conn.execute(
                 """
@@ -83,7 +101,7 @@ class Repository:
                   last_seen_at=now()
                 RETURNING id
                 """,
-                (p.key, p.name, str(p.root), p.remote_url, p.branch),
+                (project_key, safe_name, root_path, safe_remote, safe_branch),
             ).fetchone()
             return int(row["id"])
 
@@ -110,6 +128,8 @@ class Repository:
         cp_key = _key("CP")
         safe_title = str(redact_for_persistence(title))
         safe_objective = str(redact_for_persistence(objective))
+        safe_family = _persist_identity_unmodified(task_family, "task_family")
+        safe_lead = _persist_identity_unmodified(lead_role, "lead_role")
         seed_summary = str(_clip(f"Task initialized for objective: {safe_objective}"))
         seed_step = "intake"
         seed_next = "Translate the persisted objective into the next concrete action and checkpoint it before material work."
@@ -120,7 +140,7 @@ class Repository:
                 INSERT INTO vres.tasks(task_key,project_id,title,objective,task_family,status,lead_role)
                 VALUES (%s,%s,%s,%s,%s,'active',%s) RETURNING id
                 """,
-                (task_key, project_id, safe_title, safe_objective, task_family, lead_role),
+                (task_key, project_id, safe_title, safe_objective, safe_family, safe_lead),
             ).fetchone()
             task_id = int(row["id"])
             conn.execute(
@@ -144,7 +164,7 @@ class Repository:
                     seed_step,
                     seed_next,
                     json.dumps({"initial": True, "pending_work": seed_pending}),
-                    lead_role,
+                    safe_lead,
                 ),
             )
             conn.execute(
@@ -324,6 +344,8 @@ class Repository:
     def open_session(self, project_id: int, provider_session_id: str, provider: str = "claude") -> str:
         if not provider_session_id:
             raise ValueError("provider_session_id is required")
+        _persist_identity_unmodified(provider_session_id, "provider_session_id")
+        _persist_identity_unmodified(provider, "provider")
         session_key = f"SESSION-{uuid.uuid4().hex[:12]}"
         with connect() as conn, conn.transaction():
             conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s,0))",
@@ -353,6 +375,8 @@ class Repository:
         return session_key
 
     def bind_session(self, project_id: int, provider_session_id: str, task_key: str) -> None:
+        _persist_identity_unmodified(provider_session_id, "provider_session_id")
+        _persist_identity_unmodified(task_key, "task_key")
         with connect() as conn, conn.transaction():
             task_id = self._task_id(conn, task_key)
             task = conn.execute("SELECT project_id,status FROM vres.tasks WHERE id=%s", (task_id,)).fetchone()
@@ -377,6 +401,7 @@ class Repository:
                     (previous_task_id,),
                 ).fetchone()
                 previous_task_key = str(previous["task_key"]) if previous else None
+                _persist_identity_unmodified(previous_task_key, "previous_task_key")
             if previous_task_id != task_id:
                 conn.execute("UPDATE vres.sessions SET task_id=%s WHERE id=%s", (task_id, session["id"]))
                 transition = {
@@ -410,13 +435,15 @@ class Repository:
     def close_session(self, project_id: int, provider_session_id: str, reason: str) -> None:
         if not provider_session_id:
             return
+        _persist_identity_unmodified(provider_session_id, "provider_session_id")
+        safe_reason = redact_for_persistence(reason)
         with connect() as conn, conn.transaction():
             conn.execute(
                 """
                 UPDATE vres.sessions SET ended_at=COALESCE(ended_at,now()),end_reason=COALESCE(end_reason,%s)
                  WHERE provider='claude' AND provider_session_id=%s AND project_id=%s AND ended_at IS NULL
                 """,
-                (reason, provider_session_id, project_id),
+                (safe_reason, provider_session_id, project_id),
             )
 
     def record_event(
@@ -427,6 +454,9 @@ class Repository:
         payload: dict[str, Any],
         session_id: str | None = None,
     ) -> None:
+        _persist_identity_unmodified(event_type, "event_type")
+        _persist_identity_unmodified(actor, "actor")
+        _persist_identity_unmodified(session_id, "session_id")
         with connect() as conn, conn.transaction():
             task_id = self._task_id(conn, task_key)
             conn.execute(
@@ -519,6 +549,8 @@ class Repository:
         safe_position = redact_for_persistence(current_position)
         safe_next = redact_for_persistence(next_action)
         safe_context = redact_for_persistence(context)
+        safe_reason = redact_for_persistence(reason)
+        _persist_identity_unmodified(actor, "actor")
         with connect() as conn, conn.transaction():
             task_id = self._task_id(conn, task_key)
             # Same lock ValidationService.prepare takes, so prepare and checkpoint serialize.
@@ -533,7 +565,7 @@ class Repository:
                 INSERT INTO vres.checkpoints(checkpoint_key,task_id,summary,current_position,next_action,context,reason,created_by)
                 VALUES (%s,%s,%s,%s,%s,%s::jsonb,%s,%s)
                 """,
-                (cp_key, task_id, safe_summary, safe_position, safe_next, json.dumps(safe_context), reason, actor),
+                (cp_key, task_id, safe_summary, safe_position, safe_next, json.dumps(safe_context), safe_reason, actor),
             )
             conn.execute(
                 """UPDATE vres.task_state SET validation_status=CASE WHEN
