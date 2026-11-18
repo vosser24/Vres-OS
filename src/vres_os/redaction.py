@@ -186,6 +186,23 @@ def redact(value: Any, _depth: int = 0) -> Any:
 # checkpoint ledger. Keep redact_text()/redact() display semantics unchanged.
 _UNSAFE_PERSISTED_FIELD = "[REDACTED_UNSAFE_FIELD]"
 
+# Strict Repository writes recognise structured secret-key families not covered
+# by the historic display redactor. Do not change redact()/redact_text().
+_PERSISTENCE_SECRET_KEY_SUFFIXES = (
+    "passphrase", "credential", "authorization", "signingkey",
+    "encryptionkey", "masterkey", "clientkey", "accesskey",
+    "secretkey", "keydata",
+)
+
+
+def _is_persistence_secret_key(key: Any) -> bool:
+    normalised = re.sub(r"[^a-z]", "", str(key).lower())
+    return (
+        _is_secret_key(key)
+        or normalised == "auth"
+        or normalised.endswith(_PERSISTENCE_SECRET_KEY_SUFFIXES)
+    )
+
 
 def redact_for_persistence(value: Any, _depth: int = 0) -> Any:
     """Suppress complete tainted strings before Repository persistence.
@@ -223,8 +240,20 @@ def redact_for_persistence(value: Any, _depth: int = 0) -> Any:
     if isinstance(value, (list, tuple)):
         return [redact_for_persistence(item, _depth + 1) for item in value]
     if isinstance(value, dict):
+        # JSON object keys are also persisted. A key containing a raw
+        # credential assignment cannot be made safe by masking only its value.
+        # Suppress that nested mapping; keep clean siblings in its parent.
+        if any(
+            isinstance(key, str)
+            and redact_for_persistence(key, _depth + 1) != key
+            for key in value
+        ):
+            return _UNSAFE_PERSISTED_FIELD
         return {
-            key: ("[REDACTED]" if _is_secret_key(key) else redact_for_persistence(item, _depth + 1))
+            key: (
+                "[REDACTED]" if _is_persistence_secret_key(key)
+                else redact_for_persistence(item, _depth + 1)
+            )
             for key, item in value.items()
         }
     return value

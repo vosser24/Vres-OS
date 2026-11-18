@@ -171,3 +171,51 @@ def test_original_checkpoint_jsonb_and_completion_use_strict_boundary(fake_conne
     assert cp[2] == UNSAFE
     assert json.loads(cp[5]) == {"notes": UNSAFE, "safe": "Keep context"}
     assert "abc,def" not in str(cp) and "correct horse battery" not in str(cp)
+
+@pytest.mark.parametrize("secret_key", [
+    "ssh_passphrase", "db_credential", "signing_key", "access_key",
+    "encryption_key", "master_key", "client_key", "service_authorization",
+    "auth", "key_data",
+])
+def test_original_repository_strictly_redacts_structured_secret_key_families(secret_key):
+    """AUTHOR ONLY / NOT_RUN: plain values cannot bypass a sensitive mapping key."""
+    value = "synthetic-mapping-secret"
+    sanitized = redact_for_persistence({"safe": "Keep", secret_key: value, "source_key": "SRC-1"})
+    assert sanitized == {"safe": "Keep", secret_key: "[REDACTED]", "source_key": "SRC-1"}
+    assert value not in json.dumps(sanitized)
+
+
+@pytest.mark.parametrize("credential_key", [
+    "password=synthetic-dict-key-01",
+    "ssh_passphrase: tiny",
+    "Authorization: Basic synthetic-dict-key-02",
+    "password=[REDACTED] synthetic-ambiguous-tail",
+])
+def test_original_repository_rejects_credential_text_in_json_keys(credential_key):
+    """AUTHOR ONLY / NOT_RUN: keys need protection as well as JSON values."""
+    sanitized = redact_for_persistence({
+        "safe": "Retain this sibling",
+        "details": {"safe_in_inner": "unsafe key makes this whole nested mapping ambiguous",
+                    credential_key: "unrelated value"},
+    })
+    assert sanitized == {"safe": "Retain this sibling", "details": UNSAFE}
+    assert "synthetic-dict-key" not in json.dumps(sanitized)
+    assert redact_for_persistence(sanitized) == sanitized
+
+
+def test_original_event_jsonb_structured_sensitive_keys_are_masked(fake_connection):
+    """AUTHOR ONLY / NOT_RUN: actual owner recording route, fake DB only."""
+    repository_module.Repository().record_event(
+        "TASK-TEST", "TASK_UPDATED", "chairman",
+        {"metadata": "safe", "context": {"db_credential": "synthetic-db-password",
+                                          "signing_key": "synthetic-signing-material",
+                                          "source_key": "SRC-1"}},
+    )
+    event = _single_statement(fake_connection, "INSERT INTO vres.task_events(")
+    assert json.loads(event[3]) == {
+        "metadata": "safe",
+        "context": {"db_credential": "[REDACTED]",
+                    "signing_key": "[REDACTED]", "source_key": "SRC-1"},
+    }
+    assert "synthetic-db-password" not in event[3]
+    assert "synthetic-signing-material" not in event[3]
