@@ -31,3 +31,17 @@ The same original FastMCP read-only workday_overview and task_continuity_preview
 ## Source-only follow-up: short/quoted credential assignment detection
 
 Static review found that the canonical residual-assignment check requires eight contiguous characters after a credential-like key. For non-eagerly-redacted fields such as `ssh_passphrase`, `db_credential`, `Authorization`, and signing/client key assignments, short or whitespace-separated values can therefore escape the shared scalar/JSONB output gate. The EXISTING canonical `redaction.py` now adds a high-confidence key-assignment residual postcondition independent of value length, without expanding the original FastMCP runtime, task owner or installation scope. Original low-confidence `password_policy: on` remains nonblocking. Both original workday and continuity tools inherit the shared sanitizer. Synthetic canonical and tool-level regression cases were AUTHORED NOT_RUN; no Python, pytest, MCP, PostgreSQL or Windows execution, independent security review, or incident clearance is claimed.
+
+
+## Source-only correction — masked assignment idempotence
+
+Static review of the previous high-confidence residual assignment detector found a
+false-positive for already-sanitized `Authorization: [REDACTED_SECRET]`, including
+the ordinary `Authorization: Bearer ...` eager-redaction path. The previous
+canonical redaction regression expected no residual after complete masking.
+The original sanitizer now distinguishes an entire bracketed sanitized placeholder
+from an assignment with a real residual value. A placeholder followed by attached
+unmasked bytes continues to fail closed. This remains a best-effort postcondition,
+not an independent secret-safety proof. Canonical and original workday MCP
+regressions are AUTHORED NOT_RUN. No native host/DB/Windows execution, installer,
+schema, protected branch or original ownership change is authorized.

@@ -153,3 +153,26 @@ def test_short_unmasked_detector_does_not_flag_ordinary_metadata():
     assert not sanitize_text("password_policy: on").residual
     assert not sanitize_text("author: Taylor").residual
     assert not sanitize_text("source_key: SRC-1").residual
+
+@pytest.mark.parametrize("text", [
+    "Authorization: Bearer synthetic.bearer.value1234",
+    "Authorization: [REDACTED_SECRET]",
+    'ssh_passphrase="[REDACTED]"',
+    "db_credential: [REDACTED]",
+])
+def test_safe_masked_credential_assignments_remain_non_residual(text):
+    # AUTHORED/NOT_RUN: previous high-confidence key scan flagged placeholders.
+    result = sanitize_text(text)
+    assert not result.residual
+    assert not sanitize_text(result.text).residual
+
+
+@pytest.mark.parametrize("text", [
+    "Authorization: [REDACTED_SECRET]synthetic-tail",
+    "ssh_passphrase=[REDACTED]synthetic-tail",
+    'db_credential="[REDACTED]"synthetic-tail',
+    "Authorization: Basic abc",
+])
+def test_credential_assignment_placeholder_tails_still_fail_closed(text):
+    # AUTHORED/NOT_RUN: a masked prefix cannot hide attached residual bytes.
+    assert sanitize_text(text).residual.get("residual_unmasked_credential_assignment") == 1

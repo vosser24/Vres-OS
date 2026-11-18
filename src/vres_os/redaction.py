@@ -56,6 +56,13 @@ _RESIDUAL_UNMASKED_ASSIGNMENT = re.compile(
     r"(?:signing|encryption|master|client|access|secret)[_ -]?key|key-data|\.key)"
     r"[\w.-]{0,32}[\"']?\s*[:=]"
 )
+# Match a complete sanitized placeholder, not a prefix with an attached value.
+# Inspect from the assignment separator: an optional space/quote is consumed
+# before this check, so the regex cannot backtrack around the guard.
+_RESIDUAL_CLEAN_PLACEHOLDER = re.compile(
+    r"""(?i)\s*["']?\[REDACTED(?:_SECRET)?\]["']?(?=$|[\s,;}\]])"""
+)
+
 _RESIDUAL_PROVIDER = re.compile(
     r"\bAKIA[0-9A-Z]{16}\b|hooks\.slack\.com/services/T[A-Z0-9]+/|\bxox[abposr]-[A-Za-z0-9-]{10,}|\bAIza[0-9A-Za-z_-]{35}\b|"
     r"\b[sr]k_(?:live|test)_[A-Za-z0-9]{10,}|\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*"
@@ -131,7 +138,16 @@ def sanitize_text(value: str) -> SanitizeResult:
         ("residual_unmasked_credential_assignment", _RESIDUAL_UNMASKED_ASSIGNMENT),
         ("residual_provider_token", _RESIDUAL_PROVIDER),
     ):
-        hits = len(pattern.findall(result.text))
+        if rule == "residual_unmasked_credential_assignment":
+            # Authorization: Bearer ... has already become [REDACTED_SECRET].
+            # Count only residual assignments whose value is NOT a complete
+            # clean placeholder; attached tails still fail closed.
+            hits = sum(
+                1 for match in pattern.finditer(result.text)
+                if not _RESIDUAL_CLEAN_PLACEHOLDER.match(result.text, match.end())
+            )
+        else:
+            hits = len(pattern.findall(result.text))
         if hits:
             result.residual[rule] = hits
     return result

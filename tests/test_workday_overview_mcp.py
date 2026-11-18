@@ -117,3 +117,15 @@ def test_workday_fail_closed_on_scalar_fields_and_recorded_results(monkeypatch):
         "opaque-hidden-workday-value",
         "opaque-completion-workday-value",
     ))
+
+def test_workday_keeps_redacted_bearer_hint_without_false_unsafe_suppression(monkeypatch):
+    """AUTHORED/NOT_RUN: already redacted Authorization is not a residual leak."""
+    _fixture(monkeypatch, [{
+        "task_key": "TASK-AUTH",
+        "title": "Authorization: Bearer synthetic.bearer.value1234",
+        "status": "active",
+    }])
+    packet = mcp_server.workday_overview()
+    assert packet["tasks"][0]["title"] == "Authorization: [REDACTED_SECRET]"
+    assert "synthetic.bearer.value1234" not in str(packet)
+    assert packet["selected_task_key"] is None and packet["read_only"] is True
