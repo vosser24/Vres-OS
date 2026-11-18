@@ -201,7 +201,9 @@ def transition_task_status(
                 (project_id, task_id),
             ).fetchall()
             for bound in sessions:
-                sid = str(bound["provider_session_id"])
+                # A stored sibling session ID is still an authority/event key.
+                # Fail inside this transaction rather than writing unsafe JSON.
+                sid = _persist_identity_unmodified(bound.get("provider_session_id"), "bound_provider_session_id")
                 conn.execute(
                     """
                     INSERT INTO vres.task_events(task_id,event_type,actor,payload,session_id)

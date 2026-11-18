@@ -7,7 +7,8 @@ from typing import Any
 
 from .database_boundary import boundary_ready
 from .db import connect
-from .redaction import redact
+from .redaction import redact_for_persistence
+from .repository import _persist_identity_unmodified
 
 _PENDING_KEY = "pending_user_instructions"
 _LEGACY_PENDING_KEY = "pending_user_instruction"
@@ -134,15 +135,30 @@ def _stage_entry(
 ) -> bool:
     if not provider_session_id or not isinstance(text, str) or not text.strip():
         return False
+    # Session and tool-use IDs are provenance/join keys: never mask or truncate them.
+    _persist_identity_unmodified(provider_session_id, "provider_session_id")
+    _persist_identity_unmodified(tool_use_id, "tool_use_id")
+    if tool_use_id is not None and len(tool_use_id) > 300:
+        raise ValueError("tool_use_id exceeds provenance identity length limit")
     if not _writer_available():
         # During first-run or one-time boundary upgrade, do not fall back to an
         # authority path the runtime credential can forge. The setup/start command
         # itself does not need to become task authority.
         return False
-    safe_text = str(redact(text))
-    safe_tool_id = str(redact(tool_use_id))[:300] if tool_use_id else None
-    safe_question = str(redact(question)) if question else None
-    kind = _entry_kind(text) if source == "user_prompt" else "instruction"
+    # Persisting display redaction can retain credential tails. The strict
+    # boundary suppresses the entire tainted observation, not just its prefix.
+    safe_text = str(redact_for_persistence(text))
+    tainted = safe_text != text
+    # The SQL writer reclassifies read-only from the STORED text. Preserve that
+    # explicit safety directive using only a fixed, non-user-controlled string.
+    if tainted and source == "user_prompt" and is_explicit_read_only_instruction(text):
+        safe_text = "Inspection only."
+    safe_tool_id = tool_use_id
+    safe_question = str(redact_for_persistence(question)) if question else None
+    # An opaque suppressed prompt/answer must not authorize task cancellation.
+    kind = "control" if tainted else (
+        _entry_kind(text) if source == "user_prompt" else "instruction"
+    )
     observed_at = datetime.now(timezone.utc)
     with connect(purpose="writer") as conn, conn.transaction():
         row = conn.execute(
@@ -167,6 +183,7 @@ def bind_session_to_project_focus(project_id: int, provider_session_id: str | No
     """Bind an unbound Claude session to the project's explicit unfinished focus, if any."""
     if not provider_session_id:
         return None
+    _persist_identity_unmodified(provider_session_id, "provider_session_id")
     with connect() as conn, conn.transaction():
         session = conn.execute(
             """
@@ -185,7 +202,7 @@ def bind_session_to_project_focus(project_id: int, provider_session_id: str | No
                 "SELECT task_key,status FROM vres.tasks WHERE id=%s AND project_id=%s",
                 (session["task_id"], project_id),
             ).fetchone()
-            return str(row["task_key"]) if row and row["status"] in _ACTIVE else None
+            return _persist_identity_unmodified(str(row["task_key"]), "task_key") if row and row["status"] in _ACTIVE else None
 
         focus = conn.execute(
             """
@@ -199,6 +216,7 @@ def bind_session_to_project_focus(project_id: int, provider_session_id: str | No
         if not focus or focus["status"] not in _ACTIVE:
             return None
 
+        focus_key = _persist_identity_unmodified(str(focus["task_key"]), "task_key")
         conn.execute("UPDATE vres.sessions SET task_id=%s WHERE id=%s", (focus["id"], session["id"]))
         conn.execute(
             "INSERT INTO vres.task_events(task_id,event_type,actor,payload,session_id) "
@@ -210,7 +228,7 @@ def bind_session_to_project_focus(project_id: int, provider_session_id: str | No
             ),
         )
         conn.execute("UPDATE vres.tasks SET updated_at=now() WHERE id=%s", (focus["id"],))
-        return str(focus["task_key"])
+        return focus_key
 
 
 def stage_user_instruction(project_id: int, provider_session_id: str | None, prompt: str) -> bool:
@@ -284,26 +302,38 @@ def latest_observed_user_instruction(
     This stays behind the provenance-writer boundary so runtime code cannot forge
     cancellation authority by inserting a task event or rewriting task state.
     """
-    if not provider_session_id or not _writer_available():
+    if not provider_session_id:
+        return None
+    _persist_identity_unmodified(provider_session_id, "provider_session_id")
+    if not _writer_available():
         return None
     with connect(purpose="writer") as conn:
         row = conn.execute(
             "SELECT * FROM vres.latest_observed_user_instruction(%s,%s)",
             (project_id, provider_session_id),
         ).fetchone()
-    return dict(row) if row else None
+    if not row:
+        return None
+    observed = dict(row)
+    if isinstance(observed.get("text"), str):
+        observed["text"] = redact_for_persistence(observed["text"])
+    _persist_identity_unmodified(observed.get("committed_task_key"), "committed_task_key")
+    return observed
 
 
 def latest_staged_user_instruction(project_id: int, provider_session_id: str | None) -> str | None:
     """Read the latest protected, uncommitted substantive user instruction."""
-    if not provider_session_id or not _writer_available():
+    if not provider_session_id:
+        return None
+    _persist_identity_unmodified(provider_session_id, "provider_session_id")
+    if not _writer_available():
         return None
     with connect(purpose="writer") as conn:
         row = conn.execute(
             "SELECT vres.latest_pending_user_instruction(%s,%s) AS text",
             (project_id, provider_session_id),
         ).fetchone()
-    return str(row["text"]) if row and row.get("text") is not None else None
+    return str(redact_for_persistence(str(row["text"]))) if row and row.get("text") is not None else None
 
 
 def commit_staged_user_instruction_events(
@@ -312,7 +342,11 @@ def commit_staged_user_instruction_events(
     task_key: str | None = None,
 ) -> list[dict[str, Any]]:
     """Commit protected host observations to the task actually bound at commit time."""
-    if not provider_session_id or not _writer_available():
+    if not provider_session_id:
+        return []
+    _persist_identity_unmodified(provider_session_id, "provider_session_id")
+    _persist_identity_unmodified(task_key, "task_key")
+    if not _writer_available():
         return []
     with connect(purpose="writer") as conn, conn.transaction():
         rows = conn.execute(
@@ -323,7 +357,7 @@ def commit_staged_user_instruction_events(
         {
             "event_id": int(row["event_id"]),
             "event_type": str(row["event_type"]),
-            "text": str(row["text"]),
+            "text": str(redact_for_persistence(str(row["text"]))),
             "source": str(row["source"]),
             "created_at": row["created_at"],
         }

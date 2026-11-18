@@ -11,6 +11,7 @@ from typing import Callable
 from .db import connect
 from .local_secrets import LocalSecretManager
 from .project import ProjectIdentity
+from .repository import _persist_identity_unmodified
 
 class AmbiguousReplacedSessionError(RuntimeError):
     """More than one recent, same-host session may supply a task; never guess."""
@@ -86,6 +87,7 @@ def touch_session_host(project_id: int, provider_session_id: str | None, host_pi
     """Record bounded lifecycle metadata for the current open Claude session."""
     if not provider_session_id:
         return False
+    _persist_identity_unmodified(provider_session_id, "provider_session_id")
     metadata = {"last_seen_at": datetime.now(timezone.utc).isoformat()}
     if host_pid:
         metadata["host_pid"] = int(host_pid)
@@ -149,6 +151,7 @@ def inherit_replaced_session_task(
     """
     if not provider_session_id or not host_pid:
         return None
+    _persist_identity_unmodified(provider_session_id, "provider_session_id")
     with connect() as conn, conn.transaction():
         current = conn.execute(
             """
@@ -168,7 +171,7 @@ def inherit_replaced_session_task(
                 "SELECT task_key,status FROM vres.tasks WHERE id=%s AND project_id=%s",
                 (current["task_id"], project_id),
             ).fetchone()
-            return str(task["task_key"]) if task and task["status"] in _ACTIVE else None
+            return _persist_identity_unmodified(str(task["task_key"]), "task_key") if task and task["status"] in _ACTIVE else None
 
         predecessors = conn.execute(
             """
@@ -208,7 +211,10 @@ def inherit_replaced_session_task(
         predecessor = predecessors[0]
 
         task_id = int(predecessor["task_id"])
-        task_key = str(predecessor["task_key"])
+        # Historical rows are not automatically safe identity material.
+        # Reject unsafe predecessor IDs before changing a binding or event.
+        _persist_identity_unmodified(predecessor["provider_session_id"], "previous_provider_session_id")
+        task_key = _persist_identity_unmodified(str(predecessor["task_key"]), "task_key")
         conn.execute(
             "UPDATE vres.sessions SET task_id=%s WHERE id=%s AND task_id IS NULL",
             (task_id, current["id"]),
@@ -254,6 +260,7 @@ def reconcile_open_sessions(
     """
     if not provider_session_id or not host_pid:
         return []
+    _persist_identity_unmodified(provider_session_id, "provider_session_id")
     closed: list[dict[str, object]] = []
     with connect() as conn, conn.transaction():
         rows = conn.execute(
@@ -278,6 +285,9 @@ def reconcile_open_sessions(
                 reason = "host_process_gone"
             if not reason:
                 continue
+            # The historical session key is also written to event.session_id
+            # and returned to the host. A tainted row aborts the transaction.
+            old_sid = _persist_identity_unmodified(row.get("provider_session_id"), "previous_provider_session_id")
 
             updated = conn.execute(
                 """
@@ -291,7 +301,6 @@ def reconcile_open_sessions(
             if not updated:
                 continue
             task_id = row.get("task_id")
-            old_sid = row.get("provider_session_id")
             if task_id:
                 task = conn.execute(
                     "SELECT status FROM vres.tasks WHERE id=%s",
