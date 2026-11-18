@@ -70,6 +70,18 @@ def test_nested_depth_limit_still_fails_closed():
         redact_for_persistence(nested)
 
 
+
+@pytest.mark.parametrize("text", [
+    "password=[REDACTED],def",
+    "password: [REDACTED] horse battery",
+    'db_credential="[REDACTED]" synthetic-tail',
+    "Authorization: [REDACTED_SECRET] extra-content",
+])
+def test_previously_partial_masks_with_suspicious_tails_fail_closed(text):
+    """AUTHOR-ONLY / NOT_RUN: legacy partial masks are not safe storage input."""
+    assert redact_for_persistence(text) == UNSAFE
+
+
 class _Cursor:
     def __init__(self, row=None):
         self.row = row

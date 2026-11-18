@@ -202,6 +202,21 @@ def redact_for_persistence(value: Any, _depth: int = 0) -> Any:
         result = sanitize_text(value)
         if result.rule_counts or result.residual:
             return _UNSAFE_PERSISTED_FIELD
+        # Legacy partial masking can re-enter an original task field. A
+        # pre-masked assignment followed by ANY substantive tail remains
+        # ambiguous; discard the field instead of treating it as clean.
+        for match in _KV.finditer(result.text):
+            raw = match.group("value")
+            complete = raw in _PLACEHOLDERS or (
+                len(raw) >= 2 and raw[0] in ("'", '"') and raw[-1] == raw[0]
+                and raw[1:-1] in _PLACEHOLDERS
+            )
+            if complete and result.text[match.end():].strip():
+                return _UNSAFE_PERSISTED_FIELD
+        for match in _RESIDUAL_UNMASKED_ASSIGNMENT.finditer(result.text):
+            placeholder = _RESIDUAL_CLEAN_PLACEHOLDER.match(result.text, match.end())
+            if placeholder and result.text[placeholder.end():].strip():
+                return _UNSAFE_PERSISTED_FIELD
         return result.text
     if isinstance(value, (datetime, date)):
         return value.isoformat()
