@@ -37,7 +37,7 @@ from .repository import Repository
 from .session_contamination import ContextRefreshService, valid_event_key
 from .source_revocation import SourceRevocationService, bound_public_result
 from .sources import SourceService
-from .redaction import redact, redact_text
+from .redaction import redact, redact_text, sanitize_text
 from .metrics import validate_metrics
 from .w4_runtime_holds import require_w4_native_host_clearance
 
@@ -308,13 +308,18 @@ def task_continuity_preview(task_key: str) -> dict:
         rendered: list[str] = []
         for item in value[:5]:
             if isinstance(item, str):
-                rendered.append(text_hint(item, width))
+                text = item
             else:
-                # The original JSONB task lists accept structured values, not just strings.
-                # Redact nested credential fields before producing a bounded hint.
-                safe_item = redact(item)
-                serialized = json.dumps(safe_item, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-                rendered.append(text_hint(serialized, width))
+                # Original JSONB continuity lists accept structured values.
+                text = json.dumps(redact(item), sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+            # A nested "passphrase"/"credential" assignment can survive the eager
+            # redactor. Use the canonical residual detector BEFORE output clipping,
+            # suppressing the complete unsafe hint instead of disclosing its value.
+            sanitized = sanitize_text(text)
+            rendered.append(
+                "[REDACTED_UNSAFE_HINT]"
+                if sanitized.residual else text_hint(sanitized.text, width)
+            )
         return rendered, len(value) > 5
 
     pending, more_pending = hints(task.get("pending_work"))

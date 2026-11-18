@@ -117,3 +117,41 @@ def test_preview_preserves_structured_json_continuity_with_nested_redaction(monk
     assert packet["more_relevant_objects"] is False
     assert all(secret not in str(packet) for secret in (
         "never-expose-this", "nested-private-value", "another-private-value"))
+
+def test_preview_fail_closed_on_residual_credentials_in_string_and_nested_hints(monkeypatch):
+    """AUTHORED/NOT_RUN: suppress non-redacted credential assignments before clipping."""
+    monkeypatch.setattr(mcp_server, "_existing_project", lambda: (
+        7, SimpleNamespace(key="fixture-project")))
+
+    class Repository:
+        def inspect_task(self, pid, key):
+            assert (pid, key) == (7, "TASK-REDACTION")
+            return {
+                "task": {
+                    "task_key": key, "status": "active",
+                    "pending_work": [
+                        "ssh_passphrase=opaque-unguarded-phrase",
+                        {"ssh_passphrase": "opaque-nested-phrase", "reference": "DOC-1"},
+                        {"db_credential": "opaque-nested-credential"},
+                        {"reference": "DOC-2"},
+                    ],
+                    "completed_work": [],
+                    "relevant_objects": [],
+                },
+                "latest_checkpoint": None,
+                "recorded_completion": None,
+            }
+
+    monkeypatch.setattr(mcp_server, "Repository", Repository)
+    packet = mcp_server.task_continuity_preview("TASK-REDACTION")
+    hints = packet["task"]["pending_work"]
+    assert hints[:3] == ["[REDACTED_UNSAFE_HINT]"] * 3
+    assert hints[3] == '{"reference":"DOC-2"}'
+    assert packet["task"]["more_pending_work"] is False
+    assert packet["read_only"] is True
+    assert packet["selected_task_key"] is None
+    assert all(secret not in str(packet) for secret in (
+        "opaque-unguarded-phrase",
+        "opaque-nested-phrase",
+        "opaque-nested-credential",
+    ))
