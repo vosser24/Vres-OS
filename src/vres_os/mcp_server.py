@@ -220,7 +220,10 @@ def _bounded_persisted_hint(value: Any, width: int) -> str:
     if not isinstance(value, str):
         return ""
     sanitized = sanitize_text(value)
-    if sanitized.residual:
+    # A successful eager substitution does not prove an ambiguous trailing
+    # credential fragment was completely consumed (e.g. password=abc,def).
+    # Never expose partially scrubbed untrusted persisted task hints.
+    if sanitized.residual or sanitized.rule_counts:
         return "[REDACTED_UNSAFE_HINT]"
     return redact_text(" ".join(sanitized.text.split()))[:width]
 
@@ -316,10 +319,20 @@ def task_continuity_preview(task_key: str) -> dict:
             if isinstance(item, str):
                 text = item
             else:
-                # Original JSONB continuity lists accept structured values.
+                # Inspect ORIGINAL JSONB bytes before recursive redaction erases
+                # evidence that a value was altered yet left an ambiguous tail.
+                # This is a conservative view-only guard, not a persistence fix.
+                try:
+                    original = json.dumps(item, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+                except (TypeError, ValueError):
+                    rendered.append("[REDACTED_UNSAFE_HINT]")
+                    continue
+                original_check = sanitize_text(original)
+                if original_check.residual or original_check.rule_counts:
+                    rendered.append("[REDACTED_UNSAFE_HINT]")
+                    continue
                 text = json.dumps(redact(item), sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-            # One canonical residual check covers JSONB hints AND scalar task fields,
-            # including unsafe assignments located beyond the clipping boundary.
+            # Check the complete scalar or structured hint BEFORE clipping.
             rendered.append(text_hint(text, width))
         return rendered, len(value) > 5
 

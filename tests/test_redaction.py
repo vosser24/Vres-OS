@@ -208,7 +208,7 @@ def test_complete_credential_placeholders_are_still_idempotent(text):
     ('password="synthetic-first"synthetic-attached', 'password=[REDACTED]'),
     ("API_KEY='synthetic-first'synthetic-attached", 'API_KEY=[REDACTED]'),
     ('password="[REDACTED]"synthetic-attached', 'password=[REDACTED]'),
-    ('password="synthetic-first"synthetic-attached\nordinary=visible', 'password=[REDACTED]'),
+    ('password="synthetic-first"synthetic-attached\nordinary=visible', 'password=[REDACTED]\nordinary=visible'),
 ])
 def test_credential_balanced_quote_with_attached_tail_is_fully_redacted(text, expected):
     """AUTHORED/NOT_RUN: matching a short closed quote must not leak an attached suffix."""
@@ -230,3 +230,18 @@ def test_paired_credential_quote_at_delimiter_keeps_following_field(text, traili
     assert "synthetic-first" not in result.text
     assert result.text.endswith(trailing_field)
     assert not result.residual
+
+@pytest.mark.parametrize(("text", "expected"), [
+    ('password="synthetic-value") ordinary=visible', 'password=[REDACTED] ordinary=visible'),
+    ('password="synthetic-value"> ordinary=visible', 'password=[REDACTED] ordinary=visible'),
+    ("API_KEY='synthetic-value'. note=visible", 'API_KEY=[REDACTED] note=visible'),
+    ('password="synthetic-value"` context stays', 'password=[REDACTED] context stays'),
+    ('password="synthetic-value"synthetic-tail following=visible',
+     'password=[REDACTED] following=visible'),
+])
+def test_attached_quoted_secret_masks_only_its_undelimited_run(text, expected):
+    """AUTHORED/NOT_RUN: preserve separate task text while masking malformed tails."""
+    assert redact_text(text) == expected
+    assert redact({"note": text})["note"] == expected
+    result = sanitize_text(text)
+    assert result.text == expected and not result.residual

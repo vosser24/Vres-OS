@@ -118,15 +118,15 @@ def test_workday_fail_closed_on_scalar_fields_and_recorded_results(monkeypatch):
         "opaque-completion-workday-value",
     ))
 
-def test_workday_keeps_redacted_bearer_hint_without_false_unsafe_suppression(monkeypatch):
-    """AUTHORED/NOT_RUN: already redacted Authorization is not a residual leak."""
+def test_workday_suppresses_tainted_bearer_hint_instead_of_assuming_safe_suffix(monkeypatch):
+    """AUTHORED/NOT_RUN: successful redaction is not proof that the full hint is safe."""
     _fixture(monkeypatch, [{
         "task_key": "TASK-AUTH",
         "title": "Authorization: Bearer synthetic.bearer.value1234",
         "status": "active",
     }])
     packet = mcp_server.workday_overview()
-    assert packet["tasks"][0]["title"] == "Authorization: [REDACTED_SECRET]"
+    assert packet["tasks"][0]["title"] == "[REDACTED_UNSAFE_HINT]"
     assert "synthetic.bearer.value1234" not in str(packet)
     assert packet["selected_task_key"] is None and packet["read_only"] is True
 
@@ -139,6 +139,20 @@ def test_workday_never_exposes_unclosed_quoted_password_tail(monkeypatch):
         "status": "active",
     }])
     packet = mcp_server.workday_overview()
-    assert packet["tasks"][0]["title"] == "password=[REDACTED]"
+    assert packet["tasks"][0]["title"] == "[REDACTED_UNSAFE_HINT]"
     assert "synthetic-leaking-tail" not in str(packet)
     assert packet["read_only"] is True and packet["selected_task_key"] is None
+
+def test_workday_suppresses_ambiguous_comma_or_multitoken_assignment(monkeypatch):
+    """AUTHORED/NOT_RUN: redaction of a prefix must not expose a secret suffix."""
+    _fixture(monkeypatch, [
+        {"task_key": "TASK-AMBIGUOUS", "title": "password=abc,def",
+         "next_action": "ordinary next step"},
+        {"task_key": "TASK-WORDS", "title": "password: correct horse battery",
+         "next_action": "safe update"},
+    ])
+    packet = mcp_server.workday_overview()
+    assert packet["tasks"][0]["title"] == "[REDACTED_UNSAFE_HINT]"
+    assert packet["tasks"][1]["title"] == "[REDACTED_UNSAFE_HINT]"
+    assert packet["tasks"][0]["next_action_hint"] == "ordinary next step"
+    assert packet["tasks"][1]["next_action_hint"] == "safe update"

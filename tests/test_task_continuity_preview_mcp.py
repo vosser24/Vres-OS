@@ -77,8 +77,8 @@ def test_preview_unfinished_task_requires_explicit_resume(monkeypatch):
     assert packet["selected_task_key"] is None
 
 
-def test_preview_preserves_structured_json_continuity_with_nested_redaction(monkeypatch):
-    """AUTHORED/NOT_RUN: JSONB lists can contain mappings, sequences and scalar values."""
+def test_preview_preserves_safe_json_continuity_but_suppresses_tainted_objects(monkeypatch):
+    """AUTHORED/NOT_RUN: unsafe nested JSON is suppressed before partial redaction."""
     monkeypatch.setattr(mcp_server, "_existing_project", lambda: (
         7, SimpleNamespace(key="fixture-project")))
 
@@ -107,11 +107,10 @@ def test_preview_preserves_structured_json_continuity_with_nested_redaction(monk
     packet = mcp_server.task_continuity_preview("TASK-STRUCTURED")["task"]
     assert len(packet["pending_work"]) == 5
     assert packet["more_pending_work"] is True
-    assert '"reference":"DOC-1"' in packet["pending_work"][0]
-    assert '"api_key":"[REDACTED]"' in packet["pending_work"][0]
-    assert '"access_token":"[REDACTED]"' in packet["pending_work"][1]
+    sentinel = "[REDACTED_UNSAFE_HINT]"
+    assert packet["pending_work"][:2] == [sentinel, sentinel]
     assert packet["pending_work"][2:] == ["42", "null", "true"]
-    assert packet["completed_work"] == ['{"password":"[REDACTED]","summary":"Persisted"}']
+    assert packet["completed_work"] == [sentinel]
     assert packet["more_completed_work"] is False
     assert packet["relevant_objects"] == ['{"kind":"file","object_key":"SRC-2"}']
     assert packet["more_relevant_objects"] is False
@@ -211,3 +210,25 @@ def test_preview_fail_closed_on_scalar_instructions_checkpoint_and_result(monkey
         "opaque-checkpoint-value",
         "opaque-completion-value",
     ))
+
+def test_preview_refuses_ambiguous_nested_and_string_credential_tails(monkeypatch):
+    """AUTHORED/NOT_RUN: inspect raw JSONB before nested eager redaction."""
+    monkeypatch.setattr(mcp_server, "_existing_project", lambda: (
+        7, SimpleNamespace(key="fixture-project")))
+    class OriginalRepository:
+        def inspect_task(self, pid, key):
+            assert (pid, key) == (7, "TASK-AMBIGUOUS")
+            return {"task": {
+                "task_key": key, "status": "active",
+                "pending_work": [
+                    "password=abc,def",
+                    {"note": "password=abc,def", "reference": "DOC-1"},
+                    {"note": "password: correct horse battery"},
+                    {"reference": "DOC-2"},
+                ],
+            }, "latest_checkpoint": None, "recorded_completion": None}
+    monkeypatch.setattr(mcp_server, "Repository", OriginalRepository)
+    packet = mcp_server.task_continuity_preview("TASK-AMBIGUOUS")["task"]
+    assert packet["pending_work"][:3] == ["[REDACTED_UNSAFE_HINT]"] * 3
+    assert packet["pending_work"][3] == '{"reference":"DOC-2"}'
+    assert "abc,def" not in str(packet) and "correct horse" not in str(packet)
