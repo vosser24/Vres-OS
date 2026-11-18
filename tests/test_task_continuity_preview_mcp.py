@@ -155,3 +155,55 @@ def test_preview_fail_closed_on_residual_credentials_in_string_and_nested_hints(
         "opaque-nested-phrase",
         "opaque-nested-credential",
     ))
+
+def test_preview_fail_closed_on_scalar_instructions_checkpoint_and_result(monkeypatch):
+    """AUTHORED/NOT_RUN: inspect whole persisted scalars before user-facing clipping."""
+    monkeypatch.setattr(mcp_server, "_existing_project", lambda: (
+        7, SimpleNamespace(key="fixture-project")))
+
+    class Repository:
+        def inspect_task(self, pid, key):
+            assert (pid, key) == (7, "TASK-SCALARS")
+            return {
+                "task": {
+                    "task_key": key,
+                    "title": "Safe task title",
+                    "objective": "ssh_passphrase=opaque-objective-value",
+                    "state_summary": "A " * 260 + "db_credential=opaque-beyond-visible-limit",
+                    "latest_user_instruction": "db_credential=opaque-instruction-value",
+                    "next_action": "Review with user",
+                    "status": "completed",
+                    "pending_work": [],
+                    "completed_work": [],
+                    "relevant_objects": [],
+                },
+                "latest_checkpoint": {
+                    "checkpoint_key": "CP-S",
+                    "summary": "ssh_passphrase=opaque-checkpoint-value",
+                    "current_position": "safe position",
+                    "next_action": "ordinary follow-up",
+                },
+                "recorded_completion": {
+                    "event_id": 21,
+                    "recorded_summary": "db_credential=opaque-completion-value",
+                },
+            }
+
+    monkeypatch.setattr(mcp_server, "Repository", Repository)
+    packet = mcp_server.task_continuity_preview("TASK-SCALARS")
+    sentinel = "[REDACTED_UNSAFE_HINT]"
+    assert packet["task"]["objective_hint"] == sentinel
+    assert packet["task"]["state_hint"] == sentinel
+    assert packet["task"]["latest_user_instruction_hint"] == sentinel
+    assert packet["latest_checkpoint"]["summary_hint"] == sentinel
+    assert packet["recorded_completion"]["summary_hint"] == sentinel
+    assert packet["task"]["next_action_hint"] == "Review with user"
+    assert packet["latest_checkpoint"]["position_hint"] == "safe position"
+    assert packet["read_only"] is True and packet["selected_task_key"] is None
+    assert all(secret not in str(packet) for secret in (
+        "opaque-objective-value",
+        "opaque-beyond-visible-limit",
+        "opaque-instruction-value",
+        "opaque-checkpoint-value",
+        "opaque-completion-value",
+    ))

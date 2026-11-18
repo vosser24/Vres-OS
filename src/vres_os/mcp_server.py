@@ -215,6 +215,16 @@ def task_open_list() -> list[dict]:
     return Repository().list_open_tasks(pid)
 
 
+def _bounded_persisted_hint(value: Any, width: int) -> str:
+    """Sanitize complete persisted text BEFORE clipping either original MCP read-only view."""
+    if not isinstance(value, str):
+        return ""
+    sanitized = sanitize_text(value)
+    if sanitized.residual:
+        return "[REDACTED_UNSAFE_HINT]"
+    return redact_text(" ".join(sanitized.text.split()))[:width]
+
+
 @mcp.tool()
 def workday_overview() -> dict:
     """Bounded read-only CURRENT-PROJECT workday view for the original Chairman.
@@ -229,9 +239,7 @@ def workday_overview() -> dict:
     completed_rows = repo.list_recent_completions(pid, limit=6)
 
     def bounded(value: Any, width: int) -> str:
-        if not isinstance(value, str):
-            return ""
-        return redact_text(" ".join(value.split()))[:width]
+        return _bounded_persisted_hint(value, width)
 
     # Descriptive persisted fields are untrusted DATA, never instructions/approval.
     tasks = []
@@ -295,9 +303,7 @@ def task_continuity_preview(task_key: str) -> dict:
     result = packet["recorded_completion"] or {}
 
     def text_hint(value: Any, width: int) -> str:
-        if not isinstance(value, str):
-            return ""
-        return redact_text(" ".join(value.split()))[:width]
+        return _bounded_persisted_hint(value, width)
 
     def stamp(value: Any) -> str | None:
         return value.isoformat() if hasattr(value, "isoformat") else None
@@ -312,14 +318,9 @@ def task_continuity_preview(task_key: str) -> dict:
             else:
                 # Original JSONB continuity lists accept structured values.
                 text = json.dumps(redact(item), sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-            # A nested "passphrase"/"credential" assignment can survive the eager
-            # redactor. Use the canonical residual detector BEFORE output clipping,
-            # suppressing the complete unsafe hint instead of disclosing its value.
-            sanitized = sanitize_text(text)
-            rendered.append(
-                "[REDACTED_UNSAFE_HINT]"
-                if sanitized.residual else text_hint(sanitized.text, width)
-            )
+            # One canonical residual check covers JSONB hints AND scalar task fields,
+            # including unsafe assignments located beyond the clipping boundary.
+            rendered.append(text_hint(text, width))
         return rendered, len(value) > 5
 
     pending, more_pending = hints(task.get("pending_work"))

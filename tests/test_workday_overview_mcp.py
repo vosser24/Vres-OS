@@ -85,3 +85,33 @@ def test_recorded_completions_are_recent_bounded_and_not_assumed_today_or_valida
     assert "not_today" in result["recent_completion_ordering"]
     assert "not_validation_pass" in result["completion_evidence"]
     assert "experience" in result["next_step"]
+
+def test_workday_fail_closed_on_scalar_fields_and_recorded_results(monkeypatch):
+    """AUTHORED/NOT_RUN: residual secrets never reach the original overview."""
+    _fixture(
+        monkeypatch,
+        [{
+            "task_key": "TASK-SAFE",
+            "title": "db_credential=opaque-title-value",
+            "status": "active",
+            "current_phase": "review",
+            "next_action": "A " * 130 + "ssh_passphrase=opaque-hidden-workday-value",
+        }],
+        completions=[{
+            "task_key": "TASK-DONE",
+            "title": "Completed",
+            "completion_summary": "ssh_passphrase=opaque-completion-workday-value",
+        }],
+    )
+    packet = mcp_server.workday_overview()
+    sentinel = "[REDACTED_UNSAFE_HINT]"
+    assert packet["tasks"][0]["title"] == sentinel
+    assert packet["tasks"][0]["next_action_hint"] == sentinel
+    assert packet["tasks"][0]["phase"] == "review"
+    assert packet["recent_completions"][0]["recorded_result_hint"] == sentinel
+    assert packet["selected_task_key"] is None and packet["read_only"] is True
+    assert all(secret not in str(packet) for secret in (
+        "opaque-title-value",
+        "opaque-hidden-workday-value",
+        "opaque-completion-workday-value",
+    ))
