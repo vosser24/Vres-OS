@@ -60,3 +60,29 @@ only when its quoting is balanced and complete. Existing multiline properly clos
 credential values remain supported. Canonical regression vectors and one ORIGINAL FastMCP
 workday regression are AUTHORED NOT_RUN, NOT a proven PASS. No alternative MCP owner,
 runtime, GUI, installer or task store, and no host/DB/Windows execution.
+
+
+## Source-only correction — attached tails after apparently closed credential quotes
+
+Static source inspection of the same canonical redaction.py found that the
+first well-formed quoted-value regex alternatives had no right-hand field
+boundary requirement. For password="synthetic-first"synthetic-attached,
+the eager sanitizer could redact just "synthetic-first" and leave the
+immediately adjacent synthetic-attached visible in redact_text and nested
+redact output. This is a source-deduced possible leak, NOT an observed
+runtime or pytest failure. Residual gating can refuse some downstream
+FastMCP display paths, but not every direct caller of the canonical redactor.
+
+The original _VALUE now treats paired quoted assignments as complete only
+before end-of-string, whitespace or supported field delimiters (comma,
+semicolon, closing brace/bracket). Any immediately attached suffix instead
+takes the existing conservative malformed-quote fallback and is masked
+through the remainder of the persisted field. This can over-redact malformed
+text by design. Two focused parameterized canonical sanitizer/nested
+redaction regressions are AUTHORED NOT_RUN, including separated-field controls.
+
+No second application, FastMCP/Chairman/Repository, installer, task store,
+schema, GUI, or runtime. All exact-tree Python, AST, pytest, native Claude,
+MCP/hooks, PostgreSQL even SELECT, Windows, installation and real UAT remain
+NOT_RUN/HELD. Independent #185 reviewer acceptance and both incident closures
+remain required before any operational permission.

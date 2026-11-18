@@ -202,3 +202,31 @@ def test_complete_credential_placeholders_are_still_idempotent(text):
     result = sanitize_text(text)
     assert result.text == text
     assert not result.rule_counts and not result.residual
+
+
+@pytest.mark.parametrize(("text", "expected"), [
+    ('password="synthetic-first"synthetic-attached', 'password=[REDACTED]'),
+    ("API_KEY='synthetic-first'synthetic-attached", 'API_KEY=[REDACTED]'),
+    ('password="[REDACTED]"synthetic-attached', 'password=[REDACTED]'),
+    ('password="synthetic-first"synthetic-attached\nordinary=visible', 'password=[REDACTED]'),
+])
+def test_credential_balanced_quote_with_attached_tail_is_fully_redacted(text, expected):
+    """AUTHORED/NOT_RUN: matching a short closed quote must not leak an attached suffix."""
+    assert redact_text(text) == expected
+    assert redact({"note": text})["note"] == expected
+    result = sanitize_text(text)
+    assert result.text == expected and not result.residual
+
+
+@pytest.mark.parametrize(("text", "trailing_field"), [
+    ('password="synthetic-first",note=ordinary', ',note=ordinary'),
+    ('password="synthetic-first" note=ordinary', ' note=ordinary'),
+    ("API_KEY='synthetic-first';note=ordinary", ';note=ordinary'),
+    ('{"DATABASE_PASSWORD":"synthetic-first","note":"ordinary"}', ',"note":"ordinary"}'),
+])
+def test_paired_credential_quote_at_delimiter_keeps_following_field(text, trailing_field):
+    """AUTHORED/NOT_RUN: do not consume a separate field after a valid quote delimiter."""
+    result = sanitize_text(text)
+    assert "synthetic-first" not in result.text
+    assert result.text.endswith(trailing_field)
+    assert not result.residual

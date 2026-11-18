@@ -25,8 +25,10 @@ _KEYWORD = (
 )
 # Quoted values may contain whitespace/newlines. If a credential quote is
 # unclosed, swallow the rest of this field instead of leaking the tail through
-# the generic unquoted fallback. Malformed fields may be over-redacted.
-_VALUE = r'''(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|"[\s\S]*\Z|'[\s\S]*\Z|[^\s,;]+)'''
+# the generic unquoted fallback. A balanced quote is a complete value ONLY at a
+# field delimiter; a closing quote with attached bytes is malformed and must
+# also swallow the rest of the field. Malformed fields may be over-redacted.
+_VALUE = r'''(?:"(?:\\.|[^"\\])*"(?=$|[\s,;}\]])|'(?:\\.|[^'\\])*'(?=$|[\s,;}\]])|"[\s\S]*\Z|'[\s\S]*\Z|[^\s,;]+)'''
 # The key may carry an arbitrary (bounded) prefix: MY_APP_CLIENT_SECRET, github_access_token.
 _KV = re.compile(
     r'(?i)(?P<head>["\']?(?P<key>\b[\w.-]{0,64}?' + _KEYWORD + r')["\']?\s*[:=]\s*)(?P<value>' + _VALUE + ")"
