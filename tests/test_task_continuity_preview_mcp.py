@@ -75,3 +75,45 @@ def test_preview_unfinished_task_requires_explicit_resume(monkeypatch):
     assert packet["recorded_completion"] is None
     assert packet["resume_route"] == "task_resume_with_real_session_after_explicit_user_choice"
     assert packet["selected_task_key"] is None
+
+
+def test_preview_preserves_structured_json_continuity_with_nested_redaction(monkeypatch):
+    """AUTHORED/NOT_RUN: JSONB lists can contain mappings, sequences and scalar values."""
+    monkeypatch.setattr(mcp_server, "_existing_project", lambda: (
+        7, SimpleNamespace(key="fixture-project")))
+
+    class Repository:
+        def inspect_task(self, pid, key):
+            assert (pid, key) == (7, "TASK-STRUCTURED")
+            return {
+                "task": {
+                    "task_key": key, "status": "active",
+                    "pending_work": [
+                        {"reference": "DOC-1", "api_key": "never-expose-this"},
+                        ["nested", {"access_token": "nested-private-value"}],
+                        42,
+                        None,
+                        True,
+                        {"reference": "overflow"},
+                    ],
+                    "completed_work": [{"summary": "Persisted", "password": "another-private-value"}],
+                    "relevant_objects": [{"kind": "file", "object_key": "SRC-2"}],
+                },
+                "latest_checkpoint": None,
+                "recorded_completion": None,
+            }
+
+    monkeypatch.setattr(mcp_server, "Repository", Repository)
+    packet = mcp_server.task_continuity_preview("TASK-STRUCTURED")["task"]
+    assert len(packet["pending_work"]) == 5
+    assert packet["more_pending_work"] is True
+    assert '"reference":"DOC-1"' in packet["pending_work"][0]
+    assert '"api_key":"[REDACTED]"' in packet["pending_work"][0]
+    assert '"access_token":"[REDACTED]"' in packet["pending_work"][1]
+    assert packet["pending_work"][2:] == ["42", "null", "true"]
+    assert packet["completed_work"] == ['{"password":"[REDACTED]","summary":"Persisted"}']
+    assert packet["more_completed_work"] is False
+    assert packet["relevant_objects"] == ['{"kind":"file","object_key":"SRC-2"}']
+    assert packet["more_relevant_objects"] is False
+    assert all(secret not in str(packet) for secret in (
+        "never-expose-this", "nested-private-value", "another-private-value"))

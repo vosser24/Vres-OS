@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+import json
 import os
 from datetime import datetime
 from pathlib import Path
@@ -36,7 +37,7 @@ from .repository import Repository
 from .session_contamination import ContextRefreshService, valid_event_key
 from .source_revocation import SourceRevocationService, bound_public_result
 from .sources import SourceService
-from .redaction import redact_text
+from .redaction import redact, redact_text
 from .metrics import validate_metrics
 from .w4_runtime_holds import require_w4_native_host_clearance
 
@@ -304,7 +305,17 @@ def task_continuity_preview(task_key: str) -> dict:
     def hints(value: Any, width: int = 200) -> tuple[list[str], bool]:
         if not isinstance(value, list):
             return [], False
-        return [text_hint(item, width) for item in value[:5] if isinstance(item, str)], len(value) > 5
+        rendered: list[str] = []
+        for item in value[:5]:
+            if isinstance(item, str):
+                rendered.append(text_hint(item, width))
+            else:
+                # The original JSONB task lists accept structured values, not just strings.
+                # Redact nested credential fields before producing a bounded hint.
+                safe_item = redact(item)
+                serialized = json.dumps(safe_item, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+                rendered.append(text_hint(serialized, width))
+        return rendered, len(value) > 5
 
     pending, more_pending = hints(task.get("pending_work"))
     completed, more_completed = hints(task.get("completed_work"))
