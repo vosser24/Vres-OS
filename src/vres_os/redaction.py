@@ -180,3 +180,36 @@ def redact(value: Any, _depth: int = 0) -> Any:
     if isinstance(value, dict):
         return {k: ("[REDACTED]" if _is_secret_key(k) else redact(v, _depth + 1)) for k, v in value.items()}
     return value
+
+
+# Strict write boundary for the original Repository task, state, event and
+# checkpoint ledger. Keep redact_text()/redact() display semantics unchanged.
+_UNSAFE_PERSISTED_FIELD = "[REDACTED_UNSAFE_FIELD]"
+
+
+def redact_for_persistence(value: Any, _depth: int = 0) -> Any:
+    """Suppress complete tainted strings before Repository persistence.
+
+    A partial mask such as password=[REDACTED],def or
+    password: [REDACTED] horse battery does not prove the suffix harmless.
+    Preserve clean siblings, but not partially scrubbed strings. This only
+    covers known canonical rules and is not a retroactive database scrub or a
+    guarantee for arbitrary unknown credential formats.
+    """
+    if _depth > 32:
+        raise ValueError("Content nesting exceeds persistence safety limit")
+    if isinstance(value, str):
+        result = sanitize_text(value)
+        if result.rule_counts or result.residual:
+            return _UNSAFE_PERSISTED_FIELD
+        return result.text
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, (list, tuple)):
+        return [redact_for_persistence(item, _depth + 1) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: ("[REDACTED]" if _is_secret_key(key) else redact_for_persistence(item, _depth + 1))
+            for key, item in value.items()
+        }
+    return value

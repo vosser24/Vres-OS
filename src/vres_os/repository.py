@@ -9,7 +9,7 @@ from typing import Any
 from .db import connect
 from .experience_lifecycle import _lock_project
 from .project import ProjectIdentity
-from .redaction import redact
+from .redaction import redact_for_persistence
 from .session_contamination import contamination_notice
 from .validation import STATE_FIELDS
 
@@ -108,8 +108,8 @@ class Repository:
     ) -> str:
         task_key = _key("TASK")
         cp_key = _key("CP")
-        safe_title = str(redact(title))
-        safe_objective = str(redact(objective))
+        safe_title = str(redact_for_persistence(title))
+        safe_objective = str(redact_for_persistence(objective))
         seed_summary = str(_clip(f"Task initialized for objective: {safe_objective}"))
         seed_step = "intake"
         seed_next = "Translate the persisted objective into the next concrete action and checkpoint it before material work."
@@ -431,7 +431,7 @@ class Repository:
             task_id = self._task_id(conn, task_key)
             conn.execute(
                 "INSERT INTO vres.task_events(task_id,event_type,actor,payload,session_id) VALUES (%s,%s,%s,%s::jsonb,%s)",
-                (task_id, event_type, actor, json.dumps(redact(payload)), session_id),
+                (task_id, event_type, actor, json.dumps(redact_for_persistence(payload)), session_id),
             )
             conn.execute("UPDATE vres.tasks SET updated_at=now() WHERE id=%s", (task_id,))
 
@@ -456,7 +456,7 @@ class Repository:
         for key, value in fields.items():
             if key not in allowed:
                 raise ValueError(f"Unsupported state field {key}")
-            value = redact(value)
+            value = redact_for_persistence(value)
             if key == "validation_status" and value not in {"pending", "failed"}:
                 raise ValueError(f"Unsupported validation status {value}")
             if isinstance(value, (list, dict)):
@@ -470,7 +470,7 @@ class Repository:
         with connect() as conn, conn.transaction():
             task_id = self._task_id(conn, task_key)
             current = conn.execute("SELECT * FROM vres.task_state WHERE task_id=%s FOR UPDATE", (task_id,)).fetchone()
-            changed = {k for k, v in fields.items() if current.get(k) != redact(v)}
+            changed = {k for k, v in fields.items() if current.get(k) != redact_for_persistence(v)}
             material = bool(changed - {"latest_user_instruction", "validation_status"})
             pending = self._pending_validation_key(conn, task_id)
             if pending:
@@ -515,10 +515,10 @@ class Repository:
         actor: str,
     ) -> str:
         cp_key = _key("CP")
-        safe_summary = redact(summary)
-        safe_position = redact(current_position)
-        safe_next = redact(next_action)
-        safe_context = redact(context)
+        safe_summary = redact_for_persistence(summary)
+        safe_position = redact_for_persistence(current_position)
+        safe_next = redact_for_persistence(next_action)
+        safe_context = redact_for_persistence(context)
         with connect() as conn, conn.transaction():
             task_id = self._task_id(conn, task_key)
             # Same lock ValidationService.prepare takes, so prepare and checkpoint serialize.
@@ -557,7 +557,7 @@ class Repository:
             )
             conn.execute(
                 "INSERT INTO vres.task_events(task_id,event_type,actor,payload) VALUES (%s,'TASK_COMPLETED','chairman',%s::jsonb)",
-                (task_id, json.dumps({"summary": redact(summary)})),
+                (task_id, json.dumps({"summary": redact_for_persistence(summary)})),
             )
             conn.execute("UPDATE vres.project_focus SET task_id=NULL,updated_at=now() WHERE task_id=%s", (task_id,))
 
