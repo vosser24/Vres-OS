@@ -5,7 +5,8 @@ import re
 from typing import Any
 
 from .db import connect
-from .redaction import redact
+from .redaction import redact_for_persistence
+from .repository import _persist_identity_unmodified
 from .session_prompts import commit_staged_user_instruction_events, latest_observed_user_instruction
 
 _TRANSITIONS = {
@@ -114,8 +115,14 @@ def transition_task_status(
     Cancellation additionally requires a protected current user cancellation prompt;
     that prompt is durably committed through the provenance-writer boundary first.
     """
+    # Task/session keys are structural authority identifiers, not display text.
+    # Reject credential-shaped caller values BEFORE cancellation provenance or SQL.
+    _persist_identity_unmodified(task_key, "task_key")
+    _persist_identity_unmodified(provider_session_id, "provider_session_id")
     target = str(target_status or "").strip().lower()
-    safe_reason = redact(str(reason or "").strip())
+    # Direct lifecycle event writes must use the same strict persistence boundary
+    # as the original Repository; display redaction can leave credential tails.
+    safe_reason = redact_for_persistence(str(reason or "").strip())
     if target not in {"active", "waiting_user", "blocked", "cancelled"}:
         raise ValueError(
             "Task status must be active, waiting_user, blocked, or cancelled; completion uses task_complete"
