@@ -170,6 +170,34 @@ class Repository:
             ).fetchall()
         return [dict(r) for r in rows]
 
+
+    def list_recent_completions(self, project_id: int, limit: int = 6) -> list[dict[str, Any]]:
+        """Read-only current-project task results from the original completion event ledger.
+
+        The completion timestamp and authored summary are historic recorded facts,
+        not validation PASS, experience acceptance, approvals or a live 'today' filter.
+        """
+        count = max(1, min(int(limit), 6))
+        with connect() as conn:
+            conn.execute("SET TRANSACTION READ ONLY")
+            rows = conn.execute(
+                """
+                SELECT t.task_key,t.title,t.completed_at,done.completion_summary
+                  FROM vres.tasks t
+                  LEFT JOIN LATERAL (
+                      SELECT e.payload->>'summary' AS completion_summary
+                        FROM vres.task_events e
+                       WHERE e.task_id=t.id AND e.event_type='TASK_COMPLETED'
+                       ORDER BY e.created_at DESC,e.id DESC LIMIT 1
+                  ) done ON TRUE
+                 WHERE t.project_id=%s AND t.status='completed'
+                 ORDER BY t.completed_at DESC NULLS LAST,t.id DESC
+                 LIMIT %s
+                """,
+                (project_id, count),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def focus_task(self, project_id: int, task_key: str | None) -> None:
         with connect() as conn, conn.transaction():
             task_id = None

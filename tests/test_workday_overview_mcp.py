@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from vres_os import mcp_server
 
 
-def _fixture(monkeypatch, records):
+def _fixture(monkeypatch, records, completions=None):
     called = []
     monkeypatch.setattr(mcp_server, "_existing_project", lambda: (
         7, SimpleNamespace(key="project:fixture", name="Fixture")))
@@ -13,6 +13,10 @@ def _fixture(monkeypatch, records):
         def list_open_tasks(self, project_id, limit=20):
             called.append((project_id, limit))
             return records[:limit]
+
+        def list_recent_completions(self, project_id, limit=6):
+            assert project_id == 7 and limit == 6
+            return (completions or [])[:limit]
 
     monkeypatch.setattr(mcp_server, "Repository", OriginalRepository)
     return called
@@ -58,3 +62,26 @@ def test_workday_redacts_and_clips_stored_text(monkeypatch):
     item = mcp_server.workday_overview()["tasks"][0]
     assert "private-token" not in item["title"]
     assert len(item["next_action_hint"]) <= 240
+
+def test_recorded_completions_are_recent_bounded_and_not_assumed_today_or_validated(monkeypatch):
+    from datetime import datetime, timezone
+
+    finished = datetime(2026, 11, 16, 8, 30, tzinfo=timezone.utc)
+    rows = [{"task_key": f"T-{i}", "title": "secret phrase", "completion_summary": "secret phrase",
+             "completed_at": finished} for i in range(7)]
+    _fixture(monkeypatch, [], completions=rows)
+    monkeypatch.setattr(mcp_server, "redact_text",
+                        lambda text: text.replace("secret phrase", "[REDACTED]"))
+    result = mcp_server.workday_overview()
+
+    assert result["schema"] == "vres-original-claude-workday-overview/2"
+    assert result["tasks"] == []
+    assert len(result["recent_completions"]) == 5
+    assert result["more_recent_completions"] is True
+    assert result["selected_task_key"] is None
+    assert result["explicit_selection_needed"] is False
+    assert result["recent_completions"][0]["completed_at"] == finished.isoformat()
+    assert "secret phrase" not in str(result["recent_completions"])
+    assert "not_today" in result["recent_completion_ordering"]
+    assert "not_validation_pass" in result["completion_evidence"]
+    assert "experience" in result["next_step"]
