@@ -107,9 +107,11 @@ class Repository:
 
     @staticmethod
     def _task_id(conn, task_key: str) -> int:
+        _persist_identity_unmodified(task_key, "task_key")
         row = conn.execute("SELECT id FROM vres.tasks WHERE task_key=%s", (task_key,)).fetchone()
         if not row:
-            raise KeyError(f"Unknown task {task_key}")
+            # Never put a potentially credential-bearing caller key into errors/logs.
+            raise KeyError("Unknown task")
         return int(row["id"])
 
     @staticmethod
@@ -273,6 +275,8 @@ class Repository:
         }
 
     def focus_task(self, project_id: int, task_key: str | None) -> None:
+        # Fail before any connection or focus mutation for an unsafe caller key.
+        _persist_identity_unmodified(task_key, "task_key")
         with connect() as conn, conn.transaction():
             task_id = None
             if task_key:
@@ -281,7 +285,7 @@ class Repository:
                     (task_key, project_id, list(_ACTIVE)),
                 ).fetchone()
                 if not row:
-                    raise KeyError(f"Task {task_key} is not an unfinished task in this project")
+                    raise KeyError("Task is not an unfinished task in this project")
                 task_id = int(row["id"])
             conn.execute(
                 """
@@ -635,9 +639,12 @@ class Repository:
         task_key: str | None = None,
     ) -> dict[str, Any] | None:
         if task_key:
-            self.focus_task(project_id, task_key)
             if provider_session_id:
+                # bind_session selects task AND focus in one transaction; do not
+                # pre-select focus before session validation can fail.
                 self.bind_session(project_id, provider_session_id, task_key)
+            else:
+                self.focus_task(project_id, task_key)
         task = self.active_task(project_id, provider_session_id)
         if not task:
             candidates = self.list_open_tasks(project_id)

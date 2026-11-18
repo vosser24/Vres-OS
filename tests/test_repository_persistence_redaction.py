@@ -325,3 +325,86 @@ def test_session_binding_identity_refused_before_db_connect(fake_connection, met
     with pytest.raises(ValueError, match="unsafe credential material"):
         getattr(repository_module.Repository(), method)(**kwargs)
     assert fake_connection.statements == []
+
+# R-6 author-only synthetic regressions: NOT_RUN; no DB/native host access.
+
+
+def test_failed_explicit_resume_session_binding_cannot_preselect_focus(monkeypatch):
+    owner = repository_module.Repository()
+    changes = []
+    monkeypatch.setattr(owner, "focus_task", lambda *_: changes.append("focus"))
+
+    def rejected_binding(*_):
+        changes.append("bind_attempt")
+        raise ValueError("Cannot bind an unregistered or closed session")
+
+    monkeypatch.setattr(owner, "bind_session", rejected_binding)
+    with pytest.raises(ValueError, match="unregistered or closed"):
+        owner.resume_context(
+            7, provider_session_id="synthetic-claude-session", task_key="TASK-SAFE"
+        )
+    assert changes == ["bind_attempt"]
+
+
+def test_successful_explicit_resume_reuses_bind_session_focus_transaction(monkeypatch):
+    owner = repository_module.Repository()
+    changes = []
+
+    def no_separate_focus(*_):
+        raise AssertionError("A bound resume must not use a second focus transaction")
+
+    monkeypatch.setattr(owner, "focus_task", no_separate_focus)
+    monkeypatch.setattr(owner, "bind_session",
+                        lambda *args: changes.append(("bind", args)))
+    monkeypatch.setattr(owner, "active_task", lambda *_: None)
+    monkeypatch.setattr(owner, "list_open_tasks", lambda *_: [])
+    assert owner.resume_context(
+        7, provider_session_id="synthetic-claude-session", task_key="TASK-SAFE"
+    ) is None
+    assert changes == [("bind", (7, "synthetic-claude-session", "TASK-SAFE"))]
+
+
+def test_sessionless_explicit_resume_still_sets_focus(monkeypatch):
+    owner = repository_module.Repository()
+    changes = []
+    monkeypatch.setattr(owner, "focus_task", lambda *args: changes.append(args))
+    monkeypatch.setattr(owner, "bind_session",
+                        lambda *_: (_ for _ in ()).throw(AssertionError("No binding")))
+    monkeypatch.setattr(owner, "active_task", lambda *_: None)
+    monkeypatch.setattr(owner, "list_open_tasks", lambda *_: [])
+    assert owner.resume_context(7, task_key="TASK-SAFE") is None
+    assert changes == [(7, "TASK-SAFE")]
+
+
+def test_unsafe_task_identifiers_fail_before_sql_or_focus_connection(monkeypatch):
+    class NoSQL:
+        def execute(self, *_args, **_kwargs):
+            raise AssertionError("unsafe key must not reach SQL")
+
+    def no_connect():
+        raise AssertionError("unsafe focus key must not connect")
+
+    with pytest.raises(ValueError, match="unsafe credential material"):
+        repository_module.Repository._task_id(NoSQL(), "password=synthetic-secret")
+    monkeypatch.setattr(repository_module, "connect", no_connect)
+    with pytest.raises(ValueError, match="unsafe credential material"):
+        repository_module.Repository().focus_task(7, "password=synthetic-secret")
+
+
+def test_unknown_task_errors_do_not_echo_caller_supplied_keys(monkeypatch):
+    absent = "TASK-SYNTHETIC-ABSENT"
+
+    class MissingFocus(_NoDbConnection):
+        def execute(self, sql, params=None):
+            self.statements.append((sql, params))
+            return _Cursor()
+
+    conn = MissingFocus()
+    with pytest.raises(KeyError) as missing_lookup:
+        repository_module.Repository._task_id(conn, absent)
+    assert absent not in str(missing_lookup.value)
+
+    monkeypatch.setattr(repository_module, "connect", lambda: conn)
+    with pytest.raises(KeyError) as missing_focus:
+        repository_module.Repository().focus_task(7, absent)
+    assert absent not in str(missing_focus.value)
