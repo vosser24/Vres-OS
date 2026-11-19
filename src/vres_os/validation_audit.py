@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from .db import connect
-from .redaction import redact, redact_text
+from .redaction import redact_for_persistence
+from .repository import _persist_identity_unmodified
 
 _REQUEST_RE = re.compile(r"\bVAL-[A-Za-z0-9_-]+\b")
 _GENERIC_NOT_FOUND = "Validator report was not found in the final assistant message or observed assistant transcript"
@@ -78,7 +79,7 @@ def _canonical_request_key(payload: dict[str, Any]) -> str | None:
         report = _json_object(candidate)
         key = report.get("request_key") if report else None
         if isinstance(key, str) and key.strip():
-            return key.strip()[:200]
+            return key.strip()  # preserve the full authority key for later refusal, never silently truncate
     return None
 
 
@@ -175,15 +176,25 @@ def record_validation_ingestion_attempt(
 ) -> dict[str, Any]:
     """Persist one observed validator-hook ingestion outcome without storing report contents."""
     key = request_key or extract_request_key(payload)
+    # Request and session keys are authority joins: reject, never mask/truncate.
+    _persist_identity_unmodified(key, "request_key")
+    if key is not None and len(key) > 200:
+        raise ValueError("request_key exceeds validation audit length limit")
+    raw_session_id = payload.get("session_id") or payload.get("sessionId")
+    session_id = str(raw_session_id) if raw_session_id else None
+    _persist_identity_unmodified(session_id, "provider_session_id")
+    if session_id is not None and len(session_id) > 200:
+        raise ValueError("provider_session_id exceeds validation audit length limit")
     reason = str(reason) if accepted else _specific_contract_reason(payload, str(reason))
     disposition, reason = _classify_ingestion(accepted, reason, allow_defer)
-    safe_reason = redact_text(reason)[:1000] or disposition
-    payload_keys = sorted(str(k) for k in payload)[:100]
+    safe_reason = str(redact_for_persistence(reason))[:1000] or disposition
+    payload_keys = [
+        str(redact_for_persistence(str(item)))
+        for item in sorted(payload, key=str)[:100]
+    ]
     attempt_key = f"VATT-{uuid.uuid4().hex[:16]}"
-    agent_type = redact(payload.get("agent_type")) if payload.get("agent_type") else None
-    agent_id = redact(payload.get("agent_id")) if payload.get("agent_id") else None
-    session_id = payload.get("session_id") or payload.get("sessionId")
-    session_id = str(redact(session_id))[:200] if session_id else None
+    agent_type = redact_for_persistence(payload.get("agent_type")) if payload.get("agent_type") else None
+    agent_id = redact_for_persistence(payload.get("agent_id")) if payload.get("agent_id") else None
 
     with connect() as conn, conn.transaction():
         request = _request_for_key(conn, key, project_id) if key else None
@@ -191,7 +202,9 @@ def record_validation_ingestion_attempt(
             pending = _latest_pending_for_session(conn, project_id, session_id)
             if pending:
                 request = pending
-                key = str(pending["request_key"])[:200]
+                key = _persist_identity_unmodified(str(pending["request_key"]), "historical_request_key")
+                if len(key) > 200:
+                    raise ValueError("historical_request_key exceeds validation audit length limit")
 
         request_id = int(request["id"]) if request else None
         task_id = int(request["task_id"]) if request else None

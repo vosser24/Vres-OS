@@ -80,17 +80,27 @@ def pending_user_entries(metadata: Any) -> list[dict[str, Any]]:
         return []
     queued = metadata.get(_PENDING_KEY)
     if isinstance(queued, list):
-        return [dict(x) for x in queued if isinstance(x, dict) and isinstance(x.get("text"), str)]
+        safe_entries: list[dict[str, Any]] = []
+        for entry in queued:
+            if not isinstance(entry, dict) or not isinstance(entry.get("text"), str):
+                continue
+            # Historical SQL mirrors may predate strict staging. Never return
+            # their raw text, questions, extra values or credential-bearing keys.
+            safe_entry = redact_for_persistence(entry)
+            if isinstance(safe_entry, dict):
+                safe_entries.append(safe_entry)
+        return safe_entries
     legacy = metadata.get(_LEGACY_PENDING_KEY)
     if isinstance(legacy, dict) and isinstance(legacy.get("text"), str):
-        return [
+        safe_entry = redact_for_persistence(
             {
                 "text": legacy["text"],
                 "observed_at": legacy.get("recorded_at"),
                 "source": "user_prompt",
                 "kind": _entry_kind(legacy["text"]),
             }
-        ]
+        )
+        return [safe_entry] if isinstance(safe_entry, dict) else []
     return []
 
 
@@ -101,7 +111,12 @@ def committed_user_input_tool_ids(metadata: Any) -> list[str]:
     raw = metadata.get(_COMMITTED_TOOL_IDS_KEY)
     if not isinstance(raw, list):
         return []
-    return [str(x) for x in raw if isinstance(x, str) and x]
+    # Old metadata can contain unchecked tool provenance identifiers.
+    return [
+        item for item in raw
+        if isinstance(item, str) and item and len(item) <= 300
+        and redact_for_persistence(item) == item
+    ]
 
 
 def read_only_hold_from_metadata(metadata: Any) -> dict[str, Any] | None:
@@ -111,11 +126,12 @@ def read_only_hold_from_metadata(metadata: Any) -> dict[str, Any] | None:
     value = metadata.get(READ_ONLY_HOLD_KEY)
     if not isinstance(value, dict):
         return None
-    return {
+    safe_hold = redact_for_persistence({
         "active": bool(value.get("active")),
         "observed_at": value.get("observed_at"),
         "reason": value.get("reason"),
-    }
+    })
+    return safe_hold if isinstance(safe_hold, dict) else None
 
 
 def _writer_available() -> bool:

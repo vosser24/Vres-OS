@@ -12,7 +12,7 @@ from .db import DatabaseUnavailable, connect
 from .paths import logs_dir
 from .personal_resume_briefing import render_personal_resume_briefing
 from .project import discover_project
-from .redaction import redact_text
+from .redaction import redact_for_persistence
 from . import experience_references
 from .reply_guard import begin_reply_turn, current_reply_turn, inspect_stop_guard, mark_stop_guard_blocked
 from .repository import PendingValidationError, Repository
@@ -56,7 +56,7 @@ def _log_hook_error(event: str, exc: Exception) -> None:
     try:
         path = logs_dir() / "hook-errors.log"
         with path.open("a", encoding="utf-8") as handle:
-            handle.write(f"{datetime.now(timezone.utc).isoformat()} {event}: {type(exc).__name__}: {redact_text(str(exc))}\n")
+            handle.write(f"{datetime.now(timezone.utc).isoformat()} {event}: {type(exc).__name__}: {str(redact_for_persistence(str(exc)))}\n")
     except OSError:
         pass
 
@@ -548,7 +548,7 @@ def validator_stop() -> None:
                 )
             )
             return
-        detail = redact_text(str(exc))[:800]
+        detail = str(redact_for_persistence(str(exc)))[:800]
         sys.stderr.write(
             f"Vres validator evidence was not accepted: {detail}. Task remains pending; fresh validation may be required.\n"
         )
