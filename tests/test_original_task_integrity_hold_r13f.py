@@ -29,7 +29,8 @@ def test_prospective_terminal_guard_denies_sql_cancel_and_delete():
 
 def test_original_boundary_revokes_delete_during_setup_and_activation():
     text = BOUNDARY.read_text(encoding="utf-8")
-    assert text.count("_revoke_original_task_history_deletes(conn, ") == 2
+    assert "_revoke_original_task_history_deletes(conn, cfg.database.user)" in text
+    assert "_revoke_original_task_history_deletes(conn, runtime)" in text
     helper = text.split("def _revoke_original_task_history_deletes(", 1)[1]
     assert "require_w4_schema_clearance()" in helper
     for table in ('"tasks"', '"task_state"', '"task_events"', '"checkpoints"'):
