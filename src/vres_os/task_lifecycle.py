@@ -129,6 +129,8 @@ def _validated_bound_sessions(project_id: int, task_key: str) -> list[dict[str, 
     return safe
 
 
+# Historical SQL-writer mechanism retained for future independently reviewed
+# operator-specific design; NOT an authorized model-facing or public API route.
 def _cancel_atomic(
     project_id: int,
     task_key: str,
@@ -170,19 +172,21 @@ def transition_task_status(
     *,
     provider_session_id: str | None = None,
 ) -> dict[str, Any]:
-    """Keep the original task owner; atomic cancellation is writer-protected."""
+    """Keep the original task owner; cancellation remains held pending review."""
+    target = str(target_status or "").strip().lower()
+    # Defense-in-depth for direct Python callers, before identity persistence,
+    # redaction, observation reads, writer routing or any database connection.
+    if target == "cancelled":
+        raise ValueError("Task cancellation requires a reviewed operator-only route")
     _persist_identity_unmodified(task_key, "task_key")
     _persist_identity_unmodified(provider_session_id, "provider_session_id")
-    target = str(target_status or "").strip().lower()
     safe_reason = redact_for_persistence(str(reason or "").strip())
-    if target not in {"active", "waiting_user", "blocked", "cancelled"}:
+    if target not in {"active", "waiting_user", "blocked"}:
         raise ValueError(
-            "Task status must be active, waiting_user, blocked, or cancelled; completion uses task_complete"
+            "Task status must be active, waiting_user, or blocked; completion uses task_complete"
         )
     if not safe_reason:
         raise ValueError("Task status transition requires a durable reason")
-    if target == "cancelled":
-        return _cancel_atomic(project_id, task_key, provider_session_id, safe_reason)
 
     with connect() as conn, conn.transaction():
         # Keep session -> task lock ordering consistent with original staging.

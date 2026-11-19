@@ -64,14 +64,16 @@ def task_status_set(
     reason: str,
     session_id: str,
 ) -> dict[str, Any]:
-    """Park, block, resume, or user-cancel an unfinished task with provenance.
+    """Park, block, or resume an unfinished task with provenance.
 
-    `completed` is intentionally unavailable here and remains protected by
-    governed task completion. Every transition requires the current session
-    to be bound to the task. Cancellation additionally requires the staged current
-    user turn to explicitly request cancellation; it preserves task state/checkpoints
-    while clearing active focus/session bindings.
+    Completion remains governed by task_complete. Model-facing cancellation
+    is held pending independently reviewed operator-bound authorization.
+    Other transitions still require the current session to be bound to the task.
     """
+    # P1 R13D: refuse model-supplied cancellation BEFORE any project, session,
+    # task lookup or database-capable helper is called.
+    if str(status or "").strip().casefold() == "cancelled":
+        raise ValueError("Task cancellation is held on the model-facing MCP route")
     pid, _ = _project()
     sid = _current_session(pid, session_id)
     _require_node("task", task_key, write=True)
