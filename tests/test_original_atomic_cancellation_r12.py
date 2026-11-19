@@ -50,9 +50,10 @@ def test_original_cancel_uses_one_writer_call_and_exact_sibling_snapshot(monkeyp
         "source": "user_prompt", "kind": "instruction",
         "committed_event_id": None, "committed_at": None,
     })
-    actual = task_lifecycle.transition_task_status(
-        7, "TASK-CLEAN", "cancelled", "Explicit current user cancellation",
-        provider_session_id="SESSION-CLEAN",
+    # R13D holds the public lifecycle entry; test the preserved historical
+    # SQL-writer mechanism directly, without granting it any new authority.
+    actual = task_lifecycle._cancel_atomic(
+        7, "TASK-CLEAN", "SESSION-CLEAN", "Explicit current user cancellation",
     )
     assert purposes == ["runtime", "writer"]
     assert len(writer.calls) == 1
@@ -84,8 +85,8 @@ def test_control_or_committed_history_never_opens_db(monkeypatch, newest):
     monkeypatch.setattr(task_lifecycle, "connect",
                         lambda **_: (_ for _ in ()).throw(AssertionError("DB must not open")))
     with pytest.raises(ValueError):
-        task_lifecycle.transition_task_status(
-            7, "TASK-CLEAN", "cancelled", "safe", provider_session_id="SESSION-CLEAN"
+        task_lifecycle._cancel_atomic(
+            7, "TASK-CLEAN", "SESSION-CLEAN", "safe"
         )
 
 
@@ -106,5 +107,6 @@ def test_original_044_static_source_and_no_split_transition():
     assert "REVOKE ALL ON FUNCTION vres.cancel_task_from_current_observation(" in sql
     assert '"vres.cancel_task_from_current_observation(bigint,text,text,bigint,text,jsonb)"' in boundary
     assert 'with connect(purpose="writer") as conn, conn.transaction():' in original
-    assert 'return _cancel_atomic(' in original
+    assert 'def _cancel_atomic(' in original  # historical writer helper is retained
+    assert 'return _cancel_atomic(' not in original  # no model-facing dispatch
     assert 'commit_staged_user_instruction_events' not in original

@@ -169,9 +169,10 @@ def test_cancellation_refuses_tainted_bound_sibling_session_event(monkeypatch):
     monkeypatch.setattr(task_lifecycle, "connect", lambda purpose=None: fake)
     monkeypatch.setattr(task_lifecycle, "_authorize_cancel_instruction", lambda *_: 23)
     with pytest.raises(ValueError, match="unsafe credential material"):
-        task_lifecycle.transition_task_status(
-            7, "TASK-CLEAN", "cancelled", "Explicit user cancellation",
-            provider_session_id="SESSION-CLEAN",
+        # Historical internal writer helper is still tested, but is not
+        # reachable through the model-facing R13D lifecycle entry point.
+        task_lifecycle._cancel_atomic(
+            7, "TASK-CLEAN", "SESSION-CLEAN", "Explicit user cancellation",
         )
     # The real transaction would roll back all preceding writes. This fake
     # only proves that the unsafe SESSION_UNBOUND event is never constructed.
