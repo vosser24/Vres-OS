@@ -338,6 +338,36 @@ def latest_observed_user_instruction(
     return observed
 
 
+
+def latest_observed_user_input(
+    project_id: int,
+    provider_session_id: str | None,
+) -> dict[str, Any] | None:
+    """Read the newest trusted observation OF ANY KIND for cancellation precedence.
+
+    Unlike latest_observed_user_instruction, this includes read-only and other
+    controls, so an older cancellation never outranks a newer user control.
+    Historical text is strictly suppressed before returning to callers.
+    """
+    if not provider_session_id:
+        return None
+    _persist_identity_unmodified(provider_session_id, "provider_session_id")
+    if not _writer_available():
+        return None
+    with connect(purpose="writer") as conn:
+        row = conn.execute(
+            "SELECT * FROM vres.latest_observed_user_input(%s,%s)",
+            (project_id, provider_session_id),
+        ).fetchone()
+    if not row:
+        return None
+    observed = dict(row)
+    if isinstance(observed.get("text"), str):
+        observed["text"] = redact_for_persistence(observed["text"])
+    _persist_identity_unmodified(observed.get("committed_task_key"), "committed_task_key")
+    return observed
+
+
 def latest_staged_user_instruction(project_id: int, provider_session_id: str | None) -> str | None:
     """Read the latest protected, uncommitted substantive user instruction."""
     if not provider_session_id:

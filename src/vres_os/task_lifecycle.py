@@ -7,7 +7,7 @@ from typing import Any
 from .db import connect
 from .redaction import redact_for_persistence
 from .repository import _persist_identity_unmodified
-from .session_prompts import commit_staged_user_instruction_events, latest_observed_user_instruction
+from .session_prompts import commit_staged_user_instruction_events, latest_observed_user_input
 
 _TRANSITIONS = {
     "active": {"waiting_user", "blocked", "cancelled"},
@@ -76,28 +76,37 @@ def _authorize_cancel_instruction(
 ) -> None:
     if not provider_session_id:
         raise ValueError("Cancelling a task requires the current provider session")
-    observed = latest_observed_user_instruction(project_id, provider_session_id)
+    # The newest protected observation must win, including inspection-only
+    # controls and AskUserQuestion answers. The old instruction-only SQL view
+    # could skip a newer control and replay a stale cancellation.
+    observed = latest_observed_user_input(project_id, provider_session_id)
     text = str(observed.get("text") or "") if observed else ""
-    if not observed or not _is_explicit_cancel_instruction(text):
+    if (
+        not observed
+        or observed.get("source") != "user_prompt"
+        or observed.get("kind") != "instruction"
+        or not _is_explicit_cancel_instruction(text)
+    ):
         raise ValueError(
-            "Cancelling a task requires an explicit current user instruction such as 'cancel this task'"
+            "Cancelling a task requires the newest direct user prompt to explicitly cancel this task"
         )
 
-    committed_event_id = observed.get("committed_event_id")
-    if committed_event_id is not None:
-        if str(observed.get("committed_task_key") or "") != task_key:
-            raise ValueError(
-                "Cancellation user instruction was already committed to a different task"
-            )
-        return
+    # An already committed observation is history, not a reusable approval.
+    # The original host must stage a NEW direct cancellation instruction.
+    if observed.get("committed_event_id") is not None or observed.get("committed_at") is not None:
+        raise ValueError("Previously committed cancellation cannot authorize a later task transition")
 
     events = commit_staged_user_instruction_events(project_id, provider_session_id, task_key)
-    if not any(
-        event.get("event_type") == "USER_INSTRUCTION"
-        and _is_explicit_cancel_instruction(str(event.get("text") or ""))
-        for event in events
+    # The original writer commits in observation order. Never accept ANY older
+    # cancellation in a batch if a later observation superseded it meanwhile.
+    latest = events[-1] if events else None
+    if not (
+        latest
+        and latest.get("event_type") == "USER_INSTRUCTION"
+        and latest.get("source") == "user_prompt"
+        and _is_explicit_cancel_instruction(str(latest.get("text") or ""))
     ):
-        raise ValueError("Cancellation user instruction could not be durably committed")
+        raise ValueError("Newest cancellation instruction could not be durably committed")
 
 
 def transition_task_status(
