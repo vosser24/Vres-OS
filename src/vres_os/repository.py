@@ -281,7 +281,7 @@ class Repository:
             task_id = None
             if task_key:
                 row = conn.execute(
-                    "SELECT id FROM vres.tasks WHERE task_key=%s AND project_id=%s AND status=ANY(%s)",
+                    "SELECT id FROM vres.tasks WHERE task_key=%s AND project_id=%s AND status=ANY(%s) FOR UPDATE",
                     (task_key, project_id, list(_ACTIVE)),
                 ).fetchone()
                 if not row:
@@ -369,6 +369,14 @@ class Repository:
             # revocation's open-session snapshot or created after that revocation committed. Reuse takes no lock.
             _lock_project(conn, project_id)
             task_id = self._selected_task_id(conn, project_id, None)
+            if task_id is not None:
+                # Do not auto-bind a session to a task cancelled during selection.
+                locked = conn.execute(
+                    "SELECT project_id,status FROM vres.tasks WHERE id=%s FOR UPDATE", (task_id,),
+                ).fetchone()
+                if (not locked or int(locked["project_id"]) != int(project_id)
+                        or locked["status"] not in _ACTIVE):
+                    task_id = None
             conn.execute(
                 """
                 INSERT INTO vres.sessions(session_key,provider,provider_session_id,project_id,task_id)
@@ -383,9 +391,7 @@ class Repository:
         _persist_identity_unmodified(task_key, "task_key")
         with connect() as conn, conn.transaction():
             task_id = self._task_id(conn, task_key)
-            task = conn.execute("SELECT project_id,status FROM vres.tasks WHERE id=%s", (task_id,)).fetchone()
-            if not task or int(task["project_id"]) != int(project_id) or task["status"] not in _ACTIVE:
-                raise ValueError("Cannot bind session to a task outside this project or a completed task")
+            # Lock the session, then the target task, and recheck terminal status.
             session = conn.execute(
                 """
                 SELECT id,task_id FROM vres.sessions
@@ -397,6 +403,11 @@ class Repository:
             ).fetchone()
             if not session:
                 raise ValueError("Cannot bind an unregistered or closed session")
+            task = conn.execute(
+                "SELECT project_id,status FROM vres.tasks WHERE id=%s FOR UPDATE", (task_id,),
+            ).fetchone()
+            if not task or int(task["project_id"]) != int(project_id) or task["status"] not in _ACTIVE:
+                raise ValueError("Cannot bind session to a task outside this project or a completed task")
             previous_task_id = int(session["task_id"]) if session.get("task_id") else None
             previous_task_key = None
             if previous_task_id:

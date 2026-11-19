@@ -211,10 +211,17 @@ def inherit_replaced_session_task(
         predecessor = predecessors[0]
 
         task_id = int(predecessor["task_id"])
+        # Recheck under the cancellation writer's task row lock.
+        locked = conn.execute(
+            "SELECT task_key,status FROM vres.tasks WHERE id=%s AND project_id=%s FOR UPDATE",
+            (task_id, project_id),
+        ).fetchone()
+        if not locked or locked["status"] not in _ACTIVE:
+            return None
         # Historical rows are not automatically safe identity material.
         # Reject unsafe predecessor IDs before changing a binding or event.
         _persist_identity_unmodified(predecessor["provider_session_id"], "previous_provider_session_id")
-        task_key = _persist_identity_unmodified(str(predecessor["task_key"]), "task_key")
+        task_key = _persist_identity_unmodified(str(locked["task_key"]), "task_key")
         conn.execute(
             "UPDATE vres.sessions SET task_id=%s WHERE id=%s AND task_id IS NULL",
             (task_id, current["id"]),

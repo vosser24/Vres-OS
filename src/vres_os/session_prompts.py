@@ -229,6 +229,7 @@ def bind_session_to_project_focus(project_id: int, provider_session_id: str | No
               FROM vres.project_focus pf
               JOIN vres.tasks t ON t.id=pf.task_id
              WHERE pf.project_id=%s AND t.project_id=%s
+             FOR UPDATE OF t
             """,
             (project_id, project_id),
         ).fetchone()
