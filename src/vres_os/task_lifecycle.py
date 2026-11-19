@@ -27,7 +27,6 @@ def _is_explicit_cancel_instruction(text: str) -> bool:
     exact = {
         "cancel",
         "cancel it",
-        "cancel this",
         "cancel this task",
         "cancel the task",
         "cancel current task",
