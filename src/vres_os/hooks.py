@@ -258,19 +258,30 @@ def user_prompt() -> None:
                 )
             # Do not attribute the prompt to the currently focused task yet. The model may
             # create/switch tasks during this turn; Stop commits it to the final binding.
-            stage_user_instruction(project_id, sid, prompt)
+            # Establish the original current host turn BEFORE strict staging.
+            # SQL 047 then records this same existing turn with the observation.
             turn_id = begin_reply_turn(project_id, sid)
-            if turn_id:
-                context += (
-                    f"\nVRES_REPLY_TURN_ID={turn_id}\n"
-                    "Before every final reply while a persistent task is bound, call task_reply_gate. "
-                    "Use advances_state=true only after task_checkpoint when the reply completes, invalidates, "
-                    "or advances persisted next_action/pending_work; use advances_state=false only for a genuinely "
-                    "non-material reply."
-                )
+            if not turn_id:
+                raise ValueError("Cannot establish a current host-observed reply turn")
+            if not stage_user_instruction(project_id, sid, prompt):
+                context += "\nVRES_PERSISTENCE_WARNING: current user prompt was not durably staged."
+            context += (
+                f"\nVRES_REPLY_TURN_ID={turn_id}\n"
+                "Before every final reply while a persistent task is bound, call task_reply_gate. "
+                "Use advances_state=true only after task_checkpoint when the reply completes, invalidates, "
+                "or advances persisted next_action/pending_work; use advances_state=false only for a genuinely "
+                "non-material reply."
+            )
         # A replaced-session conflict cannot use a fallback-bound task as current.
         task = None if sid and not predecessor_unambiguous else repo.active_task(project_id, sid)
         if not task:
+            # A first prompt with no selected task cannot be copied to a later
+            # model-selected task as an authoritative original user event.
+            context += (
+                "\nVRES_UNBOUND_INPUT: no original task was bound at observation. "
+                "Do not claim this prompt was committed to a task selected or created later. "
+                "Request a fresh direct user prompt after explicit task binding for task authority."
+            )
             sys.stdout.write(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": context}}))
             return
         if repo.needs_context_rehydration(task.task_key):
