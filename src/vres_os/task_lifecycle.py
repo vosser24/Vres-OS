@@ -7,7 +7,7 @@ from typing import Any
 from .db import connect
 from .redaction import redact_for_persistence
 from .repository import _persist_identity_unmodified
-from .session_prompts import commit_staged_user_instruction_events, latest_observed_user_input
+from .session_prompts import latest_observed_user_input
 
 _TRANSITIONS = {
     "active": {"waiting_user", "blocked", "cancelled"},
@@ -51,7 +51,7 @@ def _is_explicit_cancel_instruction(text: str) -> bool:
     )
 
 
-def _require_bound_session(conn, project_id: int, task_id: int, provider_session_id: str | None):
+def _require_bound_session(conn, project_id: int, task_id: int | None, provider_session_id: str | None):
     if not provider_session_id:
         raise ValueError("Task status transition requires the current provider session")
     session = conn.execute(
@@ -64,7 +64,7 @@ def _require_bound_session(conn, project_id: int, task_id: int, provider_session
         """,
         (provider_session_id, project_id),
     ).fetchone()
-    if not session or int(session.get("task_id") or 0) != int(task_id):
+    if not session or (task_id is not None and int(session.get("task_id") or 0) != int(task_id)):
         raise ValueError("Task status transition must target the task bound to the current session")
     return session
 
@@ -73,12 +73,14 @@ def _authorize_cancel_instruction(
     project_id: int,
     task_key: str,
     provider_session_id: str | None,
-) -> None:
+) -> int:
+    """Preflight the latest direct cancellation, without consuming it.
+
+    The protected SQL 044 writer performs the locked authoritative second
+    check and task transition in the SAME transaction as committing the event.
+    """
     if not provider_session_id:
         raise ValueError("Cancelling a task requires the current provider session")
-    # The newest protected observation must win, including inspection-only
-    # controls and AskUserQuestion answers. The old instruction-only SQL view
-    # could skip a newer control and replay a stale cancellation.
     observed = latest_observed_user_input(project_id, provider_session_id)
     text = str(observed.get("text") or "") if observed else ""
     if (
@@ -90,23 +92,75 @@ def _authorize_cancel_instruction(
         raise ValueError(
             "Cancelling a task requires the newest direct user prompt to explicitly cancel this task"
         )
-
-    # An already committed observation is history, not a reusable approval.
-    # The original host must stage a NEW direct cancellation instruction.
     if observed.get("committed_event_id") is not None or observed.get("committed_at") is not None:
         raise ValueError("Previously committed cancellation cannot authorize a later task transition")
+    observation_id = observed.get("observation_id")
+    if type(observation_id) is not int or observation_id <= 0:
+        raise ValueError("Cancellation requires an exact protected observation identity")
+    return observation_id
 
-    events = commit_staged_user_instruction_events(project_id, provider_session_id, task_key)
-    # The original writer commits in observation order. Never accept ANY older
-    # cancellation in a batch if a later observation superseded it meanwhile.
-    latest = events[-1] if events else None
-    if not (
-        latest
-        and latest.get("event_type") == "USER_INSTRUCTION"
-        and latest.get("source") == "user_prompt"
-        and _is_explicit_cancel_instruction(str(latest.get("text") or ""))
-    ):
-        raise ValueError("Newest cancellation instruction could not be durably committed")
+
+def _validated_bound_sessions(project_id: int, task_key: str) -> list[dict[str, Any]]:
+    """Validate every sibling ID with ORIGINAL strict Python persistence rules.
+
+    Protected writer compares this entire snapshot with row-locked current
+    siblings, so a rebinding or newly created sibling fails closed.
+    """
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT id,provider_session_id
+              FROM vres.sessions
+             WHERE project_id=%s
+               AND task_id=(
+                   SELECT id FROM vres.tasks
+                    WHERE task_key=%s AND project_id=%s
+               )
+               AND ended_at IS NULL
+             ORDER BY id
+            """,
+            (project_id, task_key, project_id),
+        ).fetchall()
+    safe = []
+    for row in rows:
+        sid = _persist_identity_unmodified(row.get("provider_session_id"), "bound_provider_session_id")
+        if not sid:
+            raise ValueError("Cancellation sibling session identity is missing")
+        safe.append({"id": int(row["id"]), "provider_session_id": sid})
+    return safe
+
+
+def _cancel_atomic(
+    project_id: int,
+    task_key: str,
+    provider_session_id: str | None,
+    safe_reason: str,
+) -> dict[str, Any]:
+    """No legacy writer-then-runtime cancellation fallback, even on old schema."""
+    observation_id = _authorize_cancel_instruction(project_id, task_key, provider_session_id)
+    siblings = _validated_bound_sessions(project_id, task_key)
+    with connect(purpose="writer") as conn, conn.transaction():
+        row = conn.execute(
+            """
+            SELECT vres.cancel_task_from_current_observation(
+                %s,%s,%s,%s,%s,%s::jsonb
+            ) AS outcome
+            """,
+            (
+                project_id, provider_session_id, task_key, observation_id,
+                safe_reason, json.dumps(siblings, separators=(",", ":")),
+            ),
+        ).fetchone()
+    outcome = row.get("outcome") if row else None
+    if not isinstance(outcome, dict) or outcome.get("changed") is not True:
+        raise ValueError("Trusted atomic cancellation did not confirm a status change")
+    if outcome.get("status") != "cancelled" or outcome.get("from_status") not in _TRANSITIONS:
+        raise ValueError("Trusted atomic cancellation returned an invalid status")
+    return {
+        "changed": True, "task_key": task_key,
+        "from_status": outcome["from_status"],
+        "status": "cancelled", "reason": safe_reason,
+    }
 
 
 def transition_task_status(
@@ -117,20 +171,10 @@ def transition_task_status(
     *,
     provider_session_id: str | None = None,
 ) -> dict[str, Any]:
-    """Change an unfinished task's lifecycle status without destroying task state.
-
-    Completion is deliberately excluded: only the protected task_complete path may
-    establish `completed`. Park/block/resume require the current bound session.
-    Cancellation additionally requires a protected current user cancellation prompt;
-    that prompt is durably committed through the provenance-writer boundary first.
-    """
-    # Task/session keys are structural authority identifiers, not display text.
-    # Reject credential-shaped caller values BEFORE cancellation provenance or SQL.
+    """Keep the original task owner; atomic cancellation is writer-protected."""
     _persist_identity_unmodified(task_key, "task_key")
     _persist_identity_unmodified(provider_session_id, "provider_session_id")
     target = str(target_status or "").strip().lower()
-    # Direct lifecycle event writes must use the same strict persistence boundary
-    # as the original Repository; display redaction can leave credential tails.
     safe_reason = redact_for_persistence(str(reason or "").strip())
     if target not in {"active", "waiting_user", "blocked", "cancelled"}:
         raise ValueError(
@@ -138,39 +182,34 @@ def transition_task_status(
         )
     if not safe_reason:
         raise ValueError("Task status transition requires a durable reason")
-
     if target == "cancelled":
-        _authorize_cancel_instruction(project_id, task_key, provider_session_id)
+        return _cancel_atomic(project_id, task_key, provider_session_id, safe_reason)
 
     with connect() as conn, conn.transaction():
+        # Keep session -> task lock ordering consistent with original staging.
+        session = _require_bound_session(conn, project_id, None, provider_session_id)
         task = conn.execute(
             """
-            SELECT id,project_id,status
-              FROM vres.tasks
-             WHERE task_key=%s
-             FOR UPDATE
+            SELECT id,project_id,status FROM vres.tasks
+             WHERE task_key=%s FOR UPDATE
             """,
             (task_key,),
         ).fetchone()
         if not task or int(task["project_id"]) != int(project_id):
             raise ValueError("Task status transition must target a task in the current project")
         task_id = int(task["id"])
+        if int(session.get("task_id") or 0) != task_id:
+            raise ValueError("Task status transition must target the task bound to the current session")
         current = str(task["status"])
         if current == target:
             return {
-                "changed": False,
-                "task_key": task_key,
-                "from_status": current,
-                "status": target,
+                "changed": False, "task_key": task_key,
+                "from_status": current, "status": target,
             }
         if current in _TERMINAL:
             raise ValueError(f"Task status {current} is terminal and cannot be changed")
-        allowed = _TRANSITIONS.get(current, set())
-        if target not in allowed:
+        if target not in _TRANSITIONS.get(current, set()):
             raise ValueError(f"Task status transition {current} -> {target} is not allowed")
-
-        _require_bound_session(conn, project_id, task_id, provider_session_id)
-
         conn.execute(
             "UPDATE vres.validation_requests SET status='superseded',completed_at=COALESCE(completed_at,now()) "
             "WHERE task_id=%s AND status='pending'",
@@ -180,80 +219,25 @@ def transition_task_status(
             "UPDATE vres.task_state SET validation_status='pending',updated_at=now() WHERE task_id=%s",
             (task_id,),
         )
-        conn.execute(
-            "UPDATE vres.tasks SET status=%s,updated_at=now() WHERE id=%s",
-            (target, task_id),
-        )
-        payload = {
-            "from_status": current,
-            "to_status": target,
-            "reason": safe_reason,
-            "state_preserved": True,
-            "authorization": "current_user_instruction" if target == "cancelled" else "chairman_lifecycle",
-        }
+        conn.execute("UPDATE vres.tasks SET status=%s,updated_at=now() WHERE id=%s", (target, task_id))
         conn.execute(
             """
             INSERT INTO vres.task_events(task_id,event_type,actor,payload,session_id)
             VALUES (%s,'TASK_STATUS_CHANGED','chairman',%s::jsonb,%s)
             """,
-            (task_id, json.dumps(payload), provider_session_id),
+            (task_id, json.dumps({
+                "from_status": current, "to_status": target, "reason": safe_reason,
+                "state_preserved": True, "authorization": "chairman_lifecycle",
+            }), provider_session_id),
         )
-
-        if target == "cancelled":
-            sessions = conn.execute(
-                """
-                SELECT id,provider_session_id
-                  FROM vres.sessions
-                 WHERE project_id=%s AND task_id=%s AND ended_at IS NULL
-                 FOR UPDATE
-                """,
-                (project_id, task_id),
-            ).fetchall()
-            for bound in sessions:
-                # A stored sibling session ID is still an authority/event key.
-                # Fail inside this transaction rather than writing unsafe JSON.
-                sid = _persist_identity_unmodified(bound.get("provider_session_id"), "bound_provider_session_id")
-                conn.execute(
-                    """
-                    INSERT INTO vres.task_events(task_id,event_type,actor,payload,session_id)
-                    VALUES (%s,'SESSION_UNBOUND','chairman',%s::jsonb,%s)
-                    """,
-                    (
-                        task_id,
-                        json.dumps(
-                            {
-                                "source": "task_cancelled",
-                                "previous_task_id": task_id,
-                                "previous_task_key": task_key,
-                                "new_task_id": None,
-                                "new_task_key": None,
-                            }
-                        ),
-                        sid,
-                    ),
-                )
-            if sessions:
-                conn.execute(
-                    "UPDATE vres.sessions SET task_id=NULL WHERE project_id=%s AND task_id=%s AND ended_at IS NULL",
-                    (project_id, task_id),
-                )
-            conn.execute(
-                "UPDATE vres.project_focus SET task_id=NULL,updated_at=now() WHERE project_id=%s AND task_id=%s",
-                (project_id, task_id),
-            )
-        else:
-            conn.execute(
-                """
-                INSERT INTO vres.project_focus(project_id,task_id) VALUES (%s,%s)
-                ON CONFLICT(project_id) DO UPDATE SET task_id=excluded.task_id,updated_at=now()
-                """,
-                (project_id, task_id),
-            )
-
+        conn.execute(
+            """
+            INSERT INTO vres.project_focus(project_id,task_id) VALUES (%s,%s)
+            ON CONFLICT(project_id) DO UPDATE SET task_id=excluded.task_id,updated_at=now()
+            """,
+            (project_id, task_id),
+        )
     return {
-        "changed": True,
-        "task_key": task_key,
-        "from_status": current,
-        "status": target,
-        "reason": safe_reason,
+        "changed": True, "task_key": task_key,
+        "from_status": current, "status": target, "reason": safe_reason,
     }

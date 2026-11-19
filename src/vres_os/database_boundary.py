@@ -374,6 +374,7 @@ def activate_boundary(conn, cfg: VresConfig) -> None:
     for optional_signature in (
         "vres.latest_observed_user_input(bigint,text)",
         "vres.stage_strict_user_input(bigint,text,text,text,text,text,text,timestamptz,text)",
+        "vres.cancel_task_from_current_observation(bigint,text,text,bigint,text,jsonb)",
     ):
         result = conn.execute(
             "SELECT to_regprocedure(%s) AS routine", (optional_signature,)

@@ -166,8 +166,8 @@ def test_historical_observed_text_is_strictly_suppressed_on_read(monkeypatch):
 
 def test_cancellation_refuses_tainted_bound_sibling_session_event(monkeypatch):
     fake = _Fake(siblings=[{"id": 42, "provider_session_id": "password=synthetic,tail"}])
-    monkeypatch.setattr(task_lifecycle, "connect", lambda: fake)
-    monkeypatch.setattr(task_lifecycle, "_authorize_cancel_instruction", lambda *_: None)
+    monkeypatch.setattr(task_lifecycle, "connect", lambda purpose=None: fake)
+    monkeypatch.setattr(task_lifecycle, "_authorize_cancel_instruction", lambda *_: 23)
     with pytest.raises(ValueError, match="unsafe credential material"):
         task_lifecycle.transition_task_status(
             7, "TASK-CLEAN", "cancelled", "Explicit user cancellation",
@@ -175,5 +175,5 @@ def test_cancellation_refuses_tainted_bound_sibling_session_event(monkeypatch):
         )
     # The real transaction would roll back all preceding writes. This fake
     # only proves that the unsafe SESSION_UNBOUND event is never constructed.
-    assert not any("SESSION_UNBOUND" in sql for sql, _ in fake.calls)
+    assert not any("cancel_task_from_current_observation" in sql for sql, _ in fake.calls)
     assert "synthetic,tail" not in str(fake.calls)

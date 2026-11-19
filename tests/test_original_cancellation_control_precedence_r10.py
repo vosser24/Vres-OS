@@ -32,37 +32,23 @@ def test_newer_control_answer_or_committed_history_cannot_replay_cancellation(
     monkeypatch, newest,
 ):
     monkeypatch.setattr(task_lifecycle, "latest_observed_user_input", lambda *_: newest)
-    def forbidden(*_args):
-        raise AssertionError("must not commit a non-current direct cancellation")
-    monkeypatch.setattr(task_lifecycle, "commit_staged_user_instruction_events", forbidden)
     with pytest.raises(ValueError):
         task_lifecycle._authorize_cancel_instruction(7, "TASK-CLEAN", "SESSION-CLEAN")
 
 
-def test_newest_direct_pending_cancel_commits_on_original_authority_path(monkeypatch):
+def test_newest_direct_pending_cancel_returns_observation_id_without_commit(monkeypatch):
     monkeypatch.setattr(task_lifecycle, "latest_observed_user_input",
                         lambda *_: _observation())
-    calls = []
-    def commit(project_id, session_id, task_key):
-        calls.append((project_id, session_id, task_key))
-        return [{"event_type": "USER_INSTRUCTION", "source": "user_prompt",
-                 "text": "cancel this task"}]
-    monkeypatch.setattr(task_lifecycle, "commit_staged_user_instruction_events", commit)
-    task_lifecycle._authorize_cancel_instruction(7, "TASK-CLEAN", "SESSION-CLEAN")
-    assert calls == [(7, "SESSION-CLEAN", "TASK-CLEAN")]
+    assert task_lifecycle._authorize_cancel_instruction(
+        7, "TASK-CLEAN", "SESSION-CLEAN"
+    ) == 23
 
 
-def test_earlier_cancellation_in_writer_batch_is_not_sufficient(monkeypatch):
+def test_missing_protected_observation_id_refused(monkeypatch):
     monkeypatch.setattr(task_lifecycle, "latest_observed_user_input",
-                        lambda *_: _observation())
-    monkeypatch.setattr(task_lifecycle, "commit_staged_user_instruction_events",
-                        lambda *_: [
-                            {"event_type": "USER_INSTRUCTION", "source": "user_prompt",
-                             "text": "cancel this task"},
-                            {"event_type": "USER_CONTROL", "source": "user_prompt",
-                             "text": "Inspection only."},
-                        ])
-    with pytest.raises(ValueError, match="Newest cancellation"):
+                        lambda *_: {k: v for k, v in _observation().items()
+                                   if k != "observation_id"})
+    with pytest.raises(ValueError, match="exact protected observation identity"):
         task_lifecycle._authorize_cancel_instruction(7, "TASK-CLEAN", "SESSION-CLEAN")
 
 
