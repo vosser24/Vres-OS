@@ -1,0 +1,44 @@
+# Vres-OS — 2026-11-19 R13C fourth unsigned Claude Fable advisory reconciliation
+
+**ADVISORY EVIDENCE ONLY / REVIEW_BLOCKED / NO GENUINELY INDEPENDENT F1-FABLE AUTHORITY / NO R13D SOURCE OR TEST CONSENT BY THIS REPORT.**
+
+## Provenance and scope
+
+The owner pasted a reviewer-template response on 2026-11-19. The report self-identifies as an Anthropic Claude cloud AI session described as "Claude Fable 5.2", with **no independently attributable reviewer name, GitHub account, signature, credentials, or professional affiliation**. Its self-reported review time is about 13:30 UTC; the time and anonymous clone are **reporter assertions**, not authenticated provenance. It declares itself NOT independent of the same AI's earlier reports and explicitly says the review cannot lift `REVIEW_BLOCKED`. The exact paste is retained in the conversation, not claimed to have an independently verified SHA-256 or to be filed under a separate GitHub account. Do NOT post it under owner account as an independent signoff. The included unsigned third-pass report is not independent corroboration.
+
+Current authenticated GitHub readback on 2026-11-19: account `vosser24` (ID 62554356), repo `vosser24/Vres-OS` (ID 1368577038). `#185` OPEN, 12 comments ALL authored by `vosser24`, none attributable to an independent reviewer. Reporter says it read all 12 comments from owner-supplied copies; GitHub identity remains absent. Engineering `3bd8d8a8fa2bccc87286432657302db34ed13e2b` / TREE `5050a438e5efd14ce617a1e797e439de3cd18fb9` / parent `f3411367f1596ac7b03817da20fb4351a207cc83` unchanged; initial docs HEAD `40be3a74029c877701034c0a0aab46f8c5a228bc`. Do not treat claimed package checksum matching as verified reviewer attribution.
+
+## Three declared advisory verdicts
+
+- `THREAT_MODEL: REVISE`
+- `RELEASE_DESIGN: DESIGN_REVISE` (R13C); the five-part proposed R13D correction is narrowly suitable for design consideration, NOT approved code or release.
+- `OPERATIONS: BLOCKED` for PostgreSQL, native Claude/FastMCP/hooks, Windows, migrations, installation, staging, merge, production and UAT; read-only review/docs permitted. R13D source authoring CONDITIONAL on genuine independent review plus separate informed owner approval under the binding project gate. Isolated AST/compile/pytest CONDITIONAL on separately explicit owner approval in no-network/no-DB isolation; current R13C tests NOT_RUN.
+
+## Specific source-grounded findings and conservative disposition
+
+1. **P1 F1 — cancellation replay / early denial:** `src/vres_os/mcp_entrypoint.py:60-84` currently calls `_project()`, `_current_session()`, and `_require_node()` before `transition_task_status`; `mcp_server.py:71-74,92-118` confirms database-contacting routines. Denying only at `task_lifecycle.py:184` would be too late for a **pre-DB** guarantee. R13D candidate: normalize and refuse model-facing `cancelled` as the first operation of `task_status_set`, BEFORE project/session/node access, and deny again in `task_lifecycle.py:165-185` before its database route. Update any cancellation-advertising docstrings, Chairman and plugin prompts only after source approval. Existing `047:153-174` cannot attest an unobserved later host turn. Any exploit interleaving NOT_RUN.
+2. **P1 F2 — nonhuman host prompt origin:** `session_prompts.py:46-56` recognizes two notification prefixes, whereas UserPromptSubmit can include scheduled/subagent/cross-session/generated outputs per official Claude documentation. Host-submitted text is NOT human-origin proof. No irreversible automatic cancellation solely from these observations.
+3. **P1 F3 — hook failure behavior:** `plugins/vres-os/hooks/hooks.json:21-37` lacks `onFailure:block`, and `plugins/vres-os/bin/vres-hook.ps1:67-77` can emit warning and `exit 0` on launcher failure. Upstream support/version condition is Claude Code >=2.1.295 for `onFailure:block`; exact host and PowerShell behavior NOT_RUN. Preserve deliberate P0 launcher hold at line 3; no activation/bypass.
+4. **P1 F4 — release discrepancy:** `release_inputs.py` pins 001-041, prospective 042-047 NOT_APPLIED. This correctly rejects an unreviewed release tree but is not usable release readiness. The live ledger UNKNOWN. Migration 048 is NOT assumed safe, free or cleared.
+5. **P2 F5 — runtime table privileges:** `database_boundary.py:236-263` grants broad runtime table UPDATE/DELETE and default privileges. `task_lifecycle.py:221` uses direct runtime task-status UPDATE. Inspected completion triggers `021:125`, `027:103`, `033:42-43` do not specifically guard `cancelled`. Candidate writer-role status trigger when a reviewed migration is authorized; do not claim a verified DB privilege state. Trigger is defense-in-depth, NOT necessary for the narrow Python-route denial. A role-privileged runtime process may still DELETE tasks; record residual and do not break existing behavior without design review.
+6. **P2 F6/F7 — guard and session trust:** `reply_guard.py:40-73` stores runtime-writable turn metadata; `mcp_server.py:92-105` verifies caller-supplied session existence, not human control. Do not promote either to human authorization.
+7. **P2 F8 — credential ingress:** `hooks.py:213-221` emits `suppressOriginalPrompt` at the wrong nesting level; system-prefix early return precedes credential guard at `hooks.py:234-240`. Correction requires official output placement, early detection, honest disclosure that local transcripts/history may retain text. No host verification.
+8. **P2 F9 / P3 F10 — rollback and lower-severity residuals:** forward migrations 043-047 have no supported safe rollback; possible future-function EXECUTE window (`database_boundary.py:260-263`); prior passed-validation parking behavior at `task_lifecycle.py:217-220`; Greek suffix/bare cancel phrasing `047:180-189`; R13A/B/C tests are predominantly source/static. All runtime/lock effects NOT_RUN. Do not infer all FastMCP surfaces have been exhaustively audited for raw SQL: reviewer explicitly leaves this open.
+
+## Reviewer-declared incomplete coverage
+
+The reviewer says the entire old 656-KB continuity index, M0..M8, October and November 5 roadmaps, C2B/K0, full migration-023 function bodies, plugin/Chairman prompt text, full FastMCP raw-SQL surface, and refreshed installer were NOT fully read. Reporter's source identity and package hash checks are self-reported. A distinct reviewer still must independently read exact current source, complete issue and applicable history.
+
+## Actionable R13D design target; nothing authorized to implement yet
+
+1. FIRST fail-closed `task_status_set(status=cancelled)` **before every database/contact helper**; SECOND fail-closed lifecycle guard for other Python callers. Keep `active/waiting_user/blocked` unchanged.
+2. Design writer-only terminal cancellation of the **original** task owner, no staged model-replay capability; specify database-authoritative transaction, no untrusted prompt/session/hook as proof of a human. Any operator CLI confirmation is an accident barrier given model shell access; no new GUI/Chairman/MCP/runtime/store/installer.
+3. Review status-trigger contract and SQL role grants as a subsequent prospective migration without selecting a number until schema incident and live ledger are separately reconciled; do not apply SQL now.
+4. Correct hook failure / credential output and provenance labeling while keeping native-host launchers held.
+5. Add meaningful behavioral negative/positive tests *after* separate isolated-execution approval. Preserve passed validation, original task/session history, rebind quarantine, FastMCP and install/update/recovery.
+
+**Gate remains REVIEW_BLOCKED until a genuinely distinct, attributable independent reviewer provides all three explicit verdicts and evidence. Separate owner approval required for R13D source changes, and separate approval for isolated tests.** A new anonymous AI session, an owner-authored comment or this docs reconciliation cannot grant authority.
+
+**Absolute holds:** `LIVE_SCHEMA_048_INCIDENT=OPEN`: no PostgreSQL even SELECT or indirect DB route. `HOST_HOOK_DB_ROUTE_ATTEMPTED_AND_REFUSED=OPEN`: no native Claude Code/installed MCP/hooks. Independently trusted F1/Fable positive authority NOT_GRANTED; P3, Windows Git L2, installed P2, main/R13, credentials/profile, PRISM/legacy project/TASK-DAY-01, SQL application, Windows install/update/recovery and integrated UAT HELD. Current R13C Python AST/compile/pytest, SQL, PostgreSQL, PowerShell, native hooks, publisher/dependency/NTFS and V-01..V-42 UAT NOT_RUN. Historical 732/732 pytest and 407/407 compile PASS pertain only to old `9e2b538b06f34926f611db7e20120be572577101`.
+
+Sources: [issue #185](https://github.com/vosser24/Vres-OS/issues/185), [current R13C commit](https://github.com/vosser24/Vres-OS/commit/3bd8d8a8fa2bccc87286432657302db34ed13e2b), [prior independent-advisory reconciliation](VRES-2026-11-19-R13C-FABLE-UNSIGNED-REPORT-RECONCILIATION.md).
