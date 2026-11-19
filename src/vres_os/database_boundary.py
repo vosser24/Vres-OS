@@ -262,6 +262,10 @@ def provision_boundary(
                         "ALTER DEFAULT PRIVILEGES FOR ROLE {} IN SCHEMA vres GRANT EXECUTE ON FUNCTIONS TO {}"
                     ).format(sql.Identifier(migration_user), sql.Identifier(cfg.database.user))
                 )
+                # Original historical task rows/ledger are never a runtime delete surface.
+                # For a new empty schema there are no such relations yet; migration
+                # activation reapplies this narrow revocation once they exist.
+                _revoke_original_task_history_deletes(conn, cfg.database.user)
         except Exception:
             for role in (writer_user, migration_user):
                 try:
@@ -390,8 +394,37 @@ def activate_boundary(conn, cfg: VresConfig) -> None:
             sql.SQL("GRANT EXECUTE ON FUNCTION {} TO {}").format(sql.SQL(signature), sql.Identifier(writer))
         )
     conn.execute(sql.SQL("GRANT USAGE ON SCHEMA vres TO {}").format(sql.Identifier(writer)))
+    # Role privileges are rechecked after pending migrations because default
+    # privileges may have granted DELETE to new tables in older source trees.
+    _revoke_original_task_history_deletes(conn, runtime)
     _activate_context_refresh_attestations(conn, runtime, writer)
     _activate_experience_observability(conn, runtime, writer)
+
+
+def _revoke_original_task_history_deletes(conn, runtime: str) -> None:
+    """Remove direct runtime deletion of original task/history rows when present.
+
+    This is a narrowly scoped defense, not runtime least-privilege certification:
+    unrelated tables can still have broad UPDATE/DELETE. Neither this helper nor
+    its callers may run while LIVE_SCHEMA_048_INCIDENT remains OPEN.
+    """
+    require_w4_schema_clearance()  # P0: before DB metadata or role operations
+    from psycopg import sql
+
+    for table in ("tasks", "task_state", "task_events", "checkpoints"):
+        row = conn.execute(
+            "SELECT to_regclass(%s) AS relation", (f"vres.{table}",)
+        ).fetchone()
+        relation = row.get("relation") if isinstance(row, dict) else row[0] if row else None
+        if relation is None:
+            continue  # empty fresh schema; activate after migrations
+        target = sql.SQL("TABLE vres.{}").format(sql.Identifier(table))
+        conn.execute(sql.SQL("REVOKE DELETE ON {} FROM PUBLIC").format(target))
+        conn.execute(
+            sql.SQL("REVOKE DELETE ON {} FROM {}").format(
+                target, sql.Identifier(runtime)
+            )
+        )
 
 
 def _activate_context_refresh_attestations(conn, runtime: str, writer: str) -> None:
