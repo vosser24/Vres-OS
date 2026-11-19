@@ -370,6 +370,16 @@ def activate_boundary(conn, cfg: VresConfig) -> None:
         "vres.latest_observed_user_instruction(bigint,text)",
         "vres.commit_user_inputs(bigint,text,text)",
     ]
+    # 042 and 043 can be absent on older compatible ledgers: grant only if present.
+    for optional_signature in (
+        "vres.latest_observed_user_input(bigint,text)",
+        "vres.stage_strict_user_input(bigint,text,text,text,text,text,text,timestamptz,text)",
+    ):
+        result = conn.execute(
+            "SELECT to_regprocedure(%s) AS routine", (optional_signature,)
+        ).fetchone()
+        if result and result["routine"] is not None:
+            protected_functions.append(optional_signature)
     for signature in protected_functions:
         conn.execute(sql.SQL("REVOKE ALL ON FUNCTION {} FROM PUBLIC").format(sql.SQL(signature)))
         conn.execute(

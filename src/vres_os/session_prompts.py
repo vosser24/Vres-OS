@@ -14,6 +14,7 @@ _PENDING_KEY = "pending_user_instructions"
 _LEGACY_PENDING_KEY = "pending_user_instruction"
 _COMMITTED_TOOL_IDS_KEY = "committed_user_input_tool_ids"
 READ_ONLY_HOLD_KEY = "vres_read_only_hold"
+STRICT_STAGE_CONTRACT = "vres-python-strict-v1"
 _ACTIVE = {"active", "waiting_user", "blocked"}
 _CONTROL_COMMANDS = {
     "/clear",
@@ -180,7 +181,7 @@ def _stage_entry(
     with connect(purpose="writer") as conn, conn.transaction():
         row = conn.execute(
             """
-            SELECT vres.stage_user_input(%s,%s,%s,%s,%s,%s,%s,%s) AS staged
+            SELECT vres.stage_strict_user_input(%s,%s,%s,%s,%s,%s,%s,%s,%s) AS staged
             """,
             (
                 project_id,
@@ -191,6 +192,7 @@ def _stage_entry(
                 safe_tool_id,
                 safe_question,
                 observed_at,
+                STRICT_STAGE_CONTRACT,
             ),
         ).fetchone()
     return bool(row and row["staged"])

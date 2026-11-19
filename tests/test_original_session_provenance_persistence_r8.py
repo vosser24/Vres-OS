@@ -43,7 +43,7 @@ class _Fake:
 
     def execute(self, sql, params=None):
         self.calls.append((sql, params))
-        if "SELECT vres.stage_user_input" in sql:
+        if "SELECT vres.stage_strict_user_input" in sql:
             return _Result({"staged": True})
         if "SELECT * FROM vres.latest_observed_user_instruction" in sql:
             return _Result(self.observed)
@@ -75,7 +75,7 @@ def test_original_prompt_stage_is_strict_and_preserves_read_only_authority(monke
     monkeypatch.setattr(session_prompts, "_writer_available", lambda: True)
     monkeypatch.setattr(session_prompts, "connect", lambda purpose=None: fake)
     assert session_prompts.stage_user_instruction(7, "SESSION-CLEAN", prompt)
-    call = next(args for sql, args in fake.calls if "stage_user_input" in sql)
+    call = next(args for sql, args in fake.calls if "stage_strict_user_input" in sql)
     assert call[1] == "SESSION-CLEAN"
     assert call[2] == expected
     assert call[4] == ("control" if expected == "Inspection only." else "instruction")
@@ -92,7 +92,7 @@ def test_ask_answer_and_question_strictly_suppress_synthetic_secrets(monkeypatch
     assert session_prompts.stage_ask_user_answers(
         7, "SESSION-CLEAN", data, answer, tool_use_id="TOOL-CLEAN"
     ) == 1
-    call = next(args for sql, args in fake.calls if "stage_user_input" in sql)
+    call = next(args for sql, args in fake.calls if "stage_strict_user_input" in sql)
     assert call[2] == "[REDACTED_UNSAFE_FIELD]"
     assert call[4] == "instruction"
     assert call[5] == "TOOL-CLEAN:0"
