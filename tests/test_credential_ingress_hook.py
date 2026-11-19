@@ -8,6 +8,12 @@ import pytest
 from vres_os import hooks
 
 
+@pytest.fixture(autouse=True)
+def _synthetic_hook_only(monkeypatch):
+    # Test-only stub: never executes installed Claude, FastMCP, hooks or database.
+    monkeypatch.setattr(hooks, "require_w4_native_host_clearance", lambda: None)
+
+
 def test_high_confidence_credential_blocks_before_config_repository_or_prompt_staging(
     monkeypatch, tmp_path, capsys
 ):
@@ -49,7 +55,7 @@ def test_high_confidence_credential_blocks_before_config_repository_or_prompt_st
     rendered = capsys.readouterr().out
     message = json.loads(rendered)
     assert message["decision"] == "block"
-    assert message["suppressOriginalPrompt"] is True
+    assert message["hookSpecificOutput"]["suppressOriginalPrompt"] is True
     assert "Credential detected" in message["reason"]
     assert "pending current-user capture" in message["reason"]
     assert secret not in rendered
@@ -93,7 +99,7 @@ def test_credential_capture_failure_still_blocks_and_logs_only_fixed_non_secret_
     rendered = capsys.readouterr().out
     message = json.loads(rendered)
     assert message["decision"] == "block"
-    assert message["suppressOriginalPrompt"] is True
+    assert message["hookSpecificOutput"]["suppressOriginalPrompt"] is True
     assert "capture was unavailable" in message["reason"].lower()
     assert secret not in rendered
     assert logged == [
@@ -148,9 +154,9 @@ def test_false_positive_fixture_is_not_captured_and_safe_prompt_uses_existing_li
     monkeypatch.setattr(
         hooks,
         "stage_user_instruction",
-        lambda project_id, sid, text: staged.append((project_id, sid, text)),
+        lambda project_id, sid, text: staged.append((project_id, sid, text)) or True,
     )
-    monkeypatch.setattr(hooks, "begin_reply_turn", lambda *_args: None)
+    monkeypatch.setattr(hooks, "begin_reply_turn", lambda *_args: "TURN-SAFE")
 
     hooks.user_prompt()
 
@@ -193,3 +199,45 @@ def test_placeholder_and_host_system_events_are_not_silently_captured(monkeypatc
     )
     hooks.user_prompt()
     assert capsys.readouterr().out == ""
+
+
+def test_configured_prompt_missing_session_is_denied_before_repository(monkeypatch, capsys):
+    monkeypatch.setattr(hooks, "_input", lambda: {"prompt": "Continue selected task"})
+    monkeypatch.setattr(hooks, "_credential_ingress_guard", lambda *_: False)
+    monkeypatch.setattr(hooks, "ConfigStore", lambda: SimpleNamespace(load=lambda: SimpleNamespace(configured=True)))
+    monkeypatch.setattr(hooks, "Repository", lambda: pytest.fail("must reject before repository"))
+    hooks.user_prompt()
+    decision = json.loads(capsys.readouterr().out)
+    assert decision["decision"] == "block"
+    assert decision["hookSpecificOutput"]["suppressOriginalPrompt"] is True
+
+
+@pytest.mark.parametrize("failure", ["false_return", "exception"])
+def test_configured_prompt_staging_failure_is_denied_not_warned(monkeypatch, capsys, failure):
+    class Repo:
+        def open_session(self, *_args):
+            pass
+
+        def active_task(self, *_args):
+            pytest.fail("must reject before considering a focused task")
+
+    monkeypatch.setattr(hooks, "_input", lambda: {"session_id": "SESSION-CLEAN", "prompt": "Continue selected task"})
+    monkeypatch.setattr(hooks, "_credential_ingress_guard", lambda *_: False)
+    monkeypatch.setattr(hooks, "ConfigStore", lambda: SimpleNamespace(load=lambda: SimpleNamespace(configured=True)))
+    monkeypatch.setattr(hooks, "Repository", Repo)
+    monkeypatch.setattr(hooks, "_project_id", lambda *_: 7)
+    monkeypatch.setattr(hooks, "_observe_session", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(hooks, "_restore_session_focus", lambda *_: True)
+    monkeypatch.setattr(hooks, "begin_reply_turn", lambda *_: "TURN-OBSERVED")
+    monkeypatch.setattr(hooks, "_log_hook_error", lambda *_: None)
+    if failure == "false_return":
+        monkeypatch.setattr(hooks, "stage_user_instruction", lambda *_: False)
+    else:
+        def unavailable(*_args):
+            raise RuntimeError("synthetic backend text must not reach model")
+        monkeypatch.setattr(hooks, "stage_user_instruction", unavailable)
+    hooks.user_prompt()
+    decision = json.loads(capsys.readouterr().out)
+    assert decision["decision"] == "block"
+    assert decision["hookSpecificOutput"]["suppressOriginalPrompt"] is True
+    assert "synthetic backend text" not in json.dumps(decision)

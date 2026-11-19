@@ -31,7 +31,8 @@
               "-File",
               "${CLAUDE_PLUGIN_ROOT}/bin/vres-hook.ps1",
               "user-prompt"
-            ]
+            ],
+            "onFailure": "block"
           }
         ]
       }
@@ -50,7 +51,8 @@
               "-File",
               "${CLAUDE_PLUGIN_ROOT}/bin/vres-control-preflight.ps1"
             ],
-            "timeout": 10
+            "timeout": 10,
+            "onFailure": "block"
           }
         ]
       },
@@ -67,7 +69,8 @@
               "-File",
               "${CLAUDE_PLUGIN_ROOT}/bin/vres-agent-preflight.ps1"
             ],
-            "timeout": 10
+            "timeout": 10,
+            "onFailure": "block"
           }
         ]
       },
@@ -83,7 +86,8 @@
               "Bypass",
               "-File",
               "${CLAUDE_PLUGIN_ROOT}/bin/vres-external-capability-preflight.ps1"
-            ]
+            ],
+            "onFailure": "block"
           }
         ]
       }
@@ -193,7 +197,8 @@
               "-File",
               "${CLAUDE_PLUGIN_ROOT}/bin/vres-hook.ps1",
               "pre-compact"
-            ]
+            ],
+            "onFailure": "block"
           }
         ]
       }

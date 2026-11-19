@@ -60,6 +60,12 @@ def test_hook_commands_resolve_to_shipped_wrappers():
         "SessionEnd",
         "SubagentStop",
     } <= set(data["hooks"])
+    # onFailure supports pre-action command hooks, not after-action or Stop guarantees.
+    for event in ("UserPromptSubmit", "PreToolUse", "PreCompact"):
+        for group in data["hooks"][event]:
+            for hook in group["hooks"]:
+                assert hook["type"] == "command"
+                assert hook.get("onFailure") == "block"
     shipped = {
         "vres-hook.ps1",
         "vres-session-end.ps1",

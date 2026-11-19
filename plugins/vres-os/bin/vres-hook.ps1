@@ -72,7 +72,9 @@ try {
         "$(Get-Date -Format o) event=session-end phase=launch-failed" |
             Add-Content -LiteralPath (Join-Path $logDir 'lifecycle.log') -Encoding UTF8
     }
-    if ($Event -eq 'validator-stop') { exit 2 }
+    # A launcher failure before a user turn or compaction must not be a silent success.
+    # The P0 native-host execution interlock at the top of this file is unchanged.
+    if ($Event -in @('validator-stop', 'user-prompt', 'pre-compact')) { exit 2 }
     Write-Output '{"systemMessage":"Vres continuity hook failed; persistence is not confirmed. Run vres doctor in a terminal."}'
     exit 0
 }

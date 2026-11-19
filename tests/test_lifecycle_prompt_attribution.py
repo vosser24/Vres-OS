@@ -21,6 +21,7 @@ def test_agent_handback_is_not_user_intent():
 
 
 def test_user_prompt_is_staged_before_task_attribution(monkeypatch, capsys):
+    monkeypatch.setattr(hooks, "require_w4_native_host_clearance", lambda: None)  # synthetic-only
     monkeypatch.setattr(hooks, "_input", lambda: {"session_id": "S-NEW", "prompt": "Start LV-09"})
     monkeypatch.setattr(hooks, "ConfigStore", lambda: SimpleNamespace(load=lambda: VresConfig(configured=True)))
     monkeypatch.setattr(hooks, "_project_id", lambda _repo, _payload: 7)
@@ -59,7 +60,7 @@ def test_user_prompt_is_staged_before_task_attribution(monkeypatch, capsys):
     monkeypatch.setattr(
         hooks,
         "stage_user_instruction",
-        lambda project_id, sid, prompt: staged.append((project_id, sid, prompt)),
+        lambda project_id, sid, prompt: staged.append((project_id, sid, prompt)) or True,
     )
     monkeypatch.setattr(hooks, "begin_reply_turn", lambda project_id, sid: "TURN-TEST")
 
@@ -72,6 +73,7 @@ def test_user_prompt_is_staged_before_task_attribution(monkeypatch, capsys):
 
 
 def test_stop_commits_prompt_to_final_bound_task(monkeypatch, tmp_path):
+    monkeypatch.setattr(hooks, "require_w4_native_host_clearance", lambda: None)  # synthetic-only
     app_data = tmp_path / "app-data"
     monkeypatch.setenv("VRES_DATA_DIR", str(app_data))
     monkeypatch.setattr(hooks, "_input", lambda: {"session_id": "S-1"})

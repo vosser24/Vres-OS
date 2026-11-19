@@ -215,11 +215,30 @@ def _credential_ingress_guard(payload: dict[str, Any], prompt: str) -> bool:
             {
                 "decision": "block",
                 "reason": reason,
-                "suppressOriginalPrompt": True,
+                "hookSpecificOutput": {
+                    "hookEventName": "UserPromptSubmit",
+                    "suppressOriginalPrompt": True,
+                },
             }
         )
     )
     return True
+
+
+def _block_unstaged_prompt() -> None:
+    """Deny configured prompts whose original host turn cannot be persisted."""
+    # Do not include submitted prompt or backend exceptions in this host reply.
+    sys.stdout.write(json.dumps({
+        "decision": "block",
+        "reason": (
+            "Vres could not safely stage this original user turn. The prompt is blocked; "
+            "verify Vres continuity before resending."
+        ),
+        "hookSpecificOutput": {
+            "hookEventName": "UserPromptSubmit",
+            "suppressOriginalPrompt": True,
+        },
+    }))
 
 
 def user_prompt() -> None:
@@ -229,6 +248,8 @@ def user_prompt() -> None:
         return
     prompt = payload.get("prompt") or payload.get("user_prompt") or payload.get("userPrompt")
     if not isinstance(prompt, str) or not prompt:
+        if ConfigStore().load().configured:
+            _block_unstaged_prompt()
         return
     context = f"VRES_CURRENT_SESSION_ID={_session_id(payload) or 'UNKNOWN'}"
     if is_system_prompt_event(prompt):
@@ -242,9 +263,11 @@ def user_prompt() -> None:
     if not ConfigStore().load().configured:
         return
     try:
+        sid = _session_id(payload)
+        if not sid:
+            raise ValueError("Original user prompt has no host session identity")
         repo = Repository()
         project_id = _project_id(repo, payload)
-        sid = _session_id(payload)
         if sid:
             repo.open_session(project_id, sid)
             # UserPromptSubmit is also a safe recovery point if the host skipped SessionStart
@@ -264,7 +287,8 @@ def user_prompt() -> None:
             if not turn_id:
                 raise ValueError("Cannot establish a current host-observed reply turn")
             if not stage_user_instruction(project_id, sid, prompt):
-                context += "\nVRES_PERSISTENCE_WARNING: current user prompt was not durably staged."
+                _block_unstaged_prompt()
+                return
             context += (
                 f"\nVRES_REPLY_TURN_ID={turn_id}\n"
                 "Before every final reply while a persistent task is bound, call task_reply_gate. "
@@ -297,7 +321,8 @@ def user_prompt() -> None:
                 context += "\n" + _resume_message(state, label="VRES POST-COMPACTION CONTINUITY")
     except Exception as exc:
         _log_hook_error("UserPromptSubmit", exc)
-        context += "\nVRES_PERSISTENCE_WARNING: user instruction was not safely staged; do not assume it survived."
+        _block_unstaged_prompt()
+        return
     sys.stdout.write(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": context}}))
 
 
