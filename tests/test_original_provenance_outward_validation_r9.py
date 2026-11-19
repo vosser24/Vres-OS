@@ -134,3 +134,16 @@ def test_validation_audit_refuses_tainted_or_oversized_identity_pre_connect(
             payload, 7, accepted=True, reason="Accepted", request_key=request_key
         )
     assert connections == []
+
+def test_validation_audit_does_not_truncate_overlong_prose_request_key(monkeypatch):
+    connections = []
+    monkeypatch.setattr(validation_audit, "connect", lambda: connections.append(True))
+    overlong = "VAL-" + "X" * 201
+    with pytest.raises(ValueError, match="request_key exceeds"):
+        validation_audit.record_validation_ingestion_attempt(
+            {"last_assistant_message": "Review " + overlong + "."},
+            7,
+            accepted=False,
+            reason="No result",
+        )
+    assert connections == []

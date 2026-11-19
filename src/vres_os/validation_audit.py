@@ -92,7 +92,7 @@ def extract_request_key(payload: dict[str, Any]) -> str | None:
     if not isinstance(text, str) or not text:
         return None
     keys = list(dict.fromkeys(_REQUEST_RE.findall(text)))
-    return keys[0][:200] if len(keys) == 1 else None
+    return keys[0] if len(keys) == 1 else None  # reject oversized authority at the SQL boundary
 
 
 def _specific_contract_reason(payload: dict[str, Any], reason: str) -> str:
