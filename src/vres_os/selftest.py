@@ -29,8 +29,35 @@ def _procedure_accept_baseline_signature_guard() -> None:
     )
 
 
+class OriginalSelftestCleanupHeld(RuntimeError):
+    """The original destructive cleanup cannot work under narrowed runtime ACL."""
+
+
+ORIGINAL_SELFTEST_CLEANUP_HOLD = "HELD_NO_RUNTIME_DELETE_OR_TASK_CASCADE"
+
+
+def _require_original_selftest_cleanup_clearance() -> None:
+    """Deny the real smoke test BEFORE migrate(), fixture creation or any DB IO.
+
+    The historical multi-connection Repository/Knowledge/Procedure fixtures
+    cannot be safely rolled back as one transaction. R13G revokes DELETE and
+    prospective 048 refuses task DELETE, so trying the old finally-cleanup
+    would leave persistent synthetic tasks/projects. This is an explicit
+    TEMPORARY source-level refusal, not a substitute for a reviewed isolated
+    transaction-compatible selftest redesign.
+    """
+    if ORIGINAL_SELFTEST_CLEANUP_HOLD != "REVIEWED_ISOLATED_SELFTEST_CLEANUP":
+        raise OriginalSelftestCleanupHeld(
+            "VRES_W4_HELD_SELFTEST_CLEANUP: original live selftest creates rows "
+            "that the narrowed runtime cannot delete. No migration, fixture "
+            "or database access is authorized. Review isolated rollback-safe "
+            "selftest design before enabling this command."
+        )
+
+
 def run_core_selftest() -> dict:
     """Exercise core PostgreSQL persistence without fabricating user authority."""
+    _require_original_selftest_cleanup_clearance()  # before migration or fixture IO
     migrate()
     marker = uuid.uuid4().hex[:12]
     p = ProjectIdentity(

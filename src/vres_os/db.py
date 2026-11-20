@@ -361,13 +361,19 @@ def migrate(*, adopt_legacy_checksums: bool = False) -> list[str]:
                     from .database_boundary import (
                         _restrict_original_function_execute,
                         _restore_original_runtime_migration_calls,
+                        _restore_original_writer_migration_calls,
                     )
 
                     _restrict_original_function_execute(conn, cfg.database.user)
-                    # R13J: restore the two original required runtime calls
-                    # before THIS migration transaction commits. A later failed
-                    # migration must not strand runtime governance privileges.
+                    # R13J/R13K: each committed original migration must retain
+                    # required runtime and approved writer call privileges even
+                    # if a LATER migration aborts before activate_boundary().
+                    # This does not grant model/operator cancellation authority.
                     _restore_original_runtime_migration_calls(conn, cfg.database.user)
+                    if cfg.database.provenance_writer_user:
+                        _restore_original_writer_migration_calls(
+                            conn, cfg.database.provenance_writer_user
+                        )
                 conn.execute(
                     "INSERT INTO vres.schema_migrations(version,checksum) VALUES (%s,%s)",
                     (name, checksum),

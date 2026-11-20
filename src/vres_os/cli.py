@@ -137,8 +137,12 @@ def doctor(allow_unconfigured: bool = False, skip_database: bool = False) -> Non
 @app.command()
 def selftest() -> None:
     """Run the real PostgreSQL persistence/retrieval/procedure smoke test."""
-    from .selftest import run_core_selftest
-    result = run_core_selftest()
+    from .selftest import OriginalSelftestCleanupHeld, run_core_selftest
+    try:
+        result = run_core_selftest()
+    except OriginalSelftestCleanupHeld as exc:
+        console.print(str(exc), style="bold red")
+        raise typer.Exit(2) from exc
     console.print_json(data=result)
     if not result.get("passed"):
         raise typer.Exit(2)

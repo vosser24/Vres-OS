@@ -483,6 +483,43 @@ def _restore_original_runtime_migration_calls(conn, runtime: str) -> None:
             )
 
 
+def _restore_original_writer_migration_calls(conn, writer: str) -> None:
+    """Regrant only the original required writer calls within each migration TX.
+
+    R13I/R13J revoke PUBLIC and runtime function execution before each commit.
+    Restoring writer calls only after the final migration can strand a partially
+    migrated original installation if a later migration fails. A function that
+    has not yet been created is intentionally skipped. Do not restore the
+    dormant cancellation-writer function: operator-only authority is NOT granted.
+    This is static source intent, not effective SQL privilege certification.
+    """
+    require_w4_schema_clearance()  # P0: absolutely no PostgreSQL, even SELECT
+    from psycopg import sql
+
+    approved = (
+        "vres.user_event_writer_role()",
+        "vres.stage_user_input(bigint,text,text,text,text,text,text,timestamptz)",
+        "vres.latest_pending_user_instruction(bigint,text)",
+        "vres.latest_observed_user_instruction(bigint,text)",
+        "vres.commit_user_inputs(bigint,text,text)",
+        "vres.latest_observed_user_input(bigint,text)",
+        "vres.stage_strict_user_input(bigint,text,text,text,text,text,text,timestamptz,text)",
+        "vres.issue_context_refresh_attestation(text,text,text,text)",
+        "vres.record_experience_retrieval_observation(bigint,text,text,text,text,jsonb,jsonb)",
+        "vres.record_experience_retrieval_references(bigint,text,text,text,text,text,text,text[])",
+        "vres.record_experience_retrieval_replay(bigint,bigint,jsonb)",
+    )
+    for signature in approved:
+        row = conn.execute("SELECT to_regprocedure(%s) AS routine", (signature,)).fetchone()
+        routine = row.get("routine") if isinstance(row, dict) else row[0] if row else None
+        if routine is not None:
+            conn.execute(
+                sql.SQL("GRANT EXECUTE ON FUNCTION {} TO {}").format(
+                    sql.SQL(signature), sql.Identifier(writer)
+                )
+            )
+
+
 def _revoke_original_task_history_deletes(conn, runtime: str) -> None:
     """Restrict runtime destructive DML and task-column UPDATEs.
 
