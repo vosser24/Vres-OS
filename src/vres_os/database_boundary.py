@@ -241,10 +241,10 @@ def provision_boundary(
                     sql.SQL("GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA vres TO {}")
                     .format(sql.Identifier(cfg.database.user))
                 )
-                conn.execute(
-                    sql.SQL("GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA vres TO {}")
-                    .format(sql.Identifier(cfg.database.user))
-                )
+                # No blanket EXECUTE: a runtime login must not be able to call
+                # every SECURITY DEFINER routine created by the original migrator.
+                # The trusted activation step restores only reviewed callers.
+                _restrict_original_function_execute(conn, cfg.database.user)
                 conn.execute(
                     sql.SQL(
                         "ALTER DEFAULT PRIVILEGES FOR ROLE {} IN SCHEMA vres "
@@ -257,11 +257,9 @@ def provision_boundary(
                         "GRANT USAGE,SELECT ON SEQUENCES TO {}"
                     ).format(sql.Identifier(migration_user), sql.Identifier(cfg.database.user))
                 )
-                conn.execute(
-                    sql.SQL(
-                        "ALTER DEFAULT PRIVILEGES FOR ROLE {} IN SCHEMA vres GRANT EXECUTE ON FUNCTIONS TO {}"
-                    ).format(sql.Identifier(migration_user), sql.Identifier(cfg.database.user))
-                )
+                # Never add runtime EXECUTE to future Vres SQL functions by default.
+                # PostgreSQL grants PUBLIC EXECUTE globally by default: it must
+                # still be addressed by independent migration-time review.
                 # Original historical task rows/ledger are never a runtime delete surface.
                 # For a new empty schema there are no such relations yet; migration
                 # activation reapplies this narrow revocation once they exist.
@@ -385,6 +383,10 @@ def activate_boundary(conn, cfg: VresConfig) -> None:
         ).fetchone()
         if result and result["routine"] is not None:
             protected_functions.append(optional_signature)
+    # Remove blanket runtime/PUBLIC function execution FIRST, then restore
+    # purpose-specific writer and runtime calls. Trigger functions are invoked
+    # by their triggers; only direct invoker calls need runtime EXECUTE.
+    _restrict_original_function_execute(conn, runtime)
     for signature in protected_functions:
         conn.execute(sql.SQL("REVOKE ALL ON FUNCTION {} FROM PUBLIC").format(sql.SQL(signature)))
         conn.execute(
@@ -392,6 +394,19 @@ def activate_boundary(conn, cfg: VresConfig) -> None:
         )
         conn.execute(
             sql.SQL("GRANT EXECUTE ON FUNCTION {} TO {}").format(sql.SQL(signature), sql.Identifier(writer))
+        )
+    # Original migration 030 SECURITY INVOKER triggers call this read-only
+    # function directly under the runtime identity. Withholding it would
+    # break normal routing, worker and material-event operations.
+    governance_signature = "vres.assert_governance_mutation_allowed(bigint,text)"
+    governance_row = conn.execute(
+        "SELECT to_regprocedure(%s) AS routine", (governance_signature,)
+    ).fetchone()
+    if governance_row and governance_row["routine"] is not None:
+        conn.execute(
+            sql.SQL("GRANT EXECUTE ON FUNCTION {} TO {}").format(
+                sql.SQL(governance_signature), sql.Identifier(runtime)
+            )
         )
     conn.execute(sql.SQL("GRANT USAGE ON SCHEMA vres TO {}").format(sql.Identifier(writer)))
     # Enforce a narrow effective runtime baseline after the last migration;
@@ -414,8 +429,33 @@ def activate_boundary(conn, cfg: VresConfig) -> None:
                 "REVOKE UPDATE ON SEQUENCES FROM {}"
             ).format(sql.Identifier(migrator), sql.Identifier(runtime))
         )
+        conn.execute(
+            sql.SQL(
+                "ALTER DEFAULT PRIVILEGES FOR ROLE {} IN SCHEMA vres "
+                "REVOKE EXECUTE ON FUNCTIONS FROM {}"
+            ).format(sql.Identifier(migrator), sql.Identifier(runtime))
+        )
     _activate_context_refresh_attestations(conn, runtime, writer)
     _activate_experience_observability(conn, runtime, writer)
+
+
+def _restrict_original_function_execute(conn, runtime: str) -> None:
+    """Revoke direct Vres SQL function EXECUTE from runtime and PUBLIC.
+
+    This protects already-existing functions once activated. It does NOT remove
+    PostgreSQL's global PUBLIC default for yet-uncreated functions: release
+    migration preflight/transaction authority must resolve that separately.
+    """
+    require_w4_schema_clearance()  # P0: never touch DB under Schema-048 hold
+    from psycopg import sql
+
+    conn.execute(
+        sql.SQL("REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA vres FROM PUBLIC")
+    )
+    conn.execute(
+        sql.SQL("REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA vres FROM {}")
+        .format(sql.Identifier(runtime))
+    )
 
 
 def _revoke_original_task_history_deletes(conn, runtime: str) -> None:
