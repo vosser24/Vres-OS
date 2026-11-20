@@ -33,6 +33,21 @@ def require_w4_release_input_clearance() -> None:
 
 
 PERSONAL_RELEASE_MAX_MIGRATION = 41
+
+# Original configured Claude UserPromptSubmit now strictly stages turns using
+# 043 and records the observed host reply turn via the 047 writer revision.
+# Never claim release readiness by updating only part of this schema cohort.
+# These are review prerequisites, NOT accepted release migrations or authority
+# to alter a real DB. The existing approved release pin stays at 001-041.
+ORIGINAL_CLAUDE_STRICT_STAGE_REQUIRED_MIGRATIONS = (
+    "042_latest_observed_user_input_control_precedence.sql",
+    "043_legacy_observation_commit_quarantine.sql",
+    "044_original_current_turn_atomic_cancellation.sql",
+    "045_original_bound_task_cancellation_r13a.sql",
+    "046_original_observation_rebind_quarantine_r13b.sql",
+    "047_original_cancel_observed_turn_and_validation_r13c.sql",
+)
+ORIGINAL_CLAUDE_STRICT_STAGE_MIN_MIGRATION = 47
 MIGRATIONS_DIR = Path("src/vres_os/migrations")
 PERSONAL_MIGRATION_PINS = {
     "001_initial.sql": "0bfac431940459f7cef45735fd89e88093e2db99065225ec7cfedc7cfb9d2af1",
@@ -110,6 +125,25 @@ def release_input_problems(root: Path) -> list[str]:
     require_w4_release_input_clearance()
     root = Path(root)
     problems: list[str] = []
+
+    # R13L: the original installed host contract and its packaged SQL must
+    # advance together. The R13I/R13J/R13K source calls SQL introduced after
+    # the currently accepted 001-041 release cohort. Do not let a future
+    # review accidentally unlock release by pinning only 043 while omitting
+    # 047's required host-turn semantics. No database inspection occurs here.
+    missing_stage_pins = [
+        name for name in ORIGINAL_CLAUDE_STRICT_STAGE_REQUIRED_MIGRATIONS
+        if name not in PERSONAL_MIGRATION_PINS
+    ]
+    if (PERSONAL_RELEASE_MAX_MIGRATION < ORIGINAL_CLAUDE_STRICT_STAGE_MIN_MIGRATION
+            or missing_stage_pins):
+        problems.append(
+            "VRES_W4_HELD_RELEASE_COHORT: configured Claude strict staging requires "
+            "independently reviewed migrations 042-047 together with the original "
+            "release/host contract; personal release remains pinned to 001-041. "
+            "No PostgreSQL contact, migration, installation or pin promotion "
+            "is authorized; missing accepted pins: " + ", ".join(missing_stage_pins)
+        )
     migrations = root / MIGRATIONS_DIR
     present = {p.name: p for p in migrations.glob("*.sql")} if migrations.is_dir() else {}
     for name in sorted(present):
