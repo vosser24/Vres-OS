@@ -142,10 +142,11 @@ def test_installer_preflight_never_contacts_the_database_and_keeps_its_integrity
     assert at("if ($SourceCommit -notmatch '^[0-9a-fA-F]{40}\\z'") < at("'check','--root',$RepoRoot") < stage
     verify = at("'verify-installed','--manifest',$ReleaseManifest")
     assert verify < at("from vres_os.cli import app") < at("'doctor','--allow-unconfigured','--skip-database'")
-    assert at("'doctor','--allow-unconfigured','--skip-database'") < at("'pending-install.json') @{")
+    assert at("'doctor','--allow-unconfigured','--skip-database'") < at("Write-JsonAtomic (Join-Path $InstallRoot 'pending-install.json') $JournalRecord")
     for kept in ("'--dir',$PluginTarget,'--allow-extra','.vres-managed'", "install_recovery.py'),'snapshot'",
-                 "Move-Item -LiteralPath $PluginBackup -Destination $PluginTarget", "$GlobalClaudeBefore",
-                 "$ClaudeSettingsBefore", "resolved-dependencies.txt"):
+                 "Move-Item -LiteralPath $PluginTarget -Destination $PluginBackup",
+                 "function Assert-Managed([string]$Path)", "'recover-prepublication','--install-root',$InstallRoot",
+                 "$JournalRecord", "resolved-dependencies.txt"):
         assert kept in text
     success = at("Write-Host 'Vres preview installed.")
     assert success < at("Database health was not checked") < at("} catch {")
@@ -303,7 +304,7 @@ def test_installer_requires_offline_hash_locked_wheels_and_records_dependency_re
     assert "(23, 0)" in text  # installation-report schema version 1 is stable from pip 23.0
     # The report is checked only after the installed package is verified, and before anything is activated.
     assert at("'verify-installed','--manifest',$ReleaseManifest") < at("Run $Python @('-I','-c',$PipReportCheck,$PipReport)")
-    assert at("$PipReportCheck,$PipReport") < at("'pending-install.json') @{")
+    assert at("$PipReportCheck,$PipReport") < at("Write-JsonAtomic (Join-Path $InstallRoot 'pending-install.json') $JournalRecord")
     summary = text[at("Offline hash-locked pip report:"):].split("\n", 1)[0]
     assert "Independent wheel trust" in summary
     assert "'--no-index'" in text and "'--require-hashes'" in text

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import os
+
+from .install_transaction import hold_install_transaction, InstallTransactionHeld
+from .w4_runtime_holds import W4OriginalRouteRefused, require_w4_native_host_clearance
 from datetime import datetime, timezone
 
 from .config import ConfigStore
@@ -35,7 +38,16 @@ def _bounded_env(name: str, limit: int, *, required: bool = True) -> str:
 
 
 def run() -> int:
-    """Finish SessionEnd persistence outside Claude Code's teardown budget."""
+    """Finish SessionEnd only after native-host/installation source guards."""
+    require_w4_native_host_clearance()  # Before env, logging, config or DB.
+    # Keep the original lock reader for the ENTIRE detached session lifecycle,
+    # not merely the first database connection. This prevents a concurrent
+    # original installer from starting during credential cleanup.
+    with hold_install_transaction():
+        return _run_under_install_transaction()
+
+
+def _run_under_install_transaction() -> int:
     sid = _bounded_env("VRES_SESSION_END_ID", _MAX_SESSION_ID)
     cwd = _bounded_env("VRES_SESSION_END_CWD", _MAX_CWD)
     reason = canonical_session_end_reason(_bounded_env("VRES_SESSION_END_REASON", _MAX_REASON, required=False))
@@ -77,6 +89,9 @@ def run() -> int:
 def main() -> None:
     try:
         code = run()
+    except (W4OriginalRouteRefused, InstallTransactionHeld):
+        # Do not write profile logs after a P0 native-host or install fence.
+        code = 2
     except Exception as exc:
         try:
             _log("worker-failed", error_type=type(exc).__name__)

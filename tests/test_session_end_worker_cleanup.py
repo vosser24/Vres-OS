@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 import pytest
@@ -25,6 +26,10 @@ def _set_env(monkeypatch, tmp_path):
     monkeypatch.setenv("VRES_SESSION_END_ID", "session-under-test")
     monkeypatch.setenv("VRES_SESSION_END_CWD", str(tmp_path))
     monkeypatch.setenv("VRES_SESSION_END_REASON", "user_exit")
+    # Only the synthetic unit tests bypass held source guards; never read a
+    # real Windows installation or contact a host/DB during these tests.
+    monkeypatch.setattr(session_end_worker, "require_w4_native_host_clearance", lambda: None)
+    monkeypatch.setattr(session_end_worker, "hold_install_transaction", lambda: nullcontext())
 
 
 @pytest.mark.parametrize(("open_sessions", "expected"), [(0, 2), (1, None)])
@@ -138,3 +143,20 @@ def test_detached_session_end_cleanup_failure_does_not_fail_session_close(monkey
     assert closed == [True]
     assert ("secret-cleanup-failed", {"error_type": "PermissionError"}) in logs
     assert logs[-1] == ("worker-finish", {"result": "success", "secret_cleanup": "failed"})
+
+
+def test_detached_worker_source_hold_refuses_before_profile_or_session_access(monkeypatch):
+    from vres_os.w4_runtime_holds import W4OriginalRouteRefused
+
+    def held():
+        raise W4OriginalRouteRefused("held before any original worker I/O")
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("No profile, log, configuration, session or database access allowed")
+
+    monkeypatch.setattr(session_end_worker, "require_w4_native_host_clearance", held)
+    monkeypatch.setattr(session_end_worker, "_log", forbidden)
+    monkeypatch.setattr(session_end_worker, "ConfigStore", forbidden)
+    monkeypatch.setattr(session_end_worker, "hold_install_transaction", forbidden)
+    with pytest.raises(W4OriginalRouteRefused):
+        session_end_worker.run()

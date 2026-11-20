@@ -14,6 +14,58 @@
 
 Version: **0.2.0-alpha.1 / Python package 0.2.0a1**. Target: native Windows, Python 3.12–3.13, current Claude Code. This is a controlled-live-test preview; the installer itself has not executed on Windows in the audit environment.
 
+## R13P original managed-install review corrections — SOURCE ONLY / NOT_RUN
+
+R13P corrects **one actual installer source defect**, not a Windows installation.
+The original `install.ps1` `Assert-Managed` function was inadvertently deleted
+in R13O while its call remained. R13P restores the **unchanged R13N function**,
+including the original `.vres-managed` ownership and reparse-point checks.
+No installer execution has occurred; this is an authored source correction.
+
+The original Claude SessionEnd PowerShell hook now uses the **shared original**
+`Resolve-VresPython` runtime resolver instead of reading
+`active-install.json` directly. The detached
+`vres_os.session_end_worker` checks original P0 runtime/native-host clearance
+before reading session environment, configuration, logs, or database state,
+and holds a shared installation-lock reader for its complete session close
+and sensitive-cleanup workflow. The installer remains exclusive and refuses
+running workers. Existing native-hook source P0 refusal is retained.
+
+**R13P does NOT authorize interrupted-update rollback or journal deletion.**
+The original `install_recovery.py.inspect_finalization_evidence` is an
+*authored, read-only, source-held diagnostic*, not a `finalize` command. It
+requires a R13O protocol journal, committed phase, full version-2 original
+snapshot, matching new active-pointer identity, managed plugin and staged
+release-manifest file before reporting preliminary *local* evidence.
+No combination of those local writable files is trusted release post-image,
+PostgreSQL migration ledger, native Claude binary/hook proof or human
+authorization. The diagnostic always reports
+`journal_removal_approved=False`, `rollback_approved=False` and **zero
+operations**. If the phase update failed and the disk still says
+`publishing`, it remains held. If file verification is incomplete,
+it remains held. After a power loss, neither a journal nor lock metadata
+may be manually edited to force a retry. A future independently reviewed
+operator procedure must establish a trusted post-image, actual schema
+compatibility and original host provenance before finalization or any
+cross-release rollback. Existing R13O prepublication in-run behavior remains
+source-held and untested.
+
+Old R13M/R13N/R13O Python source assertions have been reconciled with the
+current installer contract rather than deleted. R13P regression assertions
+also describe synthetic partial-recovery retries, invalid snapshots/journals,
+locked SessionEnd behavior and finalization refusal. All AST, compilation,
+pytest, PowerShell, native host, PostgreSQL (even SELECT), Windows
+preflight/update/install/recovery and integrated UAT remain **NOT_RUN**.
+
+**NOT AUTHORIZED NOW:** no ordinary native Claude Code, installed
+FastMCP/hooks, Windows Git/preflight/update/installation, credentials/profile
+mutation, PostgreSQL, `inspect-finalization` command, recovery/rollback,
+journal deletion, CI workflow or release. The existing October Vres
+installation and protected worktrees remain unchanged. Only after
+independently reviewed incident/compatibility clearances and separate
+informed owner permissions may the ORIGINAL `update.ps1` operate on the
+**SAME existing installation**, not a second Vres application.
+
 ## R13O original managed-install transaction barrier — SOURCE ONLY / NOT_RUN
 
 R13O remains an **unexecuted GitHub source design**, NOT a procedure for the

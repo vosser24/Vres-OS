@@ -1,5 +1,6 @@
 """Static Windows deployment contracts. These do NOT execute PowerShell or certify Windows."""
 from pathlib import Path
+import re
 
 ROOT = Path(__file__).parents[1]
 
@@ -39,7 +40,9 @@ def test_python_runtime_staged_before_active_pointer_changes():
     assert text.index("Run $NewPython @('-I','-m','pip','--isolated','check')") < text.index('Write-JsonAtomic $ActivePath')
     assert text.index("Run 'claude' @('plugin','validate',$StagedPlugin)") < text.index('Write-JsonAtomic $ActivePath')
     assert "[IO.File]::Replace" in text and "$oldPointer" in text
-    assert 'Move-Item -LiteralPath $PluginBackup -Destination $PluginTarget' in text
+    assert 'Move-Item -LiteralPath $PluginTarget -Destination $PluginBackup' in text
+    assert "'recover-prepublication','--install-root',$InstallRoot" in text
+    assert "function Assert-Managed([string]$Path)" in text
     assert 'plugin marketplace remove' not in text
 
 
@@ -53,15 +56,21 @@ def test_atomic_pointer_replace_uses_real_backup_path_on_windows_powershell():
     assert 'Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue' in atomic
 
 
-def test_statusline_install_is_transactional_and_uses_staged_runtime():
+def test_statusline_install_is_journalled_and_never_restored_by_catch_bypass():
     text = (ROOT / 'install.ps1').read_text()
     assert "$ClaudeSettingsPath = Join-Path $ClaudeHome 'settings.json'" in text
-    assert "$ClaudeSettingsBefore" in text
     assert "'-m','vres_os.statusline','install'" in text
     assert "'--runtime-python',$NewPython" in text
-    assert text.index("Write-JsonAtomic $ActivePath") < text.index("'-m','vres_os.statusline','install'")
-    assert "Restore-OriginalBytesAtomic $ClaudeSettingsPath $ClaudeSettingsBefore" in text
-    assert "Restore-OriginalBytesAtomic $GlobalClaudePath $GlobalClaudeBefore" in text
+    assert text.index("install_recovery.py'),'snapshot'") < text.index(
+        "Write-JsonAtomic (Join-Path $InstallRoot 'pending-install.json') $JournalRecord"
+    ) < text.index("Write-JsonAtomic $ActivePath") < text.index(
+        "'-m','vres_os.statusline','install'"
+    )
+    catch = text.rsplit("} catch {", 1)[1].split("} finally {", 1)[0]
+    assert "'recover-prepublication','--install-root',$InstallRoot" in catch
+    assert "VRES_W4_HELD_INSTALL_FAILURE_RECOVERY" in catch
+    assert "Restore-OriginalBytesAtomic" not in catch
+    assert "Remove-Item -LiteralPath $ClaudeSettingsPath" not in catch
 
 
 def test_uninstall_removes_only_vres_owned_statusline_before_runtime_removal():
@@ -109,7 +118,7 @@ def test_maintenance_update_preserves_current_user_path_from_recovery_gap():
     """Update leaves the registry-backed user PATH untouched, even if Vres bin is absent."""
     text = (ROOT / 'install.ps1').read_text(encoding='utf-8')
     section = text.split("    $userPath=[Environment]::GetEnvironmentVariable('Path','User')", 1)[1]
-    section = section.split("    Remove-Item -LiteralPath (Join-Path $InstallRoot 'pending-install.json')", 1)[0]
+    section = section.split("    $PendingSuccess = Join-Path $InstallRoot 'pending-install.json'", 1)[0]
     assert 'if ($Update) {' in section
     update, initial_install = section.split('} elseif ($parts -notcontains $Bin) {', 1)
     assert "SetEnvironmentVariable('Path'" not in update
@@ -191,8 +200,10 @@ def test_installer_manages_native_autocompact_conservatively_and_transactionally
     assert "15% of the native auto-compact window" in text
     assert "~85% of that window remains free" in text
     assert "CLAUDE_CODE_AUTO_COMPACT_WINDOW" not in text
-    assert "$ClaudeSettingsBefore" in text
-    assert "[IO.File]::WriteAllBytes($ClaudeSettingsPath, $ClaudeSettingsBefore)" in text
+    assert "install_recovery.py'),'snapshot'" in text
+    assert "$JournalRecord['phase'] = 'verified_commit_pending_cleanup'" in text
+    assert "VRES_W4_INSTALLED_JOURNAL_FINALIZATION_HELD" in text
+    assert "Restore-OriginalBytesAtomic" not in text
 
 
 def test_uninstall_removes_only_recorded_vres_owned_autocompact_before_runtime_removal():
@@ -222,4 +233,32 @@ def test_postinstall_python_imports_disable_bytecode_and_are_rechecked_last():
     last_gate = "Run $Python @('-I','-B','-X','utf8',$ArtifactTool,'verify-installed','--manifest',$ReleaseManifest,'--package-dir',$PackageDir)"
     assert installer.count(last_gate) == 1
     assert installer.index(last_gate) > installer.index('Could not configure Vres-managed native auto-compaction.')
-    assert installer.index(last_gate) < installer.index("Remove-Item -LiteralPath (Join-Path $InstallRoot 'pending-install.json') -ErrorAction SilentlyContinue")
+    assert installer.index(last_gate) < installer.index("Write-JsonAtomic $PendingSuccess $JournalRecord")
+    assert installer.index("Write-JsonAtomic $PendingSuccess $JournalRecord") < installer.index(
+        "Remove-Item -LiteralPath $PendingSuccess -ErrorAction Stop"
+    )
+
+
+def test_every_called_original_assert_function_exists_before_use():
+    # Static source closure; no PowerShell execution or Windows side effects.
+    source = (ROOT / "install.ps1").read_text(encoding="utf-8")
+    declarations = set(re.findall(
+        r"(?m)^function\s+(Assert-[A-Za-z0-9_-]+)\s*\(", source
+    ))
+    invocations = set(re.findall(
+        r"(?m)^\s*(Assert-[A-Za-z0-9_-]+)(?=\s|$)", source
+    ))
+    assert "Assert-Managed" in declarations
+    assert "Assert-Managed" in invocations
+    assert invocations <= declarations
+    assert source.index("function Assert-Managed([string]$Path)") < source.index(
+        "Assert-Managed $PluginTarget"
+    )
+    guarded = source.split("function Assert-Managed([string]$Path)", 1)[1].split(
+        "\nif ($env:OS -ne", 1
+    )[0]
+    assert ".vres-managed" in guarded
+    assert "[IO.FileAttributes]::ReparsePoint" in guarded
+    assert source.index("Assert-Managed $PluginTarget") < source.index(
+        "Move-Item -LiteralPath $PluginTarget -Destination $PluginBackup"
+    )

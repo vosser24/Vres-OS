@@ -35,6 +35,9 @@ def _synthetic_transaction(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     (root / "installation.lock").write_bytes(b"")
     release = "synthetic-r13o"
     monkeypatch.setattr(recovery, "W4_INSTALL_RECOVERY_SOURCE_INTERLOCK", "INDEPENDENT_RELEASE_AND_OWNER_APPROVED")
+    # Simulate a running exclusive installer *only for fake roots* on every OS.
+    # Native Windows FileShare.None still requires a later approved actual test.
+    monkeypatch.setattr(recovery, "_require_inrun_installer_lock", lambda _root: None)
     recovery.snapshot(root, claude, release)
     backup = root / "backups" / release
     journal = {
@@ -81,7 +84,11 @@ def test_synthetic_prepublication_rollback_restores_exact_bytes(tmp_path, monkey
     assert (claude / "settings.json").read_bytes() == b'{"stable":true}\n'
 
 
-@pytest.mark.parametrize("mutation", ["published_pointer", "finalizing_phase", "changed_claude"])
+@pytest.mark.parametrize("mutation", [
+    "published_pointer", "finalizing_phase", "changed_claude",
+    "snapshot_corrupted", "backup_corrupted", "journal_plugin_redirect",
+    "pointer_same_release_extra_data",
+])
 def test_ambiguous_or_published_synthetic_rollback_is_refused(tmp_path, monkeypatch, mutation):
     root, claude, release, journal = _synthetic_transaction(tmp_path, monkeypatch)
     if mutation == "published_pointer":
@@ -91,8 +98,19 @@ def test_ambiguous_or_published_synthetic_rollback_is_refused(tmp_path, monkeypa
     elif mutation == "finalizing_phase":
         journal["phase"] = "verified_commit_pending_cleanup"
         (root / "pending-install.json").write_text(json.dumps(journal), encoding="utf-8")
-    else:
+    elif mutation == "changed_claude":
         (claude / "settings.json").write_bytes(b"edited-by-another-process")
+    elif mutation == "snapshot_corrupted":
+        (root / "install-recovery" / release / "snapshot.json").write_bytes(b"invalid-snapshot")
+    elif mutation == "backup_corrupted":
+        (root / "backups" / release / "original.txt").write_bytes(b"wrong-plugin-bytes")
+    elif mutation == "journal_plugin_redirect":
+        journal["plugin_path"] = str(root / "not-the-managed-plugin")
+        (root / "pending-install.json").write_text(json.dumps(journal), encoding="utf-8")
+    else:
+        (root / "active-install.json").write_bytes(
+            b'{"product":"Vres-OS","release":"previous","changed":true}'
+        )
     plan = recovery.inspect(root, installer_prepublication=True)
     assert plan["recoverable"] is False
     with pytest.raises(recovery.InstallRecoveryError):
@@ -173,3 +191,105 @@ def test_source_and_incident_holds_not_removed():
     assert "require_install_transaction_ready()" in db
     assert 'W4_INSTALL_RECOVERY_SOURCE_INTERLOCK = "HELD_NO_INSTALL_OR_RECOVERY"' in rec
     assert "Assert-VresInstallTransactionQuiescent $root" in win
+
+
+def test_synthetic_partial_recovery_preserves_journal_until_verified_retry(tmp_path, monkeypatch):
+    root, claude, release, _ = _synthetic_transaction(tmp_path, monkeypatch)
+    original_atomic = recovery._write_atomic
+    invoked = {"failed": False}
+    launcher = root / "bin" / "vres-launch.ps1"
+
+    def interrupted_restore(path, data):
+        if path == launcher and not invoked["failed"]:
+            invoked["failed"] = True
+            raise OSError("synthetic disk interruption before launcher restore")
+        return original_atomic(path, data)
+
+    monkeypatch.setattr(recovery, "_write_atomic", interrupted_restore)
+    with pytest.raises(OSError, match="synthetic disk interruption"):
+        recovery.recover(
+            root, confirm=True, installer_prepublication=True,
+            expected_release=release, expected_claude_home=claude,
+        )
+    assert (root / "pending-install.json").exists()
+    assert (root / "bin" / "vres-launch.ps1").read_bytes() == b"partially-published launcher\n"
+    assert (claude / "skills" / "vres-os" / "original.txt").read_bytes() == b"original-plugin\n"
+    monkeypatch.setattr(recovery, "_write_atomic", original_atomic)
+    result = recovery.recover(
+        root, confirm=True, installer_prepublication=True,
+        expected_release=release, expected_claude_home=claude,
+    )
+    assert result["status"] == "recovered"
+    assert not (root / "pending-install.json").exists()
+    assert launcher.read_bytes() == b"original launcher\r\n"
+
+
+def test_inrun_lock_seam_refusal_does_not_touch_synthetic_journal(tmp_path, monkeypatch):
+    root, claude, release, _ = _synthetic_transaction(tmp_path, monkeypatch)
+    def no_exclusive_installer(_root):
+        raise recovery.InstallRecoveryError("no live original exclusive installer")
+    monkeypatch.setattr(recovery, "_require_inrun_installer_lock", no_exclusive_installer)
+    with pytest.raises(recovery.InstallRecoveryError, match="no live original"):
+        recovery.recover(
+            root, confirm=True, installer_prepublication=True,
+            expected_release=release, expected_claude_home=claude,
+        )
+    assert (root / "pending-install.json").exists()
+    assert (root / "bin" / "vres-launch.ps1").read_bytes() == b"partially-published launcher\n"
+
+
+def test_local_finalization_evidence_never_grants_cleanup(tmp_path, monkeypatch):
+    root, claude, release, journal = _synthetic_transaction(tmp_path, monkeypatch)
+    journal["phase"] = "verified_commit_pending_cleanup"
+    (root / "pending-install.json").write_text(json.dumps(journal), encoding="utf-8")
+    (root / "active-install.json").write_text(
+        json.dumps({"product": "Vres-OS", "release": release, "plugin_path": journal["plugin_path"]}),
+        encoding="utf-8",
+    )
+    staged = root / "releases" / release
+    staged.mkdir(parents=True)
+    (staged / "release-manifest.json").write_text('{"source":"synthetic"}', encoding="utf-8")
+    before = (root / "pending-install.json").read_bytes()
+    report = recovery.inspect_finalization_evidence(root)
+    assert report["local_evidence"]["phase_verified_commit_pending_cleanup"] is True
+    assert report["local_evidence"]["snapshot_v2_integrity"] is True
+    assert report["local_evidence"]["active_pointer_new_release"] is True
+    assert report["local_evidence"]["managed_plugin_present"] is True
+    assert report["local_evidence"]["staged_release_manifest_present"] is True
+    assert report["journal_removal_approved"] is False
+    assert report["rollback_approved"] is False
+    assert report["actions"] == []
+    assert any("VRES_W4_HELD_FINALIZATION" in reason for reason in report["refusals"])
+    assert (root / "pending-install.json").read_bytes() == before
+
+
+@pytest.mark.parametrize("mutation", ["phase_write_missing", "pointer_mismatch", "snapshot_invalid"])
+def test_synthetic_finalization_unproven_cases_remain_held(tmp_path, monkeypatch, mutation):
+    root, claude, release, journal = _synthetic_transaction(tmp_path, monkeypatch)
+    if mutation != "phase_write_missing":
+        journal["phase"] = "verified_commit_pending_cleanup"
+        (root / "pending-install.json").write_text(json.dumps(journal), encoding="utf-8")
+    if mutation == "snapshot_invalid":
+        (root / "install-recovery" / release / "snapshot.json").write_bytes(b"broken")
+    if mutation == "pointer_mismatch":
+        (root / "active-install.json").write_bytes(b'{"release":"wrong"}')
+    report = recovery.inspect_finalization_evidence(root)
+    assert report["journal_removal_approved"] is False
+    assert report["rollback_approved"] is False
+    assert report["refusals"]
+    assert (root / "pending-install.json").exists()
+
+
+def test_r13p_original_session_end_source_guard_precedes_detached_worker():
+    root = Path(__file__).resolve().parents[1]
+    launcher = (root / "plugins/vres-os/bin/vres-session-end.ps1").read_text(encoding="utf-8")
+    worker = (root / "src/vres_os/session_end_worker.py").read_text(encoding="utf-8")
+    assert launcher.index("Resolve-VresPython") < launcher.index("Start-Process -FilePath $python")
+    assert "Get-Content -Raw -Encoding UTF8 -LiteralPath $activePath" not in launcher
+    assert worker.index("require_w4_native_host_clearance()") < worker.index(
+        "with hold_install_transaction():"
+    )
+    assert worker.index("with hold_install_transaction():") < worker.index(
+        "return _run_under_install_transaction()"
+    )
+    assert "LIVE_SCHEMA_048_INCIDENT" not in launcher  # unchanged source P0 native host gate

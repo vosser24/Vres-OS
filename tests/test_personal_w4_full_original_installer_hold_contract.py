@@ -27,14 +27,18 @@ def test_direct_original_stage_has_source_hold_before_output():
     assert artifact.index("W4_STAGE_SOURCE_INTERLOCK !=") < artifact.index("os.path.lexists(out)")
 
 
-def test_profile_snapshot_deferred_and_recovery_is_attempted_only():
+def test_original_install_profile_snapshot_precedes_any_publication_and_recovery_stays_held():
     install = text("install.ps1")
-    assert "$ClaudeContractAttempted = $true" in install
-    assert "$ClaudeSettingsAttempted = $true" in install
-    assert "if ($ClaudeContractAttempted)" in install
-    assert "if ($ClaudeSettingsAttempted)" in install
-    assert "Restore-OriginalBytesAtomic" in install
-    assert "do not auto-delete" in install
+    recovery = text("src/vres_os/install_recovery.py")
+    snapshot = "install_recovery.py'),'snapshot'"
+    journal = "Write-JsonAtomic (Join-Path $InstallRoot 'pending-install.json') $JournalRecord"
+    assert install.index(snapshot) < install.index(journal) < install.index("Write-JsonAtomic $ActivePath")
+    assert "phase='publishing'" in install
+    assert "'recover-prepublication','--install-root',$InstallRoot" in install
+    assert "VRES_W4_HELD_INSTALL_FAILURE_RECOVERY" in install
+    assert 'W4_INSTALL_RECOVERY_SOURCE_INTERLOCK = "HELD_NO_INSTALL_OR_RECOVERY"' in recovery
+    # The old PowerShell caught-error profile rollback bypass must not return.
+    assert "Restore-OriginalBytesAtomic" not in install
     for name in ("$GlobalClaudePath", "$GlobalRulesPath", "$ClaudeSettingsPath"):
         assert ("Remove-Item -LiteralPath " + name) not in install
 

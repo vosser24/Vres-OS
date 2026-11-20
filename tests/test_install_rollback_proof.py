@@ -11,6 +11,15 @@ from vres_os import install_recovery as recovery
 from vres_os.install_recovery import InstallRecoveryError
 
 
+@pytest.fixture(autouse=True)
+def _reviewed_synthetic_root_only(monkeypatch):
+    # Unit-testing seam for FAKE tmp_path install/Claude roots ONLY.
+    # Original source interlock remains HELD in all production files.
+    monkeypatch.setattr(
+        recovery, "W4_INSTALL_RECOVERY_SOURCE_INTERLOCK", "INDEPENDENT_RELEASE_AND_OWNER_APPROVED"
+    )
+
+
 def _bytes(root: Path) -> dict[str, bytes]:
     return {p.relative_to(root).as_posix(): p.read_bytes()
             for p in root.rglob("*") if p.is_file()}
@@ -137,37 +146,34 @@ def test_proof_fails_closed_for_v1_and_malformed_release(tmp_path):
     assert (install / recovery.JOURNAL).exists()
 
 
-def test_v2_recovery_checks_exact_restored_plugin_and_all_user_surfaces(tmp_path):
-    install, home, plugin, original = _saved(tmp_path)
+def test_v2_legacy_published_journal_is_held_without_mutation(tmp_path):
+    install, home, plugin, _ = _saved(tmp_path)
     _interrupt(install, home, plugin, existed=True)
-    result = recovery.recover(install, confirm=True)
-    assert result["status"] == "recovered"
-    assert (install / recovery.ACTIVE).read_bytes() == original["pointer"]
-    assert _bytes(install / "bin") == original["bin"]
-    assert _bytes(plugin) == original["plugin"]
-    for name, value in original["claude"].items():
-        assert (home / name).read_bytes() == value
-    assert not (install / recovery.JOURNAL).exists()
-    assert not (install / "backups" / "R2").exists()
+    before = _bytes(tmp_path)
+    plan = recovery.inspect(install)
+    assert plan["recoverable"] is False
+    assert plan["classification"] == "RUNTIME_RESTORE_HELD"
+    assert any("VRES_W4_HELD_SCHEMA_ROLLBACK" in reason for reason in plan["refusals"])
+    with pytest.raises(InstallRecoveryError, match="Recovery refused"):
+        recovery.recover(install, confirm=True)
+    assert _bytes(tmp_path) == before
+    assert (install / recovery.JOURNAL).exists()
     assert (home / "skills" / "other-plugin" / "keep.txt").read_bytes() == b"ANOTHER-PLUGIN"
     assert (home / ".credentials.json").read_bytes() == b"FAKE-DO-NOT-TOUCH"
 
 
-def test_v2_manual_recovery_keeps_journal_if_post_restore_bytes_drift(tmp_path, monkeypatch):
+def test_v2_legacy_journal_with_changed_profile_cannot_restore(tmp_path):
     install, home, plugin, _ = _saved(tmp_path)
     _interrupt(install, home, plugin, existed=True)
-    native = recovery._write_atomic
-
-    def corrupted_restore(path, data):
-        native(path, data)
-        if path == home / "settings.json":
-            path.write_bytes(b"interrupted-again")
-
-    monkeypatch.setattr(recovery, "_write_atomic", corrupted_restore)
-    with pytest.raises(InstallRecoveryError, match="Restored settings.json differs"):
+    (home / "settings.json").write_bytes(b"another-user-change")
+    before = _bytes(tmp_path)
+    plan = recovery.inspect(install)
+    assert plan["recoverable"] is False
+    assert any(step["action"] == "restore_claude_file" for step in plan["actions"])
+    with pytest.raises(InstallRecoveryError, match="Recovery refused"):
         recovery.recover(install, confirm=True)
+    assert _bytes(tmp_path) == before
     assert (install / recovery.JOURNAL).exists()
-    assert (home / "settings.json").read_bytes() == b"interrupted-again"
 
 
 def test_originally_absent_bin_and_plugin_are_verified_as_absent(tmp_path):
@@ -192,16 +198,27 @@ def test_cli_verifies_restoration_without_clearing_journal(tmp_path, capsys):
     assert (install / recovery.JOURNAL).exists()
 
 
-def test_installer_failed_transaction_requires_rollback_proof_before_journal_clear():
+def test_installer_failed_transaction_uses_one_original_snapshot_policy():
     source = (Path(__file__).resolve().parents[1] / "install.ps1").read_text(encoding="utf-8")
-    transaction = source.split("} catch {", 1)[1].split("} finally {", 1)[0]
-    assert "$HadPluginBefore = Test-Path -LiteralPath $PluginTarget" in source
-    assert "$BinExistedBefore = Test-Path -LiteralPath $Bin" in source
-    assert "had_plugin=$HadPluginBefore" in source
-    assert "if ($pluginMoved -or -not $HadPluginBefore)" in transaction
-    assert "if ($BinExistedBefore)" in transaction
-    assert ",'verify-restored','--install-root'" in transaction
-    assert transaction.index(",'verify-restored','--install-root'") < transaction.index(
-        "Remove-Item -LiteralPath (Join-Path $InstallRoot 'pending-install.json') -ErrorAction Stop"
+    recovery_source = (Path(__file__).resolve().parents[1] / "src/vres_os/install_recovery.py").read_text(
+        encoding="utf-8"
     )
-    # No actual installer or native Claude, PostgreSQL or user-file mutations.
+    caught = source.rsplit("} catch {", 1)[1].split("} finally {", 1)[0]
+    assert "$HadPluginBefore = Test-Path -LiteralPath $PluginTarget" in source
+    assert "had_plugin=$HadPluginBefore" in source
+    assert "function Assert-Managed([string]$Path)" in source
+    assert "Assert-Managed $PluginTarget" in source
+    assert source.index("Assert-Managed $PluginTarget") < source.index(
+        "Move-Item -LiteralPath $PluginTarget -Destination $PluginBackup"
+    )
+    assert "'recover-prepublication','--install-root',$InstallRoot" in caught
+    assert "VRES_W4_HELD_INSTALL_FAILURE_RECOVERY" in caught
+    assert "Move-Item -LiteralPath $PluginBackup -Destination $PluginTarget" not in caught
+    assert "Restore-OriginalBytesAtomic" not in caught
+    assert recovery_source.index("verify_restored(install_root, claude_home") < recovery_source.index(
+        "(install_root / JOURNAL).unlink()"
+    )
+    assert source.index("Write-JsonAtomic $PendingSuccess $JournalRecord") < source.index(
+        "Remove-Item -LiteralPath $PendingSuccess -ErrorAction Stop"
+    )
+    # Source assertion only; PowerShell and actual Windows are NOT_RUN.

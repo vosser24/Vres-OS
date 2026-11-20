@@ -35,14 +35,12 @@ try {
     if ($reason.Length -gt 200) { throw 'Invalid SessionEnd reason.' }
     if ([string]::IsNullOrWhiteSpace($reason)) { $reason = 'session_end' }
 
-    # Resolve the immutable active runtime directly; do not dot-source the general resolver
-    # or perform process inspection inside Claude Code's SessionEnd budget.
-    $activePath = Join-Path $root 'active-install.json'
-    $active = Get-Content -Raw -Encoding UTF8 -LiteralPath $activePath | ConvertFrom-Json
-    $release = [string]$active.release
-    if ($release -notmatch '^\d{14}-[a-f0-9]{8}$') { throw 'Invalid active release id.' }
-    $python = Join-Path $root "releases\$release\venv\Scripts\python.exe"
-    if (-not (Test-Path -LiteralPath $python)) { throw 'Active Python runtime is missing.' }
+    # R13P: resolve through the ORIGINAL shared source-held runtime resolver.
+    # Its pending-journal/exclusive-lock check occurs before reading the pointer
+    # or starting a detached worker. Do not bypass it for SessionEnd.
+    # No CIM/process walk is added to the host teardown budget.
+    . (Join-Path $root 'bin\resolve-runtime.ps1')
+    $python = Resolve-VresPython
 
     $env:VRES_SESSION_END_ID = $sid
     $env:VRES_SESSION_END_CWD = $cwd

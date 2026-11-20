@@ -531,6 +531,100 @@ def verify_restored(install_root: Path, claude_home: Path, release: str) -> dict
     }
 
 
+def inspect_finalization_evidence(install_root: Path) -> dict[str, Any]:
+    """Read-only R13P journal-finalization diagnostic; NEVER delete the journal.
+
+    The phase is written by the installer, not independently trusted. Even
+    complete local file evidence cannot prove the deployed SQL migration
+    ledger, host identity, wheel publisher or post-install profile contract.
+    There is deliberately no finalize command or approved action here.
+    """
+    require_w4_install_recovery_clearance()  # P0 source hold remains first
+    install_root = Path(install_root)
+    evidence = {
+        "journal_protocol_r13o": False,
+        "phase_verified_commit_pending_cleanup": False,
+        "snapshot_v2_integrity": False,
+        "active_pointer_new_release": False,
+        "managed_plugin_present": False,
+        "staged_release_manifest_present": False,
+    }
+    refusal = []
+    raw = _file(install_root / JOURNAL)
+    if raw is None:
+        return {
+            "journal": False, "local_evidence": evidence,
+            "journal_removal_approved": False, "rollback_approved": False,
+            "refusals": ["no pending journal to finalize"],
+        }
+    try:
+        journal = json.loads(raw.decode("utf-8-sig"))
+        if not isinstance(journal, dict):
+            raise ValueError("journal is not an object")
+    except (UnicodeDecodeError, ValueError):
+        return {
+            "journal": True, "local_evidence": evidence,
+            "journal_removal_approved": False, "rollback_approved": False,
+            "refusals": ["journal is malformed; preserve it"],
+        }
+    release = journal.get("new_release")
+    evidence["journal_protocol_r13o"] = journal.get("transaction_protocol") == "r13o/1"
+    evidence["phase_verified_commit_pending_cleanup"] = (
+        journal.get("phase") == "verified_commit_pending_cleanup"
+    )
+    if not evidence["journal_protocol_r13o"]:
+        refusal.append("non-R13O journal is not eligible for this diagnostic")
+    if not evidence["phase_verified_commit_pending_cleanup"]:
+        refusal.append("journal has no confirmed finalization phase")
+    if not isinstance(release, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", release):
+        refusal.append("journal has invalid release identity")
+    else:
+        try:
+            snapshot = _load_snapshot(install_root / SNAPSHOTS / release)
+            if snapshot.get("version") != 2 or snapshot.get("release") != release:
+                raise InstallRecoveryError("release does not match verified v2 snapshot")
+            claude_home = Path(str(snapshot["claude_home"]))
+            if str(journal.get("claude_home") or "") != str(claude_home):
+                raise InstallRecoveryError("Claude home differs from the snapshot")
+            evidence["snapshot_v2_integrity"] = True
+            active_raw = _file(install_root / ACTIVE)
+            active = json.loads(active_raw.decode("utf-8-sig")) if active_raw is not None else None
+            evidence["active_pointer_new_release"] = (
+                isinstance(active, dict)
+                and active.get("product") == "Vres-OS"
+                and active.get("release") == release
+                and active.get("plugin_path") == journal.get("plugin_path")
+            )
+            plugin = claude_home / "skills" / "vres-os"
+            evidence["managed_plugin_present"] = (
+                str(journal.get("plugin_path") or "") == str(plugin)
+                and _plain_dir(plugin) and _managed(plugin)
+            )
+            evidence["staged_release_manifest_present"] = (
+                _file(install_root / "releases" / release / "release-manifest.json") is not None
+            )
+        except (InstallRecoveryError, ValueError, KeyError, TypeError, OSError) as exc:
+            refusal.append("local snapshot/pointer/plugin evidence incomplete: " + type(exc).__name__)
+    for name, valid in evidence.items():
+        if not valid:
+            refusal.append(f"unverified local finalization evidence: {name}")
+    # A local user-controlled file or journal, even when all checks above
+    # match, is NOT independent release/schema/host authorization.
+    refusal.append(
+        "VRES_W4_HELD_FINALIZATION: missing independently trusted SQL ledger, "
+        "released post-install file/profile hashes, runtime host identity "
+        "and separately approved operator cleanup"
+    )
+    return {
+        "journal": True,
+        "local_evidence": evidence,
+        "journal_removal_approved": False,
+        "rollback_approved": False,
+        "actions": [],
+        "refusals": refusal,
+    }
+
+
 def _require_inrun_installer_lock(install_root: Path) -> None:
     """Native-Windows accident check, not a trusted same-user provenance proof.
 

@@ -200,6 +200,16 @@ function Write-JsonAtomic([string]$Path, $Value) {
         Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
     }
 }
+function Assert-Managed([string]$Path) {
+    if (Test-Path -LiteralPath $Path) {
+        $marker = Join-Path $Path '.vres-managed'
+        if (-not (Test-Path -LiteralPath $marker) -or (Get-Content -Raw -Encoding UTF8 -LiteralPath $marker).Trim() -ne 'Vres-OS') {
+            throw "Refusing to replace an unmanaged directory: $Path"
+        }
+        if ((Get-Item -LiteralPath $Path).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Managed path cannot be a junction or symlink.' }
+    }
+}
+
 if ($env:OS -ne 'Windows_NT') { throw 'This installer is for native Windows only.' }
 if ($env:VRES_DATA_DIR -and [IO.Path]::GetFullPath($env:VRES_DATA_DIR) -ne [IO.Path]::GetFullPath($InstallRoot)) { throw 'Remove VRES_DATA_DIR override before using the managed Windows installer.' }
 if (Test-Path (Join-Path $InstallRoot 'pending-install.json')) { throw "An interrupted installation journal exists. Inspect it with: python -I `"$(Join-Path $RepoRoot 'src\vres_os\install_recovery.py')`" inspect --install-root `"$InstallRoot`" (then recover --confirm), or follow docs/INSTALL-WINDOWS.md." }
