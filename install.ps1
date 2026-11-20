@@ -128,9 +128,6 @@ $BackupRoot = Join-Path $InstallRoot 'backups'
 $GlobalClaudePath = Join-Path $ClaudeHome 'CLAUDE.md'
 $GlobalRulesPath = Join-Path $ClaudeHome 'vres-rules.md'
 $ClaudeSettingsPath = Join-Path $ClaudeHome 'settings.json'
-$GlobalClaudeBefore = $null
-$GlobalRulesBefore = $null
-$ClaudeSettingsBefore = $null
 # Capture protected profile bytes later at the original recovery boundary.
 
 function Confirm-Choice([string]$Question, [bool]$Default=$false) {
@@ -203,45 +200,6 @@ function Write-JsonAtomic([string]$Path, $Value) {
         Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
     }
 }
-function Restore-OriginalBytesAtomic([string]$Path, [byte[]]$Original) {
-    # Attempted-change-only restoration. Never delete an originally absent
-    # Claude file: it may have been independently created after the snapshot.
-    if ($null -eq $Original) {
-        if (Test-Path -LiteralPath $Path) {
-            throw "Recovery HELD: originally absent Claude file exists: $Path. Keep the journal; do not auto-delete."
-        }
-        return
-    }
-    $parent = Split-Path -Parent $Path
-    if (-not (Test-Path -LiteralPath $parent -PathType Container)) {
-        throw "Recovery HELD: original Claude parent directory is missing: $parent"
-    }
-    $tmp = "$Path.$([guid]::NewGuid().ToString('N')).tmp"
-    $backup = "$Path.$([guid]::NewGuid().ToString('N')).bak"
-    try {
-        [IO.File]::WriteAllBytes($tmp, $Original)
-        if (Test-Path -LiteralPath $Path -PathType Leaf) {
-            [IO.File]::Replace($tmp, $Path, $backup)
-        } elseif (Test-Path -LiteralPath $Path) {
-            throw "Recovery HELD: Claude path is not an ordinary file: $Path"
-        } else {
-            [IO.File]::Move($tmp, $Path)
-        }
-    } finally {
-        Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
-    }
-}
-function Assert-Managed([string]$Path) {
-    if (Test-Path -LiteralPath $Path) {
-        $marker = Join-Path $Path '.vres-managed'
-        if (-not (Test-Path -LiteralPath $marker) -or (Get-Content -Raw -Encoding UTF8 -LiteralPath $marker).Trim() -ne 'Vres-OS') {
-            throw "Refusing to replace an unmanaged directory: $Path"
-        }
-        if ((Get-Item -LiteralPath $Path).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Managed path cannot be a junction or symlink.' }
-    }
-}
-
 if ($env:OS -ne 'Windows_NT') { throw 'This installer is for native Windows only.' }
 if ($env:VRES_DATA_DIR -and [IO.Path]::GetFullPath($env:VRES_DATA_DIR) -ne [IO.Path]::GetFullPath($InstallRoot)) { throw 'Remove VRES_DATA_DIR override before using the managed Windows installer.' }
 if (Test-Path (Join-Path $InstallRoot 'pending-install.json')) { throw "An interrupted installation journal exists. Inspect it with: python -I `"$(Join-Path $RepoRoot 'src\vres_os\install_recovery.py')`" inspect --install-root `"$InstallRoot`" (then recover --confirm), or follow docs/INSTALL-WINDOWS.md." }
@@ -276,7 +234,6 @@ if (Test-Path (Join-Path $InstallRoot 'venv')) {
 Assert-Managed $PluginTarget
 # Capture pre-existing surfaces BEFORE any newly staged bin/plugin is created.
 $HadPluginBefore = Test-Path -LiteralPath $PluginTarget -PathType Container
-$BinExistedBefore = Test-Path -LiteralPath $Bin -PathType Container
 Write-Host 'Vres-OS controlled-live-test preview. Not production-verified.' -ForegroundColor Yellow
 if ($Update) {
     Write-Host "Update target: the existing Vres installation for this Windows user, from pinned commit $SourceCommit." -ForegroundColor Yellow
@@ -351,10 +308,11 @@ $AutoCompactOwnedBefore = $false
 if ($oldPointer -and $oldPointer.PSObject.Properties['autocompact_owned']) {
     $AutoCompactOwnedBefore = [bool]$oldPointer.autocompact_owned
 }
-$pluginMoved = $false
 $published = $false
-$ClaudeContractAttempted = $false
-$ClaudeSettingsAttempted = $false
+$JournalFinalizationFailed = $false
+$InstallationCommitted = $false
+# No original profile bytes are restored from the installer catch. Only the
+# shared R13O source-held recovery tool may recover an un-published transaction.
 try {
     New-Item -ItemType Directory -Force -Path $NewRelease,$DistributionRoot | Out-Null
     # Stage the release files of the pinned commit, read from its verified git objects (never from
@@ -404,16 +362,29 @@ try {
     # The doctor preflight skips database contact and reports PostgreSQL NOT CHECKED, not healthy. Database
     # isolation of the other installer subprocesses (pip, claude plugin validate) is not independently verified.
     Run $NewPython @('-B','-m','vres_os.cli','doctor','--allow-unconfigured','--skip-database')
-    $GlobalClaudeBefore = if (Test-Path -LiteralPath $GlobalClaudePath -PathType Leaf) { [IO.File]::ReadAllBytes($GlobalClaudePath) } else { $null }
-    $GlobalRulesBefore = if (Test-Path -LiteralPath $GlobalRulesPath -PathType Leaf) { [IO.File]::ReadAllBytes($GlobalRulesPath) } else { $null }
-    $ClaudeSettingsBefore = if (Test-Path -LiteralPath $ClaudeSettingsPath -PathType Leaf) { [IO.File]::ReadAllBytes($ClaudeSettingsPath) } else { $null }
     # Persist and verify exact snapshots of the Claude files and launchers this installer may change,
     # before the journal and before any mutation, so an interrupted install can be recovered exactly.
     Run $Python @('-I','-X','utf8',(Join-Path $StagedSource 'src\vres_os\install_recovery.py'),'snapshot','--install-root',$InstallRoot,'--claude-home',$ClaudeHome,'--release',$ReleaseId)
     $ClaudeSnapshot = Join-Path $InstallRoot "install-recovery\$ReleaseId"
-    Write-JsonAtomic (Join-Path $InstallRoot 'pending-install.json') @{ product='Vres-OS'; new_release=$ReleaseId; previous=$oldPointer; plugin_backup=$PluginBackup; plugin_path=$PluginTarget; had_plugin=$HadPluginBefore; claude_snapshot=$ClaudeSnapshot; claude_home=$ClaudeHome }
-    # Only now change the selected runtime/plugin. Roll back both on failure.
-    if (Test-Path $PluginTarget) { Move-Item -LiteralPath $PluginTarget -Destination $PluginBackup; $pluginMoved=$true }
+    # R13O journal phase is durable before any managed-file mutation. A crash
+    # after pointer publication but before the next PowerShell statement must
+    # still be refused by comparing the full snapshotted pointer bytes.
+    $JournalRecord = @{
+        product='Vres-OS'
+        transaction_protocol='r13o/1'
+        phase='publishing'
+        new_release=$ReleaseId
+        previous=$oldPointer
+        plugin_backup=$PluginBackup
+        plugin_path=$PluginTarget
+        had_plugin=$HadPluginBefore
+        claude_snapshot=$ClaudeSnapshot
+        claude_home=$ClaudeHome
+    }
+    Write-JsonAtomic (Join-Path $InstallRoot 'pending-install.json') $JournalRecord
+    # Only now change managed plugin/launchers. Recovery may restore bytes
+    # before pointer publication, but NEVER after unknown runtime exposure.
+    if (Test-Path $PluginTarget) { Move-Item -LiteralPath $PluginTarget -Destination $PluginBackup }
     Copy-Item -Recurse -LiteralPath $StagedPlugin -Destination $PluginTarget
     Run $Python @('-I','-X','utf8',$ArtifactTool,'verify-tree','--manifest',$ReleaseManifest,'--prefix','plugins/vres-os','--dir',$PluginTarget,'--allow-extra','.vres-managed')
     Run 'claude' @('plugin','validate',$PluginTarget)
@@ -438,13 +409,11 @@ try {
         autocompact_owned=$AutoCompactOwnedBefore
     }
     $published=$true
-    $ClaudeContractAttempted = $true
     Run $NewPython @(
         '-B','-m','vres_os.claude_contract','install-global',
         '--claude-home',$ClaudeHome,
         '--rules-source',(Join-Path $StagedSource 'rules\vres-rules.md')
     )
-    $ClaudeSettingsAttempted = $true
     Run $NewPython @(
         '-B','-m','vres_os.statusline','install',
         '--claude-home',$ClaudeHome,
@@ -484,32 +453,59 @@ try {
     } elseif ($parts -notcontains $Bin) {
         [Environment]::SetEnvironmentVariable('Path', (($parts+$Bin)-join ';'), 'User')
     }
-    # R13N: never report a completed installation while a pending recovery
-    # journal could still exist. Removal failure goes to the same held
-    # single recovery policy in catch, not to an alternate auto-rollback.
+    # R13O N-3: persistent FINALIZED-READY evidence distinguishes a completed
+    # but not journal-cleaned installation from a partially published release.
+    # A journal-cleanup failure is not an invitation to roll back live files.
     $PendingSuccess = Join-Path $InstallRoot 'pending-install.json'
-    Remove-Item -LiteralPath $PendingSuccess -ErrorAction Stop
-    if (Test-Path -LiteralPath $PendingSuccess) {
-        throw 'VRES_W4_PENDING_JOURNAL_NOT_FINALIZED: keep recovery evidence; success refused.'
+    try {
+        $JournalRecord['phase'] = 'verified_commit_pending_cleanup'
+        Write-JsonAtomic $PendingSuccess $JournalRecord
+        Remove-Item -LiteralPath $PendingSuccess -ErrorAction Stop
+        if (Test-Path -LiteralPath $PendingSuccess) {
+            throw 'VRES_W4_PENDING_JOURNAL_NOT_FINALIZED: journal removal not confirmed.'
+        }
+    } catch {
+        $JournalFinalizationFailed = $true
+        throw
     }
+    $InstallationCommitted = $true
     Write-Host 'Vres preview installed. This does not certify Windows live behavior.' -ForegroundColor Green
     Write-Host 'Database health was not checked: the doctor preflight skipped database contact. No PostgreSQL access is authorized; check database health separately with vres doctor only after approving a non-incident database target.' -ForegroundColor Yellow
     Write-Host "Release: $ReleaseId"
     Write-Host 'Open a fresh terminal, enter a disposable project, launch claude, then say: start vres'
     Write-Host 'Credentials belong in the separate setup console, never in Claude chat.'
 } catch {
-    # R13N: ONE original interrupted-installation recovery policy. A caught
-    # PowerShell failure must not bypass install_recovery.py's unknown-schema
-    # refusal by restoring the active pointer, plugin, launchers or Claude files
-    # directly. File snapshots are not trusted live-ledger or host evidence.
-    # Preserve the journal and all managed/user surfaces for reviewed recovery.
+    $InstallerFailure = $_
     $PendingFailure = Join-Path $InstallRoot 'pending-install.json'
-    if (Test-Path -LiteralPath $PendingFailure) {
-        Write-Warning 'VRES_W4_HELD_INSTALL_FAILURE_RECOVERY: preserved pending journal and original recovery evidence. No automatic rollback was attempted. See docs/INSTALL-WINDOWS.md for the held offline recovery decision.'
+    if ($InstallationCommitted) {
+        Write-Warning 'VRES_W4_INSTALL_COMMITTED_OUTPUT_FAILURE: journal was finalized; do not attempt rollback because success output failed.'
+    } elseif ($JournalFinalizationFailed) {
+        # N-3: all release verification steps completed. The journal remains
+        # an intentional launch fence. Keep evidence; never restore old files.
+        Write-Warning 'VRES_W4_INSTALLED_JOURNAL_FINALIZATION_HELD: installed files were verified but the pending journal was not finalized. Runtime remains blocked. Do not delete it without independent reviewed recovery.'
+    } elseif ((Test-Path -LiteralPath $PendingFailure) -and -not $published) {
+        # N-1: same original policy as interrupted recovery, NOT R13M direct
+        # PowerShell rollback. The shared recovery module validates v2 snapshot,
+        # exact original pointer bytes and absence of Claude profile changes.
+        # Its independent P0 source-only gate is STILL HELD until cleared.
+        try {
+            Run $Python @(
+                '-I','-X','utf8',(Join-Path $StagedSource 'src\vres_os\install_recovery.py'),
+                'recover-prepublication','--install-root',$InstallRoot,
+                '--claude-home',$ClaudeHome,'--release',$ReleaseId,'--confirm'
+            )
+            Write-Warning 'VRES_W4_PREPUBLICATION_ROLLBACK_VERIFIED: original managed bytes restored and verified using the common snapshot policy; staged evidence retained.'
+        } catch {
+            Write-Warning 'VRES_W4_PREPUBLICATION_ROLLBACK_HELD: snapshot-backed recovery was refused or failed; journal preserved and no manual deletion is authorized.'
+        }
+    } elseif (Test-Path -LiteralPath $PendingFailure) {
+        # Any pointer publication, including a crash between publication and
+        # the in-memory $published flag, is refused by the recovery module.
+        Write-Warning 'VRES_W4_HELD_INSTALL_FAILURE_RECOVERY: published or uncertain transaction preserved; runtime and old-file restoration require independently established schema/host compatibility.'
     } else {
-        Write-Warning 'VRES_W4_INSTALL_FAILURE_NO_JOURNAL: no automatic rollback was attempted. Preserve staged files and verify the installed release independently before retrying.'
+        Write-Warning 'VRES_W4_INSTALL_FAILURE_NO_JOURNAL: preserve staged evidence; no rollback without the original snapshot.'
     }
-    throw
+    throw $InstallerFailure
 } finally {
     $installLock.Dispose()
 }

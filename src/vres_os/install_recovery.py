@@ -85,7 +85,7 @@ def _lstat(path: Path) -> os.stat_result | None:
 
 
 def _is_link(info: os.stat_result) -> bool:
-    return stat.S_ISLNK(info.st_mode) or bool(getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+    return stat.S_ISLNK(info.st_mode) or bool(getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
 
 
 def _file(path: Path) -> bytes | None:
@@ -266,7 +266,7 @@ def _classify_recovery_actions(actions: list[dict[str, Any]]) -> str:
     return "UNKNOWN_ACTION_HELD"
 
 
-def inspect(install_root: Path) -> dict[str, Any]:
+def inspect(install_root: Path, *, installer_prepublication: bool = False) -> dict[str, Any]:
     """Deterministic recovery plan from the journal and verified evidence, or the reasons it is ambiguous."""
     require_w4_install_recovery_clearance()  # P0: source-only held direct-route boundary
     install_root = Path(install_root)
@@ -386,10 +386,42 @@ def inspect(install_root: Path) -> dict[str, Any]:
     except (InstallRecoveryError, ValueError) as exc:
         refusals.append(str(exc))
 
+
+    # R13O scoped source-only in-run path: the ORIGINAL installer may attempt a
+    # snapshot-backed rollback BEFORE its first active-pointer publication.
+    # An unmodified pointer, v2 snapshot, no Claude-profile changes and the
+    # r13o publishing journal are mandatory. This is local evidence, NOT trusted
+    # schema attestation; publication/unknown states remain categorically held.
+    # The global source-only recovery interlock above is unchanged.
+    if installer_prepublication:
+        allowed = {"restore_plugin_from_backup", "remove_new_plugin", "restore_launchers"}
+        if journal.get("transaction_protocol") != "r13o/1" or journal.get("phase") != "publishing":
+            refusals.append("prepublication recovery requires the R13O publishing journal")
+        if manifest is None or manifest.get("version") != 2:
+            refusals.append("prepublication recovery requires a complete v2 snapshot")
+        else:
+            if _file(install_root / ACTIVE) != _file(snap_path / ACTIVE):
+                refusals.append("active pointer was published or altered; in-run rollback refused")
+        if any(step.get("action") not in allowed for step in actions):
+            refusals.append("prepublication plan includes a pointer, Claude profile or unknown action")
+        if not refusals:
+            actions.append({"action": "remove_journal"})
+        return {"journal": True, "new_release": new_release, "actions": actions,
+                "refusals": refusals, "classification": "R13O_PREPUBLICATION_ONLY",
+                "recoverable": not refusals}
+
     # R13N: only local managed-file differences are classified here. Neither
     # the journal nor a new migration marker proves the live SQL ledger; even
     # changing a source interlock must not turn unknown compatibility into PASS.
     # The PowerShell catch path now preserves this same journal without rollback.
+    # An R13O journal is never self-cleaned by ordinary inspect/recover,
+    # even when all managed bytes happen to match. Only independently reviewed
+    # cleanup or the tightly scoped in-run prepublication path may act.
+    if journal.get("transaction_protocol") == "r13o/1":
+        refusals.append(
+            "VRES_W4_HELD_R13O_JOURNAL: no ordinary rollback or marker deletion; "
+            "seek independently reviewed transaction recovery"
+        )
     classification = _classify_recovery_actions(actions)
     if classification == "RUNTIME_RESTORE_HELD":
         refusals.append(
@@ -499,11 +531,41 @@ def verify_restored(install_root: Path, claude_home: Path, release: str) -> dict
     }
 
 
-def recover(install_root: Path, *, confirm: bool) -> dict[str, Any]:
-    """Carry out the inspected plan; refuse on any ambiguity or without explicit confirmation."""
+def _require_inrun_installer_lock(install_root: Path) -> None:
+    """Native-Windows accident check, not a trusted same-user provenance proof.
+
+    Recover only while the ORIGINAL PowerShell installer still holds its
+    exclusive FileShare.None lock; a power-loss journal must not be replayed
+    using the prepublication exception. Synthetic-root unit tests on non-
+    Windows hosts exercise the plan, not OS file-share behaviour.
+    """
+    if os.name != "nt":
+        return  # Windows-only installer; synthetic-root testing seam
+    lock = install_root / "installation.lock"
+    try:
+        with lock.open("rb"):
+            pass
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 32:  # ERROR_SHARING_VIOLATION
+            return
+        raise InstallRecoveryError("R13O exclusive installer-lock evidence unavailable") from exc
+    raise InstallRecoveryError("R13O prepublication rollback requires a live exclusive installer")
+
+
+def recover(
+    install_root: Path, *, confirm: bool, installer_prepublication: bool = False,
+    expected_release: str | None = None, expected_claude_home: Path | None = None,
+) -> dict[str, Any]:
+    """Restore only a verified plan; R13O pre-publication is never a release authorization."""
     require_w4_install_recovery_clearance()  # P0: source-only held direct-route boundary
+    if installer_prepublication and (
+        not confirm or not expected_release or expected_claude_home is None
+    ):
+        raise InstallRecoveryError("In-run prepublication rollback needs explicit release, Claude home and confirmation")
     install_root = Path(install_root)
-    plan = inspect(install_root)
+    if installer_prepublication:
+        _require_inrun_installer_lock(install_root)
+    plan = inspect(install_root, installer_prepublication=installer_prepublication)
     if not plan["journal"]:
         return {"status": "nothing_to_recover"}
     if not plan["recoverable"]:
@@ -511,6 +573,11 @@ def recover(install_root: Path, *, confirm: bool) -> dict[str, Any]:
     if not confirm:
         raise InstallRecoveryError("Recovery changes the installation; repeat with explicit confirmation")
     journal = json.loads((install_root / JOURNAL).read_bytes().decode("utf-8-sig"))
+    if installer_prepublication and (
+        journal.get("new_release") != expected_release
+        or Path(str(journal.get("claude_home") or "")).resolve() != Path(expected_claude_home).resolve()
+    ):
+        raise InstallRecoveryError("Installer prepublication parameters do not match the original journal")
     snap = Path(journal["claude_snapshot"])
     manifest = _load_snapshot(snap)
     claude_home = Path(manifest["claude_home"])
@@ -579,11 +646,14 @@ def main(argv: list[str] | None = None) -> int:
     snap.add_argument("--install-root", type=Path, required=True)
     snap.add_argument("--claude-home", type=Path, required=True)
     snap.add_argument("--release", required=True)
-    for name in ("inspect", "recover"):
+    for name in ("inspect", "recover", "recover-prepublication"):
         cmd = commands.add_parser(name)
         cmd.add_argument("--install-root", type=Path, required=True)
-        if name == "recover":
+        if name in {"recover", "recover-prepublication"}:
             cmd.add_argument("--confirm", action="store_true")
+        if name == "recover-prepublication":
+            cmd.add_argument("--claude-home", type=Path, required=True)
+            cmd.add_argument("--release", required=True)
     proof = commands.add_parser("verify-restored")
     proof.add_argument("--install-root", type=Path, required=True)
     proof.add_argument("--claude-home", type=Path, required=True)
@@ -597,7 +667,12 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "verify-restored":
             result = verify_restored(args.install_root, args.claude_home, args.release)
         else:
-            result = recover(args.install_root, confirm=args.confirm)
+            in_run = args.command == "recover-prepublication"
+            result = recover(
+                args.install_root, confirm=args.confirm, installer_prepublication=in_run,
+                expected_release=args.release if in_run else None,
+                expected_claude_home=args.claude_home if in_run else None,
+            )
     except (InstallRecoveryError, OSError, ValueError) as exc:
         print(f"Vres installation recovery refused: {exc}", file=sys.stderr)
         return 2

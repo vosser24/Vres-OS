@@ -14,6 +14,59 @@
 
 Version: **0.2.0-alpha.1 / Python package 0.2.0a1**. Target: native Windows, Python 3.12–3.13, current Claude Code. This is a controlled-live-test preview; the installer itself has not executed on Windows in the audit environment.
 
+## R13O original managed-install transaction barrier — SOURCE ONLY / NOT_RUN
+
+R13O remains an **unexecuted GitHub source design**, NOT a procedure for the
+existing October Windows laptop. All P0 holds, host/SQL prohibition, source
+installer/preflight interlocks and independent-release requirements remain.
+Do NOT execute these commands, edit local holds, remove a pending journal, run
+a Windows update or start the original native Claude/installed FastMCP yet.
+
+The original one-user `installation.lock` and `pending-install.json` now
+also form an **accidental-concurrency** barrier in source, in the original
+shared Windows runtime resolver and the Python database connection/migration
+paths. The Python DB connection retains a lock reader handle for its entire
+lifetime; the original installer requests an exclusive writer handle. When a
+journal is present, all ordinary original launches and database operations
+are refused. Direct old releases, externally started processes, source
+modification, same-user/admin tampering and actual SQL ledger state are
+**not** independently attested by this barrier. It neither touches the
+database now nor proves schema compatibility for later rollback.
+
+For a **caught failure before any active-pointer publication**, the original
+installer would call the original `install_recovery.py recover-prepublication`
+path under the existing global release/recovery source hold. That shared
+tool requires a complete v2 snapshot, R13O `publishing` journal, exact
+unchanged original active-pointer bytes, no Claude-profile action, an exact
+release/Claude-home match and explicit confirmation; it verifies restored
+bytes before removing the journal. On native Windows, that in-run path also
+checks that the original installer still holds the exclusive
+`installation.lock` (Windows sharing-violation evidence), so an abandoned
+power-loss journal alone cannot request the exception. This is an accidental
+same-user lock barrier, NOT authentication or trusted SQL compatibility proof.
+It is **not authorized or operational now**.
+No PowerShell catch-path rollback is performed independently of the recovery
+policy. Any failure *after* active-pointer publication, unknown transaction
+state, incompatible snapshot or altered profile stays held with journal and
+evidence preserved. R13O does **not** solve power-loss recovery across
+publication or provide safe automatic rollback with the unknown live SQL ledger.
+
+After all ordinary final file verification steps the installer would change
+the journal phase to `verified_commit_pending_cleanup` and attempt removal.
+If removal fails, it must report
+`VRES_W4_INSTALLED_JOURNAL_FINALIZATION_HELD`: the release files were verified,
+but **launch remains blocked** until an independently reviewed cleanup
+decision. Do **not** delete the journal, retry the installer or restore
+an older runtime because this message appears.
+
+The R13O synthetic-root pytest file is **AUTHORED / NOT_RUN**. No actual
+PowerShell fault injection, Windows file-share behavior, crash replay,
+PostgreSQL access, native host, installed user-profile operation or integrated
+UAT is claimed. Historical R13N guidance below still describes the held
+published/uncertain cases; the conditional R13O prepublication policy above
+supersedes R13N's blanket statement about every caught error only after
+future independent approval.
+
 ## R13N original interrupted-install consistency — SOURCE ONLY, NOT executable
 
 The R13M advisory found that the original installer PowerShell catch path

@@ -121,24 +121,29 @@ def build_dsn(purpose: str = "runtime") -> str:
 def connect(*, autocommit: bool = False, purpose: str = "runtime") -> Iterator[Connection]:
     """Open a purpose-scoped database connection without masking SQL/application defects."""
     require_w4_schema_clearance()  # BEFORE importing driver
-    psycopg = _driver()
-    from psycopg.rows import dict_row
+    # R13O: keep an ordinary Windows lock reader open for the full DB lifetime.
+    # This does NOT clear the P0 SQL incident or prove schema compatibility.
+    from .install_transaction import hold_install_transaction
 
-    try:
-        conn = psycopg.connect(
-            build_dsn(purpose),
-            row_factory=dict_row,
-            cursor_factory=psycopg.ClientCursor,
-            autocommit=autocommit,
-        )
-    except (DatabaseUnavailable, DatabaseBoundaryUpgradeRequired):
-        raise
-    except (psycopg.OperationalError, psycopg.InterfaceError) as exc:
-        raise DatabaseUnavailable(
-            f"PostgreSQL {purpose} connection failed; check service, account, TLS and secure setup."
-        ) from exc
-    with conn:
-        yield conn
+    with hold_install_transaction():
+        psycopg = _driver()
+        from psycopg.rows import dict_row
+
+        try:
+            conn = psycopg.connect(
+                build_dsn(purpose),
+                row_factory=dict_row,
+                cursor_factory=psycopg.ClientCursor,
+                autocommit=autocommit,
+            )
+        except (DatabaseUnavailable, DatabaseBoundaryUpgradeRequired):
+            raise
+        except (psycopg.OperationalError, psycopg.InterfaceError) as exc:
+            raise DatabaseUnavailable(
+                f"PostgreSQL {purpose} connection failed; check service, account, TLS and secure setup."
+            ) from exc
+        with conn:
+            yield conn
 
 
 def _digest(text: str) -> str:
@@ -305,6 +310,11 @@ def migrate(*, adopt_legacy_checksums: bool = False) -> list[str]:
     ambiguous metadata is refused before any advisory lock or DDL, and the same checks
     are repeated under the lock before the first schema change.
     """
+    # The P0 denial stays first; never read a DB target while the incident is open.
+    require_w4_schema_clearance()
+    from .install_transaction import require_install_transaction_ready
+
+    require_install_transaction_ready()
     cfg = ConfigStore().load()
     test_single_role = _test_single_role_dsn() is not None
     has_migrator_identity = bool(cfg.database.migration_user)
