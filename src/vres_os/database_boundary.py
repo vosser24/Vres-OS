@@ -458,6 +458,31 @@ def _restrict_original_function_execute(conn, runtime: str) -> None:
     )
 
 
+def _restore_original_runtime_migration_calls(conn, runtime: str) -> None:
+    """Regrant essential direct runtime calls in the SAME migration transaction.
+
+    R13I revokes PUBLIC/runtime EXECUTE for functions created by each migration.
+    If a later migration fails, the already-committed schema must retain its
+    existing governance and context-refresh invoker dependencies. This is not
+    a blanket grant or proof of effective privileges/role inheritance.
+    """
+    require_w4_schema_clearance()  # P0: no database contact while incident remains open
+    from psycopg import sql
+
+    for signature in (
+        "vres.assert_governance_mutation_allowed(bigint,text)",
+        "vres.consume_context_refresh_attestation(bigint,text,text,text)",
+    ):
+        row = conn.execute("SELECT to_regprocedure(%s) AS routine", (signature,)).fetchone()
+        routine = row.get("routine") if isinstance(row, dict) else row[0] if row else None
+        if routine is not None:
+            conn.execute(
+                sql.SQL("GRANT EXECUTE ON FUNCTION {} TO {}").format(
+                    sql.SQL(signature), sql.Identifier(runtime)
+                )
+            )
+
+
 def _revoke_original_task_history_deletes(conn, runtime: str) -> None:
     """Restrict runtime destructive DML and task-column UPDATEs.
 

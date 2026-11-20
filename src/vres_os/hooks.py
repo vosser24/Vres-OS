@@ -231,8 +231,30 @@ def _block_unstaged_prompt() -> None:
     sys.stdout.write(json.dumps({
         "decision": "block",
         "reason": (
-            "Vres could not safely stage this original user turn. The prompt is blocked; "
-            "verify Vres continuity before resending."
+            "Vres could not safely stage this original user turn. The prompt is blocked. "
+            "Do not disable continuity hooks or retry state-changing work. "
+            "Request separately approved offline recovery before resending."
+        ),
+        "hookSpecificOutput": {
+            "hookEventName": "UserPromptSubmit",
+            "suppressOriginalPrompt": True,
+        },
+    }))
+
+
+def _block_sensitive_notification() -> None:
+    """Refuse sensitive notification-shaped input without credential capture.
+
+    A prompt starting with a host notification tag is NOT authenticated as
+    host-generated, and must not bypass the original credential ingress filter.
+    Host-generated content is also not consent to store a credential.
+    """
+    sys.stdout.write(json.dumps({
+        "decision": "block",
+        "reason": (
+            "Notification-shaped input contains credential-like material. "
+            "The prompt is blocked and Vres did not capture any credential. "
+            "Use the separately approved local credential/recovery workflow."
         ),
         "hookSpecificOutput": {
             "hookEventName": "UserPromptSubmit",
@@ -253,6 +275,15 @@ def user_prompt() -> None:
         return
     context = f"VRES_CURRENT_SESSION_ID={_session_id(payload) or 'UNKNOWN'}"
     if is_system_prompt_event(prompt):
+        # R13J: tags are untrusted prompt content, not provenance. Strip the
+        # first opening tag when inspecting inline secret assignments that
+        # otherwise hide behind the notification prefix. Do NOT auto-capture
+        # host/system material as if it were a user's credential.
+        notification_body = prompt.lstrip().split(">", 1)[-1]
+        if (detect_high_confidence_credentials(prompt) is not None
+                or detect_high_confidence_credentials(notification_body) is not None):
+            _block_sensitive_notification()
+            return
         # Claude Code background-task notifications are host/system events, not user intent.
         if not ConfigStore().load().configured:
             return

@@ -185,7 +185,10 @@ def test_placeholder_and_host_system_events_are_not_silently_captured(monkeypatc
         lambda: pytest.fail("host/system notification must not become a credential capture"),
     )
     hooks.user_prompt()
-    assert "VRES_CURRENT_SESSION_ID=S-SYSTEM" in capsys.readouterr().out
+    message = json.loads(capsys.readouterr().out)
+    assert message["decision"] == "block"
+    assert message["hookSpecificOutput"]["suppressOriginalPrompt"] is True
+    assert "SyntheticPassword999" not in json.dumps(message)
 
     monkeypatch.setattr(
         hooks,
@@ -199,6 +202,28 @@ def test_placeholder_and_host_system_events_are_not_silently_captured(monkeypatc
     )
     hooks.user_prompt()
     assert capsys.readouterr().out == ""
+
+
+def test_benign_system_notification_retains_unattributed_context_not_credential_capture(monkeypatch, capsys):
+    monkeypatch.setattr(
+        hooks,
+        "_input",
+        lambda: {"session_id": "S-BENIGN-SYSTEM",
+                 "prompt": "<task-notification>background task completed</task-notification>"},
+    )
+    monkeypatch.setattr(
+        hooks, "ConfigStore",
+        lambda: SimpleNamespace(load=lambda: SimpleNamespace(configured=True)),
+    )
+    monkeypatch.setattr(
+        hooks, "CredentialBroker",
+        lambda: pytest.fail("host notification must not become a credential capture"),
+    )
+    hooks.user_prompt()
+    message = json.loads(capsys.readouterr().out)
+    assert message["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
+    assert "VRES_CURRENT_SESSION_ID=S-BENIGN-SYSTEM" in message["hookSpecificOutput"]["additionalContext"]
+    assert "decision" not in message
 
 
 def test_configured_prompt_missing_session_is_denied_before_repository(monkeypatch, capsys):

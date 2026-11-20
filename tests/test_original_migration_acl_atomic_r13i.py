@@ -39,6 +39,29 @@ def test_existing_original_function_boundary_is_reused_not_bypassed():
     assert "_activate_experience_observability(conn, runtime, writer)" in boundary
 
 
+def test_required_runtime_calls_restored_before_each_migration_commit():
+    db = DB.read_text(encoding="utf-8")
+    original = db.split("def migrate(", 1)[1].split("for name in names:", 1)[1]
+    transaction = original.split("with conn.transaction():", 1)[1].split("applied.append(name)", 1)[0]
+    markers = (
+        "conn.execute(sql_text)",
+        "_restrict_original_function_execute(conn, cfg.database.user)",
+        "_restore_original_runtime_migration_calls(conn, cfg.database.user)",
+        "INSERT INTO vres.schema_migrations(version,checksum)",
+    )
+    offsets = [transaction.index(marker) for marker in markers]
+    assert offsets == sorted(offsets)
+
+    boundary = BOUNDARY.read_text(encoding="utf-8")
+    required = boundary.split("def _restore_original_runtime_migration_calls(", 1)[1]
+    required = required.split("def _revoke_original_task_history_deletes(", 1)[0]
+    assert "require_w4_schema_clearance()" in required
+    assert "vres.assert_governance_mutation_allowed(bigint,text)" in required
+    assert "vres.consume_context_refresh_attestation(bigint,text,text,text)" in required
+    assert "GRANT EXECUTE ON FUNCTION {} TO {}" in required
+    assert "SELECT to_regprocedure(%s) AS routine" in required
+
+
 def test_incident_holds_and_release_pin_still_present():
     db = DB.read_text(encoding="utf-8")
     release = RELEASE.read_text(encoding="utf-8")

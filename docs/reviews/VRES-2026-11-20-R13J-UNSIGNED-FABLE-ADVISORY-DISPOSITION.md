@@ -1,0 +1,23 @@
+# Vres-OS R13J — unsigned Claude Fable R13D-I advisory, author-side disposition
+
+2026-11-20. SOURCE ONLY. NOT AN INDEPENDENT REVIEW. NOT_RUN. NOT_APPLIED. NOT A RELEASE.
+
+Input: user-supplied unsigned Claude Fable 5.2 advisory against immutable R13I commit f18e0ef416345545fa9cd0324a5177a7b5143833. The author expressly states they cannot post to #185 from an independent authenticated identity, did not read all current #185 comments and used only read-only static Git examination. THREAT_MODEL=REVISE, RELEASE_DESIGN=DESIGN_REVISE and OPERATIONS=BLOCKED are ADVISORY, not F1/Fable positive authority or signed review. Issue #185 remains independent-review blocked.
+
+## Review of findings, and narrowly authorized R13J source corrections
+
+- F1 P1 CONFIRMED STATIC: session_prompts._stage_entry requires stage_strict_user_input while release_inputs.py pins SQL 001-041. Configured prompt staging on 041 is incompatible. NO release-pin edit, migration application or bypass; release/design remains held until full schema/installer assessment.
+- F2 P1 UNRESOLVED: new SOURCE-ONLY 048 migration name overlaps open Schema-048 incident nomenclature; the actual live ledger is UNKNOWN. Collision cannot be asserted or cleared. Do not rename, rewrite or apply existing migration without separate ledger evidence, independent design review and consent.
+- F3 P2 ADDRESSED IN SOURCE ONLY: the R13I per-migration function revoke was followed by regrant only after ALL migrations. R13J adds a same-transaction, conditional regrant for the two original direct runtime functions: assert_governance_mutation_allowed and consume_context_refresh_attestation. Other functions remain denied; any SQL failures must roll back that migration transaction. Effective grants and failed-intermediate-migration behavior NOT_RUN.
+- F4 P2 CONFIRMED STATIC: selftest.py cleanup uses runtime DELETE, incompatible with proposed R13G grants and 048 task DELETE hold. This cannot be safely turned into a one-connection rollback using its current Repository/Knowledge/Procedure multi-connection services without a deliberate redesign. Selftest is NOT authorized and NOT_RUN; do not run it against real data.
+- F5 P2 PARTIALLY ADDRESSED IN SOURCE ONLY: fail-closed staging blocks configured prompts by design; recovery text now explicitly discourages disabling hooks or retrying state-changing work. Real safe recovery, compatible host version and V-42 availability remain unverified; no user instruction to run vres doctor under P0 holds.
+- F6 P2 INTENTIONAL HOLD: model-facing, lifecycle and SQL task cancellation remain refused; no independently approved operator-only cancellation route exists. Preserve task functionality otherwise; do not reopen a reusable model cancellation capability.
+- F7 P2 ADDRESSED IN SOURCE ONLY: a notification-shaped prefix is not trusted origin. Before taking the non-authoritative notification return, R13J checks high-confidence credential material both in the full prompt and immediately after its opening tag. It blocks without attempting Windows credential capture; benign notification events remain non-authoritative. No claimed detection of all secrets or genuine human-origin attestation.
+- F8 P2 OPEN: runtime-writable turn fence, caller-asserted session provenance, other-table INSERT/UPDATE and passed-validation parking remain subject to independent source/design review.
+- F9 P3 OPEN: new tests are AUTHORED/NOT_RUN. Trigger permissions, cascading deletes, NTFS, release packaging, power-loss recovery and all original-owner workflow effects require separately authorized tests and independent review.
+
+## Operational boundaries
+
+Both LIVE_SCHEMA_048_INCIDENT=OPEN (NO PostgreSQL EVEN SELECT) and HOST_HOOK_DB_ROUTE_ATTEMPTED_AND_REFUSED=OPEN (NO ordinary native Claude Code/installed FastMCP/hooks) remain binding. F1/Fable positive independent authority NOT_GRANTED. SQL 042-048 NOT_APPLIED. Original release pin 001-041 remains; actual ledger UNKNOWN. No CI/PR; .github/workflows/ci.yml pull_request runs PostgreSQL and tests. No protected main/R13 merge, Windows git/update/preflight, installed P2, credentials/profile, real PRISM, TASK-DAY-01 or real UAT. Original one-user Chairman, Claude CLI+FastMCP, tasks/explicit selection/task_resume/results/learning, installation/update/recovery and V-01..V-42 preserved in scope.
+
+R13J Python AST NOT_RUN; compilation NOT_RUN; pytest NOT_RUN; SQL parsing/connection NOT_RUN; PostgreSQL NOT_RUN; native host/Windows NOT_RUN; UAT NOT_RUN. Any source review outcome is NOT independent approval. Required next: genuinely attributable three-part #185 verdict on exact updated source, then incident evidence and separate executable-test and original updater approval for SAME October installation.

@@ -358,9 +358,16 @@ def migrate(*, adopt_legacy_checksums: bool = False) -> list[str]:
                 # the existing R13H protected boundary helper. No global
                 # default-privilege changes or alternate runtime are introduced.
                 if purpose == "migrator":
-                    from .database_boundary import _restrict_original_function_execute
+                    from .database_boundary import (
+                        _restrict_original_function_execute,
+                        _restore_original_runtime_migration_calls,
+                    )
 
                     _restrict_original_function_execute(conn, cfg.database.user)
+                    # R13J: restore the two original required runtime calls
+                    # before THIS migration transaction commits. A later failed
+                    # migration must not strand runtime governance privileges.
+                    _restore_original_runtime_migration_calls(conn, cfg.database.user)
                 conn.execute(
                     "INSERT INTO vres.schema_migrations(version,checksum) VALUES (%s,%s)",
                     (name, checksum),
