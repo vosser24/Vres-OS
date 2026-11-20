@@ -352,6 +352,15 @@ def migrate(*, adopt_legacy_checksums: bool = False) -> list[str]:
                 continue
             with conn.transaction():
                 conn.execute(sql_text)
+                # R13I: source-only transactional function-ACL fence. PostgreSQL
+                # defaults new functions to PUBLIC EXECUTE. Revoke it before
+                # the same original per-migration transaction commits, using
+                # the existing R13H protected boundary helper. No global
+                # default-privilege changes or alternate runtime are introduced.
+                if purpose == "migrator":
+                    from .database_boundary import _restrict_original_function_execute
+
+                    _restrict_original_function_execute(conn, cfg.database.user)
                 conn.execute(
                     "INSERT INTO vres.schema_migrations(version,checksum) VALUES (%s,%s)",
                     (name, checksum),
