@@ -7,8 +7,11 @@ vres-rules.md, settings.json) and of the Vres launchers in bin/, under
 journal records where that snapshot is.
 
 If the installer is then killed or loses power, `inspect` reads the journal, the verified
-snapshot and the current state and prints a deterministic plan. `recover --confirm`
-carries the plan out:
+snapshot and the current state and classifies a deterministic local plan. Under
+the R13N source-only interlocks, neither inspection nor recovery is executable.
+Runtime/plugin/launcher or Claude-profile restoration is denied pending
+independent compatibility review. In a future separately approved design,
+`recover --confirm` may carry a reviewed, permitted plan out:
 - the previous active pointer is restored;
 - the backed-up managed plugin is restored, and only a Vres-managed plugin is ever removed;
 - the launchers and the three Claude files are restored to their snapshot bytes, after
@@ -55,9 +58,9 @@ class InstallRecoveryError(RuntimeError):
 
 
 W4_INSTALL_RECOVERY_SOURCE_INTERLOCK = "HELD_NO_INSTALL_OR_RECOVERY"
-# R13M: no source-authored boolean or owner assertion certifies the live schema.
-# A future independently reviewed evidence design is needed before auto-restoring
-# an older runtime/plugin/launchers across potentially advanced SQL 042-048.
+# R13M/R13N: no local marker, owner assertion or source-authored boolean
+# certifies the live schema. R13N now denies runtime restoration regardless
+# of this sentinel until an independently reviewed evidence design exists.
 W4_SCHEMA_ROLLBACK_SOURCE_INTERLOCK = "HELD_UNVERIFIED_LIVE_MIGRATION_LEDGER"
 
 
@@ -243,6 +246,26 @@ def _release_of(pointer: Any) -> str | None:
     return pointer.get("release") if isinstance(pointer, dict) else None
 
 
+# R13N: this is a classification of LOCAL managed-file differences, never a
+# database migration ledger, human attestation, host clearance or permission.
+# Unknown future recovery actions are always held, not silently treated as safe.
+RUNTIME_RESTORE_ACTIONS = frozenset({
+    "restore_active_pointer", "restore_plugin_from_backup",
+    "remove_new_plugin", "restore_launchers",
+})
+
+
+def _classify_recovery_actions(actions: list[dict[str, Any]]) -> str:
+    kinds = {step.get("action") for step in actions}
+    if kinds & RUNTIME_RESTORE_ACTIONS:
+        return "RUNTIME_RESTORE_HELD"
+    if not kinds:
+        return "NO_MANAGED_FILE_RESTORE"
+    if kinds <= {"restore_claude_file"}:
+        return "CLAUDE_PROFILE_RESTORE_HELD"
+    return "UNKNOWN_ACTION_HELD"
+
+
 def inspect(install_root: Path) -> dict[str, Any]:
     """Deterministic recovery plan from the journal and verified evidence, or the reasons it is ambiguous."""
     require_w4_install_recovery_clearance()  # P0: source-only held direct-route boundary
@@ -363,23 +386,32 @@ def inspect(install_root: Path) -> dict[str, Any]:
     except (InstallRecoveryError, ValueError) as exc:
         refusals.append(str(exc))
 
-    # R13M: an installation snapshot proves FILE bytes, not the actual SQL ledger.
-    # Do not undo an active runtime/plugin/launcher transition if the live schema
-    # might have moved past the previous release. No DB probe or untrusted
-    # journal-supplied "schema approved" flag can lift this SOURCE-ONLY hold.
-    runtime_restore = {"restore_active_pointer", "restore_plugin_from_backup",
-                       "remove_new_plugin", "restore_launchers"}
-    if (any(step.get("action") in runtime_restore for step in actions)
-            and W4_SCHEMA_ROLLBACK_SOURCE_INTERLOCK != "INDEPENDENT_SCHEMA_COMPATIBILITY_VERIFIED"):
+    # R13N: only local managed-file differences are classified here. Neither
+    # the journal nor a new migration marker proves the live SQL ledger; even
+    # changing a source interlock must not turn unknown compatibility into PASS.
+    # The PowerShell catch path now preserves this same journal without rollback.
+    classification = _classify_recovery_actions(actions)
+    if classification == "RUNTIME_RESTORE_HELD":
         refusals.append(
-            "VRES_W4_HELD_SCHEMA_ROLLBACK: recovery would restore prior runtime files, "
-            "but compatibility with the unknown live PostgreSQL ledger is not established. "
-            "Preserve the journal and request independent review; no PostgreSQL access is authorized."
+            "VRES_W4_HELD_SCHEMA_ROLLBACK: restoring an older runtime/plugin/launcher "
+            "requires independent live-ledger compatibility review, incident closure "
+            "and owner authorization. Preserve the journal; no PostgreSQL access is authorized."
+        )
+    elif classification == "CLAUDE_PROFILE_RESTORE_HELD":
+        refusals.append(
+            "VRES_W4_HELD_HOST_PROFILE_RECOVERY: Claude profile restoration requires "
+            "independent host/hook review and owner authorization. Preserve the journal."
+        )
+    elif classification == "UNKNOWN_ACTION_HELD":
+        refusals.append(
+            "VRES_W4_HELD_UNKNOWN_RECOVERY_ACTION: unrecognized recovery action; preserve the journal."
         )
     if not refusals:
+        # Even NO_MANAGED_FILE_RESTORE is local evidence only, not approval to
+        # relaunch Claude or access a database. All commands remain source-held.
         actions.append({"action": "remove_journal"})
     return {"journal": True, "new_release": new_release, "actions": actions, "refusals": refusals,
-            "recoverable": not refusals}
+            "classification": classification, "recoverable": not refusals}
 
 
 def verify_restored(install_root: Path, claude_home: Path, release: str) -> dict[str, Any]:

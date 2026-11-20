@@ -14,6 +14,62 @@
 
 Version: **0.2.0-alpha.1 / Python package 0.2.0a1**. Target: native Windows, Python 3.12–3.13, current Claude Code. This is a controlled-live-test preview; the installer itself has not executed on Windows in the audit environment.
 
+## R13N original interrupted-install consistency — SOURCE ONLY, NOT executable
+
+The R13M advisory found that the original installer PowerShell catch path
+could restore the previous pointer, plugin, launchers and Claude files directly,
+while the separate interrupted-install recovery inspector held runtime rollback.
+R13N removes that **alternative catch-path rollback**. On a failed installation,
+the original installer now preserves the pending journal and existing files,
+reports a stable held-recovery notice and rethrows the original error. If
+journal finalization fails, it no longer announces installation success.
+This consistency correction is **AUTHORED / NOT_RUN** and does not make
+installation, recovery, Claude, the updater or PostgreSQL usable.
+
+The original interrupted-install inspector classifies local evidence only:
+
+- **NO_MANAGED_FILE_RESTORE:** no managed-file restoration is proposed from
+  the snapshot. Following *future separate approvals*, exact bytes may be
+  verified before a pending journal is cleared; this says nothing about
+  database or native host health.
+- **CLAUDE_PROFILE_RESTORE_HELD:** one or more original Claude files differ.
+  Do not automatically overwrite or delete profile files. Require a reviewed
+  operator-specific host/profile procedure and explicit approval.
+- **RUNTIME_RESTORE_HELD:** the prior active pointer, plugin or launchers
+  would need restoring. No local journal or migration marker can prove
+  compatibility with the unknown actual SQL ledger; preserve files and
+  snapshots until independent incident/compatibility review.
+- **UNKNOWN_ACTION_HELD:** an unexpected recovery action is unsafe to guess.
+
+The current original source interlocks still prohibit even running the
+inspector. **DO NOT execute any recovery command or use these classifications
+to bypass the two OPEN incidents.** For any interrupted update, preserve
+the existing October installation, both active/pending records, old plugin,
+backups, snapshots and the staged release; do not delete, rename, re-point
+or change Claude settings or hooks. Escalate with nonsecret evidence through
+issue #185 and request independently attributable approval.
+
+**Future owner-operated recovery sequence (NOT AUTHORIZED NOW):**
+after independently verified closure of both incidents, a reviewer must
+establish the actual migration ledger and old/new runtime compatibility
+from permitted evidence, and assess host hooks, file ownership/NTFS paths,
+publisher/dependencies and the specific journal state. The owner must
+separately authorize the exact non-destructive inspection, a reviewed
+profile-only or runtime-compatible recovery plan as needed, and verification
+of original pointer/plugin/launcher/Claude bytes. Only then may a specifically
+cleared recovery implementation finalize the journal and restore original
+CLI/FastMCP use. A self-writable migration marker is not sufficient evidence;
+no current version of this source provides that release-ready workflow.
+
+The version floor of Claude Code 2.1.295 is checked only at install time:
+a later update, downgrade or different PATH-resolved host can change actual
+hook behavior. Same-user processes and administrators can alter local
+source, journal, profile or host; those are not cryptographic authority.
+Any future live acceptance must independently confirm host identity and
+actual fail-closed hook operation without treating a user-supplied flag as
+proof. The release remains pinned to SQL 001–041; prospective 042–048 are
+NOT_APPLIED, and the live Schema-048 ledger remains UNKNOWN.
+
 ## R13M offline staging-recovery HOLD — read-only guidance, NOT an executable procedure
 
 When the ORIGINAL `UserPromptSubmit` hook reports

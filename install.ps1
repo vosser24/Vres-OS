@@ -484,52 +484,31 @@ try {
     } elseif ($parts -notcontains $Bin) {
         [Environment]::SetEnvironmentVariable('Path', (($parts+$Bin)-join ';'), 'User')
     }
-    Remove-Item -LiteralPath (Join-Path $InstallRoot 'pending-install.json') -ErrorAction SilentlyContinue
+    # R13N: never report a completed installation while a pending recovery
+    # journal could still exist. Removal failure goes to the same held
+    # single recovery policy in catch, not to an alternate auto-rollback.
+    $PendingSuccess = Join-Path $InstallRoot 'pending-install.json'
+    Remove-Item -LiteralPath $PendingSuccess -ErrorAction Stop
+    if (Test-Path -LiteralPath $PendingSuccess) {
+        throw 'VRES_W4_PENDING_JOURNAL_NOT_FINALIZED: keep recovery evidence; success refused.'
+    }
     Write-Host 'Vres preview installed. This does not certify Windows live behavior.' -ForegroundColor Green
     Write-Host 'Database health was not checked: the doctor preflight skipped database contact. No PostgreSQL access is authorized; check database health separately with vres doctor only after approving a non-incident database target.' -ForegroundColor Yellow
     Write-Host "Release: $ReleaseId"
     Write-Host 'Open a fresh terminal, enter a disposable project, launch claude, then say: start vres'
     Write-Host 'Credentials belong in the separate setup console, never in Claude chat.'
 } catch {
-    if ($published) {
-        if ($oldPointer) { Write-JsonAtomic $ActivePath $oldPointer }
-        elseif (Test-Path $ActivePath) { Remove-Item -LiteralPath $ActivePath }
+    # R13N: ONE original interrupted-installation recovery policy. A caught
+    # PowerShell failure must not bypass install_recovery.py's unknown-schema
+    # refusal by restoring the active pointer, plugin, launchers or Claude files
+    # directly. File snapshots are not trusted live-ledger or host evidence.
+    # Preserve the journal and all managed/user surfaces for reviewed recovery.
+    $PendingFailure = Join-Path $InstallRoot 'pending-install.json'
+    if (Test-Path -LiteralPath $PendingFailure) {
+        Write-Warning 'VRES_W4_HELD_INSTALL_FAILURE_RECOVERY: preserved pending journal and original recovery evidence. No automatic rollback was attempted. See docs/INSTALL-WINDOWS.md for the held offline recovery decision.'
+    } else {
+        Write-Warning 'VRES_W4_INSTALL_FAILURE_NO_JOURNAL: no automatic rollback was attempted. Preserve staged files and verify the installed release independently before retrying.'
     }
-    if (Test-Path (Join-Path $NewRelease 'previous-bin')) {
-        if (Test-Path $Bin) { Remove-Item -LiteralPath $Bin -Recurse -Force }
-        # A brand-new install had no bin directory before this transaction.
-        # Never replace that absence with a newly copied empty directory.
-        if ($BinExistedBefore) {
-            Copy-Item -Recurse -LiteralPath (Join-Path $NewRelease 'previous-bin') -Destination $Bin
-        }
-    }
-    if (Test-Path (Join-Path $InstallRoot 'pending-install.json')) {
-        # If the journal was written but the old plugin was NOT yet moved,
-        # it is still the user's original plugin. Do not delete it.
-        # For a fresh install without an old plugin, remove only our copy.
-        if ($pluginMoved -or -not $HadPluginBefore) {
-            if (Test-Path $PluginTarget) { Assert-Managed $PluginTarget; Remove-Item -LiteralPath $PluginTarget -Recurse -Force }
-        }
-        if ($pluginMoved -and (Test-Path $PluginBackup)) { Move-Item -LiteralPath $PluginBackup -Destination $PluginTarget }
-    }
-    # Only restore profile surfaces the transaction actually attempted to
-    # change. Refuse auto-deletion of new files and retain recovery journal
-    # on uncertain state; source only, no real Windows recovery testing.
-    if ($ClaudeContractAttempted) {
-        Restore-OriginalBytesAtomic $GlobalClaudePath $GlobalClaudeBefore
-        Restore-OriginalBytesAtomic $GlobalRulesPath $GlobalRulesBefore
-    }
-    if ($ClaudeSettingsAttempted) {
-        Restore-OriginalBytesAtomic $ClaudeSettingsPath $ClaudeSettingsBefore
-    }
-    if (Test-Path (Join-Path $InstallRoot 'pending-install.json')) {
-        # A successful *attempt* at restoration is insufficient: verify the exact
-        # preinstall v2 plugin, active pointer, launcher and Claude file bytes.
-        # On failure, retain the journal for explicit reviewed recovery.
-        Run $Python @('-I','-X','utf8',(Join-Path $StagedSource 'src\vres_os\install_recovery.py'),'verify-restored','--install-root',$InstallRoot,'--claude-home',$ClaudeHome,'--release',$ReleaseId)
-        Remove-Item -LiteralPath (Join-Path $InstallRoot 'pending-install.json') -ErrorAction Stop
-    }
-    Write-Warning 'Installation failed. Previous runtime/plugin/global Claude contract/status-line/auto-compaction settings restored and byte-verified when a recovery journal existed. A failed staged release is retained for diagnosis. No database migration was performed by this installer.'
     throw
 } finally {
     $installLock.Dispose()
