@@ -203,7 +203,7 @@ def test_installer_failed_transaction_uses_one_original_snapshot_policy():
     recovery_source = (Path(__file__).resolve().parents[1] / "src/vres_os/install_recovery.py").read_text(
         encoding="utf-8"
     )
-    caught = source.rsplit("} catch {", 1)[1].split("} finally {", 1)[0]
+    caught = source.split("\n} catch {", 1)[1].split("\n} finally {", 1)[0]
     assert "$HadPluginBefore = Test-Path -LiteralPath $PluginTarget" in source
     assert "had_plugin=$HadPluginBefore" in source
     assert "function Assert-Managed([string]$Path)" in source

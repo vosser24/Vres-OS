@@ -557,43 +557,74 @@ def test_a_tampered_release_manifest_is_refused(staged, edit):
 
 # ---------------------------------------------------------------------------------- installer contract
 
-def test_installer_installs_only_from_the_verified_staged_artifact():
-    text = (_ROOT / "install.ps1").read_text(encoding="utf-8")
-    at = text.index
-    first_write = at("New-Item -ItemType Directory -Force -Path $InstallRoot")
+def test_installer_installs_only_from_verified_offline_staged_artifact():
+    """R13Q current installer contract; static ONLY, no PowerShell or release staging."""
+    source = (_ROOT / "install.ps1").read_text(encoding="utf-8")
+    at = source.index
+    first_managed_write = at("New-Item -ItemType Directory -Force -Path $InstallRoot")
 
-    # The commit pin is mandatory and checked, with the source objects, before any installation write.
-    assert "[string]$SourceCommit" in text and at("if ($SourceCommit -notmatch '^[0-9a-fA-F]{40}$')") < at("Run ")
+    # Exact commit and tree, protected holds and pinned original update preflight
+    # precede every managed installation file mutation.
+    assert "$W4SourceInterlock = 'HELD_SOURCE_ONLY'" in source
+    assert "$W4HostInterlock = 'HELD_SCHEMA_048_AND_NATIVE_CLAUDE_HOOKS'" in source
+    assert "if ($SourceCommit -notmatch" in source
+    assert "$SourceTree -notmatch" in source
+    preflight = at("update.ps1') -PreflightOnly -SourceCommit $SourceCommit -SourceTree $SourceTree")
     check = at("'check','--root',$RepoRoot,'--source-commit',$SourceCommit")
-    assert at("src\\vres_os\\release_inputs.py") < check < first_write
-    assert "if ($SourceCommit) {" not in text and "Extract the COMPLETE source ZIP" not in text
-    assert "complete git checkout" in text
-    stage = at("'stage','--root',$RepoRoot,'--out',$StagedSource,'--manifest',$ReleaseManifest,'--source-commit',"
-               "$SourceCommit")
-    assert first_write < stage
-    assert "$RepoRoot" not in text[stage + len("'stage','--root',$RepoRoot"):]  # nothing mutable after staging
-    pip = at("Run $NewPython @('-m','pip','install','--no-compile','--report',$PipReport,\"$StagedSource[$extras]\")")
-    assert stage < at("Run $Python @('-m','venv'") < pip
-    # The package is located without importing it or writing bytecode, then verified in full.
+    assert preflight < check < first_managed_write
+
+    # Independently approved offline wheels are checked before pip. No remote
+    # resolver, source-build or ambient package fallback on the original route.
+    assert "Get-FileHash -LiteralPath $WheelLockFile -Algorithm SHA256" in source
+    assert "Get-FileHash -LiteralPath $wheel.FullName -Algorithm SHA256" in source
+    assert "verify-root-wheel" in source
+    stage = at("'stage','--root',$RepoRoot,'--out',$StagedSource,'--manifest',$ReleaseManifest")
+    root_wheel_proof = at("'verify-root-wheel','--manifest',$ReleaseManifest")
+    venv = at("Run $Python @('-m','venv'")
+    pip = at("Run $NewPython @('-I','-m','pip','--isolated','install'")
+    pip_check = at("Run $NewPython @('-I','-m','pip','--isolated','check')")
+    assert first_managed_write < stage < root_wheel_proof < venv < pip < pip_check
+    for required in ("'--no-index'", "'--no-cache-dir'", "'--only-binary=:all:'",
+                     "'--require-hashes'", "'--find-links',$WheelhouseDir",
+                     "'--report',$PipReport", "'-r',$WheelLockFile"):
+        assert required in source
+
+    # Package discovery is import-free and staged verified objects are
+    # checked before a plugin, original launcher or active pointer is written.
     locate = at("$PackageDir = & $NewPython -I -B -c 'import importlib.util")
     verify_installed = at("'verify-installed','--manifest',$ReleaseManifest")
-    assert at("'-m','pip','check'") < locate < verify_installed < at("from vres_os.cli import app")
-    assert "find_spec(''vres_os'')" in text and "vres_os.__file__" not in text
-    assert "import pathlib, vres_os" not in text
-    assert verify_installed < at("'pending-install.json') @{")  # before the journal and any activation
-    staged_plugin_check = at("'--dir',$StagedPlugin)")
-    assert at("Join-Path $StagedSource 'plugins\\vres-os'") < staged_plugin_check < at("'.vres-managed'), 'Vres-OS')")
-    target_check = at("'--dir',$PluginTarget,'--allow-extra','.vres-managed'")
-    assert at("Copy-Item -Recurse -LiteralPath $StagedPlugin -Destination $PluginTarget") < target_check
-    assert target_check < at("Run 'claude' @('plugin','validate',$PluginTarget)") < at("Write-JsonAtomic $ActivePath @{")
-    assert "Join-Path $StagedSource 'scripts\\windows\\*.ps1'" in text and "Join-Path $StagedSource 'rules\\vres-rules.md'" in text
-    # The accepted journal, rollback and Claude-file protection are unchanged; the snapshot tool runs staged.
-    for kept in ("(Join-Path $StagedSource 'src\\vres_os\\install_recovery.py'),'snapshot','--install-root'",
-                 "$GlobalClaudeBefore", "$ClaudeSettingsBefore", "previous-bin",
-                 "Move-Item -LiteralPath $PluginBackup -Destination $PluginTarget"):
-        assert kept in text
-    assert "-SourceCommit $SourceCommit" in (_ROOT / "update.ps1").read_text(encoding="utf-8")
+    import_smoke = at("from vres_os.cli import app")
+    assert pip_check < locate < verify_installed < import_smoke
+    assert "find_spec(''vres_os'')" in source
+    assert "vres_os.__file__" not in source
 
+    staged_plugin_check = at("'--dir',$StagedPlugin)")
+    target_check = at("'--dir',$PluginTarget,'--allow-extra','.vres-managed'")
+    snap = at("install_recovery.py'),'snapshot'")
+    journal = at("Write-JsonAtomic (Join-Path $InstallRoot 'pending-install.json') $JournalRecord")
+    plugin_move = at("Move-Item -LiteralPath $PluginTarget -Destination $PluginBackup")
+    plugin_validation = at("Run 'claude' @('plugin','validate',$PluginTarget)")
+    publish = at("Write-JsonAtomic $ActivePath @{")
+    assert stage < staged_plugin_check < snap < journal < plugin_move < target_check
+    assert target_check < plugin_validation < publish
+    assert "function Assert-Managed([string]$Path)" in source
+    assert at("Assert-Managed $PluginTarget") < plugin_move
+    assert "Join-Path $StagedSource 'scripts\\windows\\*.ps1'" in source
+    assert "Join-Path $StagedSource 'rules\\vres-rules.md'" in source
+
+    # One source-held original recovery policy, not historical direct
+    # PowerShell catch rollback or silent journal removal.
+    assert "'recover-prepublication','--install-root',$InstallRoot" in source
+    assert "Restore-OriginalBytesAtomic" not in source
+    assert "Move-Item -LiteralPath $PluginBackup -Destination $PluginTarget" not in source
+    assert "$JournalRecord['phase'] = 'verified_commit_pending_cleanup'" in source
+    final_package_check = source.rindex("'verify-installed','--manifest',$ReleaseManifest")
+    cleanup = at("Remove-Item -LiteralPath $PendingSuccess -ErrorAction Stop")
+    assert publish < final_package_check < cleanup
+
+    updater = (_ROOT / "update.ps1").read_text(encoding="utf-8")
+    assert "-SourceCommit $SourceCommit" in updater
+    assert "-SourceTree $SourceTree" in updater
 
 def test_the_documented_release_path_is_a_pinned_git_checkout_not_a_zip():
     install = (_ROOT / "docs/INSTALL-WINDOWS.md").read_text(encoding="utf-8")

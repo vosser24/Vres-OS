@@ -170,7 +170,7 @@ def test_original_python_guard_refuses_busy_fake_lock(tmp_path, monkeypatch):
 def test_installer_catch_has_one_shared_prepublication_policy_only():
     # Static contract supplements (never replaces) synthetic behavioural tests.
     install = (Path(__file__).resolve().parents[1] / "install.ps1").read_text(encoding="utf-8")
-    caught = install.rsplit("} catch {", 1)[1].split("} finally {", 1)[0]
+    caught = install.split("\n} catch {", 1)[1].split("\n} finally {", 1)[0]
     assert "recover-prepublication" in caught
     assert "not $published" in caught
     assert "VRES_W4_HELD_INSTALL_FAILURE_RECOVERY" in caught

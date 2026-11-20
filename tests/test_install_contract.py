@@ -66,7 +66,7 @@ def test_statusline_install_is_journalled_and_never_restored_by_catch_bypass():
     ) < text.index("Write-JsonAtomic $ActivePath") < text.index(
         "'-m','vres_os.statusline','install'"
     )
-    catch = text.rsplit("} catch {", 1)[1].split("} finally {", 1)[0]
+    catch = text.split("\n} catch {", 1)[1].split("\n} finally {", 1)[0]
     assert "'recover-prepublication','--install-root',$InstallRoot" in catch
     assert "VRES_W4_HELD_INSTALL_FAILURE_RECOVERY" in catch
     assert "Restore-OriginalBytesAtomic" not in catch

@@ -13,7 +13,7 @@ DOCUMENT = ROOT / "docs/INSTALL-WINDOWS.md"
 
 def test_installer_catch_does_not_bypass_recovery_policy():
     source = INSTALL.read_text(encoding="utf-8")
-    caught = source.rsplit("} catch {", 1)[1].split("} finally {", 1)[0]
+    caught = source.split("\n} catch {", 1)[1].split("\n} finally {", 1)[0]
     assert "VRES_W4_HELD_INSTALL_FAILURE_RECOVERY" in caught
     assert "pending-install.json" in caught
     assert "throw" in caught
