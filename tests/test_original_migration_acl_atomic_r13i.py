@@ -17,7 +17,7 @@ def test_migration_sql_and_acl_revoke_precede_same_ledger_commit():
         "with conn.transaction():",
         "conn.execute(sql_text)",
         'if purpose == "migrator":',
-        "from .database_boundary import _restrict_original_function_execute",
+        "from .database_boundary import (",
         "_restrict_original_function_execute(conn, cfg.database.user)",
         "INSERT INTO vres.schema_migrations(version,checksum)",
         "applied.append(name)",
