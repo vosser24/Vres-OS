@@ -1,6 +1,6 @@
 # Windows installation and safe first use
 
-> **2026-11-17 SOURCE-ONLY HOLD — DO NOT EXECUTE THE COMMANDS BELOW.** The
+> **2026-11-20 R13M SOURCE-ONLY HOLD — DO NOT EXECUTE THE COMMANDS BELOW.** The
 > original installer and updater are mechanically held, have never been
 > validated on the current exact source in Windows, and are NOT authorized for
 > local preflight, install, update or recovery. Historical command examples
@@ -13,6 +13,52 @@
 
 
 Version: **0.2.0-alpha.1 / Python package 0.2.0a1**. Target: native Windows, Python 3.12–3.13, current Claude Code. This is a controlled-live-test preview; the installer itself has not executed on Windows in the audit environment.
+
+## R13M offline staging-recovery HOLD — read-only guidance, NOT an executable procedure
+
+When the ORIGINAL `UserPromptSubmit` hook reports
+`VRES_W4_STAGING_RECOVERY_REQUIRED`, the submitted prompt has been blocked
+because original strict staging could not be confirmed. **Do not re-send it, turn
+off hooks, bypass the configured Claude profile, launch native Claude/FastMCP,
+run `vres doctor`/`selftest`, access PostgreSQL (even SELECT), edit credentials,
+run the updater/preflight, or attempt automatic recovery while the incidents are
+OPEN.** The hook's message is intentionally short and contains no prompt,
+credential, backend exception or database detail.
+
+Safe next actions are **human review only**: stop the affected Vres task,
+preserve the existing October installation, `active-install.json`,
+`pending-install.json` if already present, snapshots and backups without
+modifying them, and record the block code, approximate local time and non-secret
+observed host version from pre-existing evidence. Do not paste configuration,
+secrets or the rejected prompt into a public issue. Use the GitHub continuity
+handoff and issue #185 to request an attributable, independent reviewer and
+separately approved recovery plan; if host version or schema identity is unknown,
+record **UNKNOWN** rather than probing the host or database.
+
+The original plugin's pre-action command hooks use `onFailure: "block"`, which
+requires Claude Code **v2.1.295+** per Anthropic's hooks reference
+(https://code.claude.com/docs/en/hooks). R13M changes the ORIGINAL
+`install.ps1` version *source check* from 2.1.246 to 2.1.295. Neither the
+version check nor these docs prove Windows PowerShell/plugin behavior, make
+the installed host trustworthy, or authorize installing/upgrading Claude Code.
+
+**Rollback boundary:** original interrupted-install snapshot verification
+proves previous file bytes only, not database compatibility. R13M's original
+`install_recovery.py` now **holds automatic runtime/plugin/launcher rollback**
+when the live migration ledger cannot be independently established. The original
+installer catch-path and any future release update/rollback must be separately
+reviewed for this same hazard; no claim is made that R13M solves them.
+A future independently reviewed, operator-approved design must establish
+compatible runtime and database snapshot/ledger provenance **before** any
+restoration. Neither editing a ledger receipt nor changing source interlocks is
+evidence of independent approval. Existing rollback examples further below
+are historical and remain NOT AUTHORIZED.
+
+The release stays pinned to 001-041; prospective 042-048 remain NOT_APPLIED.
+`LIVE_SCHEMA_048_INCIDENT` and `HOST_HOOK_DB_ROUTE_ATTEMPTED_AND_REFUSED`
+remain OPEN. No PostgreSQL, Windows, PowerShell, Python, Claude Code or
+FastMCP action was executed in producing the source-only R13M change.
+R13D-R13M tests are AUTHORED / NOT_RUN.
 
 ## 1. Prepare a disposable environment
 

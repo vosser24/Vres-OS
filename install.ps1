@@ -307,7 +307,10 @@ Run $Python @('-I','-B','-X','utf8',(Join-Path $RepoRoot 'src\vres_os\release_in
 # The user-scoped skills-directory plugin facility requires a current Claude version.
 $cv = & claude --version
 if ($LASTEXITCODE -ne 0 -or "$cv" -notmatch '(\d+\.\d+\.\d+)') { throw 'Could not determine Claude Code version.' }
-if ([version]$Matches[1] -lt [version]'2.1.246') { throw 'Update Claude Code to 2.1.246 or newer, then rerun. This preview does not emulate older plugin APIs.' }
+# R13M source-only host contract: the original command hooks depend on
+# onFailure='block', first supported by Claude Code 2.1.295. A version
+# string alone is not native host behavior, publisher, or F1 authority proof.
+if ([version]$Matches[1] -lt [version]'2.1.295') { throw 'Update Claude Code to 2.1.295 or newer before a separately authorized Vres update. Critical onFailure=block hook behavior is unavailable on older hosts.' }
 # Maintenance updates never inspect/provision local PostgreSQL, even to check whether
 # an executable/service exists. DB-dependent behavior stays disabled under the incident.
 if (-not $Update -and -not $UseRemotePostgres -and -not (Have 'psql') -and -not (Get-Service -Name 'postgresql*' -ErrorAction SilentlyContinue)) {

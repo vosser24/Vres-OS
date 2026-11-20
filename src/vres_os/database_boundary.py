@@ -373,10 +373,10 @@ def activate_boundary(conn, cfg: VresConfig) -> None:
         "vres.commit_user_inputs(bigint,text,text)",
     ]
     # 042 and 043 can be absent on older compatible ledgers: grant only if present.
+    # The dormant 044 cancellation function is NOT a writer capability.
     for optional_signature in (
         "vres.latest_observed_user_input(bigint,text)",
         "vres.stage_strict_user_input(bigint,text,text,text,text,text,text,timestamptz,text)",
-        "vres.cancel_task_from_current_observation(bigint,text,text,bigint,text,jsonb)",
     ):
         result = conn.execute(
             "SELECT to_regprocedure(%s) AS routine", (optional_signature,)
@@ -387,6 +387,8 @@ def activate_boundary(conn, cfg: VresConfig) -> None:
     # purpose-specific writer and runtime calls. Trigger functions are invoked
     # by their triggers; only direct invoker calls need runtime EXECUTE.
     _restrict_original_function_execute(conn, runtime)
+    # R13M: remove legacy explicit grants; not merely omit future GRANTs.
+    _revoke_dormant_cancel_writer_execute(conn, writer)
     for signature in protected_functions:
         conn.execute(sql.SQL("REVOKE ALL ON FUNCTION {} FROM PUBLIC").format(sql.SQL(signature)))
         conn.execute(
@@ -458,6 +460,29 @@ def _restrict_original_function_execute(conn, runtime: str) -> None:
     )
 
 
+def _revoke_dormant_cancel_writer_execute(conn, writer: str) -> None:
+    """Revoke historical direct writer EXECUTE on the dormant cancellation routine.
+
+    The original R13H activation granted this function to the provenance writer.
+    Omitting it from a later grant list alone does not revoke that old explicit ACL.
+    Apply this in both migration transactions and final activation; no operator or
+    model cancellation authority is established. Other inherited/effective grants
+    remain unverified under the Schema-048 incident.
+    """
+    require_w4_schema_clearance()  # P0: no PostgreSQL even SELECT until cleared
+    from psycopg import sql
+
+    signature = "vres.cancel_task_from_current_observation(bigint,text,text,bigint,text,jsonb)"
+    row = conn.execute("SELECT to_regprocedure(%s) AS routine", (signature,)).fetchone()
+    routine = row.get("routine") if isinstance(row, dict) else row[0] if row else None
+    if routine is not None:
+        conn.execute(
+            sql.SQL("REVOKE EXECUTE ON FUNCTION {} FROM {}").format(
+                sql.SQL(signature), sql.Identifier(writer)
+            )
+        )
+
+
 def _restore_original_runtime_migration_calls(conn, runtime: str) -> None:
     """Regrant essential direct runtime calls in the SAME migration transaction.
 
@@ -496,6 +521,8 @@ def _restore_original_writer_migration_calls(conn, writer: str) -> None:
     require_w4_schema_clearance()  # P0: absolutely no PostgreSQL, even SELECT
     from psycopg import sql
 
+    # R13M: seal any historical writer EXECUTE within this same migration TX.
+    _revoke_dormant_cancel_writer_execute(conn, writer)
     approved = (
         "vres.user_event_writer_role()",
         "vres.stage_user_input(bigint,text,text,text,text,text,text,timestamptz)",

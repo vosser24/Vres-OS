@@ -55,6 +55,10 @@ class InstallRecoveryError(RuntimeError):
 
 
 W4_INSTALL_RECOVERY_SOURCE_INTERLOCK = "HELD_NO_INSTALL_OR_RECOVERY"
+# R13M: no source-authored boolean or owner assertion certifies the live schema.
+# A future independently reviewed evidence design is needed before auto-restoring
+# an older runtime/plugin/launchers across potentially advanced SQL 042-048.
+W4_SCHEMA_ROLLBACK_SOURCE_INTERLOCK = "HELD_UNVERIFIED_LIVE_MIGRATION_LEDGER"
 
 
 def require_w4_install_recovery_clearance() -> None:
@@ -359,6 +363,19 @@ def inspect(install_root: Path) -> dict[str, Any]:
     except (InstallRecoveryError, ValueError) as exc:
         refusals.append(str(exc))
 
+    # R13M: an installation snapshot proves FILE bytes, not the actual SQL ledger.
+    # Do not undo an active runtime/plugin/launcher transition if the live schema
+    # might have moved past the previous release. No DB probe or untrusted
+    # journal-supplied "schema approved" flag can lift this SOURCE-ONLY hold.
+    runtime_restore = {"restore_active_pointer", "restore_plugin_from_backup",
+                       "remove_new_plugin", "restore_launchers"}
+    if (any(step.get("action") in runtime_restore for step in actions)
+            and W4_SCHEMA_ROLLBACK_SOURCE_INTERLOCK != "INDEPENDENT_SCHEMA_COMPATIBILITY_VERIFIED"):
+        refusals.append(
+            "VRES_W4_HELD_SCHEMA_ROLLBACK: recovery would restore prior runtime files, "
+            "but compatibility with the unknown live PostgreSQL ledger is not established. "
+            "Preserve the journal and request independent review; no PostgreSQL access is authorized."
+        )
     if not refusals:
         actions.append({"action": "remove_journal"})
     return {"journal": True, "new_release": new_release, "actions": actions, "refusals": refusals,

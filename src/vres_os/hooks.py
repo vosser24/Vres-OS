@@ -231,9 +231,12 @@ def _block_unstaged_prompt() -> None:
     sys.stdout.write(json.dumps({
         "decision": "block",
         "reason": (
-            "Vres could not safely stage this original user turn. The prompt is blocked. "
-            "Do not disable continuity hooks or retry state-changing work. "
-            "Request separately approved offline recovery before resending."
+            "VRES_W4_STAGING_RECOVERY_REQUIRED: Vres could not safely stage this original user turn; "
+            "the prompt is blocked. Stop this Vres workflow; do not disable hooks, re-send the "
+            "prompt, retry state-changing work, or run Vres/DB repair commands. Preserve the "
+            "existing installation and any recovery journal. Read docs/INSTALL-WINDOWS.md "
+            "(R13M offline staging-recovery HOLD) in the trusted source checkout and request "
+            "independent review and separately authorized recovery. No prompt or secret is logged here."
         ),
         "hookSpecificOutput": {
             "hookEventName": "UserPromptSubmit",
