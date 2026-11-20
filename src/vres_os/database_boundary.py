@@ -234,11 +234,11 @@ def provision_boundary(
                     )
                 )
                 conn.execute(
-                    sql.SQL("GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA vres TO {}")
+                    sql.SQL("GRANT SELECT,INSERT,UPDATE ON ALL TABLES IN SCHEMA vres TO {}")
                     .format(sql.Identifier(cfg.database.user))
                 )
                 conn.execute(
-                    sql.SQL("GRANT USAGE,SELECT,UPDATE ON ALL SEQUENCES IN SCHEMA vres TO {}")
+                    sql.SQL("GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA vres TO {}")
                     .format(sql.Identifier(cfg.database.user))
                 )
                 conn.execute(
@@ -248,13 +248,13 @@ def provision_boundary(
                 conn.execute(
                     sql.SQL(
                         "ALTER DEFAULT PRIVILEGES FOR ROLE {} IN SCHEMA vres "
-                        "GRANT SELECT,INSERT,UPDATE,DELETE ON TABLES TO {}"
+                        "GRANT SELECT,INSERT,UPDATE ON TABLES TO {}"
                     ).format(sql.Identifier(migration_user), sql.Identifier(cfg.database.user))
                 )
                 conn.execute(
                     sql.SQL(
                         "ALTER DEFAULT PRIVILEGES FOR ROLE {} IN SCHEMA vres "
-                        "GRANT USAGE,SELECT,UPDATE ON SEQUENCES TO {}"
+                        "GRANT USAGE,SELECT ON SEQUENCES TO {}"
                     ).format(sql.Identifier(migration_user), sql.Identifier(cfg.database.user))
                 )
                 conn.execute(
@@ -394,22 +394,55 @@ def activate_boundary(conn, cfg: VresConfig) -> None:
             sql.SQL("GRANT EXECUTE ON FUNCTION {} TO {}").format(sql.SQL(signature), sql.Identifier(writer))
         )
     conn.execute(sql.SQL("GRANT USAGE ON SCHEMA vres TO {}").format(sql.Identifier(writer)))
-    # Role privileges are rechecked after pending migrations because default
-    # privileges may have granted DELETE to new tables in older source trees.
+    # Enforce a narrow effective runtime baseline after the last migration;
+    # legacy objects and defaults may still carry earlier broad privileges.
     _revoke_original_task_history_deletes(conn, runtime)
+    if cfg.database.migration_user:
+        migrator = cfg.database.migration_user
+        # Undo older per-schema defaults for all later Vres-owned objects.
+        # PostgreSQL per-schema REVOKE does not override global/default role
+        # grants or inherited roles; those remain independent review blockers.
+        conn.execute(
+            sql.SQL(
+                "ALTER DEFAULT PRIVILEGES FOR ROLE {} IN SCHEMA vres "
+                "REVOKE DELETE,TRUNCATE ON TABLES FROM {}"
+            ).format(sql.Identifier(migrator), sql.Identifier(runtime))
+        )
+        conn.execute(
+            sql.SQL(
+                "ALTER DEFAULT PRIVILEGES FOR ROLE {} IN SCHEMA vres "
+                "REVOKE UPDATE ON SEQUENCES FROM {}"
+            ).format(sql.Identifier(migrator), sql.Identifier(runtime))
+        )
     _activate_context_refresh_attestations(conn, runtime, writer)
     _activate_experience_observability(conn, runtime, writer)
 
 
 def _revoke_original_task_history_deletes(conn, runtime: str) -> None:
-    """Remove direct runtime deletion of original task/history rows when present.
+    """Restrict runtime destructive DML and task-column UPDATEs.
 
-    This is a narrowly scoped defense, not runtime least-privilege certification:
-    unrelated tables can still have broad UPDATE/DELETE. Neither this helper nor
-    its callers may run while LIVE_SCHEMA_048_INCIDENT remains OPEN.
+    Existing original tasks/session/results/history remain in their one store.
+    Broad INSERT/UPDATE rights on other tables, function EXECUTE and role
+    inheritance remain P0 REVIEW_REQUIRED; this is not effective-ACL proof.
+    No caller may run during LIVE_SCHEMA_048_INCIDENT.
     """
     require_w4_schema_clearance()  # P0: before DB metadata or role operations
     from psycopg import sql
+
+    # DELETE/TRUNCATE and sequence UPDATE do not belong to normal Chairman
+    # runtime. This also addresses tables not covered by the R13F task guard.
+    # The original migrator owns schema changes; its permissions are not
+    # broadened by these runtime-only revocations.
+    conn.execute(sql.SQL("REVOKE DELETE,TRUNCATE ON ALL TABLES IN SCHEMA vres FROM PUBLIC"))
+    conn.execute(
+        sql.SQL("REVOKE DELETE,TRUNCATE ON ALL TABLES IN SCHEMA vres FROM {}")
+        .format(sql.Identifier(runtime))
+    )
+    conn.execute(sql.SQL("REVOKE UPDATE ON ALL SEQUENCES IN SCHEMA vres FROM PUBLIC"))
+    conn.execute(
+        sql.SQL("REVOKE UPDATE ON ALL SEQUENCES IN SCHEMA vres FROM {}")
+        .format(sql.Identifier(runtime))
+    )
 
     for table in ("tasks", "task_state", "task_events", "checkpoints"):
         row = conn.execute(
@@ -424,6 +457,24 @@ def _revoke_original_task_history_deletes(conn, runtime: str) -> None:
             sql.SQL("REVOKE DELETE ON {} FROM {}").format(
                 target, sql.Identifier(runtime)
             )
+        )
+
+    # Source scan: original task runtime updates target status, updated_at,
+    # completed_at. Remove table-wide UPDATE before granting ONLY these
+    # necessary columns. Do not disturb task INSERT and existing SELECT.
+    row = conn.execute("SELECT to_regclass('vres.tasks') AS relation").fetchone()
+    relation = row.get("relation") if isinstance(row, dict) else row[0] if row else None
+    if relation is not None:
+        conn.execute(sql.SQL("REVOKE UPDATE ON TABLE vres.tasks FROM PUBLIC"))
+        conn.execute(
+            sql.SQL("REVOKE UPDATE ON TABLE vres.tasks FROM {}")
+            .format(sql.Identifier(runtime))
+        )
+        conn.execute(
+            sql.SQL(
+                "GRANT UPDATE (status,updated_at,completed_at) "
+                "ON TABLE vres.tasks TO {}"
+            ).format(sql.Identifier(runtime))
         )
 
 
