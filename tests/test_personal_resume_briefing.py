@@ -254,6 +254,9 @@ class _Repository:
 
 
 def _wire(monkeypatch, repository, *, conflict=False, prompt=False):
+    # Synthetic hook adapter only: do not invoke any native host or DB route.
+    # Production source interlocks stay unchanged and cannot be cleared here.
+    monkeypatch.setattr(hooks, "require_w4_native_host_clearance", lambda: None)
     monkeypatch.setattr(hooks, "ConfigStore", _ConfigStore)
     monkeypatch.setattr(hooks, "Repository", lambda: repository)
     monkeypatch.setattr(hooks, "_input", lambda: {
@@ -302,7 +305,7 @@ def test_ambiguous_user_prompt_never_rehydrates_fallback_task(monkeypatch, capsy
     monkeypatch.setattr(hooks, "is_system_prompt_event", lambda *_a: False)
     monkeypatch.setattr(hooks, "_credential_ingress_guard", lambda *_a: False)
     monkeypatch.setattr(hooks, "stage_user_instruction", lambda *a: staged.append(a) or True)
-    monkeypatch.setattr(hooks, "begin_reply_turn", lambda *_a: None)
+    monkeypatch.setattr(hooks, "begin_reply_turn", lambda *_a: "SYNTHETIC-TURN-1")
     hooks.user_prompt()
     context = json.loads(capsys.readouterr().out)["hookSpecificOutput"]["additionalContext"]
     assert "VRES_CONTINUITY_AMBIGUOUS" in context
@@ -317,7 +320,7 @@ def test_nonambiguous_postcompaction_uses_briefing_without_raw_transcript(monkey
     monkeypatch.setattr(hooks, "is_system_prompt_event", lambda *_a: False)
     monkeypatch.setattr(hooks, "_credential_ingress_guard", lambda *_a: False)
     monkeypatch.setattr(hooks, "stage_user_instruction", lambda *_a: True)
-    monkeypatch.setattr(hooks, "begin_reply_turn", lambda *_a: None)
+    monkeypatch.setattr(hooks, "begin_reply_turn", lambda *_a: "SYNTHETIC-TURN-1")
     hooks.user_prompt()
     context = json.loads(capsys.readouterr().out)["hookSpecificOutput"]["additionalContext"]
     assert "VRES POST-COMPACTION CONTINUITY" in context
@@ -366,3 +369,62 @@ def test_unhashable_claimed_authority_is_a_neutral_refusal(changes):
     value = _render(_state(**changes))
     assert "VRES_RESUME_UNCERTAIN" in value
     assert "Run the selected offline tests" not in value
+
+
+def test_session_start_contamination_is_not_a_successful_rehydration(monkeypatch, capsys):
+    repo = _Repository(_state(contamination_notice={
+        "contamination_event_key": "LCE-REVOKED",
+        "reason_class": "source_revocation",
+        "revoked_keys": ["PRIVATE_REVOKED_CONTEXT"],
+    }))
+    _wire(monkeypatch, repo)
+    hooks.session_start()
+    output = json.loads(capsys.readouterr().out)["hookSpecificOutput"]["additionalContext"]
+    assert "VRES_CONTEXT_REFRESH_REQUIRED" in output
+    assert "PRIVATE_REVOKED_CONTEXT" not in output
+    assert "Live next action:" not in output
+    assert repo.events == []
+
+
+def test_session_start_uncertain_projection_does_not_mark_rehydrated(monkeypatch, capsys):
+    repo = _Repository(_state(next_action=None))
+    _wire(monkeypatch, repo)
+    hooks.session_start()
+    output = json.loads(capsys.readouterr().out)["hookSpecificOutput"]["additionalContext"]
+    assert "VRES_RESUME_UNCERTAIN" in output
+    assert repo.events == []
+
+
+def test_postcompact_contamination_never_acknowledges_context(monkeypatch, capsys):
+    repo = _Repository(_state(contamination_notice={
+        "contamination_event_key": "LCE-REVOKED",
+        "reason_class": "source_revocation",
+    }), active=True, hydrate=True)
+    _wire(monkeypatch, repo, prompt=True)
+    monkeypatch.setattr(hooks, "is_system_prompt_event", lambda *_a: False)
+    monkeypatch.setattr(hooks, "_credential_ingress_guard", lambda *_a: False)
+    monkeypatch.setattr(hooks, "stage_user_instruction", lambda *_a: True)
+    monkeypatch.setattr(hooks, "begin_reply_turn", lambda *_a: "SYNTHETIC-TURN-2")
+    hooks.user_prompt()
+    output = json.loads(capsys.readouterr().out)["hookSpecificOutput"]["additionalContext"]
+    assert "VRES_CONTEXT_REFRESH_REQUIRED" in output
+    assert "Run the selected offline tests and inspect failures" not in output
+    assert repo.events == []
+
+
+def test_postcompact_task_change_never_uses_wrong_task_plan(monkeypatch, capsys):
+    repo = _Repository(_state(
+        task_key="TASK-OTHER-20261123",
+        next_action="WRONG_TASK_NEXT_ACTION",
+    ), active=True, hydrate=True)
+    _wire(monkeypatch, repo, prompt=True)
+    monkeypatch.setattr(hooks, "is_system_prompt_event", lambda *_a: False)
+    monkeypatch.setattr(hooks, "_credential_ingress_guard", lambda *_a: False)
+    monkeypatch.setattr(hooks, "stage_user_instruction", lambda *_a: True)
+    monkeypatch.setattr(hooks, "begin_reply_turn", lambda *_a: "SYNTHETIC-TURN-3")
+    hooks.user_prompt()
+    output = json.loads(capsys.readouterr().out)["hookSpecificOutput"]["additionalContext"]
+    assert "VRES_CONTINUITY_AMBIGUOUS: selected task changed" in output
+    assert "WRONG_TASK_NEXT_ACTION" not in output
+    assert "TASK-OTHER-20261123" not in output
+    assert repo.events == []

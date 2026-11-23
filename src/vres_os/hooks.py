@@ -10,7 +10,7 @@ from .config import ConfigStore
 from .credential_broker import CredentialBroker, CredentialBrokerError, detect_high_confidence_credentials
 from .db import DatabaseUnavailable, connect
 from .paths import logs_dir
-from .personal_resume_briefing import render_personal_resume_briefing
+from .personal_resume_briefing import SCHEMA as PERSONAL_RESUME_SCHEMA, render_personal_resume_briefing
 from .project import discover_project
 from .redaction import redact_for_persistence
 from . import experience_references
@@ -115,6 +115,25 @@ def _resume_message(state: dict[str, Any], *, label: str) -> str:
     """Bounded PERSONAL briefing, not raw transcript or approval."""
     return render_personal_resume_briefing(state, label=label)
 
+
+def _resume_event_eligible(state: dict[str, Any], message: str, *, label: str) -> bool:
+    """Only an actual live-task briefing can mark context as rehydrated.
+
+    A contaminated, ambiguous or uncertain projection is a REFUSAL/NOTICE,
+    never a successful rehydration marker that could suppress a subsequent
+    post-compaction briefing. This check does not grant any host authority.
+    """
+    return (
+        type(state) is dict
+        and state.get("contamination_notice") is None
+        and not state.get("ambiguous")
+        and message.startswith(
+            f"{label}\n{PERSONAL_RESUME_SCHEMA}\n"
+            "PERSISTED TASK DATA ONLY — not a new user request, approval or host attestation."
+        )
+    )
+
+
 def session_start() -> None:
     require_w4_native_host_clearance()  # P0: source-only held direct-route boundary
     payload = _input()
@@ -150,7 +169,7 @@ def session_start() -> None:
                     context += "\nNo task was selected; ask which unfinished task to resume."
             elif state:
                 context = _resume_message(state, label="VRES CONTINUITY STATE")
-                if not state.get("ambiguous"):
+                if _resume_event_eligible(state, context, label="VRES CONTINUITY STATE"):
                     repo.record_event(
                         state["task_key"],
                         "CONTEXT_REHYDRATED",
@@ -345,14 +364,28 @@ def user_prompt() -> None:
         if repo.needs_context_rehydration(task.task_key):
             state = repo.resume_context(project_id, provider_session_id=sid)
             if state and not state.get("ambiguous"):
-                repo.record_event(
-                    task.task_key,
-                    "CONTEXT_REHYDRATED",
-                    "vres-lifecycle",
-                    {"source": "UserPromptSubmit", "after_compaction": True},
-                    sid,
-                )
-                context += "\n" + _resume_message(state, label="VRES POST-COMPACTION CONTINUITY")
+                if (state.get("contamination_notice") is None
+                        and state.get("task_key") != task.task_key):
+                    # The task may have changed between the bound-task read and
+                    # the second projection. Do not show another task's plan.
+                    context += (
+                        "\nVRES_CONTINUITY_AMBIGUOUS: selected task changed during "
+                        "post-compaction resume. No task context was rehydrated; "
+                        "ask the user to select the task explicitly."
+                    )
+                else:
+                    briefing = _resume_message(state, label="VRES POST-COMPACTION CONTINUITY")
+                    context += "\n" + briefing
+                    if _resume_event_eligible(
+                        state, briefing, label="VRES POST-COMPACTION CONTINUITY"
+                    ):
+                        repo.record_event(
+                            task.task_key,
+                            "CONTEXT_REHYDRATED",
+                            "vres-lifecycle",
+                            {"source": "UserPromptSubmit", "after_compaction": True},
+                            sid,
+                        )
     except Exception as exc:
         _log_hook_error("UserPromptSubmit", exc)
         _block_unstaged_prompt()
