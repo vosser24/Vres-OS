@@ -25,7 +25,11 @@ from .experience_retrieval import ExperienceRetrievalService
 from .experience_utility import ExperienceUtilityEvidenceService
 from .knowledge import KnowledgeService
 from .model_policy import ModelPolicyService
-from .personal_resume_briefing import SCHEMA as PERSONAL_RESUME_SCHEMA, render_personal_resume_briefing
+from .personal_resume_briefing import (
+    SCHEMA as PERSONAL_RESUME_SCHEMA,
+    classify_resume_briefing,
+    render_personal_resume_briefing,
+)
 from .onboarding import OnboardingService
 from .personal_profile import CODEX_HANDOFF_EXECUTE, CODEX_REVIEW, CapabilityDisabled, require_capability
 from .preferences import PreferenceService
@@ -224,9 +228,11 @@ def task_resume_briefing(session_id: str, task_key: str | None = None) -> dict:
     context-refresh acknowledgement, or authorization to execute host tools.
     """
     state = _bound_resume_context(session_id, task_key)
+    briefing = render_personal_resume_briefing(state, label="VRES CONTINUITY STATE")
     return {
         "schema": PERSONAL_RESUME_SCHEMA,
-        "briefing": render_personal_resume_briefing(state, label="VRES CONTINUITY STATE"),
+        "briefing": briefing,
+        "disposition": classify_resume_briefing(briefing),
         "source": "original_session_bound_repository_resume_context",
         "authority": "persisted_task_data_not_user_approval_or_host_attestation",
     }

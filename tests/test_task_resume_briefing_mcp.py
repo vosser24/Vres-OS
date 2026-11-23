@@ -86,6 +86,7 @@ def test_existing_resume_and_bounded_chairman_view_share_one_session_selection(m
         ("resume_context", 7, "SESSION-CURRENT", _TASK),
     ]
     assert result["schema"] == SCHEMA
+    assert result["disposition"] == "task_orientation_only"
     assert result["source"] == "original_session_bound_repository_resume_context"
     assert "not_user_approval" in result["authority"]
     briefing = result["briefing"]
@@ -123,6 +124,7 @@ def test_ambiguous_unfinished_tasks_require_user_selection_without_fallback(monk
     })
     response = mcp_server.task_resume_briefing("SESSION-CURRENT")
     assert "VRES_CONTINUITY_AMBIGUOUS" in response["briefing"]
+    assert response["disposition"] == "selection_required"
     assert "TASK-A" in response["briefing"] and "TASK-B" in response["briefing"]
     assert "NO task selected" in response["briefing"]
     assert "WRONG_TASK_RAW_TEXT" not in response["briefing"]
@@ -142,6 +144,7 @@ def test_no_fabricated_resume_when_projection_is_missing_or_conflicting(monkeypa
     _wire(monkeypatch, projection)
     response = mcp_server.task_resume_briefing("SESSION-CURRENT")
     assert "VRES_RESUME_UNCERTAIN" in response["briefing"]
+    assert response["disposition"] == "uncertain"
     assert "Task: " + _TASK not in response["briefing"]
     assert "Live next action:" not in response["briefing"]
 
@@ -157,6 +160,21 @@ def test_contamination_dominates_current_state_and_prior_transcript(monkeypatch)
     assert "PRIVATE_RAW_TRANSCRIPT_NOT_TO_RENDER" not in result
     assert "EVENT-NOTICE" in result
     assert "NOT a refresh acknowledgement" in result
+
+
+def test_original_mcp_briefing_refuses_sensitive_live_action_and_redacts_other_hints(monkeypatch):
+    """AUTHORED/NOT_RUN: no credential-like persisted action becomes a handoff."""
+    _wire(monkeypatch, _projection(
+        objective="db_credential=synthetic-objective",
+        next_action="Review " + "a" * 850 + " password=abc,def",
+    ))
+    packet = mcp_server.task_resume_briefing("SESSION-CURRENT", _TASK)
+    assert packet["disposition"] == "uncertain"
+    assert "VRES_RESUME_UNCERTAIN" in packet["briefing"]
+    assert "Live next action:" not in packet["briefing"]
+    assert "abc,def" not in str(packet)
+    assert "synthetic-objective" not in str(packet)
+    assert "not_user_approval" in packet["authority"]
 
 
 def test_invalid_current_session_refuses_before_repository_access(monkeypatch):
