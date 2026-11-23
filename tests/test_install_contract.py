@@ -216,7 +216,7 @@ def test_uninstall_removes_only_recorded_vres_owned_autocompact_before_runtime_r
 
 def test_personal_windows_launchers_use_process_only_remotesigned_not_bypass():
     installer = (ROOT / "install.ps1").read_text(encoding="utf-8")
-    assert installer.count("-ExecutionPolicy RemoteSigned -File") == 2
+    assert installer.count("-ExecutionPolicy RemoteSigned -File") == 3
     assert "-ExecutionPolicy Bypass" not in installer
     assert 'vres-launch.ps1`" %*' in installer
     assert 'vres-mcp-launch.ps1`"' in installer
