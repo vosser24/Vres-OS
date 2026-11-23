@@ -177,6 +177,17 @@ def test_original_mcp_briefing_refuses_sensitive_live_action_and_redacts_other_h
     assert "not_user_approval" in packet["authority"]
 
 
+def test_original_mcp_briefing_refuses_legacy_pre_masked_live_action(monkeypatch):
+    """R14C AUTHORED/NOT_RUN: original provider-bound view must fail closed."""
+    _wire(monkeypatch, _projection(next_action="password=[REDACTED],synthetic-tail"))
+    packet = mcp_server.task_resume_briefing("SESSION-CURRENT", _TASK)
+    assert packet["disposition"] == "uncertain"
+    assert "VRES_RESUME_UNCERTAIN" in packet["briefing"]
+    assert "Live next action:" not in packet["briefing"]
+    assert "synthetic-tail" not in str(packet)
+    assert packet["source"] == "original_session_bound_repository_resume_context"
+
+
 def test_invalid_current_session_refuses_before_repository_access(monkeypatch):
     monkeypatch.setattr(mcp_server, "_project", lambda: (7, None))
     monkeypatch.setattr(mcp_server, "_current_session",

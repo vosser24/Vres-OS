@@ -11,7 +11,7 @@ import json
 import re
 from typing import Any
 
-from .redaction import sanitize_text
+from .redaction import redact_for_persistence
 
 SCHEMA = "vres-personal-resume-briefing/1"
 LABELS = frozenset(("VRES CONTINUITY STATE", "VRES POST-COMPACTION CONTINUITY"))
@@ -26,10 +26,10 @@ def _quoted(value: Any, limit: int) -> tuple[str | None, bool]:
     """Render persisted free-text as a SINGLE quoted data literal, never a new line."""
     if type(value) is not str:
         return None, False
-    checked = sanitize_text(value)  # Inspect the COMPLETE scalar before clipping.
-    if checked.rule_counts or checked.residual:
+    checked = redact_for_persistence(value)  # Inspect COMPLETE legacy masked text before clipping.
+    if checked != value or "[REDACTED_UNSAFE_FIELD]" in checked:
         return json.dumps("[REDACTED_UNSAFE_HINT]"), False
-    single_line = " ".join(checked.text.split())
+    single_line = " ".join(checked.split())
     if not single_line:
         return None, False
     truncated = len(single_line) > limit

@@ -232,3 +232,41 @@ def test_preview_refuses_ambiguous_nested_and_string_credential_tails(monkeypatc
     assert packet["pending_work"][:3] == ["[REDACTED_UNSAFE_HINT]"] * 3
     assert packet["pending_work"][3] == '{"reference":"DOC-2"}'
     assert "abc,def" not in str(packet) and "correct horse" not in str(packet)
+
+
+def test_preview_suppresses_legacy_pre_masked_task_and_nested_hints(monkeypatch):
+    """R14C AUTHORED/NOT_RUN: no hidden credential tails in original inspection."""
+    monkeypatch.setattr(mcp_server, "_existing_project", lambda: (
+        7, SimpleNamespace(key="fixture-project")))
+
+    class OriginalRepository:
+        def inspect_task(self, pid, key):
+            assert (pid, key) == (7, "TASK-LEGACY")
+            return {
+                "task": {
+                    "task_key": key,
+                    "status": "active",
+                    "objective": "password=[REDACTED],synthetic-objective",
+                    "next_action": "Continue normal review",
+                    "pending_work": [
+                        "password=[REDACTED],synthetic-pending",
+                        {"note": "password=[REDACTED],synthetic-nested"},
+                        "Keep safe pending",
+                    ],
+                    "completed_work": [],
+                    "relevant_objects": [],
+                },
+                "latest_checkpoint": None,
+                "recorded_completion": None,
+            }
+
+    monkeypatch.setattr(mcp_server, "Repository", OriginalRepository)
+    packet = mcp_server.task_continuity_preview("TASK-LEGACY")
+    task = packet["task"]
+    assert task["objective_hint"] == "[REDACTED_UNSAFE_HINT]"
+    assert task["pending_work"][:2] == ["[REDACTED_UNSAFE_HINT]"] * 2
+    assert task["pending_work"][2] == "Keep safe pending"
+    assert task["next_action_hint"] == "Continue normal review"
+    assert packet["read_only"] is True and packet["selected_task_key"] is None
+    for secret in ("synthetic-objective", "synthetic-pending", "synthetic-nested"):
+        assert secret not in str(packet)

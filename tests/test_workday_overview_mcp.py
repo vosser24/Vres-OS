@@ -157,3 +157,25 @@ def test_workday_suppresses_ambiguous_comma_or_multitoken_assignment(monkeypatch
     assert packet["tasks"][1]["title"] == "[REDACTED_UNSAFE_HINT]"
     assert packet["tasks"][0]["next_action_hint"] == "ordinary next step"
     assert packet["tasks"][1]["next_action_hint"] == "safe update"
+
+
+def test_workday_suppresses_legacy_pre_masked_hints_and_result(monkeypatch):
+    """R14C AUTHORED/NOT_RUN: pre-masked legacy tails never reach the overview."""
+    _fixture(monkeypatch, [{
+        "task_key": "TASK-LEGACY",
+        "title": "password=[REDACTED],synthetic-title",
+        "status": "active",
+        "next_action": "ssh_passphrase=[REDACTED] synthetic-action",
+    }], completions=[{
+        "task_key": "TASK-DONE",
+        "title": "Completed safely",
+        "completion_summary": "password=[REDACTED],synthetic-completion",
+    }])
+    packet = mcp_server.workday_overview()
+    assert packet["tasks"][0]["title"] == "[REDACTED_UNSAFE_HINT]"
+    assert packet["tasks"][0]["next_action_hint"] == "[REDACTED_UNSAFE_HINT]"
+    assert packet["recent_completions"][0]["recorded_result_hint"] == "[REDACTED_UNSAFE_HINT]"
+    assert packet["tasks"][0]["task_key"] == "TASK-LEGACY"
+    assert packet["selected_task_key"] is None and packet["read_only"] is True
+    for secret in ("synthetic-title", "synthetic-action", "synthetic-completion"):
+        assert secret not in str(packet)

@@ -42,7 +42,7 @@ from .repository import Repository
 from .session_contamination import ContextRefreshService, valid_event_key
 from .source_revocation import SourceRevocationService, bound_public_result
 from .sources import SourceService
-from .redaction import redact, redact_text, sanitize_text
+from .redaction import redact, redact_for_persistence, redact_text, sanitize_text
 from .metrics import validate_metrics
 from .w4_runtime_holds import require_w4_native_host_clearance
 
@@ -249,13 +249,12 @@ def _bounded_persisted_hint(value: Any, width: int) -> str:
     """Sanitize complete persisted text BEFORE clipping either original MCP read-only view."""
     if not isinstance(value, str):
         return ""
-    sanitized = sanitize_text(value)
-    # A successful eager substitution does not prove an ambiguous trailing
-    # credential fragment was completely consumed (e.g. password=abc,def).
-    # Never expose partially scrubbed untrusted persisted task hints.
-    if sanitized.residual or sanitized.rule_counts:
+    checked = redact_for_persistence(value)
+    # Reject old already-masked credential assignments with residual tails;
+    # eager sanitization alone cannot establish this display boundary.
+    if checked != value or "[REDACTED_UNSAFE_FIELD]" in checked:
         return "[REDACTED_UNSAFE_HINT]"
-    return redact_text(" ".join(sanitized.text.split()))[:width]
+    return redact_text(" ".join(checked.split()))[:width]
 
 
 @mcp.tool()
