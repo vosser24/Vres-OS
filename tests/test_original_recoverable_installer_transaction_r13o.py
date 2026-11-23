@@ -538,6 +538,35 @@ def test_r13u_finalization_snapshot_and_owner_reads_are_bounded_and_held(
     assert (root / "pending-install.json").read_bytes() == journal_before
 
 
+@pytest.mark.parametrize("damage", [
+    "deeply_nested_snapshot_json", "deeply_nested_journal_json",
+    "deeply_nested_active_pointer_json",
+])
+def test_r13v_nested_json_finalization_returns_a_held_report(
+    tmp_path, monkeypatch, damage
+):
+    """The ORIGINAL local diagnostic must not leak a JSON recursion exception."""
+    root, _claude, release, _manifest, _source = _synthetic_published_local_image(
+        tmp_path, monkeypatch
+    )
+    # Fits every R13U byte limit; exceeds the Python JSON decoder nesting limit.
+    nested = b"[" * 12_000 + b"0" + b"]" * 12_000
+    target = {
+        "deeply_nested_snapshot_json": root / "install-recovery" / release / "snapshot.json",
+        "deeply_nested_journal_json": root / "pending-install.json",
+        "deeply_nested_active_pointer_json": root / "active-install.json",
+    }[damage]
+    target.write_bytes(nested)
+    journal_before = (root / "pending-install.json").read_bytes()
+    report = recovery.inspect_finalization_evidence(root)
+    assert report["journal_removal_approved"] is False
+    assert report["rollback_approved"] is False
+    assert report["actions"] == []
+    assert report["refusals"]
+    assert not all(report["local_evidence"].values()), (damage, report)
+    assert (root / "pending-install.json").read_bytes() == journal_before
+
+
 def test_r13p_original_session_end_source_guard_precedes_detached_worker():
     root = Path(__file__).resolve().parents[1]
     launcher = (root / "plugins/vres-os/bin/vres-session-end.ps1").read_text(encoding="utf-8")

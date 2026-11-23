@@ -790,7 +790,7 @@ def _local_snapshot_v2_verified(path: Path) -> dict[str, Any]:
         raise InstallRecoveryError("Local snapshot manifest is missing")
     try:
         doc = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError) as exc:
+    except (UnicodeDecodeError, ValueError, RecursionError) as exc:
         raise InstallRecoveryError("Local snapshot manifest is unreadable") from exc
     if (not isinstance(doc, dict) or doc.get("format") != FORMAT
             or doc.get("version") != 2 or doc.get("complete") is not True
@@ -973,7 +973,7 @@ def inspect_finalization_evidence(install_root: Path) -> dict[str, Any]:
         journal = json.loads(raw.decode("utf-8-sig"))
         if not isinstance(journal, dict):
             raise ValueError("journal is not an object")
-    except (UnicodeDecodeError, ValueError):
+    except (UnicodeDecodeError, ValueError, RecursionError):
         return {
             "journal": True, "local_evidence": evidence,
             "journal_removal_approved": False, "rollback_approved": False,
@@ -1022,7 +1022,8 @@ def inspect_finalization_evidence(install_root: Path) -> dict[str, Any]:
             # package, plugin and script bytes; NEVER infer a cleanup permit.
             if evidence["staged_release_manifest_present"]:
                 evidence.update(_local_published_release_evidence(install_root, release, claude_home))
-        except (InstallRecoveryError, ValueError, KeyError, TypeError, OSError) as exc:
+        except (InstallRecoveryError, ValueError, KeyError, TypeError, OSError,
+                RecursionError) as exc:
             refusal.append("local snapshot/pointer/plugin evidence incomplete: " + type(exc).__name__)
     for name, valid in evidence.items():
         if not valid:

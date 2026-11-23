@@ -14,6 +14,20 @@
 
 Version: **0.2.0-alpha.1 / Python package 0.2.0a1**. Target: native Windows, Python 3.12–3.13, current Claude Code. This is a controlled-live-test preview; the installer itself has not executed on Windows in the audit environment.
 
+## R13V nested-JSON fail-closed diagnostic correction — SOURCE ONLY / NOT_RUN
+
+The ORIGINAL local-only read-only finalization diagnostic now catches Python
+`RecursionError` from bounded but excessively nested snapshot-v2 JSON, pending
+journal JSON and active-install pointer JSON. It returns a HELD report rather
+than propagating the decoder exception. This adds no authorized operation:
+`journal_removal_approved=False`, `rollback_approved=False`, `actions=[]`.
+Three parameterized synthetic-root regression scenarios were AUTHORed in the
+existing original R13O test file. **R13V tests NOT_RUN at authoring**; R13T's
+94 selected offline PASS still belongs only to R13T. The source recovery
+interlocks, release migration pin, PostgreSQL and native Claude/FastMCP
+restrictions remain unchanged. Same original October Windows installation
+is preserved without access or update.
+
 ## R13U bounded ORIGINAL snapshot and owner-marker finalization diagnostic — SOURCE ONLY / NOT_RUN
 
 The R13T diagnostic bounded its pending journal, release manifest and local Git-member
