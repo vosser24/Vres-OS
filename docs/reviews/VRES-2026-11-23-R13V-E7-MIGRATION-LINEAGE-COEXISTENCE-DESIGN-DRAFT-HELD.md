@@ -1,0 +1,95 @@
+# Vres-OS — R13V / historical E7 migration-lineage coexistence: reviewable DESIGN DRAFT, HELD
+
+**23 November 2026 | OWNER-SIDE GITHUB SOURCE ANALYSIS ONLY | NOT AN INDEPENDENT REVIEW, MIGRATION PLAN, INCIDENT CLEARANCE, TEST, OR RELEASE APPROVAL**
+
+## 1. One personal application; no operational authorization
+
+The product is ONE original PERSONAL Windows daily-operations companion for ONE user, with the ORIGINAL Claude Code CLI primary and ORIGINAL FastMCP integral. Preserve Chairman, Authoritative Repository, explicit task selection, real provider-session-bound task_resume, tasks, sessions, results, history, checkpoints, projects, credential/data-source boundaries, governed experience retrieval and learning, and ORIGINAL install.ps1 / update.ps1 / recovery. Preserve V-01..V-42, M0..M8, W0..W3, W4 R1..R13V, C2B/K0 and October/November roadmaps. No second installation, alternate GUI/Tk, duplicate task store/MCP/installer, enterprise IAM or multi-tenancy.
+
+Both absolute incidents remain OPEN: **LIVE_SCHEMA_048_INCIDENT=OPEN (NO PostgreSQL EVEN SELECT, direct or indirect)** and **HOST_HOOK_DB_ROUTE_ATTEMPTED_AND_REFUSED=OPEN (NO ordinary native Claude Code/FastMCP/hooks)**. Also HELD: Windows preflight/update/install/recovery, active P2, credentials/profile, PR/draft PR/CI (CI provisions PostgreSQL), release/UAT, protected-branch merge, rollback/journal removal, real legacy/PRISM/TASK-DAY-01. Positive independently trusted F1/Fable authority is NOT_GRANTED. This document creates no operational permission.
+
+## 2. Exact immutable evidence
+
+- Repository: https://github.com/vosser24/Vres-OS; authenticated owner vosser24; owner ID 62554356; repository ID 1368577038; GitHub App installation 85535881.
+- Formal independent-review baseline **R13S** commit 2f731c13bda265f1b99520d83b2d7c15895caf08, TREE 9e4e9bef09df6617aef88ec503d2cd8d83d49d8a. Later R13T/U/V changes require separate review.
+- Current **R13V** source branch feature/personal-w4-original-finalization-nested-json-failclosed-r13v-20261123 at commit ad4c517aa1c14be9d64ddbfce4ad1eeb492cb46c, TREE a1d7585e9b85c4c594165f52714c449e291dbb11, sole R13U parent 0ffa04ae1d41b2f66c7b9ec2e38428c48f9e2f7f.
+- Historical E7 G7 source commit d930adfa89617067115d9538e9692945230d9630, TREE 1c15a8fcb02093c7f16ea67f5295779ad1e0a107.
+- Source-only Git tree comparison: migrations 001–041 have identical 41 filenames AND blobs. E7 versus original R13 042–048 have seven different filenames AND seven different blobs. Historical E7 048 = 048_source_effective_trust.sql, blob 3070f3aafa305590ed6ae6ac7a48b0f73111f128; R13 048 = 048_original_task_terminal_hold_r13f.sql, blob b0784c84b8b823d3a3525b4d911b54754c0ddc41.
+- Canonical continuity docs branch docs/chatgpt-continuity-20261023 HEAD e5c6605f536f94e12ec0841f8c518678053c939a, TREE 72e220af24fa3185011d1ce2a3e1b27f4f2a8cda, sole parent 2d1225db8bf65fd9d519e8b05d489dfe430d1aba. The canonical READ FIRST handoff/index remain unchanged by this dedicated design branch.
+- Protected main stays at 9a8acc5d464b96432a93cb95daa9581412fb07ee; protected original R13 at bcf62460d68caebfdbd0e838d44c5997992c5fbc. These are remote GitHub identities; they are NOT the currently observed Windows install identity.
+
+Historical 2026-10-13 E7 migration-048 incident and a postincident backup/isolated-restore rehearsal were previously reported. Actual PRESENT database, ledger, role privileges, installed binaries, full Windows state, and any usable preincident PITR remain UNKNOWN. No database connection or new Windows inspection was made for this design.
+
+## 3. Semantic dependency inventory from exact SQL source (not execution)
+
+| Cohort | SQL source effect | Shared dependency / coexistence question |
+|---|---|---|
+| E7 042–046 | Alters constraints and policies on experience_retrieval_observations and experience_episodes; 043 also writes experience_policy_versions | Preserve previously applied constraint state, provenance rules, and existing experience events; do not assume a 041-only schema |
+| E7 047 | Creates append-only source_trust_events referencing projects, sources, tasks and task_events; defines immutability and owner-only-insert triggers, source_trust_digests and record_source_trust_decision | Table/sequence ownership, SECURITY DEFINER, full ACL/default-grant sweep, immutable authority event chain, and event referential integrity |
+| E7 048 | Defines STABLE SECURITY DEFINER source_effective_trust(bigint), consuming source_trust_events, sources, source_trust_digests, tasks and task_events; revokes PUBLIC and other non-owner grants | Ensure read-only trust semantics, protected function owner/search_path, no implicit elevation and correct runtime-only execution grants |
+| Original R13 042 | Defines latest_observed_user_input for strict user authority precedence | Preserve original provenance_authority and user_input_observations semantics |
+| Original R13 043 | Alters user_input_observations; defines stage_strict_user_input and revises commit_user_inputs | Transactional task-event / task-state / session consistency; legacy observation quarantine |
+| Original R13 044–045 | Revises observed-input/commit logic and adds then tightens cancel_task_from_current_observation, including task/validation/session/project focus changes | Task-bound cancellation, observed turn identity, atomicity, race and authorization boundaries |
+| Original R13 046–047 | Adds observation rebind quarantine trigger on sessions, revised commit semantics, observed_turn_id, and cancellation/validation source | Exact real Claude host-turn binding; rejection of replay/rebind and stale observation |
+| Original R13 048 | Adds refuse_unapproved_task_terminal_mutation and BEFORE UPDATE OF status OR DELETE trigger on tasks | Intentionally refuses all new cancellations even through earlier writer helpers until a *separate*, independently approved operator authority design; protects terminal task history |
+
+**Important joint boundary:** historical E7 047/048 TRUST READS task_events and tasks; R13 control writers/terminal trigger also affect task/session/event relationships. This is a dependency to investigate, **not evidence** that the two already coexist safely. R13 048 deliberately blocks a cancellation-to-cancelled transition, so any future operator-only cancellation must be reviewed as a new control, not silently enabled by R13 044/047 writer functions.
+
+## 4. Exact original migrator and release interlocks
+
+At R13V, src/vres_os/db.py builds a single sorted package of migration *.sql filenames, inspects schema_migrations by exact **version filename**, refuses unknown package-missing entries, and compares recorded **SHA-256 text digests** to packaged text. These checks are distinct from Git blob SHAs. Missing/ambiguous checksums or a vres schema with no ledger are held; migration lock and DDL are not reached in the source-held incident. The executable source guard refuses before driver, configuration, credential lookup or database contact.
+
+The original src/vres_os/release_inputs.py keeps PERSONAL_RELEASE_MAX_MIGRATION=41 and original strict-Claude required filenames 042–047. Its source-held validator emits VRES_W4_HELD_RELEASE_COHORT for the incomplete accepted cohort. No partial pin, no guard flip, no number-only substitution and no release downgrade can supply the missing original-host semantics.
+
+If E7 042–048 are in the live ledger, a package with only R13 042–048 would reject the E7 filenames before applying anything. A naive common package containing E7 042–048 plus newly numbered original task controls would cause a verified-041-only target to encounter E7 migrations as well; that is a *new* deployment decision, **not automatically acceptable**. The actual target lineage must be known through future independently cleared investigation, not guessed from the 2026-10-13 report.
+
+## 5. Architectural choices for accountable reviewer decision — NOTHING SELECTED OR IMPLEMENTED
+
+**Candidate A: one forward-additive superset package.** Preserve all actual historical E7 filename/text/checksum identities without rewrites. Design a distinct, strictly ordered, uniquely identified original task/host migration successor cohort *after* the historical 048 position. A clean-041 target would necessarily traverse E7 before original task controls; this is permissible only if an independent assessment finds E7 fully acceptable for that target, with explicit product acceptance of E7 experience/trust semantics, schema ownership, privileges, data and upgrade effects. No numbering, SQL, grants, package or pins are selected here.
+
+**Candidate B: explicit lineage-specific migration packaging within the SAME ORIGINAL application.** A separately reviewed migrator/package contract could recognize immutable E7-advanced versus verified-041 histories and supply distinct additive paths that converge on one compatible schema without altering any past recorded checksum or version. This substantially increases release, packaging, replay, downgrade and audit complexity. Do not implement dual runtimes, alternate applications or silent target-dependent fallback. This candidate also requires identifying the exact currently applied lineage, with no DB access while P0 is OPEN.
+
+**Reject outright:** overwriting any historical 042–048 SQL under a recorded filename, relabelling existing ledger versions, checksum adoption to mask drift, deleted/reverted ledger entries, guessed restore to 041, a partial R13 043/047 pin, a source-interlock bypass, an out-of-band SQL patch, auto-migration during preflight, enabling a cancelled terminal state merely to make host UAT pass, and any new CI job that opens PostgreSQL.
+
+A reviewer must choose or revise the design only after establishing source compatibility and incident/authority requirements. This document does not choose a migration number or authorize migration implementation.
+
+## 6. Explicit lineage-dependent acceptance matrix
+
+| Candidate target state (UNKNOWN now) | Before design approval | Eventual acceptance evidence, only after separate permission |
+|---|---|---|
+| Exactly original 001–041 | Do not assume E7 or R13 042+ is present | Immutable preimage evidence; exact accepted deployment path; full host 042–047 successor semantics; default grants and rollback/forward safety |
+| Historical E7 042–048 truly applied | Preserve every E7 row/name/checksum and source-trust authority invariant | Exact target/ledger/role/objects; additive original task control path; E7 trust function/triggers remain protected and behave as specified |
+| Partial E7, unknown/foreign entries, altered checksum, mixed packages, missing ledger | UNKNOWN_TRANSACTION_HELD / MIGRATION_DRIFT; no repair guess | Separate incident-level forensic assessment and explicitly approved recovery/compatibility design; no generic auto-adoption |
+| Independently reconciled future cohort | No automatic acceptance from offline green tests | External publisher/toolchain/host identity, strict task/session control, owner ACLs, true Windows same-install release and recovery proof |
+
+State-specific checks to design (all **NOT_RUN**): applied-version filename and digest immutability; existing E7 trust ledger rows/trigger immutability; task-event provenance and rebind cancellation refusal; effect of task terminal trigger on legitimate governed completion versus unauthorized cancellation; SECURITY DEFINER owners, search_path, PUBLIC/default/non-owner grants and role boundaries; unique migration order, transaction boundaries and repeatability; clean 041, clean E7-048, malformed/mixed and interrupted states; lossless experience data; rollback **design** (not execution), immutable backup identity and operator recovery state.
+
+The future test plan MUST isolate synthetic/disposable roots and authorized database environments, explicitly exclude real PostgreSQL until P0 incident closure, separately approve scope, and record PASS/FAIL/NOT_RUN without inventing results. NO PR/CI is authorized.
+
+## 7. Review gates and minimally useful integrated resolution
+
+**Gate G0 — today, source-only:** Independently inspect immutable E7 and R13 source and this design. Require an own-GitHub-account, independently attributable reviewer on issue #185 with three separate verdicts for the *R13S immutable baseline*: THREAT_MODEL (ACCEPT/REVISE/REJECT), RELEASE_DESIGN (DESIGN_ACCEPT/DESIGN_REVISE/DESIGN_REJECT), and operation-specific OPERATIONS (ALLOW/CONDITIONAL/BLOCKED). Explicitly add separate conclusions on R13T, R13U and R13V follow-on deltas. Owner-authored issue comments and unsigned Claude/Fable reports do not qualify.
+
+**Gate G1 — compatibility design only:** Independent reviewer specifies whether Candidate A/B/or another solution is viable, including exact E7 functions and original 042–048 task semantics, immutable ledger, all role/grant consequences, migration package selection and safe behavior for every permitted starting state. Request a change if proofs are missing. No SQL publication, SQL execution, database contact or release unhold.
+
+**Gate G2 — separately governed P0 resolution:** An accountable incident authority and informed owner must separately clear LIVE_SCHEMA_048_INCIDENT and HOST_HOOK_DB_ROUTE_ATTEMPTED_AND_REFUSED based on trusted evidence. Independent reviewer verdicts do not by themselves clear either incident or grant F1/Fable trust authority.
+
+**Gate G3 — future separately scoped engineering/testing:** Only after explicit new owner approval, implement a selected coherent migration/host/release cohort on a dedicated feature branch and run narrowly authorized isolated tests; preserve exact original functions and controls. Real PostgreSQL, even read-only, remains blocked unless the relevant incident has separately been cleared and that operation is individually authorized.
+
+**Gate G4 — original same-install operation only after all gates:** Independently approved release identity, recovery/journal strategy, host provenance, actual Windows safeguards and fresh user consent. On the ACTUAL original Windows PC, use a clean approved Git checkout, verify HEAD/TREE, run ORIGINAL update.ps1 -PreflightOnly, ORIGINAL update.ps1 targeting SAME October installed Vres, and original Claude Code CLI + FastMCP integrated UAT. No second installation. A rollback and journal deletion are NOT approved by local diagnostic flags.
+
+## 8. Provenance and reviewer handoff
+
+The exact R13V owner-uploaded ZIP SHA-256 dc6748fa2d9a4d19f15a30cad82316d083e7ed8752da427470932511c2a9df0d previously matched 661 original Git files and full TREE, with zero changed after selected testing. On R13V **only three approved original pytest selectors were run**: 10 PASS/0 FAIL/0 ERROR, and AST/in-memory compile of three original Python files PASS. Two rejected *runner bootstrap* attempts preceded that successful run (self-blocked ctypes.dlopen exit 98; inherited VRES_DATA_DIR outside trusted TMPDIR conftest exit 4 before collection). They were NOT original pytest failures. Historical R13T 94 PASS is build-specific and NOT inherited as an R13V 94-PASS result. No tests, Python/SQL, native host or Windows commands were run during this document authoring.
+
+Issue #185 at preparation remained OPEN, 21 comments ALL owner-authored, with no independent own-account three-verdict clearance: https://github.com/vosser24/Vres-OS/issues/185. Issues #165–170 and #176 remain OPEN; #174 CLOSED planning only. Original October Windows release 20261022172833-4d82147b and source 82c82430b38f93bd6b9d5c3af3b5de9c1368af9c are owner-reported; historical staged 194/194 matches were reported but the installation was **NOT** visited or modified.
+
+Immutable source references:
+- Historical E7 https://github.com/vosser24/Vres-OS/tree/d930adfa89617067115d9538e9692945230d9630/src/vres_os/migrations
+- Original R13V https://github.com/vosser24/Vres-OS/tree/ad4c517aa1c14be9d64ddbfce4ad1eeb492cb46c/src/vres_os/migrations
+- Original migrator https://github.com/vosser24/Vres-OS/blob/ad4c517aa1c14be9d64ddbfce4ad1eeb492cb46c/src/vres_os/db.py
+- Original release pin https://github.com/vosser24/Vres-OS/blob/ad4c517aa1c14be9d64ddbfce4ad1eeb492cb46c/src/vres_os/release_inputs.py
+- Prior source-only E7 collision report https://github.com/vosser24/Vres-OS/blob/985ec17aeef70c0f6136dfe37eea21b3b151e8d4/docs/reviews/VRES-2026-11-23-R13S-E7-042-048-LINEAGE-COLLISION-RECONCILIATION-HELD.md
+- Immutable R13S independent review request https://github.com/vosser24/Vres-OS/blob/2e44c6fd9341a215bde63caeddbda408a4edc11b/docs/reviews/VRES-2026-11-23-R13S-EXTERNAL-THREE-VERDICT-REVIEW-REQUEST.md
+
+**Status: DESIGN DRAFT / NO SELECTED MIGRATION LINEAGE / NO INDEPENDENT APPROVAL / NO NEW TEST RESULTS / NO OPERATIONAL CLEARANCE. Do not post this as an independent reviewer verdict or bypass a P0 hold.**
