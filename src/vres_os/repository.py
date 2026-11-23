@@ -480,7 +480,9 @@ class Repository:
             )
             conn.execute("UPDATE vres.tasks SET updated_at=now() WHERE id=%s", (task_id,))
 
-    def update_state(self, task_key: str, **fields: Any) -> None:
+    @staticmethod
+    def _prepare_state_updates(fields: dict[str, Any]) -> tuple[list[str], list[Any], dict[str, Any]]:
+        """Validate and redact all state assignments before opening a connection."""
         allowed = {
             "current_phase",
             "current_step",
@@ -498,42 +500,65 @@ class Repository:
         }
         updates: list[str] = []
         params: list[Any] = []
+        safe_fields: dict[str, Any] = {}
         for key, value in fields.items():
             if key not in allowed:
                 raise ValueError(f"Unsupported state field {key}")
-            value = redact_for_persistence(value)
-            if key == "validation_status" and value not in {"pending", "failed"}:
-                raise ValueError(f"Unsupported validation status {value}")
-            if isinstance(value, (list, dict)):
+            safe_value = redact_for_persistence(value)
+            if key == "validation_status" and safe_value not in {"pending", "failed"}:
+                raise ValueError(f"Unsupported validation status {safe_value}")
+            safe_fields[key] = safe_value
+            if isinstance(safe_value, (list, dict)):
                 updates.append(f"{key}=%s::jsonb")
-                params.append(json.dumps(value))
+                params.append(json.dumps(safe_value))
             else:
                 updates.append(f"{key}=%s")
-                params.append(value)
+                params.append(safe_value)
+        return updates, params, safe_fields
+
+    def _apply_state_updates_in_transaction(
+        self,
+        conn,
+        task_key: str,
+        safe_fields: dict[str, Any],
+        updates: list[str],
+        params: list[Any],
+    ) -> None:
+        """Use the original state lock and validation guards on the caller's transaction."""
+        if not updates:
+            return
+        task_id = self._task_id(conn, task_key)
+        current = conn.execute(
+            "SELECT * FROM vres.task_state WHERE task_id=%s FOR UPDATE", (task_id,)
+        ).fetchone()
+        if current is None:
+            raise ValueError("Task has no persisted state")
+        changed = {key for key, value in safe_fields.items() if current.get(key) != value}
+        material = bool(changed - {"latest_user_instruction", "validation_status"})
+        pending = self._pending_validation_key(conn, task_id)
+        if pending:
+            # Keep the existing prepare/checkpoint lock order and frozen-state fence.
+            if changed & set(STATE_FIELDS):
+                raise PendingValidationError(
+                    f"State change rejected: protected validation request {pending} is pending"
+                )
+            if not changed:
+                return  # Identical values are still a true no-op during validation.
+        assignments = list(updates)
+        if material and "validation_status" not in safe_fields:
+            assignments.append("validation_status='pending'")
+        conn.execute(
+            f"UPDATE vres.task_state SET {', '.join(assignments)}, updated_at=now() WHERE task_id=%s",
+            [*params, task_id],
+        )
+        conn.execute("UPDATE vres.tasks SET updated_at=now() WHERE id=%s", (task_id,))
+
+    def update_state(self, task_key: str, **fields: Any) -> None:
+        updates, params, safe_fields = self._prepare_state_updates(fields)
         if not updates:
             return
         with connect() as conn, conn.transaction():
-            task_id = self._task_id(conn, task_key)
-            current = conn.execute("SELECT * FROM vres.task_state WHERE task_id=%s FOR UPDATE", (task_id,)).fetchone()
-            changed = {k for k, v in fields.items() if current.get(k) != redact_for_persistence(v)}
-            material = bool(changed - {"latest_user_instruction", "validation_status"})
-            pending = self._pending_validation_key(conn, task_id)
-            if pending:
-                # Same lock order as checkpoint/prepare: task_state first, then check, compare, write.
-                if changed & set(STATE_FIELDS):
-                    raise PendingValidationError(
-                        f"State change rejected: protected validation request {pending} is pending"
-                    )
-                if not changed:
-                    return  # identical values: true no-op, no write, no timestamp bump
-            if material and "validation_status" not in fields:
-                updates.append("validation_status='pending'")
-            params.append(task_id)
-            conn.execute(
-                f"UPDATE vres.task_state SET {', '.join(updates)}, updated_at=now() WHERE task_id=%s",
-                params,
-            )
-            conn.execute("UPDATE vres.tasks SET updated_at=now() WHERE id=%s", (task_id,))
+            self._apply_state_updates_in_transaction(conn, task_key, safe_fields, updates, params)
 
     @staticmethod
     def _pending_validation_key(conn, task_id: int) -> str | None:
@@ -558,7 +583,26 @@ class Repository:
         context: dict[str, Any],
         reason: str,
         actor: str,
+        *,
+        state_fields: dict[str, Any] | None = None,
     ) -> str:
+        """Write a checkpoint, optionally with its state update in ONE transaction.
+
+        state_fields is used only by the ORIGINAL Chairman task_checkpoint tool.
+        An error in either write rolls back both; a checkpoint alone keeps its
+        original standalone behavior for lifecycle and existing callers.
+        """
+        if state_fields is not None:
+            if type(state_fields) is not dict:
+                raise TypeError("Atomic checkpoint state_fields must be a dict")
+            if (
+                state_fields.get("state_summary") != summary
+                or state_fields.get("current_step") != current_position
+                or state_fields.get("next_action") != next_action
+                or context != state_fields
+            ):
+                raise ValueError("Atomic checkpoint state and context must match the selected continuation")
+            updates, params, safe_fields = self._prepare_state_updates(state_fields)
         cp_key = _key("CP")
         safe_summary = redact_for_persistence(summary)
         safe_position = redact_for_persistence(current_position)
@@ -567,6 +611,8 @@ class Repository:
         safe_reason = redact_for_persistence(reason)
         _persist_identity_unmodified(actor, "actor")
         with connect() as conn, conn.transaction():
+            if state_fields is not None:
+                self._apply_state_updates_in_transaction(conn, task_key, safe_fields, updates, params)
             task_id = self._task_id(conn, task_key)
             # Same lock ValidationService.prepare takes, so prepare and checkpoint serialize.
             conn.execute("SELECT 1 FROM vres.task_state WHERE task_id=%s FOR UPDATE", (task_id,))

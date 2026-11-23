@@ -459,8 +459,9 @@ def task_checkpoint(
         "validation_status": validation_status,
     }
     fields.update({k: v for k, v in optional.items() if v is not None})
-    repo.update_state(task_key, **fields)
-    cp = repo.checkpoint(task_key, summary, current_position, next_action, fields, reason, "chairman")
+    # One original Repository transaction: either state AND checkpoint commit, or neither.
+    cp = repo.checkpoint(task_key, summary, current_position, next_action, fields, reason, "chairman",
+                         state_fields=fields)
     return {"checkpoint": cp}
 
 
