@@ -46,8 +46,8 @@ def test_chairman_preserves_ambiguous_contaminated_and_untrusted_resume_boundari
 
 def test_chairman_source_policy_remains_original_and_not_a_host_clearance():
     chairman = (ROOT / "plugins/vres-os/agents/chairman.md").read_text(encoding="utf-8")
-    assert chairman.startswith("---\\nname: chairman\\n")
-    assert "\\nmodel: sonnet\\neffort: high\\n---\\n" in chairman
+    assert chairman.startswith("---\nname: chairman\n")
+    assert "\nmodel: sonnet\neffort: high\n---\n" in chairman
     assert "orchestration_discover" in chairman
     assert "task_checkpoint" in chairman
     assert "task_reply_gate" in chairman
