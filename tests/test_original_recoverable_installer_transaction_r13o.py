@@ -243,7 +243,8 @@ def test_local_finalization_evidence_never_grants_cleanup(tmp_path, monkeypatch)
     journal["phase"] = "verified_commit_pending_cleanup"
     (root / "pending-install.json").write_text(json.dumps(journal), encoding="utf-8")
     (root / "active-install.json").write_text(
-        json.dumps({"product": "Vres-OS", "release": release, "plugin_path": journal["plugin_path"]}),
+        json.dumps({"product": "Vres-OS", "release": release,
+                    "previous": journal["previous"], "plugin_path": journal["plugin_path"]}),
         encoding="utf-8",
     )
     staged = root / "releases" / release
@@ -278,6 +279,130 @@ def test_synthetic_finalization_unproven_cases_remain_held(tmp_path, monkeypatch
     assert report["rollback_approved"] is False
     assert report["refusals"]
     assert (root / "pending-install.json").exists()
+
+
+def _synthetic_published_local_image(tmp_path, monkeypatch):
+    """Only synthetic roots: stage, venv package, plugin and launchers mimic installer bytes."""
+    import hashlib
+    import shutil
+
+    root, claude, release, journal = _synthetic_transaction(tmp_path, monkeypatch)
+    journal["phase"] = "verified_commit_pending_cleanup"
+    (root / "pending-install.json").write_text(json.dumps(journal), encoding="utf-8")
+    (root / "active-install.json").write_text(json.dumps({
+        "product": "Vres-OS", "release": release, "previous": journal["previous"],
+        "plugin_path": journal["plugin_path"]
+    }), encoding="utf-8")
+    source = {
+        "pyproject.toml": b"[project]\nname='vres-os'\n",
+        "src/vres_os/__init__.py": b"__version__='synthetic'\n",
+        "src/vres_os/migrations/001_demo.sql": b"-- synthetic bytes; NEVER executed\n",
+        "plugins/vres-os/hooks/hooks.json": b'{"hooks":{}}',
+        "scripts/windows/vres-launch.ps1": b"# synthetic original launcher\n",
+        "scripts/windows/vres-mcp-launch.ps1": b"# synthetic original MCP launcher\n",
+    }
+    target = claude / "skills" / "vres-os"
+    shutil.rmtree(target)
+    target.mkdir()
+    (target / ".vres-managed").write_bytes(b"Vres-OS")
+    manifest_files = []
+    release_root = root / "releases" / release
+    staging = release_root / "source"
+    for name, data in source.items():
+        dst = staging / name
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes(data)
+        if name.startswith("src/vres_os/"):
+            pkg = release_root / "venv" / "Lib" / "site-packages" / "vres_os" / name[len("src/vres_os/"):]
+            pkg.parent.mkdir(parents=True, exist_ok=True)
+            pkg.write_bytes(data)
+        if name.startswith("plugins/vres-os/"):
+            plugin = target / name[len("plugins/vres-os/"):]
+            plugin.parent.mkdir(parents=True, exist_ok=True)
+            plugin.write_bytes(data)
+        if name.startswith("scripts/windows/"):
+            (root / "bin" / name[len("scripts/windows/"):]).write_bytes(data)
+        digest = hashlib.sha1(b"blob " + str(len(data)).encode() + b"\x00" + data).hexdigest()
+        manifest_files.append({"path": name, "mode": "100644", "git_blob": digest,
+                               "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()})
+    manifest = {
+        "format": "vres-personal-release-artifact", "version": 2, "object_format": "sha1",
+        "source_origin": "git-objects", "source_commit": "0" * 40, "source_tree": "1" * 40,
+        "files": manifest_files,
+    }
+    (release_root / "release-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    return root, claude, release, manifest, source
+
+
+def test_r13s_exact_published_local_image_still_never_grants_recovery(tmp_path, monkeypatch):
+    root, claude, release, manifest, source = _synthetic_published_local_image(tmp_path, monkeypatch)
+    before = {p.relative_to(tmp_path).as_posix(): p.read_bytes()
+              for p in tmp_path.rglob("*") if p.is_file()}
+    report = recovery.inspect_finalization_evidence(root)
+    assert all(report["local_evidence"].values()), report
+    assert report["journal_removal_approved"] is False
+    assert report["rollback_approved"] is False
+    assert report["actions"] == []
+    assert any("VRES_W4_HELD_FINALIZATION" in r for r in report["refusals"])
+    assert {p.relative_to(tmp_path).as_posix(): p.read_bytes()
+            for p in tmp_path.rglob("*") if p.is_file()} == before
+
+
+@pytest.mark.parametrize("damage", [
+    "corrupt_manifest", "unsafe_path", "change_staged_source", "add_staged_source",
+    "change_installed_package", "add_installed_package", "change_plugin",
+    "remove_plugin_marker", "change_launcher_script", "remove_launcher_script",
+    "remove_venv", "symlink_plugin_file", "pointer_wrong_previous", "extra_empty_package_dir",
+])
+def test_r13s_published_local_image_differences_are_held(tmp_path, monkeypatch, damage):
+    root, claude, release, manifest, source = _synthetic_published_local_image(tmp_path, monkeypatch)
+    r = root / "releases" / release
+    pkg = r / "venv" / "Lib" / "site-packages" / "vres_os"
+    plugin = claude / "skills" / "vres-os"
+    if damage == "corrupt_manifest":
+        (r / "release-manifest.json").write_bytes(b"not-json")
+    elif damage == "unsafe_path":
+        manifest["files"][0]["path"] = "../escape"
+        (r / "release-manifest.json").write_text(json.dumps(manifest))
+    elif damage == "change_staged_source":
+        (r / "source" / "pyproject.toml").write_bytes(b"changed")
+    elif damage == "add_staged_source":
+        (r / "source" / "extra.txt").write_bytes(b"extra")
+    elif damage == "change_installed_package":
+        (pkg / "__init__.py").write_bytes(b"changed")
+    elif damage == "add_installed_package":
+        (pkg / "extra.py").write_bytes(b"extra")
+    elif damage == "change_plugin":
+        (plugin / "hooks" / "hooks.json").write_bytes(b"changed")
+    elif damage == "remove_plugin_marker":
+        (plugin / ".vres-managed").unlink()
+    elif damage == "change_launcher_script":
+        (root / "bin" / "vres-launch.ps1").write_bytes(b"changed")
+    elif damage == "remove_launcher_script":
+        (root / "bin" / "vres-mcp-launch.ps1").unlink()
+    elif damage == "remove_venv":
+        import shutil
+        shutil.rmtree(r / "venv")
+    elif damage == "pointer_wrong_previous":
+        (root / "active-install.json").write_text(json.dumps({
+            "product": "Vres-OS", "release": release,
+            "previous": {"product": "Vres-OS", "release": "wrong"},
+            "plugin_path": str(plugin),
+        }), encoding="utf-8")
+    elif damage == "extra_empty_package_dir":
+        (pkg / "unexpected_empty_dir").mkdir()
+    else:
+        (plugin / "hooks" / "hooks.json").unlink()
+        (plugin / "hooks" / "hooks.json").symlink_to(tmp_path / "unused-synthetic")
+    before = {p.relative_to(tmp_path).as_posix(): p.read_bytes()
+              for p in tmp_path.rglob("*") if p.is_file() and not p.is_symlink()}
+    report = recovery.inspect_finalization_evidence(root)
+    assert report["journal_removal_approved"] is False and report["rollback_approved"] is False
+    assert report["actions"] == [] and report["refusals"]
+    assert not all(report["local_evidence"].values()), (damage, report)
+    assert (root / "pending-install.json").exists()
+    assert {p.relative_to(tmp_path).as_posix(): p.read_bytes()
+            for p in tmp_path.rglob("*") if p.is_file() and not p.is_symlink()} == before
 
 
 def test_r13p_original_session_end_source_guard_precedes_detached_worker():

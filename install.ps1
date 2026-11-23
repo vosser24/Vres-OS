@@ -212,7 +212,7 @@ function Assert-Managed([string]$Path) {
 
 if ($env:OS -ne 'Windows_NT') { throw 'This installer is for native Windows only.' }
 if ($env:VRES_DATA_DIR -and [IO.Path]::GetFullPath($env:VRES_DATA_DIR) -ne [IO.Path]::GetFullPath($InstallRoot)) { throw 'Remove VRES_DATA_DIR override before using the managed Windows installer.' }
-if (Test-Path (Join-Path $InstallRoot 'pending-install.json')) { throw "An interrupted installation journal exists. Inspect it with: python -I `"$(Join-Path $RepoRoot 'src\vres_os\install_recovery.py')`" inspect --install-root `"$InstallRoot`" (then recover --confirm), or follow docs/INSTALL-WINDOWS.md." }
+if (Test-Path (Join-Path $InstallRoot 'pending-install.json')) { throw 'VRES_W4_PENDING_JOURNAL_HELD: an interrupted Vres update journal exists. Preserve it. Do not run recovery, delete the journal, or retry installation. Follow docs/INSTALL-WINDOWS.md for separately approved evidence review.' }
 if ((Test-Path $InstallRoot) -and ((Get-Item -LiteralPath $InstallRoot).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Install root must not be a junction or symlink.' }
 # A detached worker can outlive Claude. Do not overwrite a runtime used by such a process.
 $runningVres = @(Get-CimInstance Win32_Process -Filter "Name = 'python.exe' OR Name = 'pythonw.exe'" -ErrorAction Stop | Where-Object {

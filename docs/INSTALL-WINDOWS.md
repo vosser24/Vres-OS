@@ -14,6 +14,43 @@
 
 Version: **0.2.0-alpha.1 / Python package 0.2.0a1**. Target: native Windows, Python 3.12–3.13, current Claude Code. This is a controlled-live-test preview; the installer itself has not executed on Windows in the audit environment.
 
+## R13S original postpublication local integrity diagnostic — SOURCE ONLY / NOT APPROVAL
+
+**No Windows command is authorized.** The ORIGINAL `install_recovery.py` now has
+read-only LOCAL point-in-time comparisons of a R13O finalization journal against
+the staged original release manifest: manifest structure, exact staged Git-object
+release files, exact installed original `vres_os` package, exact managed Claude
+plugin, and exact original PowerShell launcher scripts. Unexpected files, bytes,
+symlinks/junctions, malformed paths/hashes and missing evidence are **not a PASS**.
+The `.cmd` wrappers and the host/native dependencies are NOT independently
+attested by these particular checks. The ordinary recovery source interlock is
+**unchanged** and remains first, even before any read-only diagnostic.
+
+The existing `staged_release_manifest_present` flag is **presence only** and
+never counted as verification. The five new local booleans are diagnostic and
+separate from trusted Git publisher attestation, installed wheel/dependency
+closure, Windows path/share semantics, live PostgreSQL migration ledger and
+host provenance. The manifest and directories are on the same mutable machine;
+**even five positive local observations authorize nothing**. Any missing or
+mismatched observation retains the journal and requests independent human
+review; no `finalize`, cleanup, startup or rollback command has been created.
+
+Conservative original transaction decision matrix: a caught prepublication
+failure may eventually use only the already-source-held R13O in-run synthetic
+rollback policy; any published pointer with incomplete local evidence remains
+**PUBLISHED_PARTIAL_HELD**; locally matching new files with a still-present
+journal are **PUBLISHED_FINALIZATION_HELD**, not an automatic old-runtime
+rollback; unknown pointer, phase or schema is **UNKNOWN_TRANSACTION_HELD**.
+These are **operator analysis labels, not executable statuses**. Trusted
+schema/release/host evidence, incident closures, attributable #185 review,
+and separate owner consent remain mandatory before any Windows decision.
+The original `install.ps1` pending-journal error no longer suggests
+`recover --confirm` while that command is categorically source-held.
+
+This source-only milestone may be exercised only through approved disposable
+synthetic-root offline tests; all actual Windows, PostgreSQL even SELECT,
+original Claude/FastMCP/hooks and installed P2 operations remain NOT_RUN.
+
 ## R13P original managed-install review corrections — SOURCE ONLY / NOT_RUN
 
 R13P corrects **one actual installer source defect**, not a Windows installation.

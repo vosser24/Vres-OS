@@ -531,6 +531,143 @@ def verify_restored(install_root: Path, claude_home: Path, release: str) -> dict
     }
 
 
+# R13S local-only postpublication file integrity. These routines DO NOT certify
+# the Git publisher, live migration ledger, host, wheelhouse or installed native
+# dependencies, and must never be reused as an authorization to mutate files.
+# They are invoked only after the original recovery source interlock.
+_RELEASE_LOCAL_FORMAT = "vres-personal-release-artifact"
+_RELEASE_LOCAL_PATH = re.compile(r"[A-Za-z0-9_.@+ -]+")
+_RELEASE_LOCAL_SCOPE = ("src/vres_os/", "plugins/vres-os/", "scripts/windows/")
+_RELEASE_LOCAL_FILES = frozenset({"pyproject.toml", "README.md", "LICENSE", "rules/vres-rules.md"})
+
+
+def _read_local_release_manifest(path: Path) -> dict[str, dict[str, tuple[int, str]]]:
+    """Parse only a tightly bounded original staged release manifest; never run its code."""
+    raw = _file(path)
+    if raw is None or not 0 < len(raw) <= 2_000_000:
+        raise InstallRecoveryError("Local release manifest missing or outside the size limit")
+    try:
+        doc = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise InstallRecoveryError("Local release manifest unreadable") from exc
+    if not isinstance(doc, dict) or (
+        doc.get("format") != _RELEASE_LOCAL_FORMAT or doc.get("version") != 2
+        or doc.get("object_format") != "sha1" or doc.get("source_origin") != "git-objects"
+        or not isinstance(doc.get("source_commit"), str)
+        or not re.fullmatch(r"[0-9a-f]{40}", doc["source_commit"])
+        or not isinstance(doc.get("source_tree"), str)
+        or not re.fullmatch(r"[0-9a-f]{40}", doc["source_tree"])
+        or not isinstance(doc.get("files"), list) or not 1 <= len(doc["files"]) <= 3000
+    ):
+        raise InstallRecoveryError("Local release manifest metadata is malformed")
+    groups: dict[str, dict[str, tuple[int, str]]] = {
+        "all": {}, "package": {}, "plugin": {}, "scripts": {}
+    }
+    for entry in doc["files"]:
+        if not isinstance(entry, dict) or set(entry) != {"path", "mode", "git_blob", "bytes", "sha256"}:
+            raise InstallRecoveryError("Local release manifest contains a malformed entry")
+        name = entry["path"]
+        if (not isinstance(name, str) or len(name) > 300
+                or not all(part not in {"", ".", ".."} and _RELEASE_LOCAL_PATH.fullmatch(part)
+                           for part in name.split("/"))
+                or not (name in _RELEASE_LOCAL_FILES or name.startswith(_RELEASE_LOCAL_SCOPE))
+                or entry["mode"] not in {"100644", "100755"}
+                or not isinstance(entry["git_blob"], str)
+                or not re.fullmatch(r"[0-9a-f]{40}", entry["git_blob"])
+                or type(entry["bytes"]) is not int or not 0 <= entry["bytes"] <= 64 * 1024 * 1024
+                or not isinstance(entry["sha256"], str)
+                or not re.fullmatch(r"[0-9a-f]{64}", entry["sha256"])):
+            raise InstallRecoveryError("Local release manifest has an invalid path, hash or size")
+        if name in groups["all"]:
+            raise InstallRecoveryError("Local release manifest repeats a file")
+        value = entry["bytes"], entry["sha256"]
+        groups["all"][name] = value
+        for group, prefix in (("package", "src/vres_os/"), ("plugin", "plugins/vres-os/"),
+                              ("scripts", "scripts/windows/")):
+            if name.startswith(prefix):
+                groups[group][name[len(prefix):]] = value
+    if not (groups["package"] and groups["plugin"]
+            and any(name.endswith(".ps1") for name in groups["scripts"])):
+        raise InstallRecoveryError("Local release manifest is missing required original release surfaces")
+    return groups
+
+
+def _local_tree_equals(root: Path, wanted: dict[str, tuple[int, str]], *,
+                       plugin_marker: bool = False, only_ps1: bool = False) -> bool:
+    """Read ordinary files only; compare complete relevant byte/name sets to the LOCAL manifest."""
+    if not _plain_dir(root):
+        return False
+    observed: dict[str, tuple[int, str]] = {}
+    observed_dirs: set[str] = set()
+    pending = [root]
+    while pending:
+        current = pending.pop()
+        for child in current.iterdir():
+            info = _lstat(child)
+            if info is None or _is_link(info):
+                raise InstallRecoveryError("Local release image contains a link or missing entry")
+            if stat.S_ISDIR(info.st_mode):
+                observed_dirs.add(child.relative_to(root).as_posix())
+                pending.append(child)
+            elif stat.S_ISREG(info.st_mode):
+                name = child.relative_to(root).as_posix()
+                if plugin_marker and name == MARKER:
+                    if _file(child) != b"Vres-OS":
+                        raise InstallRecoveryError("Local Vres plugin marker differs from managed ownership")
+                    continue
+                if only_ps1 and not name.endswith(".ps1"):
+                    continue  # .cmd launchers are separately created by the installer, not in manifest
+                data = _file(child)
+                if data is None:
+                    return False
+                observed[name] = len(data), _sha256(data)
+            else:
+                raise InstallRecoveryError("Local release image contains a nonordinary entry")
+    if not only_ps1:
+        expected_dirs = {"/".join(name.split("/")[:level])
+                         for name in wanted for level in range(1, name.count("/") + 1)}
+        if observed_dirs != expected_dirs:
+            return False
+    return observed == wanted
+
+
+def _local_published_release_evidence(
+    install_root: Path, release: str, claude_home: Path
+) -> dict[str, bool]:
+    """LOCAL point-in-time evidence ONLY; independent compatibility is always UNVERIFIED."""
+    result = {
+        "manifest_structurally_valid": False,
+        "staged_source_exact_manifest": False,
+        "installed_package_exact_manifest": False,
+        "managed_plugin_exact_manifest": False,
+        "launcher_scripts_exact_manifest": False,
+    }
+    release_root = install_root / "releases" / release
+    if not _plain_dir(install_root / "releases") or not _plain_dir(release_root):
+        return result
+    groups = _read_local_release_manifest(release_root / "release-manifest.json")
+    result["manifest_structurally_valid"] = True
+    result["staged_source_exact_manifest"] = _local_tree_equals(release_root / "source", groups["all"])
+    # The installer uses Windows venv/Lib/site-packages/vres_os. On Linux these
+    # paths exist only inside synthetic test roots; never probe a real host.
+    if all(_plain_dir(p) for p in (release_root / "venv", release_root / "venv" / "Lib",
+                                   release_root / "venv" / "Lib" / "site-packages")):
+        result["installed_package_exact_manifest"] = _local_tree_equals(
+            release_root / "venv" / "Lib" / "site-packages" / "vres_os", groups["package"]
+        )
+    if (_plain_dir(claude_home) and _plain_dir(claude_home / "skills")
+            and _plain_dir(claude_home / "skills" / "vres-os")
+            and _managed(claude_home / "skills" / "vres-os")):
+        result["managed_plugin_exact_manifest"] = _local_tree_equals(
+            claude_home / "skills" / "vres-os", groups["plugin"], plugin_marker=True
+        )
+    result["launcher_scripts_exact_manifest"] = _local_tree_equals(
+        install_root / "bin", {name: value for name, value in groups["scripts"].items()
+                               if name.endswith(".ps1")}, only_ps1=True
+    )
+    return result
+
+
 def inspect_finalization_evidence(install_root: Path) -> dict[str, Any]:
     """Read-only R13P journal-finalization diagnostic; NEVER delete the journal.
 
@@ -548,6 +685,11 @@ def inspect_finalization_evidence(install_root: Path) -> dict[str, Any]:
         "active_pointer_new_release": False,
         "managed_plugin_present": False,
         "staged_release_manifest_present": False,
+        "manifest_structurally_valid": False,
+        "staged_source_exact_manifest": False,
+        "installed_package_exact_manifest": False,
+        "managed_plugin_exact_manifest": False,
+        "launcher_scripts_exact_manifest": False,
     }
     refusal = []
     raw = _file(install_root / JOURNAL)
@@ -593,6 +735,7 @@ def inspect_finalization_evidence(install_root: Path) -> dict[str, Any]:
                 isinstance(active, dict)
                 and active.get("product") == "Vres-OS"
                 and active.get("release") == release
+                and active.get("previous") == journal.get("previous")
                 and active.get("plugin_path") == journal.get("plugin_path")
             )
             plugin = claude_home / "skills" / "vres-os"
@@ -603,6 +746,11 @@ def inspect_finalization_evidence(install_root: Path) -> dict[str, Any]:
             evidence["staged_release_manifest_present"] = (
                 _file(install_root / "releases" / release / "release-manifest.json") is not None
             )
+            # R13S: the old existence-only flag could be true even for a forged
+            # or stale manifest. Independently compare local source, installed
+            # package, plugin and script bytes; NEVER infer a cleanup permit.
+            if evidence["staged_release_manifest_present"]:
+                evidence.update(_local_published_release_evidence(install_root, release, claude_home))
         except (InstallRecoveryError, ValueError, KeyError, TypeError, OSError) as exc:
             refusal.append("local snapshot/pointer/plugin evidence incomplete: " + type(exc).__name__)
     for name, valid in evidence.items():
