@@ -1,10 +1,13 @@
-"""P2-A2 review B1: the Vres MCP server itself refuses mutation-capable tools before secure setup.
+"""Original FastMCP boundary regression under the independent W4 P0 runtime hold.
 
-Every call goes through the registered low-level tools/call handler of the one Vres
-FastMCP instance (all registration modules loaded via mcp_entrypoint), exactly as an
-MCP client request would, with no Claude PreToolUse hook involved. Project, session,
-setup and repository seams are tripwires; the P2-A1 conftest tripwire refuses any
-PostgreSQL connection.
+The historical B1/B3 configured/unconfigured low-level MCP dispatch tests are
+RETAINED, but DEFERRED while the original runtime source interlock is held:
+they assert downstream behavior that native dispatch MUST NOT reach yet.
+New direct dispatcher tests prove the intact P0 hold refuses all registered
+MCP tools before configuration, project lookup, credentials or database access.
+The original conftest tripwire additionally refuses any PostgreSQL connection.
+After independent clearance the original dispatch assertions become runnable
+again; skipping them is NOT a pass or a release approval.
 """
 from __future__ import annotations
 
@@ -27,6 +30,19 @@ from vres_os import (
     validation_lifecycle_mcp,
 )
 from vres_os.config import ConfigStore, VresConfig
+from vres_os import w4_runtime_holds
+
+_P0_RUNTIME_HOLD_ACTIVE = (
+    w4_runtime_holds.W4_ORIGINAL_RUNTIME_SOURCE_INTERLOCK
+    != "INDEPENDENT_RUNTIME_REVIEW_AND_OWNER_APPROVED"
+    or w4_runtime_holds.W4_NATIVE_CLAUDE_SOURCE_INTERLOCK
+    != "INDEPENDENT_HOST_INCIDENT_CLEARANCE_AND_OWNER_APPROVED"
+)
+_DEFERRED_UNTIL_CLEARANCE = (
+    "P0 direct native MCP dispatch is intentionally blocked. "
+    "Retain the historical downstream configuration/diagnostics contract for "
+    "independent clearance; do not bypass production source interlocks."
+)
 
 _MODULES = (mcp_server, mcp_entrypoint, company_mcp, aigo_mcp, routing_mcp, user_intent_mcp, validation_lifecycle_mcp)
 
@@ -96,6 +112,7 @@ def test_every_registration_module_shares_the_guarded_server():
         ("capability_resolve", "mcp_server"),
     ],
 )
+@pytest.mark.skipif(_P0_RUNTIME_HOLD_ACTIVE, reason=_DEFERRED_UNTIL_CLEARANCE)
 def test_unconfigured_server_refuses_mutation_capable_tools_before_any_tool_body(_offline_seams, tool, module):
     ConfigStore().save(VresConfig(configured=False))
 
@@ -106,6 +123,7 @@ def test_unconfigured_server_refuses_mutation_capable_tools_before_any_tool_body
     assert _offline_seams == []
 
 
+@pytest.mark.skipif(_P0_RUNTIME_HOLD_ACTIVE, reason=_DEFERRED_UNTIL_CLEARANCE)
 def test_missing_or_unreadable_config_counts_as_unconfigured(_offline_seams, tmp_path):
     assert _call("task_begin").isError is True  # no config file at all
     (tmp_path / "data").mkdir(parents=True, exist_ok=True)
@@ -114,6 +132,7 @@ def test_missing_or_unreadable_config_counts_as_unconfigured(_offline_seams, tmp
     assert _offline_seams == []
 
 
+@pytest.mark.skipif(_P0_RUNTIME_HOLD_ACTIVE, reason=_DEFERRED_UNTIL_CLEARANCE)
 def test_read_only_status_remains_available_while_unconfigured(_offline_seams):
     ConfigStore().save(VresConfig(configured=False))
 
@@ -124,6 +143,7 @@ def test_read_only_status_remains_available_while_unconfigured(_offline_seams):
     assert _offline_seams == []
 
 
+@pytest.mark.skipif(_P0_RUNTIME_HOLD_ACTIVE, reason=_DEFERRED_UNTIL_CLEARANCE)
 def test_secure_setup_entry_point_remains_reachable_while_unconfigured(monkeypatch, tmp_path, _offline_seams):
     ConfigStore().save(VresConfig(configured=False))
     started = []
@@ -140,6 +160,7 @@ def test_secure_setup_entry_point_remains_reachable_while_unconfigured(monkeypat
 
 
 @pytest.mark.parametrize("tool", ["task_begin", "task_status_set", "orchestration_work_unit_start"])
+@pytest.mark.skipif(_P0_RUNTIME_HOLD_ACTIVE, reason=_DEFERRED_UNTIL_CLEARANCE)
 def test_configured_server_keeps_its_existing_dispatch(_offline_seams, tool):
     ConfigStore().save(VresConfig(configured=True))
 
@@ -160,6 +181,7 @@ _UNCONFIGURED_ALLOWED = {"vres_status", "start_vres"}
 
 
 @pytest.mark.parametrize("tool", sorted(_BOOKKEEPING))
+@pytest.mark.skipif(_P0_RUNTIME_HOLD_ACTIVE, reason=_DEFERRED_UNTIL_CLEARANCE)
 def test_unconfigured_server_refuses_reply_bookkeeping_before_repository_or_database(_offline_seams, tool):
     ConfigStore().save(VresConfig(configured=False))
 
@@ -170,6 +192,7 @@ def test_unconfigured_server_refuses_reply_bookkeeping_before_repository_or_data
 
 
 @pytest.mark.parametrize("tool", sorted(_BOOKKEEPING))
+@pytest.mark.skipif(_P0_RUNTIME_HOLD_ACTIVE, reason=_DEFERRED_UNTIL_CLEARANCE)
 def test_unreadable_config_refuses_reply_bookkeeping(_offline_seams, monkeypatch, tool):
     def unreadable(self):
         raise PermissionError("access denied")
@@ -181,6 +204,7 @@ def test_unreadable_config_refuses_reply_bookkeeping(_offline_seams, monkeypatch
 
 
 @pytest.mark.parametrize("tool", sorted(_BOOKKEEPING))
+@pytest.mark.skipif(_P0_RUNTIME_HOLD_ACTIVE, reason=_DEFERRED_UNTIL_CLEARANCE)
 def test_configured_session_keeps_reply_bookkeeping_dispatch(_offline_seams, tool):
     ConfigStore().save(VresConfig(configured=True))
 
@@ -190,6 +214,7 @@ def test_configured_session_keeps_reply_bookkeeping_dispatch(_offline_seams, too
     assert _offline_seams[:1] == ["_project"]  # the tool body ran, as before
 
 
+@pytest.mark.skipif(_P0_RUNTIME_HOLD_ACTIVE, reason=_DEFERRED_UNTIL_CLEARANCE)
 def test_unconfigured_allowlist_is_exact_and_no_registered_tool_is_newly_permitted(_offline_seams):
     from vres_os import control_preflight
 
@@ -311,6 +336,7 @@ def configured_diagnostics(monkeypatch, tmp_path, _offline_seams):
 
 
 @pytest.mark.parametrize("tool", sorted(_DIAGNOSTICS))
+@pytest.mark.skipif(_P0_RUNTIME_HOLD_ACTIVE, reason=_DEFERRED_UNTIL_CLEARANCE)
 def test_hold_diagnostics_inspect_a_registered_project_without_mutation(configured_diagnostics, tool):
     scripted = configured_diagnostics.install(registered=True, tool=tool)
 
@@ -325,6 +351,7 @@ def test_hold_diagnostics_inspect_a_registered_project_without_mutation(configur
 
 
 @pytest.mark.parametrize("tool", sorted(_DIAGNOSTICS))
+@pytest.mark.skipif(_P0_RUNTIME_HOLD_ACTIVE, reason=_DEFERRED_UNTIL_CLEARANCE)
 def test_hold_diagnostics_never_register_an_unknown_project(configured_diagnostics, tool):
     scripted = configured_diagnostics.install(registered=False, tool=tool)
 
@@ -336,6 +363,7 @@ def test_hold_diagnostics_never_register_an_unknown_project(configured_diagnosti
 
 
 @pytest.mark.parametrize("registered", [True, False])
+@pytest.mark.skipif(_P0_RUNTIME_HOLD_ACTIVE, reason=_DEFERRED_UNTIL_CLEARANCE)
 def test_configured_status_is_read_only_and_never_registers_the_project(configured_diagnostics, registered):
     scripted = configured_diagnostics.install(registered=registered, tool="vres_status")
 
@@ -373,3 +401,46 @@ def test_installed_hook_matcher_skips_exactly_the_inspection_hold_policy():
 
     assert host == control_preflight._SAFE_HOST_TOOLS
     assert vres == set(control_preflight._SAFE_VRES_TOOLS)
+
+
+# R13Z: direct original FastMCP dispatch must remain inaccessible while the P0
+# host/runtime incidents are OPEN. No monkeypatch or clearance override occurs.
+@pytest.mark.skipif(not _P0_RUNTIME_HOLD_ACTIVE, reason="P0 runtime hold was independently cleared; use downstream policy tests")
+@pytest.mark.parametrize("configured", [False, True])
+def test_p0_runtime_refuses_every_original_registered_mcp_tool_before_body(_offline_seams, configured):
+    ConfigStore().save(VresConfig(configured=configured))
+    registered = sorted(tool.name for tool in asyncio.run(mcp_server.mcp.list_tools()))
+    assert "task_resume_briefing" in registered and "task_resume" in registered
+    assert "vres_status" in registered and "start_vres" in registered
+    for name in registered:
+        response = _call(name)
+        assert response.isError is True, name
+        assert "VRES_W4_HELD_ORIGINAL_RUNTIME" in _text(response), name
+    assert _offline_seams == []  # No project, session, repository or credentials
+
+
+@pytest.mark.parametrize("configured", [False, True])
+def test_unconfigured_policy_still_exists_beneath_p0_hold(_offline_seams, configured):
+    from vres_os import control_preflight
+
+    ConfigStore().save(VresConfig(configured=configured))
+    assert control_preflight.vres_configured() is configured
+    registered = {tool.name for tool in asyncio.run(mcp_server.mcp.list_tools())}
+    admitted = {name for name in registered if control_preflight.allowed_while_unconfigured(name)}
+    assert admitted == {"vres_status", "start_vres"}
+    assert "task_resume_briefing" not in admitted
+    assert "task_resume" not in admitted
+    for tool in registered - admitted:
+        refusal = control_preflight.unconfigured_refusal(tool)
+        assert "not configured" in refusal and tool in refusal
+    assert _offline_seams == []
+
+
+def test_p0_runtime_clearance_check_precedes_config_policy_and_tool_dispatch_in_source():
+    import inspect
+
+    body = inspect.getsource(mcp_server.VresMCP.call_tool)
+    guard = body.find("require_w4_native_host_clearance()")
+    config = body.find("allowed_while_unconfigured(name)")
+    dispatch = body.find("super().call_tool(name, arguments)")
+    assert 0 <= guard < config < dispatch
