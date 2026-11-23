@@ -325,6 +325,14 @@ def _synthetic_published_local_image(tmp_path, monkeypatch):
         digest = hashlib.sha1(b"blob " + str(len(data)).encode() + b"\x00" + data).hexdigest()
         manifest_files.append({"path": name, "mode": "100644", "git_blob": digest,
                                "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()})
+    # Match the THREE actual ASCII generated wrappers from the original PowerShell installer.
+    wrappers = {
+        "vres.cmd": b'@echo off\r\npowershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "%~dp0vres-launch.ps1" %*\r\n',
+        "vres-mcp.cmd": b'@echo off\r\npowershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "%~dp0vres-mcp-launch.ps1"\r\n',
+        "vres-day.cmd": b'@echo off\r\npowershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "%~dp0vres-day-launch.ps1" %*\r\n',
+    }
+    for name, data in wrappers.items():
+        (root / "bin" / name).write_bytes(data)
     manifest = {
         "format": "vres-personal-release-artifact", "version": 2, "object_format": "sha1",
         "source_origin": "git-objects", "source_commit": "0" * 40, "source_tree": "1" * 40,
@@ -353,6 +361,9 @@ def test_r13s_exact_published_local_image_still_never_grants_recovery(tmp_path, 
     "change_installed_package", "add_installed_package", "change_plugin",
     "remove_plugin_marker", "change_launcher_script", "remove_launcher_script",
     "remove_venv", "symlink_plugin_file", "pointer_wrong_previous", "extra_empty_package_dir",
+    "change_cmd", "missing_cmd", "extra_cmd", "symlink_cmd",
+    "oversized_manifest", "oversized_journal",
+    "manifest_case_alias", "manifest_reserved_windows_name", "extra_bin_directory",
 ])
 def test_r13s_published_local_image_differences_are_held(tmp_path, monkeypatch, damage):
     root, claude, release, manifest, source = _synthetic_published_local_image(tmp_path, monkeypatch)
@@ -391,6 +402,29 @@ def test_r13s_published_local_image_differences_are_held(tmp_path, monkeypatch, 
         }), encoding="utf-8")
     elif damage == "extra_empty_package_dir":
         (pkg / "unexpected_empty_dir").mkdir()
+    elif damage == "change_cmd":
+        (root / "bin" / "vres.cmd").write_bytes(b"tampered wrapper\n")
+    elif damage == "missing_cmd":
+        (root / "bin" / "vres-mcp.cmd").unlink()
+    elif damage == "extra_cmd":
+        (root / "bin" / "unapproved.cmd").write_bytes(b"@echo off\n")
+    elif damage == "symlink_cmd":
+        (root / "bin" / "vres-day.cmd").unlink()
+        (root / "bin" / "vres-day.cmd").symlink_to(tmp_path / "unused-cmd")
+    elif damage == "oversized_manifest":
+        (r / "release-manifest.json").write_bytes(b" " * (recovery._RELEASE_LOCAL_MANIFEST_MAX + 1))
+    elif damage == "oversized_journal":
+        (root / "pending-install.json").write_bytes(b" " * (recovery._RELEASE_LOCAL_JOURNAL_MAX + 1))
+    elif damage == "manifest_case_alias":
+        entry = dict(manifest["files"][2])
+        entry["path"] = "src/vres_os/migrations/001_DEMO.sql"
+        manifest["files"].append(entry)
+        (r / "release-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    elif damage == "manifest_reserved_windows_name":
+        manifest["files"][1]["path"] = "src/vres_os/CON.sql"
+        (r / "release-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    elif damage == "extra_bin_directory":
+        (root / "bin" / "unrecognized_subdirectory").mkdir()
     else:
         (plugin / "hooks" / "hooks.json").unlink()
         (plugin / "hooks" / "hooks.json").symlink_to(tmp_path / "unused-synthetic")
@@ -403,6 +437,59 @@ def test_r13s_published_local_image_differences_are_held(tmp_path, monkeypatch, 
     assert (root / "pending-install.json").exists()
     assert {p.relative_to(tmp_path).as_posix(): p.read_bytes()
             for p in tmp_path.rglob("*") if p.is_file() and not p.is_symlink()} == before
+
+
+
+
+def test_r13t_oversized_staged_file_diagnostic_remains_held(tmp_path, monkeypatch):
+    # A sparse oversized synthetic file should be rejected by stat before hashing.
+    root, _claude, release, _manifest, _source = _synthetic_published_local_image(tmp_path, monkeypatch)
+    target = root / "releases" / release / "source" / "pyproject.toml"
+    with target.open("r+b") as stream:
+        stream.truncate(recovery._RELEASE_LOCAL_FILE_MAX + 1)
+    report = recovery.inspect_finalization_evidence(root)
+    assert report["local_evidence"]["staged_source_exact_manifest"] is False
+    assert report["journal_removal_approved"] is False
+    assert report["rollback_approved"] is False
+    assert report["actions"] == []
+    assert (root / "pending-install.json").exists()
+
+
+def test_r13t_original_generated_cmds_are_exact_source_contract():
+    """Assert original PowerShell launcher strings match the read-only local verifier."""
+    install = (Path(__file__).resolve().parents[1] / "install.ps1").read_text(encoding="utf-8")
+    tick = chr(96)  # PowerShell backtick, without invoking a native host.
+    original = {
+        "vres.cmd": f'@echo off{tick}r{tick}npowershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File {tick}"%~dp0vres-launch.ps1{tick}" %*{tick}r{tick}n',
+        "vres-mcp.cmd": f'@echo off{tick}r{tick}npowershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File {tick}"%~dp0vres-mcp-launch.ps1{tick}"{tick}r{tick}n',
+        "vres-day.cmd": f'@echo off{tick}r{tick}npowershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File {tick}"%~dp0vres-day-launch.ps1{tick}" %*{tick}r{tick}n',
+    }
+    assert set(original) == set(recovery._RELEASE_LOCAL_CMD_WRAPPERS)
+    for name, encoded in original.items():
+        assert f"(Join-Path $Bin '{name}')" in install
+        assert encoded in install
+        assert recovery._RELEASE_LOCAL_CMD_WRAPPERS[name] == (
+            encoded.replace(tick + "r", "\r").replace(tick + "n", "\n")
+                   .replace(tick + '"', '"').encode("ascii")
+        )
+
+
+def test_r13t_missing_or_malformed_journal_has_uniform_zero_actions(tmp_path, monkeypatch):
+    root = tmp_path / "synthetic-VresOS"
+    root.mkdir()
+    monkeypatch.setattr(recovery, "W4_INSTALL_RECOVERY_SOURCE_INTERLOCK",
+                        "INDEPENDENT_RELEASE_AND_OWNER_APPROVED")
+    missing = recovery.inspect_finalization_evidence(root)
+    assert missing["journal"] is False
+    assert missing["actions"] == []
+    assert missing["journal_removal_approved"] is False
+    assert missing["rollback_approved"] is False
+    (root / "pending-install.json").write_bytes(b"not-json")
+    invalid = recovery.inspect_finalization_evidence(root)
+    assert invalid["journal"] is True
+    assert invalid["actions"] == []
+    assert invalid["journal_removal_approved"] is False
+    assert invalid["rollback_approved"] is False
 
 
 def test_r13p_original_session_end_source_guard_precedes_detached_worker():

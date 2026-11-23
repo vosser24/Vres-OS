@@ -14,6 +14,38 @@
 
 Version: **0.2.0-alpha.1 / Python package 0.2.0a1**. Target: native Windows, Python 3.12–3.13, current Claude Code. This is a controlled-live-test preview; the installer itself has not executed on Windows in the audit environment.
 
+## R13T original postpublication bounded-evidence strengthening — SOURCE ONLY / NOT_RUN
+
+**This is a subsequent source-only recovery candidate, NOT an installation clearance.**
+The ORIGINAL `src/vres_os/install_recovery.py` now defines bounded local reads
+for the pending journal, staged release manifest and local file comparisons;
+SHA-256 member comparisons use bounded streaming chunks rather than unlimited
+`read_bytes()`. The local manifest must have an acceptable aggregate size,
+reject Windows reserved names/trailing-dot-space aliases and case-insensitive
+path collisions, and the directory walk has a bounded entry count.
+A new local-only diagnostic compares the exact three generated ASCII
+`vres.cmd`, `vres-mcp.cmd`, and `vres-day.cmd` wrapper bytes to the
+current ORIGINAL `install.ps1` source contract. This fills the specific
+R13S `.cmd` observation gap without executing those launchers.
+
+The existing independent P0 source interlock runs FIRST. No finalizer,
+rollback, restart, journal-delete, installer, profile change, migration,
+PowerShell or native Claude/FastMCP execution was enabled. **All decisions
+still return `journal_removal_approved=False`,
+`rollback_approved=False`, `actions=[]`.** Even matching local
+files cannot establish an authenticated Git publisher, Windows race-free
+NTFS snapshot, live SQL ledger, installed dependency closure, native host
+identity or external operator permission. The original October Windows
+installation remains the sole future upgrade target and is unchanged.
+
+Additional synthetic-root assertions were **AUTHORED ONLY / NOT_RUN** on this
+candidate. The previously recorded R13S five-selected-file 82 PASS / 0 FAIL
+belongs **only** to R13S and must not be presented as an R13T result.
+Pending separate test scope/independent review, the ORIGINAL `update.ps1`,
+`install.ps1`, native host, PostgreSQL even SELECT and real Windows UAT remain
+HELD. The historical E7 and R13S migration 042–048 source lineage collision
+also remains unresolved; no migration pin, SQL file or live database changed.
+
 ## R13S original postpublication local integrity diagnostic — SOURCE ONLY / NOT APPROVAL
 
 **No Windows command is authorized.** The ORIGINAL `install_recovery.py` now has

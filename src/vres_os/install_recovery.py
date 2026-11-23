@@ -540,11 +540,106 @@ _RELEASE_LOCAL_PATH = re.compile(r"[A-Za-z0-9_.@+ -]+")
 _RELEASE_LOCAL_SCOPE = ("src/vres_os/", "plugins/vres-os/", "scripts/windows/")
 _RELEASE_LOCAL_FILES = frozenset({"pyproject.toml", "README.md", "LICENSE", "rules/vres-rules.md"})
 
+# R13T: bounded, read-only, LOCAL observations. NOT publisher or NTFS attestation.
+_RELEASE_LOCAL_MANIFEST_MAX = 2_000_000
+_RELEASE_LOCAL_JOURNAL_MAX = 262_144
+_RELEASE_LOCAL_FILE_MAX = 64 * 1024 * 1024
+_RELEASE_LOCAL_TOTAL_MAX = 512 * 1024 * 1024
+_RELEASE_LOCAL_WALK_MAX = 12_000
+_RELEASE_LOCAL_WINDOWS_RESERVED = frozenset(
+    {"CON", "PRN", "AUX", "NUL"} |
+    {f"{prefix}{n}" for prefix in ("COM", "LPT") for n in range(1, 10)}
+)
+# Mirrors the THREE original install.ps1 [Text.Encoding]::ASCII wrappers; test
+# source contracts must reject accidental drift. No new launcher is installed.
+_RELEASE_LOCAL_CMD_WRAPPERS = {
+    "vres.cmd": b'@echo off\r\npowershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "%~dp0vres-launch.ps1" %*\r\n',
+    "vres-mcp.cmd": b'@echo off\r\npowershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "%~dp0vres-mcp-launch.ps1"\r\n',
+    "vres-day.cmd": b'@echo off\r\npowershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "%~dp0vres-day-launch.ps1" %*\r\n',
+}
+
+
+
+def _local_file_signature(info: os.stat_result) -> tuple[int, int, int, int]:
+    """Best-effort local identity; not a Windows NTFS snapshot or secure provenance."""
+    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
+
+
+def _local_regular_info(path: Path) -> os.stat_result | None:
+    info = _lstat(path)
+    if info is not None and (_is_link(info) or not stat.S_ISREG(info.st_mode)):
+        raise InstallRecoveryError("Local release evidence contains a link or nonordinary file")
+    return info
+
+
+def _local_open_readonly(path: Path, before: os.stat_result):
+    """No follow on platforms supporting it; require same opened file identity."""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+    try:
+        stream = os.fdopen(os.open(path, flags), "rb")
+        opened = os.fstat(stream.fileno())
+    except OSError as exc:
+        raise InstallRecoveryError("Local release evidence file cannot be safely opened") from exc
+    if (_is_link(opened) or not stat.S_ISREG(opened.st_mode)
+            or _local_file_signature(opened) != _local_file_signature(before)):
+        stream.close()
+        raise InstallRecoveryError("Local release evidence file changed during opening")
+    return stream
+
+
+def _local_confirm_same_file(path: Path, before: os.stat_result,
+                             opened_after: os.stat_result) -> None:
+    after = _local_regular_info(path)
+    if (after is None or _is_link(opened_after)
+            or _local_file_signature(before) != _local_file_signature(opened_after)
+            or _local_file_signature(before) != _local_file_signature(after)):
+        raise InstallRecoveryError("Local release evidence file changed while reading")
+
+
+def _local_bounded_bytes(path: Path, maximum: int) -> bytes | None:
+    """Read at most maximum+1 bytes; reject size/race/link irregularities."""
+    before = _local_regular_info(path)
+    if before is None:
+        return None
+    if before.st_size > maximum:
+        raise InstallRecoveryError("Local release evidence file exceeds read limit")
+    with _local_open_readonly(path, before) as stream:
+        raw = stream.read(maximum + 1)
+        opened_after = os.fstat(stream.fileno())
+    _local_confirm_same_file(path, before, opened_after)
+    if len(raw) > maximum or len(raw) != before.st_size:
+        raise InstallRecoveryError("Local release evidence file length changed or exceeded limit")
+    return raw
+
+
+def _local_file_matches(path: Path, wanted: tuple[int, str]) -> bool:
+    """Stream bounded SHA-256; never load arbitrary release member bytes into RAM."""
+    expected_bytes, expected_hash = wanted
+    before = _local_regular_info(path)
+    if before is None or before.st_size != expected_bytes:
+        return False
+    if expected_bytes > _RELEASE_LOCAL_FILE_MAX:
+        return False
+    digest = hashlib.sha256()
+    with _local_open_readonly(path, before) as stream:
+        remaining = expected_bytes
+        while remaining:
+            chunk = stream.read(min(64 * 1024, remaining))
+            if not chunk:
+                return False
+            digest.update(chunk)
+            remaining -= len(chunk)
+        if stream.read(1):
+            return False
+        opened_after = os.fstat(stream.fileno())
+    _local_confirm_same_file(path, before, opened_after)
+    return digest.hexdigest() == expected_hash
+
 
 def _read_local_release_manifest(path: Path) -> dict[str, dict[str, tuple[int, str]]]:
-    """Parse only a tightly bounded original staged release manifest; never run its code."""
-    raw = _file(path)
-    if raw is None or not 0 < len(raw) <= 2_000_000:
+    """Parse bounded local manifest; it is never independent Git publisher evidence."""
+    raw = _local_bounded_bytes(path, _RELEASE_LOCAL_MANIFEST_MAX)
+    if raw is None or not raw:
         raise InstallRecoveryError("Local release manifest missing or outside the size limit")
     try:
         doc = json.loads(raw.decode("utf-8"))
@@ -563,23 +658,32 @@ def _read_local_release_manifest(path: Path) -> dict[str, dict[str, tuple[int, s
     groups: dict[str, dict[str, tuple[int, str]]] = {
         "all": {}, "package": {}, "plugin": {}, "scripts": {}
     }
+    windows_paths: set[str] = set()
+    total_bytes = 0
     for entry in doc["files"]:
         if not isinstance(entry, dict) or set(entry) != {"path", "mode", "git_blob", "bytes", "sha256"}:
             raise InstallRecoveryError("Local release manifest contains a malformed entry")
         name = entry["path"]
         if (not isinstance(name, str) or len(name) > 300
                 or not all(part not in {"", ".", ".."} and _RELEASE_LOCAL_PATH.fullmatch(part)
+                           and not part.endswith((".", " "))
+                           and part.split(".", 1)[0].upper() not in _RELEASE_LOCAL_WINDOWS_RESERVED
                            for part in name.split("/"))
                 or not (name in _RELEASE_LOCAL_FILES or name.startswith(_RELEASE_LOCAL_SCOPE))
                 or entry["mode"] not in {"100644", "100755"}
                 or not isinstance(entry["git_blob"], str)
                 or not re.fullmatch(r"[0-9a-f]{40}", entry["git_blob"])
-                or type(entry["bytes"]) is not int or not 0 <= entry["bytes"] <= 64 * 1024 * 1024
+                or type(entry["bytes"]) is not int
+                or not 0 <= entry["bytes"] <= _RELEASE_LOCAL_FILE_MAX
                 or not isinstance(entry["sha256"], str)
                 or not re.fullmatch(r"[0-9a-f]{64}", entry["sha256"])):
             raise InstallRecoveryError("Local release manifest has an invalid path, hash or size")
-        if name in groups["all"]:
-            raise InstallRecoveryError("Local release manifest repeats a file")
+        if name in groups["all"] or name.casefold() in windows_paths:
+            raise InstallRecoveryError("Local release manifest repeats or aliases a Windows file")
+        windows_paths.add(name.casefold())
+        total_bytes += entry["bytes"]
+        if total_bytes > _RELEASE_LOCAL_TOTAL_MAX:
+            raise InstallRecoveryError("Local release manifest declares excessive total file bytes")
         value = entry["bytes"], entry["sha256"]
         groups["all"][name] = value
         for group, prefix in (("package", "src/vres_os/"), ("plugin", "plugins/vres-os/"),
@@ -592,35 +696,47 @@ def _read_local_release_manifest(path: Path) -> dict[str, dict[str, tuple[int, s
     return groups
 
 
+def _local_directory_entries(path: Path):
+    """Stream directory names without allocating an unbounded list first."""
+    with os.scandir(path) as entries:
+        for entry in entries:
+            yield Path(entry.path)
+
+
 def _local_tree_equals(root: Path, wanted: dict[str, tuple[int, str]], *,
                        plugin_marker: bool = False, only_ps1: bool = False) -> bool:
-    """Read ordinary files only; compare complete relevant byte/name sets to the LOCAL manifest."""
+    """Bounded local file-set/byte checks; not transactional or independently trusted."""
     if not _plain_dir(root):
         return False
-    observed: dict[str, tuple[int, str]] = {}
+    observed: set[str] = set()
     observed_dirs: set[str] = set()
     pending = [root]
+    visited = 0
     while pending:
         current = pending.pop()
-        for child in current.iterdir():
+        for child in _local_directory_entries(current):
+            visited += 1
+            if visited > _RELEASE_LOCAL_WALK_MAX:
+                raise InstallRecoveryError("Local release tree exceeds entry inspection limit")
             info = _lstat(child)
             if info is None or _is_link(info):
                 raise InstallRecoveryError("Local release image contains a link or missing entry")
+            name = child.relative_to(root).as_posix()
             if stat.S_ISDIR(info.st_mode):
-                observed_dirs.add(child.relative_to(root).as_posix())
+                if only_ps1:
+                    return False
+                observed_dirs.add(name)
                 pending.append(child)
             elif stat.S_ISREG(info.st_mode):
-                name = child.relative_to(root).as_posix()
                 if plugin_marker and name == MARKER:
-                    if _file(child) != b"Vres-OS":
+                    if _local_bounded_bytes(child, 64) != b"Vres-OS":
                         raise InstallRecoveryError("Local Vres plugin marker differs from managed ownership")
                     continue
                 if only_ps1 and not name.endswith(".ps1"):
-                    continue  # .cmd launchers are separately created by the installer, not in manifest
-                data = _file(child)
-                if data is None:
+                    continue  # checked .cmd wrappers separately, other file types remain unverified
+                if name not in wanted or not _local_file_matches(child, wanted[name]):
                     return False
-                observed[name] = len(data), _sha256(data)
+                observed.add(name)
             else:
                 raise InstallRecoveryError("Local release image contains a nonordinary entry")
     if not only_ps1:
@@ -628,7 +744,30 @@ def _local_tree_equals(root: Path, wanted: dict[str, tuple[int, str]], *,
                          for name in wanted for level in range(1, name.count("/") + 1)}
         if observed_dirs != expected_dirs:
             return False
-    return observed == wanted
+    return observed == set(wanted)
+
+
+def _local_cmd_wrappers_equal(root: Path) -> bool:
+    """Compare generated ORIGINAL ASCII .cmd bytes, previously excluded from R13S."""
+    if not _plain_dir(root):
+        return False
+    observed: set[str] = set()
+    inspected = 0
+    for child in _local_directory_entries(root):
+        inspected += 1
+        if inspected > _RELEASE_LOCAL_WALK_MAX:
+            raise InstallRecoveryError("Local launcher directory exceeds inspection limit")
+        info = _lstat(child)
+        if info is None or _is_link(info):
+            raise InstallRecoveryError("Local launcher directory contains a link or missing entry")
+        if stat.S_ISREG(info.st_mode) and child.name.lower().endswith(".cmd"):
+            wanted = _RELEASE_LOCAL_CMD_WRAPPERS.get(child.name)
+            if wanted is None or _local_bounded_bytes(child, 512) != wanted:
+                return False
+            observed.add(child.name)
+        elif not stat.S_ISREG(info.st_mode):
+            return False
+    return observed == set(_RELEASE_LOCAL_CMD_WRAPPERS)
 
 
 def _local_published_release_evidence(
@@ -641,6 +780,7 @@ def _local_published_release_evidence(
         "installed_package_exact_manifest": False,
         "managed_plugin_exact_manifest": False,
         "launcher_scripts_exact_manifest": False,
+        "launcher_cmd_wrappers_exact_contract": False,
     }
     release_root = install_root / "releases" / release
     if not _plain_dir(install_root / "releases") or not _plain_dir(release_root):
@@ -665,6 +805,7 @@ def _local_published_release_evidence(
         install_root / "bin", {name: value for name, value in groups["scripts"].items()
                                if name.endswith(".ps1")}, only_ps1=True
     )
+    result["launcher_cmd_wrappers_exact_contract"] = _local_cmd_wrappers_equal(install_root / "bin")
     return result
 
 
@@ -690,14 +831,22 @@ def inspect_finalization_evidence(install_root: Path) -> dict[str, Any]:
         "installed_package_exact_manifest": False,
         "managed_plugin_exact_manifest": False,
         "launcher_scripts_exact_manifest": False,
+        "launcher_cmd_wrappers_exact_contract": False,
     }
     refusal = []
-    raw = _file(install_root / JOURNAL)
+    try:
+        raw = _local_bounded_bytes(install_root / JOURNAL, _RELEASE_LOCAL_JOURNAL_MAX)
+    except InstallRecoveryError:
+        return {
+            "journal": True, "local_evidence": evidence,
+            "journal_removal_approved": False, "rollback_approved": False,
+            "actions": [], "refusals": ["journal read or size unsafe; preserve it"],
+        }
     if raw is None:
         return {
             "journal": False, "local_evidence": evidence,
             "journal_removal_approved": False, "rollback_approved": False,
-            "refusals": ["no pending journal to finalize"],
+            "actions": [], "refusals": ["no pending journal to finalize"],
         }
     try:
         journal = json.loads(raw.decode("utf-8-sig"))
@@ -707,7 +856,7 @@ def inspect_finalization_evidence(install_root: Path) -> dict[str, Any]:
         return {
             "journal": True, "local_evidence": evidence,
             "journal_removal_approved": False, "rollback_approved": False,
-            "refusals": ["journal is malformed; preserve it"],
+            "actions": [], "refusals": ["journal is malformed; preserve it"],
         }
     release = journal.get("new_release")
     evidence["journal_protocol_r13o"] = journal.get("transaction_protocol") == "r13o/1"
@@ -744,7 +893,8 @@ def inspect_finalization_evidence(install_root: Path) -> dict[str, Any]:
                 and _plain_dir(plugin) and _managed(plugin)
             )
             evidence["staged_release_manifest_present"] = (
-                _file(install_root / "releases" / release / "release-manifest.json") is not None
+                _local_bounded_bytes(install_root / "releases" / release / "release-manifest.json",
+                                     _RELEASE_LOCAL_MANIFEST_MAX) is not None
             )
             # R13S: the old existence-only flag could be true even for a forged
             # or stale manifest. Independently compare local source, installed
