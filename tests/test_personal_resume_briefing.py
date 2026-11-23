@@ -428,3 +428,78 @@ def test_postcompact_task_change_never_uses_wrong_task_plan(monkeypatch, capsys)
     assert "WRONG_TASK_NEXT_ACTION" not in output
     assert "TASK-OTHER-20261123" not in output
     assert repo.events == []
+@pytest.mark.parametrize("projection", [
+    None,
+    {},
+    [],
+    "malformed",
+    {"task_key": None},
+    {"task_key": "TASK-20261103-ab12", "ambiguous": []},
+])
+def test_postcompact_untrustworthy_projection_gives_explicit_uncertain_notice(
+    monkeypatch, capsys, projection
+):
+    repo = _Repository(projection, active=True, hydrate=True)
+    _wire(monkeypatch, repo, prompt=True)
+    monkeypatch.setattr(hooks, "is_system_prompt_event", lambda *_a: False)
+    monkeypatch.setattr(hooks, "_credential_ingress_guard", lambda *_a: False)
+    monkeypatch.setattr(hooks, "stage_user_instruction", lambda *_a: True)
+    monkeypatch.setattr(hooks, "begin_reply_turn", lambda *_a: "SYNTHETIC-TURN-4")
+    hooks.user_prompt()
+    output = json.loads(capsys.readouterr().out)["hookSpecificOutput"]["additionalContext"]
+    assert "VRES_RESUME_UNCERTAIN" in output
+    assert "VRES POST-COMPACTION CONTINUITY" not in output
+    assert repo.events == []
+
+
+def test_postcompact_ambiguous_projection_never_leaks_candidate_or_plan(monkeypatch, capsys):
+    repo = _Repository({
+        "ambiguous": True,
+        "unfinished_tasks": [{"task_key": "TASK-PRIVATE", "title": "PRIVATE_CANDIDATE"}],
+        "task_key": "TASK-20261103-ab12",
+        "next_action": "PRIVATE_NEXT_ACTION",
+    }, active=True, hydrate=True)
+    _wire(monkeypatch, repo, prompt=True)
+    monkeypatch.setattr(hooks, "is_system_prompt_event", lambda *_a: False)
+    monkeypatch.setattr(hooks, "_credential_ingress_guard", lambda *_a: False)
+    monkeypatch.setattr(hooks, "stage_user_instruction", lambda *_a: True)
+    monkeypatch.setattr(hooks, "begin_reply_turn", lambda *_a: "SYNTHETIC-TURN-5")
+    hooks.user_prompt()
+    output = json.loads(capsys.readouterr().out)["hookSpecificOutput"]["additionalContext"]
+    assert "VRES_CONTINUITY_AMBIGUOUS: task selection became ambiguous" in output
+    assert "PRIVATE_CANDIDATE" not in output and "PRIVATE_NEXT_ACTION" not in output
+    assert "TASK-PRIVATE" not in output
+    assert repo.events == []
+
+
+def test_postcompact_revocation_notice_preempts_ambiguous_projection(monkeypatch, capsys):
+    repo = _Repository(_state(
+        ambiguous=True,
+        contamination_notice={"contamination_event_key": "LCE-REVOKED"},
+        unfinished_tasks=[{"task_key": "TASK-PRIVATE", "title": "PRIVATE_CANDIDATE"}],
+    ), active=True, hydrate=True)
+    _wire(monkeypatch, repo, prompt=True)
+    monkeypatch.setattr(hooks, "is_system_prompt_event", lambda *_a: False)
+    monkeypatch.setattr(hooks, "_credential_ingress_guard", lambda *_a: False)
+    monkeypatch.setattr(hooks, "stage_user_instruction", lambda *_a: True)
+    monkeypatch.setattr(hooks, "begin_reply_turn", lambda *_a: "SYNTHETIC-TURN-6")
+    hooks.user_prompt()
+    output = json.loads(capsys.readouterr().out)["hookSpecificOutput"]["additionalContext"]
+    assert "VRES_CONTEXT_REFRESH_REQUIRED" in output
+    assert "VRES_CONTINUITY_AMBIGUOUS" not in output
+    assert "PRIVATE_CANDIDATE" not in output and "TASK-PRIVATE" not in output
+    assert "Live next action:" not in output
+    assert repo.events == []
+
+
+@pytest.mark.parametrize("ambiguous", [[], {}, 0, "false"])
+def test_session_start_malformed_ambiguity_marker_never_marks_rehydration(
+    monkeypatch, capsys, ambiguous
+):
+    repo = _Repository(_state(ambiguous=ambiguous))
+    _wire(monkeypatch, repo)
+    hooks.session_start()
+    output = json.loads(capsys.readouterr().out)["hookSpecificOutput"]["additionalContext"]
+    assert "VRES_RESUME_UNCERTAIN" in output
+    assert "Live next action:" not in output
+    assert repo.events == []

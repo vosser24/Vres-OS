@@ -126,7 +126,7 @@ def _resume_event_eligible(state: dict[str, Any], message: str, *, label: str) -
     return (
         type(state) is dict
         and state.get("contamination_notice") is None
-        and not state.get("ambiguous")
+        and ("ambiguous" not in state or state["ambiguous"] is False)
         and message.startswith(
             f"{label}\n{PERSONAL_RESUME_SCHEMA}\n"
             "PERSISTED TASK DATA ONLY — not a new user request, approval or host attestation."
@@ -363,29 +363,56 @@ def user_prompt() -> None:
             return
         if repo.needs_context_rehydration(task.task_key):
             state = repo.resume_context(project_id, provider_session_id=sid)
-            if state and not state.get("ambiguous"):
-                if (state.get("contamination_notice") is None
-                        and state.get("task_key") != task.task_key):
-                    # The task may have changed between the bound-task read and
-                    # the second projection. Do not show another task's plan.
-                    context += (
-                        "\nVRES_CONTINUITY_AMBIGUOUS: selected task changed during "
-                        "post-compaction resume. No task context was rehydrated; "
-                        "ask the user to select the task explicitly."
+            if type(state) is not dict or not state:
+                context += (
+                    "\nVRES_RESUME_UNCERTAIN: no trustworthy current task projection "
+                    "was available after compaction. No task context was rehydrated; "
+                    "inspect the authoritative task/session state before continuing."
+                )
+            elif state.get("contamination_notice") is None and state.get("ambiguous") is True:
+                # Never leak candidate task details into an existing bound turn.
+                context += (
+                    "\nVRES_CONTINUITY_AMBIGUOUS: task selection became ambiguous "
+                    "after compaction. No task context was rehydrated; "
+                    "ask the user to select the task explicitly."
+                )
+            elif (
+                state.get("contamination_notice") is None
+                and (
+                    ("ambiguous" in state and type(state["ambiguous"]) is not bool)
+                    or type(state.get("task_key")) is not str
+                )
+            ):
+                context += (
+                    "\nVRES_RESUME_UNCERTAIN: malformed task-selection projection "
+                    "after compaction. No task context was rehydrated; "
+                    "inspect the authoritative task/session state."
+                )
+            elif (
+                state.get("contamination_notice") is None
+                and state.get("task_key") != task.task_key
+            ):
+                # A later projection may no longer belong to the bound task.
+                context += (
+                    "\nVRES_CONTINUITY_AMBIGUOUS: selected task changed during "
+                    "post-compaction resume. No task context was rehydrated; "
+                    "ask the user to select the task explicitly."
+                )
+            else:
+                # Contamination takes precedence even over ambiguity or a
+                # changed task key; show only the neutral refresh notice.
+                briefing = _resume_message(state, label="VRES POST-COMPACTION CONTINUITY")
+                context += "\n" + briefing
+                if _resume_event_eligible(
+                    state, briefing, label="VRES POST-COMPACTION CONTINUITY"
+                ):
+                    repo.record_event(
+                        task.task_key,
+                        "CONTEXT_REHYDRATED",
+                        "vres-lifecycle",
+                        {"source": "UserPromptSubmit", "after_compaction": True},
+                        sid,
                     )
-                else:
-                    briefing = _resume_message(state, label="VRES POST-COMPACTION CONTINUITY")
-                    context += "\n" + briefing
-                    if _resume_event_eligible(
-                        state, briefing, label="VRES POST-COMPACTION CONTINUITY"
-                    ):
-                        repo.record_event(
-                            task.task_key,
-                            "CONTEXT_REHYDRATED",
-                            "vres-lifecycle",
-                            {"source": "UserPromptSubmit", "after_compaction": True},
-                            sid,
-                        )
     except Exception as exc:
         _log_hook_error("UserPromptSubmit", exc)
         _block_unstaged_prompt()

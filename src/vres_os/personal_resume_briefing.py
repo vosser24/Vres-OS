@@ -89,6 +89,9 @@ def render_personal_resume_briefing(state: Any, *, label: str) -> str:
             "This briefing is NOT a refresh acknowledgement or clearance.",
         ))
 
+    if "ambiguous" in state and type(state["ambiguous"]) is not bool:
+        return _uncertain(label, "invalid task-selection ambiguity marker")
+
     if state.get("ambiguous"):
         entries = state.get("unfinished_tasks")
         lines = [
