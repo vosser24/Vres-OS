@@ -14,6 +14,31 @@
 
 Version: **0.2.0-alpha.1 / Python package 0.2.0a1**. Target: native Windows, Python 3.12–3.13, current Claude Code. This is a controlled-live-test preview; the installer itself has not executed on Windows in the audit environment.
 
+## R13U bounded ORIGINAL snapshot and owner-marker finalization diagnostic — SOURCE ONLY / NOT_RUN
+
+The R13T diagnostic bounded its pending journal, release manifest and local Git-member
+hashes, but its finalization route still called the older unbounded snapshot-v2 loader,
+read the active pointer without a local cap, and used the older unrestricted
+plugin-ownership marker reader. **R13U fixes only the read-only local-finalization
+diagnostic**, using a bounded validated snapshot-v2 manifest, bounded streamed
+snapshot files, exact local snapshot directory inventories, safe launcher names,
+a capped active pointer and capped plugin marker. Unknown, excessive or changed
+local evidence is held; no installed file is written by the diagnostic.
+
+The ORIGINAL snapshot/restore/recovery API remains source-held and **unchanged**;
+no journal deletion, rollback, standalone finalizer, installer or host/DB action
+is permitted. All finalization diagnostic outcomes continue to return
+`journal_removal_approved=False`, `rollback_approved=False`, `actions=[]`.
+These limits are NOT NTFS race-free provenance, independent Git publication,
+SQL ledger, native Claude/FastMCP or operator authority.
+
+Six synthetic negative scenarios were **authored in an existing original test file**
+but **NOT_RUN for R13U**. The prior exact R13T owner-approved FIVE original-file
+offline run remains **94 PASS / 0 FAIL / 0 ERROR at R13T only**, not R13U. The
+historical E7-vs-R13T migrations 042–048 source collision and #185 independent
+three-verdict review are OPEN. Preserve the SAME original October installation;
+no Windows/PowerShell/host/PostgreSQL even SELECT, PR/CI or credential action.
+
 ## R13T original postpublication bounded-evidence strengthening — SOURCE ONLY / NOT_RUN
 
 **This is a subsequent source-only recovery candidate, NOT an installation clearance.**
@@ -39,8 +64,10 @@ identity or external operator permission. The original October Windows
 installation remains the sole future upgrade target and is unchanged.
 
 Additional synthetic-root assertions were **AUTHORED ONLY / NOT_RUN** on this
-candidate. The previously recorded R13S five-selected-file 82 PASS / 0 FAIL
-belongs **only** to R13S and must not be presented as an R13T result.
+candidate. R13S had 82 PASS / 0 FAIL on its own immutable source. Subsequently, the exact
+R13T ZIP passed 94 selected ORIGINAL tests / 0 FAIL, under a separately scoped
+owner-approved disposable offline run (see canonical 2026-11-23 continuity).
+Neither earlier result is a test result for the authored-only R13U candidate.
 Pending separate test scope/independent review, the ORIGINAL `update.ps1`,
 `install.ps1`, native host, PostgreSQL even SELECT and real Windows UAT remain
 HELD. The historical E7 and R13S migration 042–048 source lineage collision

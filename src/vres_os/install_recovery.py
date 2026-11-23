@@ -546,6 +546,11 @@ _RELEASE_LOCAL_JOURNAL_MAX = 262_144
 _RELEASE_LOCAL_FILE_MAX = 64 * 1024 * 1024
 _RELEASE_LOCAL_TOTAL_MAX = 512 * 1024 * 1024
 _RELEASE_LOCAL_WALK_MAX = 12_000
+# R13U: caps for snapshot-v2, active-pointer and ownership-marker evidence.
+# The older executable recovery API remains globally source-HELD and unchanged.
+_RELEASE_LOCAL_SNAPSHOT_MAX = 262_144
+_RELEASE_LOCAL_ACTIVE_MAX = 65_536
+_RELEASE_LOCAL_SNAPSHOT_FILES_MAX = 256
 _RELEASE_LOCAL_WINDOWS_RESERVED = frozenset(
     {"CON", "PRN", "AUX", "NUL"} |
     {f"{prefix}{n}" for prefix in ("COM", "LPT") for n in range(1, 10)}
@@ -770,6 +775,122 @@ def _local_cmd_wrappers_equal(root: Path) -> bool:
     return observed == set(_RELEASE_LOCAL_CMD_WRAPPERS)
 
 
+
+def _local_snapshot_v2_verified(path: Path) -> dict[str, Any]:
+    """Bounded, read-only validation for finalization evidence, NOT recovery.
+
+    Do NOT call the original unbounded _load_snapshot from this diagnostic.
+    This observes local mutable data only; no DB/host/release authority follows.
+    """
+    for directory in (path.parent, path, path / "claude", path / "bin"):
+        if not _plain_dir(directory):
+            raise InstallRecoveryError("Local snapshot directory is missing or redirected")
+    raw = _local_bounded_bytes(path / "snapshot.json", _RELEASE_LOCAL_SNAPSHOT_MAX)
+    if raw is None:
+        raise InstallRecoveryError("Local snapshot manifest is missing")
+    try:
+        doc = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise InstallRecoveryError("Local snapshot manifest is unreadable") from exc
+    if (not isinstance(doc, dict) or doc.get("format") != FORMAT
+            or doc.get("version") != 2 or doc.get("complete") is not True
+            or not isinstance(doc.get("release"), str)
+            or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", doc["release"])
+            or not isinstance(doc.get("claude_home"), str) or not doc["claude_home"]
+            or not isinstance(doc.get("claude"), dict)
+            or set(doc["claude"]) != set(CLAUDE_FILES)
+            or not isinstance(doc.get("bin"), dict)
+            or type(doc["bin"].get("existed")) is not bool
+            or not isinstance(doc["bin"].get("files"), dict)
+            or len(doc["bin"]["files"]) > _RELEASE_LOCAL_SNAPSHOT_FILES_MAX
+            or not isinstance(doc.get("plugin"), dict)
+            or type(doc["plugin"].get("existed")) is not bool):
+        raise InstallRecoveryError("Local snapshot v2 metadata is malformed")
+    plugin_sha = doc["plugin"].get("tree_sha256")
+    if (doc["plugin"]["existed"] and
+            (not isinstance(plugin_sha, str) or not re.fullmatch(r"[0-9a-f]{64}", plugin_sha))):
+        raise InstallRecoveryError("Local snapshot plugin identity is malformed")
+    if not doc["plugin"]["existed"] and plugin_sha is not None:
+        raise InstallRecoveryError("Local snapshot absent plugin identity is inconsistent")
+
+    def _name_ok(name: Any) -> bool:
+        return (
+            isinstance(name, str) and 0 < len(name) <= 160
+            and name not in {".", ".."} and not name.endswith((".", " "))
+            and _RELEASE_LOCAL_PATH.fullmatch(name) is not None
+            and name.split(".", 1)[0].upper() not in _RELEASE_LOCAL_WINDOWS_RESERVED
+        )
+
+    bin_files = doc["bin"]["files"]
+    if (any(not _name_ok(name) for name in bin_files)
+            or len({name.casefold() for name in bin_files}) != len(bin_files)
+            or (not doc["bin"]["existed"] and bin_files)):
+        raise InstallRecoveryError("Local snapshot launcher set contains unsafe names")
+
+    total = 0
+
+    def _checked_member(candidate: Path, entry: Any) -> None:
+        nonlocal total
+        if not isinstance(entry, dict) or set(entry) != {"existed", "sha256", "bytes"}:
+            raise InstallRecoveryError("Local snapshot member metadata is malformed")
+        exists = entry["existed"]
+        if type(exists) is not bool:
+            raise InstallRecoveryError("Local snapshot member existence is malformed")
+        if not exists:
+            if entry["bytes"] is not None or entry["sha256"] is not None or _lstat(candidate) is not None:
+                raise InstallRecoveryError("Local snapshot absent member is inconsistent")
+            return
+        size, digest = entry["bytes"], entry["sha256"]
+        if (type(size) is not int or not 0 <= size <= _RELEASE_LOCAL_FILE_MAX
+                or not isinstance(digest, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", digest)):
+            raise InstallRecoveryError("Local snapshot member exceeds limits or has invalid digest")
+        total += size
+        if total > _RELEASE_LOCAL_TOTAL_MAX or not _local_file_matches(candidate, (size, digest)):
+            raise InstallRecoveryError("Local snapshot member bytes differ or exceed limits")
+
+    for name in CLAUDE_FILES:
+        _checked_member(path / "claude" / name, doc["claude"][name])
+    for name, entry in bin_files.items():
+        _checked_member(path / "bin" / name, entry)
+    _checked_member(path / ACTIVE, doc.get("active"))
+
+    # A declared member alone is insufficient: reject unexpected or redirected
+    # snapshot files, including names that differ only by Windows casing.
+    expected = {
+        path: {"snapshot.json", "claude", "bin"}
+              | ({ACTIVE} if doc["active"]["existed"] else set()),
+        path / "claude": {name for name in CLAUDE_FILES if doc["claude"][name]["existed"]},
+        path / "bin": set(bin_files),
+    }
+    for directory, wanted in expected.items():
+        found: set[str] = set()
+        for child in _local_directory_entries(directory):
+            if len(found) >= _RELEASE_LOCAL_SNAPSHOT_FILES_MAX:
+                raise InstallRecoveryError("Local snapshot directory contains too many entries")
+            info = _lstat(child)
+            if info is None or _is_link(info):
+                raise InstallRecoveryError("Local snapshot contains a redirected or missing entry")
+            if directory == path:
+                if child.name in {"claude", "bin"}:
+                    if not stat.S_ISDIR(info.st_mode):
+                        raise InstallRecoveryError("Local snapshot expected directory is not ordinary")
+                elif not stat.S_ISREG(info.st_mode):
+                    raise InstallRecoveryError("Local snapshot unexpected nonordinary member")
+            elif not stat.S_ISREG(info.st_mode):
+                raise InstallRecoveryError("Local snapshot contains a nonordinary member")
+            found.add(child.name)
+        if found != wanted or len({name.casefold() for name in found}) != len(found):
+            raise InstallRecoveryError("Local snapshot directory inventory differs")
+    return doc
+
+
+def _local_managed_marker(path: Path) -> bool:
+    """Ownership marker proof is bounded for local-only finalization evidence."""
+    marker = _local_bounded_bytes(path / MARKER, 64)
+    return marker is not None and marker.decode("utf-8", "replace").strip().lstrip("\ufeff") == "Vres-OS"
+
+
 def _local_published_release_evidence(
     install_root: Path, release: str, claude_home: Path
 ) -> dict[str, bool]:
@@ -797,7 +918,7 @@ def _local_published_release_evidence(
         )
     if (_plain_dir(claude_home) and _plain_dir(claude_home / "skills")
             and _plain_dir(claude_home / "skills" / "vres-os")
-            and _managed(claude_home / "skills" / "vres-os")):
+            and _local_managed_marker(claude_home / "skills" / "vres-os")):
         result["managed_plugin_exact_manifest"] = _local_tree_equals(
             claude_home / "skills" / "vres-os", groups["plugin"], plugin_marker=True
         )
@@ -871,14 +992,14 @@ def inspect_finalization_evidence(install_root: Path) -> dict[str, Any]:
         refusal.append("journal has invalid release identity")
     else:
         try:
-            snapshot = _load_snapshot(install_root / SNAPSHOTS / release)
+            snapshot = _local_snapshot_v2_verified(install_root / SNAPSHOTS / release)
             if snapshot.get("version") != 2 or snapshot.get("release") != release:
                 raise InstallRecoveryError("release does not match verified v2 snapshot")
             claude_home = Path(str(snapshot["claude_home"]))
             if str(journal.get("claude_home") or "") != str(claude_home):
                 raise InstallRecoveryError("Claude home differs from the snapshot")
             evidence["snapshot_v2_integrity"] = True
-            active_raw = _file(install_root / ACTIVE)
+            active_raw = _local_bounded_bytes(install_root / ACTIVE, _RELEASE_LOCAL_ACTIVE_MAX)
             active = json.loads(active_raw.decode("utf-8-sig")) if active_raw is not None else None
             evidence["active_pointer_new_release"] = (
                 isinstance(active, dict)
@@ -890,7 +1011,7 @@ def inspect_finalization_evidence(install_root: Path) -> dict[str, Any]:
             plugin = claude_home / "skills" / "vres-os"
             evidence["managed_plugin_present"] = (
                 str(journal.get("plugin_path") or "") == str(plugin)
-                and _plain_dir(plugin) and _managed(plugin)
+                and _plain_dir(plugin) and _local_managed_marker(plugin)
             )
             evidence["staged_release_manifest_present"] = (
                 _local_bounded_bytes(install_root / "releases" / release / "release-manifest.json",

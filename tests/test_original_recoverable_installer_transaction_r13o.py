@@ -492,6 +492,52 @@ def test_r13t_missing_or_malformed_journal_has_uniform_zero_actions(tmp_path, mo
     assert invalid["rollback_approved"] is False
 
 
+
+@pytest.mark.parametrize("damage", [
+    "oversized_snapshot_manifest", "oversized_snapshot_claude",
+    "oversized_active_pointer", "oversized_plugin_marker",
+    "snapshot_launcher_traversal", "unexpected_snapshot_member",
+])
+def test_r13u_finalization_snapshot_and_owner_reads_are_bounded_and_held(
+    tmp_path, monkeypatch, damage
+):
+    """R13U authored-only regression for the ORIGINAL read-only recovery route."""
+    root, claude, release, _manifest, _source = _synthetic_published_local_image(
+        tmp_path, monkeypatch
+    )
+    snapshot = root / "install-recovery" / release
+    if damage == "oversized_snapshot_manifest":
+        (snapshot / "snapshot.json").write_bytes(
+            b" " * (recovery._RELEASE_LOCAL_SNAPSHOT_MAX + 1)
+        )
+    elif damage == "oversized_snapshot_claude":
+        with (snapshot / "claude" / "CLAUDE.md").open("r+b") as stream:
+            stream.truncate(recovery._RELEASE_LOCAL_FILE_MAX + 1)
+    elif damage == "oversized_active_pointer":
+        with (root / "active-install.json").open("r+b") as stream:
+            stream.truncate(recovery._RELEASE_LOCAL_ACTIVE_MAX + 1)
+    elif damage == "oversized_plugin_marker":
+        (claude / "skills" / "vres-os" / ".vres-managed").write_bytes(b"x" * 65)
+    elif damage == "snapshot_launcher_traversal":
+        import hashlib
+        snap = json.loads((snapshot / "snapshot.json").read_text(encoding="utf-8"))
+        payload = b"not an authorized snapshot member"
+        snap["bin"]["files"]["../other.txt"] = {
+            "existed": True, "sha256": hashlib.sha256(payload).hexdigest(),
+            "bytes": len(payload),
+        }
+        (snapshot / "snapshot.json").write_text(json.dumps(snap), encoding="utf-8")
+    else:
+        (snapshot / "unexpected.txt").write_bytes(b"unexpected local snapshot evidence")
+    journal_before = (root / "pending-install.json").read_bytes()
+    report = recovery.inspect_finalization_evidence(root)
+    assert report["journal_removal_approved"] is False
+    assert report["rollback_approved"] is False
+    assert report["actions"] == []
+    assert not all(report["local_evidence"].values()), (damage, report)
+    assert (root / "pending-install.json").read_bytes() == journal_before
+
+
 def test_r13p_original_session_end_source_guard_precedes_detached_worker():
     root = Path(__file__).resolve().parents[1]
     launcher = (root / "plugins/vres-os/bin/vres-session-end.ps1").read_text(encoding="utf-8")
