@@ -85,6 +85,7 @@ def test_recorded_completions_are_recent_bounded_and_not_assumed_today_or_valida
     assert "not_today" in result["recent_completion_ordering"]
     assert "not_validation_pass" in result["completion_evidence"]
     assert "experience" in result["next_step"]
+    assert "task_resume_briefing" in result["next_step"]
 
 def test_workday_fail_closed_on_scalar_fields_and_recorded_results(monkeypatch):
     """AUTHORED/NOT_RUN: residual secrets never reach the original overview."""

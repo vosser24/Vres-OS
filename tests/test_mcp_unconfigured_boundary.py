@@ -91,6 +91,7 @@ def test_every_registration_module_shares_the_guarded_server():
         ("validation_invalidate", "validation_lifecycle_mcp"),
         ("task_open_list", "mcp_server"),
         ("task_continuity_preview", "mcp_server"),
+        ("task_resume_briefing", "mcp_server"),
         ("routing_evidence", "routing_mcp"),
         ("capability_resolve", "mcp_server"),
     ],
