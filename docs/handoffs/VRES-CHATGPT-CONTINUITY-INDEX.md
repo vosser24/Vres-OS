@@ -1,3 +1,9 @@
+## READ FIRST — 2026-11-25 R40 private history/trigger/cancellation-result atomicity — corrected new 5 PASS
+
+[Latest continuity checkpoint](VRES-2026-11-25-R40-PRIVATE-HISTORY-TRIGGER-ATOMICITY-5PASS-CHECKPOINT.md). Continue SAME R40 offline from private carrier `Vres-OS-R40-private-history-trigger-atomicity-continuation-bundle.zip`, SHA256 `b4517827535940377e309b5999e324e0bcd6118fd5db3c5c3c33797b97d3f2f4`, tree `cd6e201126afdc6313787529a8db6410b180bb72` (725 files). New initial 4 PASS/1 FAIL (test count error), corrected separate 5 PASS exit0; full-history draft, trigger comparison and cancellation-result rollback, SQL/Windows/full suite NOT_RUN. Both incidents OPEN; no private product publication/activation. Save and attach exact new bundle; next complete integrated semantic cohort, actual trust/provenance, fresh cancel/reopen, independent bindings and compatible activation/recovery. No repeat/restart.
+
+---
+
 ## READ FIRST — 2026-11-25 R40 private trust/catalog/history increment — new separate 7 PASS
 
 [Latest continuity checkpoint](VRES-2026-11-25-R40-PRIVATE-TRUST-CATALOG-HISTORY-7PASS-CHECKPOINT.md). Continue SAME R40 offline from private carrier `Vres-OS-R40-private-trust-catalog-continuation-bundle.zip`, SHA256 `4e27fcc29364260b5ace4e97889cffd4805ea7d759b6b2cab44a460e2c59f2a4`, tree `6a6777a79c22a8642ef68f78bb9e6418fe5efc64` (723 files). New confined 7 PASS; SQL/Windows/full suite NOT_RUN. Both incidents OPEN; no product source publication or operational release. Download/save and reattach private carrier. Next: finish semantic cohort, durable trust/integration, cancellation/reopening, actual independent binding and compatible activation/recovery. No repeat or restart.
