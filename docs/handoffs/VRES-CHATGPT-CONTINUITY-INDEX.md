@@ -1,3 +1,9 @@
+## READ FIRST — 2026-11-25 R40 private relational/catalog observation increment — final new 6 PASS
+
+[Latest continuity checkpoint](VRES-2026-11-25-R40-PRIVATE-RELATIONAL-CATALOG-6PASS-CHECKPOINT.md). Continue SAME R40 offline from private carrier `Vres-OS-R40-private-relational-catalog-continuation-bundle.zip`, SHA256 `c06ec9f49fab386857fbaebb27ebb4b3dd73b83f9022b53944206de4a7387fa6`, exact tree `ed509435582547e85be91d40a4f3ccfcd271dcbe` (729 files). New initial 3 PASS/3 ERROR, corrected intermediate 6 PASS, final separate 6 PASS exit0; source-pinned relational subset and 19-section catalog observation comparison, inactive collector draft. SQL/Windows/full suite NOT_RUN, independent reference and complete convergence pending. Both incidents OPEN; no private product publication or activation. Save and reattach new exact bundle. Finish same R40; no repeat/restart.
+
+---
+
 ## READ FIRST — 2026-11-25 R40 private history/trigger/cancellation-result atomicity — corrected new 5 PASS
 
 [Latest continuity checkpoint](VRES-2026-11-25-R40-PRIVATE-HISTORY-TRIGGER-ATOMICITY-5PASS-CHECKPOINT.md). Continue SAME R40 offline from private carrier `Vres-OS-R40-private-history-trigger-atomicity-continuation-bundle.zip`, SHA256 `b4517827535940377e309b5999e324e0bcd6118fd5db3c5c3c33797b97d3f2f4`, tree `cd6e201126afdc6313787529a8db6410b180bb72` (725 files). New initial 4 PASS/1 FAIL (test count error), corrected separate 5 PASS exit0; full-history draft, trigger comparison and cancellation-result rollback, SQL/Windows/full suite NOT_RUN. Both incidents OPEN; no private product publication/activation. Save and attach exact new bundle; next complete integrated semantic cohort, actual trust/provenance, fresh cancel/reopen, independent bindings and compatible activation/recovery. No repeat/restart.
