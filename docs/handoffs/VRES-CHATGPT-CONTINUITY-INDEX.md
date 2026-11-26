@@ -1,3 +1,14 @@
+# READ FIRST — 2026-11-26 — R40 private compaction observation and Chairman orientation
+
+- Latest sanitized checkpoint: [VRES-2026-11-26-R40-PRIVATE-COMPACTION-OBSERVATION-CHECKPOINT.md](VRES-2026-11-26-R40-PRIVATE-COMPACTION-OBSERVATION-CHECKPOINT.md).
+- SAME R40 offline PARTIAL / operational HELD. Exact private tree `59bcc9eca7e06e5b8abc0fea18a93266126530b0`; 765 files; five increment paths; previous carrier retained byte-for-byte.
+- Six new AUTHORED/NOT_RUN + prior 65 = 71 pending. Four changed Python AST syntax-only PASS. Both patches/tree/modes/91 protected paths/48 active migrations/seven draft pins verified.
+- Scoped read-only possible compaction delivery observation and original Chairman orientation; no positive receipt, original automatic checkpoint/snapshot held, no independent ingress or actual delivery established. Both incidents OPEN, independent positive authority NOT_GRANTED.
+- Next: original exact source-event/worker/report/producer ingress, compaction receipt/automatic checkpoint and lawful terminal/reset/historical compatibility; then semantic cohort, actual credential/connection/client and same-install/recovery. No weaker fence or accepted-suite repeat.
+- Preceding canonical docs HEAD `3026b00f4acd206f869ede1da5ef31fea1d2da8f`; previous index preserved exactly.
+
+---
+
 # READ FIRST — 2026-11-26 — R40 private cache, reference and validation-resume consumers
 
 - Latest sanitized checkpoint: [VRES-2026-11-26-R40-PRIVATE-CACHE-REFERENCE-REVIEW-CHECKPOINT.md](VRES-2026-11-26-R40-PRIVATE-CACHE-REFERENCE-REVIEW-CHECKPOINT.md).
