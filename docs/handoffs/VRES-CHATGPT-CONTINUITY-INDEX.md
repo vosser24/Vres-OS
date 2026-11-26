@@ -1,3 +1,7 @@
+## READ FIRST — 2026-11-26 — R40 private recorded producer association checkpoint
+
+[Latest handoff](VRES-2026-11-26-R40-PRIVATE-PRODUCER-ASSOCIATION-CHECKPOINT.md). SAME R40 OFFLINE PARTIAL / OPERATIONAL HELD. Private candidate tree e3cd6202e9f7af201289408d7f150d6c33de281e; 766 files, 121 changed vs exact R37. Private carrier SHA256 7628e95c79425035edf9f9bf65539a24c3aeb32bea93b04fd59cbbaf1f516456 (95987180 bytes). Eight new cases authored, 79 pending NOT_RUN; complete confinement NOT_ESTABLISHED, 4 Python AST syntax-only PASS. Original E1 recorded attempt/worker/report structural association and diagnostic procedure/artifact IDs, E5 unbound producer consumers and E2 registration citations held. No independent producer authority, legitimate legacy retry/producer-specific use pending. Both incidents OPEN; no PostgreSQL/native/live/installed changes or source publication. Next complete exact independent source-event/producer/consumer association and lawful compaction/terminal/reset, then cohort, target and same-install recovery; no restart or accepted test repeats. All earlier index bytes retained.
+
 # READ FIRST — 2026-11-26 — R40 private compaction observation and Chairman orientation
 
 - Latest sanitized checkpoint: [VRES-2026-11-26-R40-PRIVATE-COMPACTION-OBSERVATION-CHECKPOINT.md](VRES-2026-11-26-R40-PRIVATE-COMPACTION-OBSERVATION-CHECKPOINT.md).
