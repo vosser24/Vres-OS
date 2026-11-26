@@ -1,3 +1,14 @@
+# READ FIRST — 2026-11-26 — R40 private cache, reference and validation-resume consumers
+
+- Latest sanitized checkpoint: [VRES-2026-11-26-R40-PRIVATE-CACHE-REFERENCE-REVIEW-CHECKPOINT.md](VRES-2026-11-26-R40-PRIVATE-CACHE-REFERENCE-REVIEW-CHECKPOINT.md).
+- SAME R40 offline PARTIAL / operational HELD. Exact private tree `176a8da3b3de90c3e5fe4d7adcfc37fccbdcc71c`; 764 files; 12 increment paths. Private carrier owner-side only; previous carrier preserved byte-for-byte.
+- Seven new cases AUTHORED/NOT_RUN; previous 58 NOT_RUN; total 65 pending. Nine changed Python AST syntax-only PASS; full/increment patch round trips and seven draft pins verified. No source publication or release.
+- Raw-source cache revision commitment, unsupported reference ingress held, historical utility recorded-only, exact structural review pin required for resume PASS. No independent positive authority. Both incidents OPEN.
+- Next: integrated original compaction/snapshot/rehydration, exact source-event and producer/reference ingress, lawful receipt/terminal/reset compatibility; then actual semantic convergence, purpose-bound connection and same-install/recovery safeguards. No weaker fence or repeated accepted suites.
+- Preceding canonical documentation HEAD `509178801a3fea1a137cdd4733e633c3322f8b04`; previous index below preserved exactly.
+
+---
+
 ## READ FIRST — 2026-11-26 — R40 private original replay and model experiment consumers (58 pending tests NOT_RUN; offline PARTIAL)
 
 [Latest handoff](VRES-2026-11-26-R40-PRIVATE-ATTESTATION-CONSUMERS-CHECKPOINT.md). Private carrier Vres-OS-R40-private-attestation-consumers-continuation-bundle.zip, 87057781 bytes SHA256 417f1822b7bc8a04d8acfbb291cd75394c02e03e9e371ae0672dc4c9646428c1; exact 763-file tree 5f6978c410d3d753f4c58f1a05ad1b1366fa0d5c. Original producer pre-invocation task/project/epoch pin and procedure definition identity, original pair preparation and current review/run checks share locked lifecycle; no legacy epoch adoption. Positive attestation/promotion explicitly held; original writer bodies retained, historical structural comparison not independent authority. Six new plus previous 52 cases NOT_RUN; seven changed Python files inert AST syntax only PASS. All 91 protected paths, 48 active migrations and seven held draft pins unchanged. Both incidents OPEN, independent authority NOT_GRANTED, operational HELD. Next cache and validation/Chairman consumers, independent retrieval/reference and producer ingress, lawful receipt/promotion continuation and terminal/reset/compaction; semantic catalog/effective ACL closure pending. No restart, private publication, accepted-suite repeats or weaker fence. Preserve V-01..V-42 and all prior evidence.
